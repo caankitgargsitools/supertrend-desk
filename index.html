@@ -346,8 +346,9 @@ legend { padding: 0; margin-bottom: 4px; }
               <label class="f"><span>No trades after</span><input id="f_last_entry" type="time"></label>
               <label class="f"><span>Square off at</span><input id="f_square_off" type="time"></label>
               <label class="f"><span>Square off daily</span><select id="f_intraday"><option value="true">Yes (intraday)</option><option value="false">No (carry overnight)</option></select></label>
+              <label class="f"><span>Flip after “No trades after”</span><select id="f_after_hours_flip"><option value="FIRST_CLOSE">Decide at next day's first candle close</option><option value="OPEN">Reverse at next day's open</option></select></label>
             </div>
-            <p class="hint">Stop and reverse: when Supertrend turns green the strategy buys (closing any short first); when it turns red it sells the long and goes short. Decisions are taken when a candle closes. Nothing is traded at or after “No trades after”; if Supertrend flips after that, the position is reversed at the next day's “First trade from” time.</p>
+            <p class="hint">Stop and reverse: when Supertrend turns green the strategy buys (closing any short first); when it turns red it sells the long and goes short. Decisions are taken when a candle closes. Nothing is traded at or after “No trades after”. If Supertrend flips after that, the next day either waits for the first candle to close and follows Supertrend as it stands then (no trade if it has turned back), or reverses straight away at “First trade from”.</p>
           </fieldset>
           <details>
             <summary class="label" style="cursor:pointer">Order format (advanced)</summary>
@@ -406,13 +407,13 @@ const PRESETS = {
 const FIELDS = ["name","underlying","data_security_id","data_segment","data_instrument","timeframe_min","atr_period","factor","entry_mode",
   "bias_timeframe","bias_source","entry_time","exit_time","exit_next_day",
   "trade_type","direction","lots","lot_size","qty_mode","product_type","exchange","dhan_symbol","futures_symbol",
-  "strike_step","strike_offset","expiry_weekday","roll_on_expiry","expiry_override","session_start","last_entry","square_off","intraday",
+  "strike_step","strike_offset","expiry_weekday","roll_on_expiry","expiry_override","session_start","last_entry","square_off","intraday","after_hours_flip",
   "leg_template_opt","leg_template_fut"];
 const INT_FIELDS = ["timeframe_min","atr_period","lots","lot_size","strike_step","strike_offset","expiry_weekday"];
 const BOOL_FIELDS = ["roll_on_expiry","intraday","exit_next_day"];
 const TIME_FIELDS = ["session_start","last_entry","square_off","entry_time","exit_time"];
 const ENUMS = { entry_mode: ["FLIP","JOIN"], trade_type: ["OPTIONS","FUTURES"], direction: ["BOTH","LONG_ONLY","SHORT_ONLY"], qty_mode: ["LOTS","UNITS"],
-  product_type: ["I","M"], exchange: ["NSE","BSE"], bias_source: ["COMPLETED","LIVE"] };
+  product_type: ["I","M"], exchange: ["NSE","BSE"], bias_source: ["COMPLETED","LIVE"], after_hours_flip: ["FIRST_CLOSE","OPEN"] };
 
 const $ = (id) => document.getElementById(id);
 let state = { settings: null, strategies: [] }, selected = null, pending = null, formDirty = false;

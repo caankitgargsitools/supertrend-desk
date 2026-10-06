@@ -35,3 +35,6 @@ returns bigint language sql security definer set search_path = public, extension
 $$;
 revoke all on function public.engine_backtest(bigint) from public, anon, authenticated;
 select 'ok' as done;
+
+-- After-hours flip handling for flip strategies
+alter table algo_strategies add column if not exists after_hours_flip text not null default 'FIRST_CLOSE' check (after_hours_flip in ('FIRST_CLOSE','OPEN'));

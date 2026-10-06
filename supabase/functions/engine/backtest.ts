@@ -115,7 +115,9 @@ export async function planBacktest(
     const ss = timeToMin(String(s.session_start)), le = timeToMin(String(s.last_entry)), sq = timeToMin(String(s.square_off));
     // Stop-and-reverse, acting only when a candle closes inside the trading window:
     //  - Supertrend up   -> hold long (calls), down -> hold short (puts); the opposite position is closed and reversed.
-    //  - A flip after "no new trades after" is carried and executed at the next session start.
+    //  - A flip after "no new trades after" is not traded that day. By default (FIRST_CLOSE) the position is matched,
+    //    at the close of the next day's first candle in the window, to Supertrend as it stands then (no trade if it has
+    //    already flipped back). With after_hours_flip = OPEN it is reversed at the next session start instead.
     //  - Intraday mode squares off at the square-off time.
     let pos: Plan | null = null;
     const close = (day: string, min: number, why: string) => { if (pos) { pos.exitDay = day; pos.exitMin = min; pos.exitWhy = why; plans.push(pos); pos = null; } };
@@ -125,11 +127,11 @@ export async function planBacktest(
       if (b.day > p.to) break;
       if (pos && s.intraday && (b.day !== (pos as Plan).entryDay || b.endMin >= sq)) close((pos as Plan).entryDay, sq, "Square-off");
       if (b.day < p.from || trend[i] === 0 || trend[i - 1] === 0) continue;
-      // New day: a flip that happened after the window closed yesterday is acted on at today's session start.
-      if (b.day !== bars[i - 1].day) {
+      // OPEN mode: a flip from after hours yesterday is acted on at today's session start.
+      if (s.after_hours_flip === "OPEN" && b.day !== bars[i - 1].day) {
         const d0 = want(trend[i - 1]);
         if (pos && (pos as Plan).side !== d0) {
-          close(b.day, ss, "Supertrend turned after hours");
+          close(b.day, ss, "Supertrend turned after hours (acted on at the open)");
           if (d0) pos = mkPlan(d0, b.day, ss, b.o, "Reversed at the open (flip happened after hours)");
         } else if (!pos && d0 && s.entry_mode === "JOIN") pos = mkPlan(d0, b.day, ss, b.o, "Joined trend");
       }
@@ -138,9 +140,9 @@ export async function planBacktest(
       const desired = want(trend[i]);
       const flipped = trend[i] !== trend[i - 1];
       let reversing = false;
-      if (pos && (pos as Plan).side !== desired) { close(b.day, b.endMin, flipped ? "Supertrend turned" : "Supertrend turned after hours"); reversing = true; }
+      if (pos && (pos as Plan).side !== desired) { close(b.day, b.endMin, flipped ? "Supertrend turned" : "Supertrend turned after hours (acted on at first candle close)"); reversing = true; }
       if (!pos && desired && (s.entry_mode === "JOIN" || flipped || reversing)) {
-        pos = mkPlan(desired, b.day, b.endMin, b.c, flipped ? (reversing ? "Reversed on flip" : "Fresh flip") : reversing ? "Reversed (flip happened after hours)" : "Joined trend");
+        pos = mkPlan(desired, b.day, b.endMin, b.c, flipped ? (reversing ? "Reversed on flip" : "Fresh flip") : reversing ? "Reversed at first candle close (flip happened after hours)" : "Joined trend");
       }
     }
     if (pos) close(testDays[testDays.length - 1] ?? p.to, 925, "Still open at end of test (valued at the last price)");

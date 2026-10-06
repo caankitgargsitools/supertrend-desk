@@ -227,23 +227,30 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
     event = "SQUARE_OFF";
     newState = FLAT_STATE;
   } else {
-    // Stop-and-reverse: inside the trading window the position always follows the last completed candle's
-    // Supertrend. Flips are acted on when the candle closes; a flip after "no new trades after" is acted on
-    // at the next session start.
+    // Stop-and-reverse, decided when a candle closes inside the trading window. A flip after "no new trades after"
+    // is not traded that day. Next day it is acted on either
+    //   FIRST_CLOSE (default): at the close of the first candle in the window, using Supertrend as it stands then
+    //                          (no trade if it has already flipped back), or
+    //   OPEN: at the session start, from the previous day's last candle.
     const ss = timeToMin(String(s.session_start)), le = timeToMin(String(s.last_entry));
+    const openMode = s.after_hours_flip === "OPEN";
     const newCandle = last.t !== s.last_candle_ts;
+    const fresh = last.day === now.date && nowSec - last.endT <= Math.max(600, s.timeframe_min * 120);
+    const candleInWindow = last.endMin >= ss && last.endMin < le && (!s.intraday || last.endMin < sqOff);
     const nowInWindow = now.min >= ss && now.min < le && (!s.intraday || now.min < sqOff) && now.min < CLOSE_MIN;
-    const recent = nowSec - last.endT <= 5 * 86400; // guards against stale data (weekends and holidays allowed)
+    const recent = nowSec - last.endT <= 5 * 86400; // stale-data guard (weekends and holidays allowed)
+    const atOpen = openMode && nowInWindow && recent && !(last.day === now.date && last.endMin >= ss);
     if (s.last_candle_ts == null) {
       notes.push(`Started tracking. Trend is ${tNow === 1 ? "up" : "down"}; waiting for the next candle.`);
       event = "INFO";
-    } else if (nowInWindow && recent) {
+    } else if ((newCandle && fresh && candleInWindow && now.min < CLOSE_MIN) || atOpen) {
       const desired: Pos = tNow === 1 ? (s.direction === "SHORT_ONLY" ? "FLAT" : "LONG") : (s.direction === "LONG_ONLY" ? "FLAT" : "SHORT");
-      const flipped = newCandle && tNow !== tPrev && last.day === now.date && last.endMin >= ss;
+      const flipped = !atOpen && tNow !== tPrev;
       let reversing = false;
       if (position !== "FLAT" && position !== desired) {
         legs.push(exitLeg(s, legs.length + 1));
-        notes.push(`Supertrend ${flipped ? "turned" : "turned after hours, so reversing at the open:"} ${tNow === 1 ? "up" : "down"}: ${exitLabel(s)}`);
+        const why = flipped ? "turned" : atOpen ? "turned after hours, so reversing at the open:" : "turned after hours; first candle close confirms, reversing:";
+        notes.push(`Supertrend ${why} ${tNow === 1 ? "up" : "down"}: ${exitLabel(s)}`);
         event = "EXIT";
         position = "FLAT";
         newState = FLAT_STATE;
