@@ -1,0 +1,939 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Supertrend Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500;600&display=swap">
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%234285f4%22/%3E%3Cpath d=%22M6 22l6-7 5 4 9-10%22 stroke=%22white%22 stroke-width=%223%22 fill=%22none%22/%3E%3C/svg%3E">
+<script src="vendor/lightweight-charts.js"></script>
+<script src="vendor/supabase.js"></script>
+<style>
+html, body { margin: 0; } img { max-width: 100%; } [hidden] { display: none !important; }
+a { color: var(--blue); }
+/* Layout: a bright trading desk. Sticky status bar, strategy rail on the left, one working pane per strategy.
+   Colour: the four primaries of the Google logo carry meaning — blue = actions, green = up/active, red = down/live risk, yellow = paper/caution. */
+:root {
+  --bg: #f6f8fc; --panel: #ffffff; --ink: #202124; --muted: #5f6368; --line: #dde1e7;
+  --blue: #1a73e8; --blue-soft: #e8f0fe; --red: #d93025; --red-soft: #fce8e6;
+  --yellow: #f9ab00; --yellow-ink: #8a5a00; --yellow-soft: #fef7e0; --green: #188038; --green-soft: #e6f4ea;
+  --logo-blue: #4285f4; --logo-red: #ea4335; --logo-yellow: #fbbc05; --logo-green: #34a853;
+  --chip: #eef0f3; --on-blue: #ffffff;
+  --font-ui: "Figtree", "Segoe UI", Roboto, Arial, sans-serif;
+  --font-data: "Roboto Mono", ui-monospace, Menlo, Consolas, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111317; --panel: #1b1d22; --ink: #e8eaed; --muted: #9aa0a6; --line: #30333a;
+  --blue: #8ab4f8; --blue-soft: #1d2c46; --red: #f28b82; --red-soft: #3b2120;
+  --yellow: #fdd663; --yellow-ink: #fdd663; --yellow-soft: #3a3115; --green: #81c995; --green-soft: #1b3324;
+  --chip: #272a30; --on-blue: #0c1a33; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #111317; --panel: #1b1d22; --ink: #e8eaed; --muted: #9aa0a6; --line: #30333a;
+  --blue: #8ab4f8; --blue-soft: #1d2c46; --red: #f28b82; --red-soft: #3b2120;
+  --yellow: #fdd663; --yellow-ink: #fdd663; --yellow-soft: #3a3115; --green: #81c995; --green-soft: #1b3324;
+  --chip: #272a30; --on-blue: #0c1a33; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 14.5px/1.45 var(--font-ui); }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+button, input, select, textarea { font: inherit; color: inherit; }
+.num, .mono { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+
+/* status bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 10px 16px; }
+.bar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 3px;
+  background: linear-gradient(90deg, var(--logo-blue) 0 25%, var(--logo-red) 25% 50%, var(--logo-yellow) 50% 75%, var(--logo-green) 75% 100%); }
+.brand { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
+.brand h1 { font-size: 21px; font-weight: 800; letter-spacing: -.01em; }
+.brand h1 .b { color: var(--logo-blue); } .brand h1 .r { color: var(--logo-red); } .brand h1 .y { color: var(--logo-yellow); } .brand h1 .g { color: var(--logo-green); }
+.brand small { color: var(--muted); font-size: 12px; }
+.mk { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.dot.on { background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
+
+.wrap { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; padding-block: 18px 40px; padding-inline: 16px; max-width: 1380px; margin: 0 auto; }
+@media (max-width: 880px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+
+/* rail */
+.rail { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rail-head { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; }
+.label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
+.strat { text-align: left; border: 1px solid var(--line); background: var(--panel); border-radius: var(--r); padding: 11px 13px; cursor: pointer; display: grid; gap: 6px; }
+.strat:hover { border-color: var(--blue); }
+.strat[aria-current="true"] { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+.strat .nm { font-weight: 700; overflow-wrap: anywhere; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font: 600 10.5px/1 var(--font-data); letter-spacing: .03em; padding: 4px 7px; border-radius: 99px; background: var(--chip); color: var(--muted); text-transform: uppercase; white-space: nowrap; }
+.chip.blue { background: var(--blue-soft); color: var(--blue); }
+.chip.green { background: var(--green-soft); color: var(--green); }
+.chip.red { background: var(--red-soft); color: var(--red); }
+.chip.yellow { background: var(--yellow-soft); color: var(--yellow-ink); }
+
+/* buttons */
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 7px 14px; cursor: pointer; font-weight: 700; font-size: 13px; }
+.btn:hover { border-color: var(--blue); color: var(--blue); }
+.btn.primary { background: var(--blue); border-color: var(--blue); color: var(--on-blue); }
+.btn.primary:hover { filter: brightness(1.06); color: var(--on-blue); }
+.btn.go { background: var(--red); border-color: var(--red); color: var(--panel); }
+.btn.danger { color: var(--red); border-color: var(--red); }
+.btn.small { padding: 4px 11px; font-size: 12px; }
+.btn:disabled { opacity: .5; cursor: default; }
+:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+
+/* main pane */
+.pane { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 16px 18px; min-width: 0; }
+.head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.head h2 { font-size: 22px; font-weight: 800; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.stat { background: var(--bg); border-radius: 8px; padding: 10px 12px; display: grid; gap: 3px; min-width: 0; border-top: 3px solid var(--c, var(--line)); }
+.stat:nth-child(4n+1) { --c: var(--logo-blue); } .stat:nth-child(4n+2) { --c: var(--logo-red); }
+.stat:nth-child(4n+3) { --c: var(--logo-yellow); } .stat:nth-child(4n+4) { --c: var(--logo-green); }
+.stat .v { font: 600 16.5px/1.25 var(--font-data); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.v.up { color: var(--green); } .v.down { color: var(--red); }
+.banner { border-radius: 8px; padding: 10px 12px; font-size: 13.5px; }
+.banner.err { background: var(--red-soft); color: var(--red); }
+.banner.warn { background: var(--yellow-soft); color: var(--yellow-ink); }
+.banner.info { background: var(--blue-soft); color: var(--blue); }
+.banner.ok { background: var(--green-soft); color: var(--green); }
+#chart, #eqChart { height: 340px; width: 100%; }
+#eqChart { height: 240px; }
+.chart-foot { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 8px; }
+.legend-up { color: var(--green); font-weight: 700; } .legend-dn { color: var(--red); font-weight: 700; }
+.empty { display: grid; place-items: center; text-align: center; color: var(--muted); min-height: 200px; padding: 20px; }
+
+/* tables */
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+th { text-align: left; font-weight: 700; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.n { text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; white-space: nowrap; }
+th.n { text-align: right; }
+td.when { white-space: nowrap; font-family: var(--font-data); font-size: 12px; color: var(--muted); }
+details.payload summary { cursor: pointer; color: var(--blue); font-size: 12px; }
+pre { margin: 6px 0 0; padding: 8px; background: var(--bg); border-radius: 6px; font: 11.5px/1.45 var(--font-data); white-space: pre-wrap; overflow-wrap: anywhere; max-width: 60ch; }
+tr.pick { cursor: pointer; } tr.pick:hover td { background: var(--blue-soft); }
+
+/* forms */
+form { display: grid; gap: 18px; }
+fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 10px; }
+legend { padding: 0; margin-bottom: 4px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); gap: 10px 14px; }
+.f { display: grid; gap: 4px; min-width: 0; }
+.f span { font-size: 12px; color: var(--muted); }
+.f input, .f select, .f textarea { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 8px 10px; width: 100%; min-width: 0; }
+.f textarea { font: 12px/1.4 var(--font-data); min-height: 74px; resize: vertical; }
+.f.wide { grid-column: 1 / -1; }
+.hint { font-size: 12px; color: var(--muted); }
+.formbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.kind { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.kind label { border: 1px solid var(--line); border-radius: var(--r); padding: 12px; display: grid; gap: 4px; cursor: pointer; }
+.kind label:has(input:checked) { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+.kind input { margin: 0 8px 0 0; accent-color: var(--blue); }
+.kind strong { display: inline; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; overflow-x: auto; }
+.tab { border: 0; background: none; padding: 9px 14px; cursor: pointer; font-weight: 700; color: var(--muted); border-bottom: 3px solid transparent; white-space: nowrap; }
+.tab[aria-selected="true"] { color: var(--ink); }
+#t_log[aria-selected="true"] { border-bottom-color: var(--logo-blue); }
+#t_set[aria-selected="true"] { border-bottom-color: var(--logo-yellow); }
+#t_bt[aria-selected="true"] { border-bottom-color: var(--logo-green); }
+.confirm { display: grid; gap: 10px; border: 1px solid var(--yellow); background: var(--yellow-soft); border-radius: var(--r); padding: 12px; }
+.toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--panel);
+  padding: 10px 16px; border-radius: 99px; font-size: 13px; max-width: calc(100% - 32px); z-index: 20; }
+.gate { max-width: 560px; margin: 40px auto; padding-inline: 16px; }
+.btwrap { display: grid; gap: 16px; }
+.pos-num { color: var(--green); } .neg-num { color: var(--red); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand"><h1><span class="b">Super</span><span class="r">trend</span> <span class="y">De</span><span class="g">sk</span></h1><small>Dhan · NSE / BSE</small></div>
+  <span class="mk"><span class="dot" id="mktDot"></span><span id="mktText">Checking market hours…</span></span>
+  <button class="btn small" id="openSettings" type="button">Dhan connection</button>
+  <span class="mk" id="who" hidden></span><button class="btn small" id="signOut" type="button" hidden>Sign out</button>
+</header>
+
+<div id="gate" class="gate" hidden>
+  <div class="card">
+    <h2 style="margin-bottom:6px" id="g_title">Sign in</h2>
+    <p class="hint" id="g_hint">Supertrend Desk is private. Sign in with the owner account.</p>
+    <form id="loginForm" style="margin-top:12px">
+      <label class="f"><span>Email</span><input id="g_email" type="email" autocomplete="username" required></label>
+      <label class="f"><span>Password</span><input id="g_pass" type="password" autocomplete="current-password" required minlength="10"></label>
+      <div class="formbar"><button class="btn primary" type="submit" id="g_go">Sign in</button><span class="hint" id="g_msg"></span></div>
+    </form>
+    <p class="hint" style="margin-top:14px"><a href="#setup" id="g_switch">First time here? Create the owner account</a></p>
+  </div>
+</div>
+
+<div class="wrap" id="app">
+  <aside class="rail">
+    <div class="rail-head"><span class="label">Strategies</span>
+      <span class="actions"><button class="btn small" id="newFlip" type="button">+ Flip</button><button class="btn small" id="newTimed" type="button">+ Timed</button></span></div>
+    <div id="stratList" class="rail" aria-live="polite"><div class="strat"><span class="nm">Connecting to your Supabase project…</span></div></div>
+    <p class="hint"><strong>Flip</strong>: trades when Supertrend turns on its own timeframe.<br><strong>Timed</strong>: a higher-timeframe Supertrend picks CE or PE, bought and sold at fixed times.</p>
+    <p class="hint">The engine checks every active strategy once a minute, Mon–Fri 09:15–15:30 IST.</p>
+  </aside>
+
+  <main class="pane" id="pane">
+    <section class="card" id="connCard" hidden>
+      <div class="head"><h2>Dhan connection</h2><button class="btn small" id="closeSettings" type="button">Close</button></div>
+      <form id="connForm" style="margin-top:12px">
+        <div class="grid">
+          <label class="f"><span>Dhan client ID</span><input id="c_client" autocomplete="off"></label>
+          <label class="f"><span>Access token <em id="tokState" class="hint"></em></span><input id="c_token" type="password" placeholder="Paste a new token to replace" autocomplete="off"></label>
+          <label class="f wide"><span>Order webhook URL <em id="urlState" class="hint"></em></span><input id="c_url" type="password" placeholder="Paste a new URL to replace" autocomplete="off"></label>
+          <label class="f"><span>Webhook secret <em id="secState" class="hint"></em></span><input id="c_secret" type="password" placeholder="Paste to replace" autocomplete="off"></label>
+        </div>
+        <p class="hint">These details are stored on the server and never shown in full again. The access token reads candles and historical option prices (Dhan Data API subscription needed). Orders go to the webhook URL with its secret, in the same JSON format your TradingView alerts send to Dhan. Dhan tokens expire; paste a fresh one when the desk reports an expired token.</p>
+        <div class="formbar"><button class="btn primary" type="submit">Save connection</button><span class="hint" id="connMsg"></span></div>
+      </form>
+    </section>
+
+    <section class="card" id="emptyPane"><div class="empty">Loading your strategies…</div></section>
+
+    <div id="stratPane" class="pane" hidden>
+      <section class="card">
+        <div class="head">
+          <div><span class="label" id="sp_sub"></span><h2 id="sp_name"></h2></div>
+          <div class="actions">
+            <button class="btn" id="b_refresh" type="button">Refresh chart</button>
+            <button class="btn" id="b_active" type="button"></button>
+            <button class="btn" id="b_live" type="button"></button>
+            <button class="btn danger" id="b_flat" type="button">Exit position now</button>
+          </div>
+        </div>
+        <div id="confirmBox" style="margin-top:12px" hidden></div>
+        <div id="errBox" class="banner err" style="margin-top:12px" hidden></div>
+        <div class="stats" style="margin-top:14px">
+          <div class="stat"><span class="label" id="st_trend_l">Trend</span><span class="v" id="st_trend">–</span></div>
+          <div class="stat"><span class="label">Last price</span><span class="v" id="st_close">–</span></div>
+          <div class="stat"><span class="label">Supertrend</span><span class="v" id="st_line">–</span></div>
+          <div class="stat"><span class="label">Position</span><span class="v" id="st_pos">–</span></div>
+          <div class="stat"><span class="label">Last check</span><span class="v" id="st_run">–</span></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="head"><span class="label" id="chartTitle">Chart</span></div>
+        <div id="chart" style="margin-top:8px"></div>
+        <div class="chart-foot"><span id="chartInfo">Candles appear after the first refresh.</span><span><span class="legend-up">━ Supertrend up</span> · <span class="legend-dn">━ Supertrend down</span> · Times in IST</span></div>
+      </section>
+
+      <section class="card">
+        <div class="tabs" role="tablist">
+          <button class="tab" role="tab" id="t_log" aria-selected="true" type="button">Signals &amp; orders</button>
+          <button class="tab" role="tab" id="t_set" aria-selected="false" type="button">Strategy settings</button>
+          <button class="tab" role="tab" id="t_bt" aria-selected="false" type="button">Backtest</button>
+        </div>
+
+        <div id="logView" class="scroll">
+          <table>
+            <thead><tr><th>When (IST)</th><th>Event</th><th>Mode</th><th>Status</th><th>Details</th></tr></thead>
+            <tbody id="logBody"></tbody>
+          </table>
+        </div>
+
+        <form id="stratForm" hidden>
+          <fieldset><legend class="label">Strategy type</legend>
+            <div class="kind">
+              <label><span><input type="radio" name="kind" id="k_flip" value="FLIP"><strong>Supertrend flip</strong></span><span class="hint">Enters when Supertrend turns on the chosen candle timeframe; exits on the opposite turn or at square-off.</span></label>
+              <label><span><input type="radio" name="kind" id="k_timed" value="TIMED"><strong>Higher-timeframe bias, timed</strong></span><span class="hint">At a fixed time, buys a call if the higher-timeframe Supertrend is up or a put if it's down, and exits at a fixed time (e.g. next morning).</span></label>
+            </div>
+          </fieldset>
+          <fieldset><legend class="label">Strategy</legend>
+            <div class="grid">
+              <label class="f wide"><span>Name</span><input id="f_name" maxlength="80"></label>
+              <label class="f"><span>Underlying</span><select id="f_underlying"><option>NIFTY</option><option>SENSEX</option><option value="CUSTOM">Custom</option></select></label>
+              <label class="f"><span>Data security ID</span><input id="f_data_security_id"></label>
+              <label class="f"><span>Data segment</span><input id="f_data_segment"></label>
+              <label class="f"><span>Data instrument</span><input id="f_data_instrument"></label>
+            </div>
+          </fieldset>
+          <fieldset><legend class="label">Supertrend</legend>
+            <div class="grid">
+              <label class="f flip-only"><span>Candle timeframe (minutes)</span><input id="f_timeframe_min" type="number" min="1" max="375" step="1"></label>
+              <label class="f timed-only"><span>Bias timeframe</span><select id="f_bias_timeframe"><option value="D">Daily</option><option value="240">4 hours (240 min)</option><option value="125">125 minutes</option><option value="75">75 minutes</option><option value="60">1 hour</option><option value="30">30 minutes</option><option value="15">15 minutes</option></select></label>
+              <label class="f timed-only"><span>Read the bias from</span><select id="f_bias_source"><option value="COMPLETED">Last completed candle</option><option value="LIVE">Live candle, including today so far</option></select></label>
+              <label class="f"><span>ATR period</span><input id="f_atr_period" type="number" min="1" max="200" step="1"></label>
+              <label class="f"><span>Multiplier (factor)</span><input id="f_factor" type="number" min="0.1" step="0.1"></label>
+              <label class="f flip-only"><span>When to enter</span><select id="f_entry_mode"><option value="FLIP">Only on a fresh flip</option><option value="JOIN">Join the current trend</option></select></label>
+            </div>
+          </fieldset>
+          <fieldset class="timed-only"><legend class="label">Timing (IST)</legend>
+            <div class="grid">
+              <label class="f"><span>Buy at</span><input id="f_entry_time" type="time"></label>
+              <label class="f"><span>Sell at</span><input id="f_exit_time" type="time"></label>
+              <label class="f"><span>Sell on</span><select id="f_exit_next_day"><option value="true">Next trading day</option><option value="false">Same day</option></select></label>
+            </div>
+          </fieldset>
+          <fieldset><legend class="label">Trade</legend>
+            <div class="grid">
+              <label class="f"><span>Instrument</span><select id="f_trade_type"><option value="OPTIONS">Options (buy CE / PE)</option><option value="FUTURES">Futures (long / short)</option></select></label>
+              <label class="f"><span>Direction</span><select id="f_direction"><option value="BOTH">Both</option><option value="LONG_ONLY">Up-trend only (calls / long)</option><option value="SHORT_ONLY">Down-trend only (puts / short)</option></select></label>
+              <label class="f"><span>Lots</span><input id="f_lots" type="number" min="1" step="1"></label>
+              <label class="f"><span>Lot size (verify current)</span><input id="f_lot_size" type="number" min="1" step="1"></label>
+              <label class="f"><span>Send quantity as</span><select id="f_qty_mode"><option value="LOTS">Lots</option><option value="UNITS">Units</option></select></label>
+              <label class="f"><span>Product type</span><select id="f_product_type"><option value="I">I · Intraday</option><option value="M">M · Carry forward</option></select></label>
+              <label class="f"><span>Exchange</span><select id="f_exchange"><option>NSE</option><option>BSE</option></select></label>
+              <label class="f"><span>Option symbol (Dhan)</span><input id="f_dhan_symbol"></label>
+              <label class="f"><span>Futures symbol (Dhan)</span><input id="f_futures_symbol"></label>
+            </div>
+          </fieldset>
+          <fieldset id="optSet"><legend class="label">Option contract</legend>
+            <div class="grid">
+              <label class="f"><span>Strike gap</span><input id="f_strike_step" type="number" min="1" step="1"></label>
+              <label class="f"><span>Strike offset (+ OTM, − ITM)</span><input id="f_strike_offset" type="number" step="1"></label>
+              <label class="f"><span>Weekly expiry day</span><select id="f_expiry_weekday"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option></select></label>
+              <label class="f"><span>On expiry day</span><select id="f_roll_on_expiry"><option value="true">Use next week's expiry</option><option value="false">Use today's expiry</option></select></label>
+              <label class="f"><span>Expiry override (holiday weeks)</span><input id="f_expiry_override" type="date"></label>
+            </div>
+          </fieldset>
+          <fieldset class="flip-only"><legend class="label">Session (IST)</legend>
+            <div class="grid">
+              <label class="f"><span>First entry from</span><input id="f_session_start" type="time"></label>
+              <label class="f"><span>No new entries after</span><input id="f_last_entry" type="time"></label>
+              <label class="f"><span>Square off at</span><input id="f_square_off" type="time"></label>
+              <label class="f"><span>Square off daily</span><select id="f_intraday"><option value="true">Yes (intraday)</option><option value="false">No (carry overnight)</option></select></label>
+            </div>
+          </fieldset>
+          <details>
+            <summary class="label" style="cursor:pointer">Order format (advanced)</summary>
+            <p class="hint">One order leg in Dhan's webhook JSON. Placeholders: {side} {qty} {exchange} {symbol} {product} {sort} and, for options, {option_type} {strike} {expiry}. Compare with the sample JSON Dhan generates on its Webhooks page and edit the field names here if they differ.</p>
+            <div class="grid">
+              <label class="f wide"><span>Options leg</span><textarea id="f_leg_template_opt" spellcheck="false"></textarea></label>
+              <label class="f wide"><span>Futures leg</span><textarea id="f_leg_template_fut" spellcheck="false"></textarea></label>
+            </div>
+          </details>
+          <div class="formbar">
+            <button class="btn primary" type="submit">Save strategy</button>
+            <span class="hint" id="formMsg"></span>
+            <span style="margin-left:auto"></span>
+            <button class="btn small danger" id="b_delete" type="button">Delete strategy</button>
+          </div>
+        </form>
+
+        <div id="btView" class="btwrap" hidden>
+          <form id="btForm">
+            <div class="grid">
+              <label class="f"><span>From</span><input id="bt_from" type="date"></label>
+              <label class="f"><span>To</span><input id="bt_to" type="date"></label>
+              <label class="f"><span>Capital (₹)</span><input id="bt_capital" type="number" min="1000" step="1000" value="500000"></label>
+              <label class="f"><span>Brokerage per order (₹)</span><input id="bt_brokerage" type="number" min="0" step="1" value="20"></label>
+              <label class="f"><span>STT &amp; other charges (% of turnover)</span><input id="bt_other" type="number" min="0" step="0.01" value="0.10"></label>
+              <label class="f"><span>Dhan code for nearest expiry</span><select id="bt_code"><option value="1">1 (Dhan's examples)</option><option value="0">0 (Dhan's annexure)</option></select></label>
+            </div>
+            <p class="hint">Uses the strategy's saved settings. Option trades are priced from Dhan's expired-options data (5-minute, up to 5 years back, strikes within 10 of ATM). Futures are approximated with index prices. Up to 6 months per run.</p>
+            <div class="formbar"><button class="btn primary" type="submit" id="bt_run">Run backtest</button><span class="hint" id="btMsg"></span></div>
+          </form>
+          <div id="btResult"></div>
+          <div>
+            <span class="label">Earlier runs</span>
+            <div class="scroll"><table><thead><tr><th>Run</th><th>Period</th><th>Status</th><th class="n">Trades</th><th class="n">Net P&amp;L</th></tr></thead><tbody id="btHist"></tbody></table></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const PROJECT_ID = "umryzxusbdttbcshkajt";
+const SUPABASE_URL = "https://umryzxusbdttbcshkajt.supabase.co";
+const SUPABASE_KEY = "sb_publishable_RcHPBb3pNGfkuDcUU-49BA_FKyXp-sF";
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
+const PRESETS = {
+  NIFTY:  { data_security_id: "13", data_segment: "IDX_I", data_instrument: "INDEX", exchange: "NSE", dhan_symbol: "NIFTY", futures_symbol: "NIFTY1!", strike_step: 50, expiry_weekday: 2, lot_size: 65 },
+  SENSEX: { data_security_id: "51", data_segment: "IDX_I", data_instrument: "INDEX", exchange: "BSE", dhan_symbol: "SENSEX", futures_symbol: "SENSEX1!", strike_step: 100, expiry_weekday: 4, lot_size: 20 },
+};
+const FIELDS = ["name","underlying","data_security_id","data_segment","data_instrument","timeframe_min","atr_period","factor","entry_mode",
+  "bias_timeframe","bias_source","entry_time","exit_time","exit_next_day",
+  "trade_type","direction","lots","lot_size","qty_mode","product_type","exchange","dhan_symbol","futures_symbol",
+  "strike_step","strike_offset","expiry_weekday","roll_on_expiry","expiry_override","session_start","last_entry","square_off","intraday",
+  "leg_template_opt","leg_template_fut"];
+const INT_FIELDS = ["timeframe_min","atr_period","lots","lot_size","strike_step","strike_offset","expiry_weekday"];
+const BOOL_FIELDS = ["roll_on_expiry","intraday","exit_next_day"];
+const TIME_FIELDS = ["session_start","last_entry","square_off","entry_time","exit_time"];
+const ENUMS = { entry_mode: ["FLIP","JOIN"], trade_type: ["OPTIONS","FUTURES"], direction: ["BOTH","LONG_ONLY","SHORT_ONLY"], qty_mode: ["LOTS","UNITS"],
+  product_type: ["I","M"], exchange: ["NSE","BSE"], bias_source: ["COMPLETED","LIVE"] };
+
+const $ = (id) => document.getElementById(id);
+let state = { settings: null, strategies: [] }, selected = null, pending = null, formDirty = false;
+let chart = null, candleS = null, upS = null, dnS = null, eqChart = null, eqS = null, btPoll = null, currentTab = "log";
+
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 3600); }
+function lit(v) { if (v === null || v === undefined || v === "") return "null"; return "'" + String(v).replace(/'/g, "''") + "'"; }
+function fmtNum(v) { return v === null || v === undefined ? "–" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 }); }
+function rupees(v) { if (v === null || v === undefined) return "–"; const n = Number(v); return (n < 0 ? "−₹" : "₹") + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
+function istText(iso) {
+  if (!iso) return "–";
+  return new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+function istDate(offsetDays) { return new Date(Date.now() + 19800000 + offsetDays * 86400000).toISOString().slice(0, 10); }
+function istNow() { const d = new Date(Date.now() + 19800000); return { wd: d.getUTCDay(), min: d.getUTCHours() * 60 + d.getUTCMinutes() }; }
+function marketOpen() { const n = istNow(); return n.wd >= 1 && n.wd <= 5 && n.min >= 555 && n.min < 930; }
+function paintMarket() {
+  const open = marketOpen();
+  $("mktDot").classList.toggle("on", open);
+  $("mktText").textContent = open ? "Market open · engine checking every minute" : "Market closed · engine idle";
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function errorText(e) {
+  const m = (e && (e.message || e.error_description || e.error)) || String(e);
+  if (/JWT|not allowed|permission denied/i.test(m)) return "Your session has ended or this account isn't the desk owner. Sign in again.";
+  if (/Failed to fetch|NetworkError/i.test(m)) return "Couldn't reach the server. Check your internet connection and try again.";
+  return m;
+}
+function must(res) { if (res.error) throw res.error; return res.data; }
+
+async function loadAll() {
+  const [settings, strategies] = await Promise.all([
+    db.rpc("portal_status").then(must),
+    db.from("algo_strategies").select("*").order("created_at").then(must),
+  ]);
+  state = { settings, strategies, has_bt: true };
+  if (!selected || !state.strategies.find((s) => s.id === selected)) selected = state.strategies[0] ? state.strategies[0].id : null;
+  renderRail(); renderConn();
+  if (selected) { renderStrategy(); await loadDetail(); } else showEmpty();
+}
+
+async function loadDetail() {
+  const id = selected; if (!id) return;
+  const [chartRow, signals, bts] = await Promise.all([
+    db.from("algo_chart").select("bars, updated_at").eq("strategy_id", id).maybeSingle().then(must),
+    db.from("algo_signals").select("id, created_at, event, description, mode, status, payload, response").eq("strategy_id", id).order("id", { ascending: false }).limit(60).then(must),
+    db.from("algo_backtests").select("id, created_at, status, params, summary").eq("strategy_id", id).order("id", { ascending: false }).limit(12).then(must),
+  ]);
+  if (id !== selected) return;
+  renderChart(chartRow);
+  renderLog(signals);
+  renderBtHistory(bts.map((b) => ({ id: b.id, created_at: b.created_at, status: b.status, from: b.params && b.params.from, to: b.params && b.params.to,
+    trades: b.summary ? b.summary.trades : null, net: b.summary ? b.summary.net : null })));
+}
+
+function cur() { return state.strategies.find((s) => s.id === selected); }
+function needsUpgrade() { return false; }
+function isTimed(s) { return s && s.strategy_kind === "TIMED"; }
+function biasName(tf) { return tf === "D" ? "Daily" : (Number(tf) % 60 === 0 ? `${Number(tf) / 60}-hour` : `${tf}-minute`); }
+
+function showEmpty() {
+  $("stratPane").hidden = true; $("emptyPane").hidden = false;
+  $("emptyPane").innerHTML = '<div class="empty"><div><h3 style="margin-bottom:6px">No strategies yet</h3><p>Create one with “+ Flip” or “+ Timed”. New strategies start paused and in paper mode, so nothing is sent until you switch them on and go live.</p></div></div>';
+}
+
+function chipsFor(s) {
+  const c = [];
+  c.push(s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>');
+  c.push(s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>');
+  c.push(`<span class="chip blue">${isTimed(s) ? "Timed" : "Flip"}</span>`);
+  if (s.position === "LONG") c.push(`<span class="chip green">${s.trade_type === "OPTIONS" ? "Holding CE" : "Long"}</span>`);
+  if (s.position === "SHORT") c.push(`<span class="chip red">${s.trade_type === "OPTIONS" ? "Holding PE" : "Short"}</span>`);
+  if (s.last_error) c.push('<span class="chip red">Error</span>');
+  return c.join("");
+}
+
+function describe(s) {
+  const st = `ST(${s.atr_period}, ${Number(s.factor)})`;
+  if (isTimed(s)) return `${s.underlying} · ${biasName(s.bias_timeframe)} ${st} · buy ${String(s.entry_time).slice(0, 5)}, sell ${s.exit_next_day ? "next day " : ""}${String(s.exit_time).slice(0, 5)}`;
+  return `${s.underlying} · ${s.timeframe_min}m ${st} · ${s.trade_type === "OPTIONS" ? "Options" : "Futures"}`;
+}
+
+function renderRail() {
+  const box = $("stratList"); box.innerHTML = "";
+  if (!state.strategies.length) { box.innerHTML = '<p class="hint">No strategies yet.</p>'; return; }
+  for (const s of state.strategies) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "strat"; b.setAttribute("aria-current", s.id === selected ? "true" : "false");
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = s.name;
+    const meta = document.createElement("span"); meta.className = "hint mono"; meta.textContent = describe(s);
+    const ch = document.createElement("span"); ch.className = "chips"; ch.innerHTML = chipsFor(s);
+    b.append(nm, meta, ch);
+    b.addEventListener("click", async () => {
+      selected = s.id; formDirty = false; closeConfirm(); stopBtPoll(); $("btResult").innerHTML = "";
+      renderRail(); renderStrategy(); clearChart(); $("logBody").innerHTML = "";
+      try { await loadDetail(); } catch (e) { toast(errorText(e)); }
+    });
+    box.append(b);
+  }
+}
+
+function renderConn() {
+  const st = state.settings || {};
+  $("c_client").value = st.client_id || "";
+  $("tokState").textContent = st.has_token ? `(saved, ends …${st.token_tail})` : "(not set)";
+  $("urlState").textContent = st.has_url ? `(saved, ${st.url_host || "set"})` : "(not set)";
+  $("secState").textContent = st.has_secret ? "(saved)" : "(not set)";
+  ["c_token", "c_url", "c_secret"].forEach((id) => $(id).value = "");
+}
+
+function renderStrategy() {
+  const s = cur(); if (!s) return showEmpty();
+  $("emptyPane").hidden = true; $("stratPane").hidden = false;
+  $("sp_name").textContent = s.name;
+  $("sp_sub").textContent = describe(s);
+  $("chartTitle").textContent = isTimed(s) ? `${s.underlying} · ${biasName(s.bias_timeframe)} candles (bias)` : `${s.underlying} · ${s.timeframe_min}-minute candles`;
+  $("st_trend_l").textContent = isTimed(s) ? `${biasName(s.bias_timeframe)} bias` : "Trend";
+  $("b_active").textContent = s.active ? "Pause" : "Activate";
+  $("b_active").className = s.active ? "btn" : "btn primary";
+  $("b_live").textContent = s.live ? "Switch to paper" : "Go live";
+  $("b_live").className = s.live ? "btn" : "btn go";
+  $("b_flat").disabled = s.position === "FLAT";
+  const eb = $("errBox"); eb.hidden = !s.last_error; eb.textContent = s.last_error || "";
+  const tr = $("st_trend");
+  tr.textContent = s.last_trend === 1 ? (isTimed(s) ? "▲ Up → calls" : "▲ Up") : s.last_trend === -1 ? (isTimed(s) ? "▼ Down → puts" : "▼ Down") : "–";
+  tr.className = "v " + (s.last_trend === 1 ? "up" : s.last_trend === -1 ? "down" : "");
+  $("st_close").textContent = fmtNum(s.last_close);
+  $("st_line").textContent = fmtNum(s.last_supertrend);
+  let pos = "Flat";
+  if (s.position !== "FLAT") pos = s.trade_type === "OPTIONS" ? `${s.pos_strike} ${s.pos_option_type} ×${s.pos_qty}` : `${s.position === "LONG" ? "Long" : "Short"} ×${s.pos_qty}`;
+  $("st_pos").textContent = pos;
+  $("st_run").textContent = istText(s.last_run_at);
+  if (!formDirty) fillForm(s);
+}
+
+function applyKindVisibility() {
+  const timed = $("k_timed").checked;
+  document.querySelectorAll(".timed-only").forEach((el) => el.hidden = !timed);
+  document.querySelectorAll(".flip-only").forEach((el) => el.hidden = timed);
+  $("optSet").hidden = $("f_trade_type").value !== "OPTIONS";
+}
+
+function fillForm(s) {
+  for (const k of FIELDS) {
+    const el = $("f_" + k); if (!el) continue;
+    let v = s[k];
+    if (k === "underlying" && !PRESETS[v]) v = "CUSTOM";
+    if (TIME_FIELDS.includes(k) && v) v = String(v).slice(0, 5);
+    el.value = v === null || v === undefined ? "" : String(v);
+  }
+  $("k_timed").checked = isTimed(s); $("k_flip").checked = !isTimed(s);
+  applyKindVisibility();
+  $("formMsg").textContent = "";
+}
+
+/* charts */
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function baseChartOpts() {
+  return {
+    autoSize: true,
+    layout: { background: { type: "solid", color: cssVar("--panel") }, textColor: cssVar("--muted"), fontFamily: "Roboto Mono, monospace", fontSize: 11 },
+    grid: { vertLines: { color: cssVar("--line") }, horzLines: { color: cssVar("--line") } },
+    rightPriceScale: { borderColor: cssVar("--line") }, timeScale: { borderColor: cssVar("--line"), timeVisible: true, secondsVisible: false },
+    crosshair: { mode: 0 },
+  };
+}
+function ensureChart() {
+  if (chart) return true;
+  if (!window.LightweightCharts) return false;
+  chart = LightweightCharts.createChart($("chart"), baseChartOpts());
+  const up = cssVar("--logo-green"), dn = cssVar("--logo-red");
+  candleS = chart.addCandlestickSeries({ upColor: up, downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn });
+  upS = chart.addLineSeries({ color: cssVar("--logo-green"), lineWidth: 3, priceLineVisible: false, lastValueVisible: false });
+  dnS = chart.addLineSeries({ color: cssVar("--logo-red"), lineWidth: 3, priceLineVisible: false, lastValueVisible: false });
+  return true;
+}
+function clearChart() { if (chart) { candleS.setData([]); upS.setData([]); dnS.setData([]); } $("chartInfo").textContent = "Loading candles…"; }
+function renderChart(c) {
+  if (!c || !c.bars || !c.bars.length) { clearChart(); $("chartInfo").textContent = "No candles yet. Save your Dhan connection, then press Refresh chart."; return; }
+  if (!ensureChart()) { $("chartInfo").textContent = "The chart library didn't load; signals still work."; return; }
+  const shift = 19800; // show IST on the axis
+  candleS.setData(c.bars.map((b) => ({ time: b.t + shift, open: b.o, high: b.h, low: b.l, close: b.c })));
+  upS.setData(c.bars.map((b) => b.st !== null && b.tr === 1 ? { time: b.t + shift, value: b.st } : { time: b.t + shift }));
+  dnS.setData(c.bars.map((b) => b.st !== null && b.tr === -1 ? { time: b.t + shift, value: b.st } : { time: b.t + shift }));
+  chart.timeScale().fitContent();
+  $("chartInfo").textContent = `${c.bars.length} candles · updated ${istText(c.updated_at)}`;
+}
+
+/* signal log */
+const EVENT_NAMES = { ENTRY: "Entry", EXIT: "Exit", REVERSE: "Reverse", SQUARE_OFF: "Square-off", FLATTEN: "Manual exit", INFO: "Info" };
+const EVENT_COLOR = { ENTRY: "green", EXIT: "red", REVERSE: "blue", SQUARE_OFF: "yellow", FLATTEN: "red", INFO: "" };
+function renderLog(rows) {
+  const tb = $("logBody"); tb.innerHTML = "";
+  if (!rows.length) { tb.innerHTML = '<tr><td colspan="5" class="hint">No signals yet. When the strategy triggers, each order appears here with the exact message sent to Dhan.</td></tr>'; return; }
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    const statusChip = r.status === "SENT" ? "green" : r.status === "FAILED" ? "red" : "";
+    tr.innerHTML = `<td class="when"></td><td><span class="chip ${EVENT_COLOR[r.event] || ""}"></span></td><td><span class="chip ${r.mode === "LIVE" ? "red" : "yellow"}"></span></td><td><span class="chip ${statusChip}"></span></td><td></td>`;
+    tr.children[0].textContent = istText(r.created_at);
+    tr.children[1].firstChild.textContent = EVENT_NAMES[r.event] || r.event;
+    tr.children[2].firstChild.textContent = r.mode;
+    tr.children[3].firstChild.textContent = r.status === "LOGGED" ? "Logged" : r.status === "SENT" ? "Sent" : "Failed";
+    const d = tr.children[4];
+    const p = document.createElement("div"); p.textContent = r.description || ""; d.append(p);
+    if (r.payload || r.response) {
+      const det = document.createElement("details"); det.className = "payload";
+      const sm = document.createElement("summary"); sm.textContent = "Order message";
+      const pre = document.createElement("pre");
+      pre.textContent = (r.payload ? JSON.stringify(maskSecret(r.payload), null, 2) : "") + (r.response ? `\n\nResponse: ${r.response}` : "");
+      det.append(sm, pre); d.append(det);
+    }
+    tb.append(tr);
+  }
+}
+function maskSecret(p) { const c = JSON.parse(JSON.stringify(p)); if (c.secret) c.secret = "••••"; return c; }
+
+/* backtest */
+function stopBtPoll() { if (btPoll) { clearTimeout(btPoll); btPoll = null; } }
+function renderBtHistory(rows) {
+  const tb = $("btHist"); tb.innerHTML = "";
+  if (!rows.length) { tb.innerHTML = '<tr><td colspan="5" class="hint">No backtests yet.</td></tr>'; return; }
+  for (const r of rows) {
+    const tr = document.createElement("tr"); tr.className = "pick"; tr.tabIndex = 0;
+    const net = r.net === null ? null : Number(r.net);
+    const sc = { done: "green", partial: "yellow", failed: "red", running: "blue", queued: "blue" }[r.status] || "";
+    tr.innerHTML = `<td class="when"></td><td class="mono"></td><td><span class="chip ${sc}"></span></td><td class="n"></td><td class="n"></td>`;
+    tr.children[0].textContent = `#${r.id} · ${istText(r.created_at)}`;
+    tr.children[1].textContent = `${r.from} → ${r.to}`;
+    tr.children[2].firstChild.textContent = r.status;
+    tr.children[3].textContent = r.trades ?? "–";
+    tr.children[4].textContent = net === null ? "–" : rupees(net);
+    tr.children[4].className = "n " + (net > 0 ? "pos-num" : net < 0 ? "neg-num" : "");
+    const open = () => watchBacktest(r.id);
+    tr.addEventListener("click", open); tr.addEventListener("keydown", (e) => { if (e.key === "Enter") open(); });
+    tb.append(tr);
+  }
+}
+
+async function watchBacktest(id) {
+  stopBtPoll();
+  const tick = async () => {
+    let row;
+    try { row = must(await db.from("algo_backtests").select("id, status, progress, error, params, summary, trades").eq("id", Number(id)).maybeSingle()); }
+    catch (e) { $("btResult").innerHTML = ""; const b = document.createElement("div"); b.className = "banner err"; b.textContent = errorText(e); $("btResult").append(b); return; }
+    if (!row) return;
+    renderBacktest(row);
+    if (row.status === "queued" || row.status === "running") btPoll = setTimeout(tick, 4000);
+    else { $("bt_run").disabled = false; loadDetail().catch(() => {}); }
+  };
+  await tick();
+}
+
+function renderBacktest(r) {
+  const box = $("btResult"); box.innerHTML = "";
+  const head = document.createElement("div"); head.className = "head";
+  head.innerHTML = `<h3></h3><span class="hint"></span>`;
+  head.firstChild.textContent = `Backtest #${r.id} · ${r.params.from} → ${r.params.to}`;
+  head.lastChild.textContent = `Capital ${rupees(r.params.capital)} · brokerage ₹${r.params.brokerage}/order · charges ${r.params.other_pct}%`;
+  box.append(head);
+  if (r.status === "queued" || r.status === "running") {
+    const b = document.createElement("div"); b.className = "banner info"; b.textContent = `Running… ${r.progress || ""}`; box.append(b); return;
+  }
+  if (r.status === "failed") {
+    const b = document.createElement("div"); b.className = "banner err"; b.textContent = r.error || "The backtest failed."; box.append(b); return;
+  }
+  const s = r.summary || {};
+  if (r.status === "partial") { const b = document.createElement("div"); b.className = "banner warn"; b.textContent = r.progress; box.append(b); }
+  const stats = document.createElement("div"); stats.className = "stats";
+  const tile = (label, value, cls) => { const d = document.createElement("div"); d.className = "stat"; d.innerHTML = `<span class="label"></span><span class="v ${cls || ""}"></span>`; d.children[0].textContent = label; d.children[1].textContent = value; return d; };
+  stats.append(
+    tile("Net P&L", rupees(s.net), s.net > 0 ? "up" : s.net < 0 ? "down" : ""),
+    tile("Return on capital", `${s.return_pct ?? 0}%`, s.return_pct > 0 ? "up" : s.return_pct < 0 ? "down" : ""),
+    tile("Win rate", `${s.win_rate ?? 0}%  (${s.wins ?? 0}/${s.trades ?? 0})`),
+    tile("Max drawdown", `${rupees(s.max_dd)} · ${s.max_dd_pct ?? 0}%`, "down"),
+    tile("Profit factor", s.profit_factor === null || s.profit_factor === undefined ? "–" : String(s.profit_factor)),
+    tile("Avg per trade", rupees(s.avg_net), s.avg_net > 0 ? "up" : s.avg_net < 0 ? "down" : ""),
+    tile("Gross P&L", rupees(s.gross)),
+    tile("Brokerage & charges", rupees(s.costs)),
+  );
+  box.append(stats);
+  const notes = [];
+  notes.push(`Priced with ${s.priced_with || "historical data"}.`);
+  const sk = s.skipped || {}; const skN = Object.values(sk).reduce((a, b) => a + b, 0);
+  if (skN) notes.push(`${skN} of ${s.planned} planned trades were skipped: ${Object.entries(sk).map(([k, v]) => `${k} (${v})`).join("; ")}.`);
+  const n = document.createElement("p"); n.className = "hint"; n.textContent = notes.join(" "); box.append(n);
+
+  const trades = r.trades || [];
+  if (trades.length) {
+    const eq = document.createElement("div"); eq.id = "eqChart"; box.append(eq);
+    if (window.LightweightCharts) {
+      if (eqChart) { eqChart.remove(); eqChart = null; }
+      eqChart = LightweightCharts.createChart(eq, baseChartOpts());
+      eqS = eqChart.addAreaSeries({ lineColor: cssVar("--logo-blue"), topColor: cssVar("--blue-soft"), bottomColor: "rgba(0,0,0,0)", lineWidth: 2, priceLineVisible: false });
+      let last = 0;
+      const pts = [{ time: 0, value: Number(r.params.capital) }];
+      for (const t of trades) {
+        let tm = Date.parse(t.exit.replace(" ", "T") + ":00Z") / 1000;
+        if (tm <= last) tm = last + 1;
+        last = tm; pts.push({ time: tm, value: t.equity });
+      }
+      pts[0].time = (Date.parse(trades[0].entry.replace(" ", "T") + ":00Z") / 1000) - 60;
+      if (pts[0].time >= pts[1].time) pts[0].time = pts[1].time - 1;
+      eqS.setData(pts); eqChart.timeScale().fitContent();
+    }
+    const cap = document.createElement("p"); cap.className = "hint"; cap.textContent = "Equity after each trade (blue area). Times are IST."; box.append(cap);
+
+    const wrap = document.createElement("div"); wrap.className = "scroll";
+    const tbl = document.createElement("table");
+    tbl.innerHTML = `<thead><tr><th>Entry</th><th>Exit</th><th>Contract</th><th>Reason</th><th class="n">Buy/sell in</th><th class="n">Exit price</th><th class="n">Net</th><th class="n">Equity</th></tr></thead><tbody></tbody>`;
+    const tb = tbl.querySelector("tbody");
+    for (const t of trades.slice().reverse().slice(0, 300)) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td class="when"></td><td class="when"></td><td></td><td class="hint"></td><td class="n"></td><td class="n"></td><td class="n"></td><td class="n"></td>`;
+      tr.children[0].textContent = t.entry; tr.children[1].textContent = t.exit;
+      tr.children[2].innerHTML = `<span class="chip ${t.side === "LONG" ? "green" : "red"}"></span> `;
+      tr.children[2].firstChild.textContent = t.side === "LONG" ? (t.contract.includes(" CE") ? "CE" : "Long") : (t.contract.includes(" PE") ? "PE" : "Short");
+      tr.children[2].append(document.createTextNode(t.contract));
+      tr.children[3].textContent = `${t.why} → ${t.exit_why}`;
+      tr.children[4].textContent = fmtNum(t.entry_px); tr.children[5].textContent = fmtNum(t.exit_px);
+      tr.children[6].textContent = rupees(t.net); tr.children[6].className = "n " + (t.net > 0 ? "pos-num" : "neg-num");
+      tr.children[7].textContent = rupees(t.equity);
+      tb.append(tr);
+    }
+    wrap.append(tbl); box.append(wrap);
+    const tip = document.createElement("p"); tip.className = "hint";
+    tip.textContent = "Check one trade before trusting the numbers: open that option on Dhan or TradingView for the entry date and compare the premium. If the prices look like the following week's contract, switch “Dhan code for nearest expiry” to 0 and run again.";
+    box.append(tip);
+  } else {
+    const p = document.createElement("p"); p.className = "hint"; p.textContent = "No trades were taken in this period with these settings."; box.append(p);
+  }
+}
+
+$("btForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const s = cur();
+  const from = $("bt_from").value, to = $("bt_to").value;
+  const capital = Number($("bt_capital").value), brokerage = Number($("bt_brokerage").value), other = Number($("bt_other").value), code = Number($("bt_code").value);
+  if (!from || !to || from > to) { $("btMsg").textContent = "Pick a start date before the end date."; return; }
+  if ((Date.parse(to) - Date.parse(from)) / 86400000 > 184) { $("btMsg").textContent = "Keep each run to 6 months or less."; return; }
+  if (to > istDate(0)) { $("btMsg").textContent = "The end date can't be in the future."; return; }
+  if (!(capital > 0) || !(brokerage >= 0) || !(other >= 0)) { $("btMsg").textContent = "Capital, brokerage and charges must be numbers."; return; }
+  if (!state.settings || !state.settings.has_token) { $("btMsg").textContent = "Add your Dhan access token under Dhan connection first."; openConn(); return; }
+  const params = JSON.stringify({ from, to, capital, brokerage, other_pct: other, near_code: code });
+  $("btMsg").textContent = "";
+  run($("bt_run"), async () => {
+    const btId = must(await db.rpc("start_backtest", { p_strategy: s.id, p_params: JSON.parse(params) }));
+    $("bt_run").disabled = true;
+    toast("Backtest started. It usually takes under a minute.");
+    await watchBacktest(btId);
+  }, true);
+});
+
+/* confirmations (the viewer can't show browser dialogs) */
+function closeConfirm() { pending = null; $("confirmBox").hidden = true; $("confirmBox").innerHTML = ""; }
+function askConfirm(html, label, fn, danger) {
+  pending = fn;
+  const box = $("confirmBox"); box.hidden = false;
+  box.innerHTML = `<div class="confirm"><div>${html}</div><div class="actions"><button class="btn ${danger ? "go" : "primary"}" id="cf_yes" type="button"></button><button class="btn" id="cf_no" type="button">Cancel</button></div></div>`;
+  $("cf_yes").textContent = label;
+  $("cf_yes").addEventListener("click", async () => { const f = pending; closeConfirm(); if (f) await f(); });
+  $("cf_no").addEventListener("click", closeConfirm);
+  box.scrollIntoView({ block: "nearest" });
+}
+
+async function run(btn, fn, keepDisabled) {
+  if (btn) btn.disabled = true;
+  try { await fn(); } catch (e) { toast(errorText(e)); if (btn) btn.disabled = false; return; }
+  if (btn && !keepDisabled) btn.disabled = false;
+  if (cur()) renderStrategy();
+}
+
+async function setFlag(col, val) {
+  const s = cur();
+  must(await db.from("algo_strategies").update({ [col]: !!val }).eq("id", s.id));
+  await loadAll();
+}
+
+async function engine(action, waitMs) {
+  const s = cur();
+  must(await db.rpc("portal_engine", { p_action: action, p_strategy: s.id }));
+  await new Promise((r) => setTimeout(r, waitMs));
+  await loadAll();
+}
+
+/* buttons */
+$("b_refresh").addEventListener("click", (e) => run(e.currentTarget, async () => {
+  toast("Fetching candles from Dhan…");
+  await engine("refresh", 6000);
+  const s = cur(); toast(s && s.last_error ? "Refresh finished with an error; see the message above." : "Chart refreshed.");
+}));
+$("b_active").addEventListener("click", (e) => run(e.currentTarget, async () => {
+  const s = cur(); await setFlag("active", !s.active);
+  toast(s.active ? "Strategy paused." : isTimed(s) ? `Strategy active. It will act at ${String(s.entry_time).slice(0, 5)}.` : "Strategy active. It will act on the next completed candle.");
+}));
+$("b_live").addEventListener("click", () => {
+  const s = cur();
+  if (s.live) return run($("b_live"), async () => { await setFlag("live", false); toast("Paper mode. Orders are logged, not sent."); });
+  if (!state.settings || !state.settings.has_url) { toast("Add your order webhook URL under Dhan connection first."); openConn(); return; }
+  askConfirm("<strong>Send real orders to Dhan?</strong><br>From the next signal, this strategy posts orders to your webhook. Check the paper-mode log first and compare one order message with the sample JSON on Dhan's Webhooks page.",
+    "Go live", async () => run($("b_live"), async () => { await setFlag("live", true); toast("Live. Real orders will be sent."); }), true);
+});
+$("b_flat").addEventListener("click", () => {
+  const s = cur();
+  askConfirm(`<strong>Exit the open position now?</strong><br>${s.live ? "A real exit order will be sent to Dhan." : "Paper mode: the exit is only logged."}`,
+    "Exit now", async () => run($("b_flat"), async () => { await engine("flatten", 6000); toast("Exit processed. Check the log."); }), true);
+});
+$("b_delete").addEventListener("click", () => {
+  const s = cur();
+  if (s.position !== "FLAT") { toast("Exit the open position before deleting this strategy."); return; }
+  askConfirm(`<strong>Delete “${esc(s.name)}”?</strong><br>Its settings, chart, signal log and backtests are removed.`, "Delete", async () => run(null, async () => {
+    must(await db.from("algo_strategies").delete().eq("id", s.id));
+    selected = null; await loadAll(); toast("Strategy deleted.");
+  }), true);
+});
+async function createStrategy(kind) {
+  const nm = kind === "TIMED" ? "Daily bias · overnight option" : "Nifty Supertrend flip";
+  const stamp = new Date(Date.now() + 19800000).toISOString().slice(5, 16).replace("T", " ");
+  const row = { name: `${nm} ${stamp}`, strategy_kind: kind };
+  if (kind === "TIMED") Object.assign(row, { product_type: "M", intraday: false, roll_on_expiry: true });
+  const created = must(await db.from("algo_strategies").insert(row).select("id").single());
+  selected = created.id; formDirty = false; await loadAll(); showTab("set");
+  toast("New strategy created. It starts paused, in paper mode.");
+}
+$("newFlip").addEventListener("click", (e) => run(e.currentTarget, () => createStrategy("FLIP")));
+$("newTimed").addEventListener("click", (e) => run(e.currentTarget, () => createStrategy("TIMED")));
+
+/* tabs */
+function showTab(which) {
+  currentTab = which;
+  $("t_log").setAttribute("aria-selected", which === "log"); $("t_set").setAttribute("aria-selected", which === "set"); $("t_bt").setAttribute("aria-selected", which === "bt");
+  $("logView").hidden = which !== "log"; $("stratForm").hidden = which !== "set"; $("btView").hidden = which !== "bt";
+}
+$("t_log").addEventListener("click", () => showTab("log"));
+$("t_set").addEventListener("click", () => showTab("set"));
+$("t_bt").addEventListener("click", () => showTab("bt"));
+
+/* strategy form */
+$("stratForm").addEventListener("input", () => { formDirty = true; });
+$("k_flip").addEventListener("change", applyKindVisibility);
+$("k_timed").addEventListener("change", () => {
+  applyKindVisibility();
+  if ($("f_product_type").value === "I" && $("f_exit_next_day").value === "true") { $("f_product_type").value = "M"; $("formMsg").textContent = "Switched product type to M (carry forward), since timed trades are held overnight."; }
+});
+$("f_trade_type").addEventListener("change", applyKindVisibility);
+$("f_exit_next_day").addEventListener("change", () => {
+  if ($("f_exit_next_day").value === "true" && $("f_product_type").value === "I") { $("f_product_type").value = "M"; $("formMsg").textContent = "Switched product type to M (carry forward) for overnight holding."; }
+});
+$("f_underlying").addEventListener("change", () => {
+  const p = PRESETS[$("f_underlying").value]; if (!p) return;
+  for (const [k, v] of Object.entries(p)) { const el = $("f_" + k); if (el) el.value = String(v); }
+  $("formMsg").textContent = "Filled the usual values for " + $("f_underlying").value + ". Check the lot size and expiry day.";
+});
+
+function readForm() {
+  const out = { strategy_kind: $("k_timed").checked ? "TIMED" : "FLIP" };
+  for (const k of FIELDS) {
+    const el = $("f_" + k); let v = el.value.trim();
+    const name = el.closest(".f") ? el.closest(".f").querySelector("span").textContent : k;
+    if (INT_FIELDS.includes(k)) { const n = Number(v); if (v === "" || !Number.isInteger(n)) throw new Error(`“${name}” must be a whole number.`); v = n; }
+    else if (k === "factor") { const n = Number(v); if (!(n > 0)) throw new Error("Multiplier must be above 0."); v = n; }
+    else if (BOOL_FIELDS.includes(k)) v = v === "true";
+    else if (TIME_FIELDS.includes(k)) { if (!/^\d{2}:\d{2}$/.test(v)) throw new Error(`“${name}” must be a time (HH:MM).`); }
+    else if (k === "expiry_override") { if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new Error("Expiry override must be a date."); v = v || null; }
+    else if (k === "bias_timeframe") { if (!/^(D|\d{1,3})$/.test(v)) throw new Error("Pick a bias timeframe."); }
+    else if (ENUMS[k] && !ENUMS[k].includes(v)) throw new Error(`Unexpected value for ${name}.`);
+    else if (k === "name" && !v) throw new Error("Give the strategy a name.");
+    out[k] = v;
+  }
+  if (out.timeframe_min < 1 || out.timeframe_min > 375) throw new Error("Candle timeframe must be 1–375 minutes.");
+  if (out.strategy_kind === "FLIP") {
+    if (out.session_start >= out.last_entry) throw new Error("“First entry from” must be earlier than “No new entries after”.");
+    if (out.intraday && out.last_entry > out.square_off) throw new Error("“No new entries after” must not be later than the square-off time.");
+  } else {
+    const inMkt = (t) => t >= "09:15" && t < "15:30";
+    if (!inMkt(out.entry_time) || !inMkt(out.exit_time)) throw new Error("Buy and sell times must be between 09:15 and 15:29.");
+    if (!out.exit_next_day && out.exit_time <= out.entry_time) throw new Error("For a same-day exit, “Sell at” must be later than “Buy at”.");
+    if (out.exit_next_day && out.trade_type === "OPTIONS" && !out.roll_on_expiry) throw new Error("For overnight option trades, set “On expiry day” to use next week's expiry; today's contract expires before your exit.");
+    if (out.exit_next_day && out.product_type === "I") throw new Error("Overnight trades need product type M (carry forward); intraday positions get squared off by the broker.");
+  }
+  const sample = { side: "B", qty: "1", exchange: "NSE", symbol: "NIFTY", product: "I", sort: "1", option_type: "CE", strike: "25000", expiry: "2026-10-13" };
+  for (const k of ["leg_template_opt", "leg_template_fut"]) {
+    try { JSON.parse(out[k].replace(/\{(\w+)\}/g, (m, p) => p in sample ? sample[p] : m)); }
+    catch { throw new Error(`The ${k === "leg_template_opt" ? "options" : "futures"} order leg isn't valid JSON.`); }
+  }
+  return out;
+}
+
+$("stratForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  if (needsUpgrade()) { $("formMsg").textContent = "Install the update (top of the page) before saving settings."; return; }
+  let v; try { v = readForm(); } catch (err) { $("formMsg").textContent = err.message; return; }
+  const s = cur();
+  if (s.position !== "FLAT" && (v.strategy_kind !== s.strategy_kind || v.trade_type !== s.trade_type)) { $("formMsg").textContent = "Exit the open position before changing the strategy type or instrument."; return; }
+  const patch = { ...v };
+  if (v.strategy_kind !== s.strategy_kind) Object.assign(patch, { last_candle_ts: null, last_entry_day: null });
+  run(e.submitter, async () => {
+    must(await db.from("algo_strategies").update(patch).eq("id", s.id));
+    formDirty = false; await loadAll(); showTab("set"); $("formMsg").textContent = "Saved. Press Refresh chart to see the new candles."; toast("Strategy saved.");
+  });
+});
+
+/* connection form */
+function openConn() { $("connCard").hidden = false; $("connCard").scrollIntoView({ block: "start" }); }
+$("openSettings").addEventListener("click", openConn);
+$("closeSettings").addEventListener("click", () => $("connCard").hidden = true);
+$("connForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const tok = $("c_token").value.trim(), url = $("c_url").value.trim(), sec = $("c_secret").value.trim();
+  if (url && !/^https:\/\//.test(url)) { $("connMsg").textContent = "The webhook URL must start with https://"; return; }
+  run(e.submitter, async () => {
+    must(await db.rpc("save_portal_settings", { p_client: $("c_client").value.trim(), p_token: tok, p_url: url, p_secret: sec }));
+    await loadAll(); $("connMsg").textContent = "Saved."; toast("Connection saved. Press Refresh chart to test it.");
+  });
+});
+
+/* boot */
+$("bt_to").value = istDate(-1); $("bt_from").value = istDate(-91);
+paintMarket(); setInterval(paintMarket, 30000);
+let setupMode = false, timer = null;
+function showLogin(msg) {
+  $("app").hidden = true; $("gate").hidden = false; $("who").hidden = true; $("signOut").hidden = true; $("openSettings").hidden = true;
+  if (msg) $("g_msg").textContent = msg;
+}
+function paintGate() {
+  $("g_title").textContent = setupMode ? "Create the owner account" : "Sign in";
+  $("g_hint").textContent = setupMode ? "One-time setup. Use the invited owner email and choose a password of at least 10 characters." : "Supertrend Desk is private. Sign in with the owner account.";
+  $("g_go").textContent = setupMode ? "Create account" : "Sign in";
+  $("g_switch").textContent = setupMode ? "Already set up? Sign in" : "First time here? Create the owner account";
+  $("g_pass").autocomplete = setupMode ? "new-password" : "current-password";
+}
+$("g_switch").addEventListener("click", (e) => { e.preventDefault(); setupMode = !setupMode; $("g_msg").textContent = ""; paintGate(); });
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = $("g_email").value.trim(), password = $("g_pass").value;
+  $("g_go").disabled = true; $("g_msg").textContent = setupMode ? "Creating your account…" : "Signing in…";
+  try {
+    if (setupMode) {
+      const r = await fetch(`${SUPABASE_URL}/functions/v1/auth-setup`, { method: "POST", headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY }, body: JSON.stringify({ email, password }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "Couldn't create the account.");
+    }
+    const { error } = await db.auth.signInWithPassword({ email, password });
+    if (error) throw new Error(/invalid/i.test(error.message) ? "Wrong email or password." : error.message);
+    $("g_pass").value = "";
+  } catch (err) { $("g_msg").textContent = err.message; }
+  finally { $("g_go").disabled = false; }
+});
+$("signOut").addEventListener("click", async () => { await db.auth.signOut(); });
+
+async function enterDesk(session) {
+  $("gate").hidden = true; $("app").hidden = false; $("openSettings").hidden = false;
+  $("who").hidden = false; $("who").textContent = session.user.email; $("signOut").hidden = false;
+  try { await loadAll(); }
+  catch (e) {
+    $("emptyPane").hidden = false; $("emptyPane").innerHTML = "";
+    const d = document.createElement("div"); d.className = "banner err"; d.textContent = errorText(e);
+    $("emptyPane").append(d);
+    $("stratList").innerHTML = '<p class="hint">Strategies will appear once the server answers.</p>';
+  }
+  clearInterval(timer);
+  timer = setInterval(async () => { if (document.hidden || !marketOpen() || pending || btPoll) return; try { await loadAll(); } catch {} }, 60000);
+}
+db.auth.onAuthStateChange((event, session) => {
+  if (event === "SIGNED_OUT" || !session) { clearInterval(timer); stopBtPoll(); showLogin(event === "SIGNED_OUT" ? "Signed out." : ""); return; }
+  if (event === "SIGNED_IN" || event === "INITIAL_SESSION") setTimeout(() => enterDesk(session), 0);
+});
+if (location.hash === "#setup") setupMode = true;
+paintGate();
+</script>
+</body>
+</html>
