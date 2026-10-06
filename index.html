@@ -269,7 +269,7 @@ legend { padding: 0; margin-bottom: 4px; }
         </div>
         <div class="chartopts">
           <label><input type="checkbox" id="cx_paint" checked> Colour candles by signal (Supertrend / Heikin Ashi)</label>
-          <label><input type="checkbox" id="cx_marks" checked> Buy / Sell flip markers</label>
+          <label>Markers <select id="cx_marks"><option value="trades">Filled trades (strategy rules)</option><option value="flips">Every signal flip</option><option value="none">None</option></select></label>
           <button class="btn small" id="cx_match" type="button">Use this strategy's settings</button>
           <button class="btn small" id="cx_hidebt" type="button" hidden>Hide backtest trades</button>
         </div>
@@ -641,8 +641,10 @@ const TFS = [["1", "1m"], ["3", "3m"], ["5", "5m"], ["15", "15m"], ["30", "30m"]
 const RANGES = [["1", "Today"], ["7", "5 days"], ["31", "1 month"], ["92", "3 months"], ["184", "6 months"], ["366", "1 year"], ["731", "2 years"], ["1095", "3 years"], ["1827", "5 years"], ["3660", "10 years"], ["7320", "20 years"]];
 function tfMaxDays(tf) { if (tf === "D") return 3660; if (tf === "W") return 7320; const n = Number(tf); return n <= 1 ? 31 : n <= 3 ? 92 : n <= 10 ? 184 : n <= 30 ? 366 : n <= 125 ? 731 : 1095; }
 function tfDefaultRange(tf) { return { "1": "7", "3": "31", "5": "31", "15": "92", "30": "92", "60": "184", "120": "366", "240": "366", D: "731", W: "1827" }[tf] || "92"; }
-let cx = { asset: "13", sec: "13", seg: "IDX_I", instr: "INDEX", tf: "5", range: "31", atr: 10, fac: 3, sig: "ST", live: "15", paint: true, marks: true };
+let cx = { asset: "13", sec: "13", seg: "IDX_I", instr: "INDEX", tf: "5", range: "31", atr: 10, fac: 3, sig: "ST", live: "15", paint: true, marks: "trades", sim: null };
 try { Object.assign(cx, JSON.parse(localStorage.getItem("cx-prefs") || "{}")); } catch {}
+if (!["trades", "flips", "none"].includes(cx.marks)) cx.marks = "trades";
+let cxBase = []; // 5-minute candles, used to find exactly when a breakout order filled
 function saveCx() { try { localStorage.setItem("cx-prefs", JSON.stringify({ live: cx.live, paint: cx.paint, marks: cx.marks })); } catch {} }
 let chartFor = null, cxBars = [], cxReq = 0, cxTimer = null, cxLast = null;
 let chart = null, candleS = null, stS = null, haChart = null, haS = null, haMarkS = null;
@@ -769,7 +771,7 @@ function paintCx() {
   $("cx_range").value = cx.range;
   $("cx_atr").value = cx.atr; $("cx_fac").value = cx.fac; $("cx_live").value = cx.live; $("cx_sig").value = cx.sig;
   $("cx_atr").disabled = $("cx_fac").disabled = cx.sig === "HA";
-  $("cx_paint").checked = cx.paint; $("cx_marks").checked = cx.marks;
+  $("cx_paint").checked = cx.paint; $("cx_marks").value = cx.marks;
 }
 function cxFromStrategy(s) {
   if (!s) return;
@@ -779,7 +781,83 @@ function cxFromStrategy(s) {
   cx.tf = s.strategy_kind === "TIMED" ? String(s.bias_timeframe) : String(s.timeframe_min);
   cx.range = tfDefaultRange(cx.tf);
   cx.atr = s.atr_period; cx.fac = Number(s.factor); cx.sig = s.strategy_kind === "HA" ? "HA" : "ST";
+  cx.sim = s.strategy_kind === "TIMED" ? null : s;
   paintCx();
+}
+// The strategy whose rules drive the "filled trades" markers, when the chart shows that strategy's own asset, timeframe and settings.
+function simStrategy() {
+  const s = cx.sim && (state.strategies.find((x) => x.id === cx.sim.id) || cx.sim);
+  if (!s || s.strategy_kind === "TIMED") return null;
+  if (String(s.data_security_id) !== String(cx.sec) || s.data_segment !== cx.seg || String(s.timeframe_min) !== cx.tf) return null;
+  if ((s.strategy_kind === "HA") !== (cx.sig === "HA")) return null;
+  if (s.strategy_kind !== "HA" && (Number(s.atr_period) !== Number(cx.atr) || Number(s.factor) !== Number(cx.fac))) return null;
+  return s;
+}
+/* Replays the strategy's order rules on the chart's candles, the same way the backtester does, and returns only the
+   orders that would have filled, each on the candle where it filled. */
+function simulateTrades(s, bars, trend, base) {
+  const tf = Number(s.timeframe_min);
+  const ist = (t) => { const d = new Date((t + 19800) * 1000); return { day: d.toISOString().slice(0, 10), min: d.getUTCHours() * 60 + d.getUTCMinutes() }; };
+  const B = bars.map((b) => { const p = ist(b.t); return { ...b, day: p.day, startMin: p.min, endMin: Math.min(930, p.min + tf) }; });
+  const byDay = new Map();
+  for (const r of base || []) { const p = ist(r.t); if (p.min < 555 || p.min >= 930) continue; const a = byDay.get(p.day) || []; a.push({ ...r, min: p.min }); byDay.set(p.day, a); }
+  const tm = (x) => { const [h, m] = String(x).split(":").map(Number); return h * 60 + m; };
+  const ss = tm(s.session_start), le = tm(s.last_entry), sq = tm(s.square_off);
+  const breakout = s.entry_trigger === "BREAKOUT", buf = Number(s.buffer_points) || 0;
+  const dirOk = (side) => s.direction === "BOTH" || (side === "LONG" ? s.direction === "LONG_ONLY" : s.direction === "SHORT_ONLY");
+  const want = (t) => t === 1 ? (dirOk("LONG") ? "LONG" : null) : t === -1 ? (dirOk("SHORT") ? "SHORT" : null) : null;
+  const okMin = (m) => m >= ss && m < le && (!s.intraday || m < sq);
+  const barAtMin = (from, day, min) => { for (let k = from; k < B.length && B[k].day <= day; k++) if (B[k].day === day && min >= B[k].startMin && min < B[k].endMin) return k; return -1; };
+  const pxAt = (k, min) => { const r = (byDay.get(B[k].day) || []).find((x) => x.min >= min && x.min <= min + 15); return r ? r.o : B[k].o; };
+  const ev = [];
+  let pos = null, pending = null;
+  const close = (k, px, why) => { if (pos && k >= 0) ev.push({ k, type: "out", side: pos, px, why }); pos = null; };
+  const open = (k, side, px, why) => { if (k < 0) return; pos = side; ev.push({ k, type: "in", side, px, why }); };
+  for (let i = 1; i < B.length; i++) {
+    const b = B[i], newDay = b.day !== B[i - 1].day;
+    if (pos && s.intraday && newDay) { const k = barAtMin(Math.max(0, i - 40), B[i - 1].day, sq); close(k >= 0 ? k : i - 1, B[k >= 0 ? k : i - 1].c, "Square-off"); }
+    if (pos && s.intraday && !newDay && b.startMin <= sq && sq < b.endMin) close(i, pxAt(i, sq), "Square-off");
+    if (s.intraday && newDay) pending = null;
+    if (trend[i] === 0 || trend[i - 1] === 0) continue;
+    if (s.after_hours_flip === "OPEN" && newDay) {
+      const d0 = want(trend[i - 1]), mism = pos ? pos !== d0 : false, k = barAtMin(i, b.day, ss);
+      if (breakout) {
+        if (mism || (!pos && d0 && s.entry_mode === "JOIN")) {
+          const up = d0 === "LONG" || (d0 === null && pos === "SHORT"), ref = B[i - 1];
+          pending = { target: d0, up, trig: up ? ref.h + buf : ref.l - buf, valid: i };
+        }
+      } else if (mism) { close(k, pxAt(k, ss), "Turned after hours"); if (d0) open(k, d0, pxAt(k, ss), "Reversed at the open"); }
+      else if (!pos && d0 && s.entry_mode === "JOIN") open(k, d0, pxAt(k, ss), "Joined trend");
+    }
+    if (breakout && pending && pending.valid === i) {
+      const pd = pending, subs = (byDay.get(b.day) || []).filter((r) => r.min >= b.startMin && r.min < b.endMin);
+      let px = null;
+      if (subs.length) { const hit = subs.find((r) => okMin(r.min) && (pd.up ? r.h >= pd.trig : r.l <= pd.trig)); if (hit) px = pd.up ? Math.max(hit.o, pd.trig) : Math.min(hit.o, pd.trig); }
+      else if (okMin(b.startMin) && (pd.up ? b.h >= pd.trig : b.l <= pd.trig)) px = pd.up ? Math.max(b.o, pd.trig) : Math.min(b.o, pd.trig);
+      if (px !== null) {
+        if (pos && pos !== pd.target) close(i, px, "Breakout filled");
+        if (pd.target && !pos) open(i, pd.target, px, "Breakout filled");
+        pending = null;
+      }
+    }
+    const inWindow = b.endMin >= ss && b.endMin < le && (!s.intraday || b.endMin < sq) && b.endMin < 930;
+    if (!inWindow) continue;
+    const desired = want(trend[i]), flipped = trend[i] !== trend[i - 1];
+    if (breakout) {
+      const mism = pos ? pos !== desired : false;
+      if (mism || (!pos && desired && (s.entry_mode === "JOIN" || flipped || (pending && pending.target === desired)))) {
+        const up = desired === "LONG" || (desired === null && pos === "SHORT");
+        pending = { target: desired, up, trig: up ? b.h + buf : b.l - buf, valid: i + 1 };
+      } else pending = null;
+      continue;
+    }
+    // Order at the signal candle's close: it fills at the open of the next candle.
+    if (i + 1 >= B.length) continue;
+    let reversing = false;
+    if (pos && pos !== desired) { close(i + 1, B[i + 1].o, "Signal turned"); reversing = true; }
+    if (!pos && desired && (s.entry_mode === "JOIN" || flipped || reversing)) open(i + 1, desired, B[i + 1].o, flipped ? "Flip" : "Reversed");
+  }
+  return ev.map((e) => ({ ...e, t: B[e.k].t }));
 }
 function assetName() { const a = ASSETS.find((x) => x.key === cx.asset); return a && a.key !== "custom" ? a.name : `ID ${cx.sec} (${cx.seg})`; }
 function tfName(tf) { const t = TFS.find(([v]) => v === tf); return t ? t[1] : `${tf}m`; }
@@ -791,8 +869,8 @@ function warmDays() {
   if (cx.tf === "W") return bars * 7;
   return Math.ceil((bars * Number(cx.tf)) / 375 * 1.5) + 3;
 }
-async function fetchBars(from, to) {
-  const { data, error } = await db.functions.invoke("market-data", { body: { sec: cx.sec, seg: cx.seg, instr: cx.instr, tf: cx.tf, from, to } });
+async function fetchBars(from, to, tf) {
+  const { data, error } = await db.functions.invoke("market-data", { body: { sec: cx.sec, seg: cx.seg, instr: cx.instr, tf: tf || cx.tf, from, to } });
   if (error) {
     let msg = error.message;
     try { const j = await error.context.json(); if (j && j.error) msg = j.error; } catch {}
@@ -810,8 +888,13 @@ async function loadChart() {
   try {
     const d = await fetchBars(from, to);
     if (my !== cxReq) return;
-    cxBars = d.bars || []; cxLast = d.fetched_at;
+    cxBars = d.bars || []; cxLast = d.fetched_at; cxBase = [];
     if (!cxBars.length) { clearChart(`No candles came back for ${assetName()}. If this is a Custom instrument, check its ID, segment and instrument type.`); return; }
+    // Breakout strategies: 5-minute candles show exactly when (and whether) an order filled inside a bigger candle.
+    const sim = simStrategy();
+    if (sim && sim.entry_trigger === "BREAKOUT" && Number(cx.tf) > 5) {
+      try { const b5 = await fetchBars(istDate(-Math.min(days + 3, tfMaxDays("5"))), to, "5"); if (my !== cxReq) return; cxBase = b5.bars || []; } catch { cxBase = []; }
+    }
     drawChart(true);
     startCxLive();
   } catch (e) { if (my === cxReq) clearChart(errorText(e)); }
@@ -827,6 +910,7 @@ function drawChart(fit) {
   let start = cxBars.findIndex((b) => b.t >= viewT); if (start < 0) start = 0;
   const up = cssVar("--logo-green"), dn = cssVar("--logo-red"), shift = 19800;
   const candles = [], line = [], marks = [];
+  const sim = cx.marks === "trades" && !(cx.trades && cx.trades.length) ? simStrategy() : null;
   for (let i = start; i < cxBars.length; i++) {
     const b = cxBars[i], time = b.t + shift, tr = trend[i];
     const c = { time, open: b.o, high: b.h, low: b.l, close: b.c };
@@ -835,11 +919,32 @@ function drawChart(fit) {
     const flip = i > 0 && tr && trend[i - 1] && tr !== trend[i - 1];
     // One line coloured by trend; the jump at a flip is drawn transparent so the two sides don't join.
     if (tr && !isNaN(st[i])) line.push({ time, value: st[i], color: flip || i === start ? "rgba(0,0,0,0)" : tr === 1 ? up : dn });
-    if (cx.marks && flip && !(cx.trades && cx.trades.length)) { // with backtest trades shown, only filled trades are marked
+    if (flip && !(cx.trades && cx.trades.length) && (cx.marks === "flips" || (cx.marks === "trades" && !sim))) { // raw signal flips
       marks.push(tr === 1 ? { time, position: "belowBar", color: up, shape: "arrowUp", text: "Buy" } : { time, position: "aboveBar", color: dn, shape: "arrowDown", text: "Sell" });
     }
   }
-  let shown = 0;
+  let shown = 0, simCount = null;
+  if (sim) {
+    // Filled orders only, each on the candle where it filled.
+    const fills = simulateTrades(sim, cxBars, trend, cxBase), firstT = cxBars[start].t;
+    const isOpt = sim.trade_type === "OPTIONS", f = (v) => fmtNum(Math.trunc(v * 100) / 100);
+    simCount = 0;
+    for (let n = 0; n < fills.length; n++) {
+      const e = fills[n];
+      if (e.t < firstT) continue;
+      const next = fills[n + 1];
+      if (e.type === "out" && next && next.type === "in" && next.k === e.k) continue; // reversal: shown by the entry marker
+      if (e.type === "in") {
+        simCount++;
+        const long = e.side === "LONG";
+        const text = isOpt ? `Buy ${long ? "CE" : "PE"} @ ${f(e.px)}` : `${long ? "Buy" : "Sell"} ${f(e.px)}`;
+        marks.push({ time: e.t + shift, position: long ? "belowBar" : "aboveBar", color: long ? up : dn, shape: long ? "arrowUp" : "arrowDown", text });
+      } else {
+        marks.push({ time: e.t + shift, position: e.side === "LONG" ? "aboveBar" : "belowBar", color: cssVar("--logo-yellow"), shape: "circle", text: `Exit ${f(e.px)}` });
+      }
+    }
+    marks.sort((a, b) => a.time - b.time);
+  }
   if (cx.trades && cx.trades.length) {
     // Each filled trade sits on the candle in which the order was filled: the candle containing the fill time
     // (an order placed at a candle's close fills at the open of the next candle).
@@ -881,6 +986,8 @@ function drawChart(fit) {
   paintLegends(null);
   const lastTr = trend[trend.length - 1], lastSt = st[st.length - 1];
   $("chartInfo").textContent = `${assetName()} · ${tfName(cx.tf)} · ${candles.length} candles · ${ha ? "Heikin Ashi" : "Supertrend"} ${lastTr === 1 ? "▲ up" : lastTr === -1 ? "▼ down" : "–"}${isNaN(lastSt) ? "" : " at " + fmtNum(+lastSt.toFixed(2))} · last ${fmtNum(cxBars[cxBars.length - 1].c)}` +
+    (simCount !== null ? ` · ${simCount} filled trades marked using “${sim.name}” rules${sim.entry_trigger === "BREAKOUT" && Number(cx.tf) > 5 && !cxBase.length ? " (fill timing approximate: 5-minute data unavailable)" : ""}` :
+      cx.marks === "trades" && !(cx.trades && cx.trades.length) ? " · markers show signal flips (filled-trade markers need the strategy's own asset, timeframe and signal settings)" : "") +
     (cx.trades ? ` · backtest #${cx.tradesId}: ${shown} of ${cx.trades.length} filled trades in view, marked on the candle where each order filled (blue = entry, yellow = exit only)` : "");
   paintLive();
 }
@@ -940,7 +1047,7 @@ $("cx_atr").addEventListener("change", redraw); $("cx_fac").addEventListener("ch
 $("cx_sig").addEventListener("change", () => { cx.sig = $("cx_sig").value; paintCx(); if (cxBars.length) drawChart(false); });
 $("cx_live").addEventListener("change", () => { cx.live = $("cx_live").value; saveCx(); startCxLive(); });
 $("cx_paint").addEventListener("change", () => { cx.paint = $("cx_paint").checked; saveCx(); if (cxBars.length) drawChart(false); });
-$("cx_marks").addEventListener("change", () => { cx.marks = $("cx_marks").checked; saveCx(); if (cxBars.length) drawChart(false); });
+$("cx_marks").addEventListener("change", () => { cx.marks = $("cx_marks").value; saveCx(); if (cxBars.length) drawChart(false); });
 $("cx_match").addEventListener("click", () => { cxFromStrategy(cur()); loadChart(); });
 $("cx_hidebt").addEventListener("click", () => { cx.trades = null; $("cx_hidebt").hidden = true; if (cxBars.length) drawChart(false); });
 function showTradesOnChart(r) {
