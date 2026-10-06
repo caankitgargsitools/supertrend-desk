@@ -166,7 +166,7 @@ export async function planBacktest(
         const hit = (byDay.get(b.day) ?? []).find((r) => r.min >= b.startMin && r.min < b.endMin && okMin(r.min) && (pd.up ? r.h >= pd.trig : r.l <= pd.trig));
         if (hit) {
           const px = pd.up ? Math.max(hit.o, pd.trig) : Math.min(hit.o, pd.trig);
-          const m = hit.min + base;
+          const m = hit.min; // the base candle in which the trigger was traded through
           if (pos && pos.side !== pd.target) close(b.day, m, pd.target ? `${sigName} turned (breakout filled)` : "Exit (breakout filled)", px);
           if (pd.target && !pos) { pos = mkPlan(pd.target, b.day, m, px, pd.why); pos.fillIn = px; }
           pending = null;
@@ -303,13 +303,16 @@ export async function priceBatch(
     const t = plans[i];
     if ((i - start) % 10 === 0) await progress(`Pricing trade ${i + 1} of ${plans.length}`);
     let inPx: number | null, outPx: number | null, contract: string;
+    // Breakout fills are stamped with the base candle in which the trigger traded; price the option at that candle's end.
+    const baseMin = s.strategy_kind !== "TIMED" && s.timeframe_min % 5 !== 0 ? 1 : 5;
+    const inMin = t.fillIn != null ? t.entryMin + baseMin : t.entryMin, outMin = t.fillOut != null ? t.exitMin + baseMin : t.exitMin;
     if (isOpt && t.opt && t.strike != null) {
       const inCode = p.near_code + (s.roll_on_expiry && isExpiry(t.entryDay) ? 1 : 0);
       const outCode = inCode - expiriesBetween(t.entryDay, t.exitDay);
       if (outCode < p.near_code) { skip("Contract expired before the exit (turn on next-week expiry)"); continue; }
       contract = `${s.dhan_symbol} ${t.strike} ${t.opt}${inCode > p.near_code ? " (next week)" : ""}`;
-      inPx = await optPrice(t.entryDay, t.entryMin, t.spotIn, t.opt, t.strike, inCode);
-      outPx = inPx == null ? null : await optPrice(t.exitDay, t.exitMin, t.spotOut ?? t.spotIn, t.opt, t.strike, outCode);
+      inPx = await optPrice(t.entryDay, inMin, t.spotIn, t.opt, t.strike, inCode);
+      outPx = inPx == null ? null : await optPrice(t.exitDay, outMin, t.spotOut ?? t.spotIn, t.opt, t.strike, outCode);
     } else {
       contract = `${s.underlying} index (futures proxy)`;
       inPx = t.spotIn;

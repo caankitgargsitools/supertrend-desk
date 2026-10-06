@@ -835,27 +835,30 @@ function drawChart(fit) {
     const flip = i > 0 && tr && trend[i - 1] && tr !== trend[i - 1];
     // One line coloured by trend; the jump at a flip is drawn transparent so the two sides don't join.
     if (tr && !isNaN(st[i])) line.push({ time, value: st[i], color: flip || i === start ? "rgba(0,0,0,0)" : tr === 1 ? up : dn });
-    if (cx.marks && flip) {
+    if (cx.marks && flip && !(cx.trades && cx.trades.length)) { // with backtest trades shown, only filled trades are marked
       marks.push(tr === 1 ? { time, position: "belowBar", color: up, shape: "arrowUp", text: "Buy" } : { time, position: "aboveBar", color: dn, shape: "arrowDown", text: "Sell" });
     }
   }
   let shown = 0;
   if (cx.trades && cx.trades.length) {
-    // Each backtest trade sits on the candle whose close triggered it (the last candle starting before the trade time).
+    // Each filled trade sits on the candle in which the order was filled: the candle containing the fill time
+    // (an order placed at a candle's close fills at the open of the next candle).
     const blue = cssVar("--logo-blue"), yellow = cssVar("--logo-yellow");
     const at = (txt) => { const t = Date.parse(txt.replace(" ", "T") + ":00+05:30") / 1000; let lo = 0, hi = cxBars.length - 1, k = -1;
-      while (lo <= hi) { const m = (lo + hi) >> 1; if (cxBars[m].t < t) { k = m; lo = m + 1; } else hi = m - 1; } return k; };
+      while (lo <= hi) { const m = (lo + hi) >> 1; if (cxBars[m].t <= t) { k = m; lo = m + 1; } else hi = m - 1; } return k; };
+    const px = (v) => fmtNum(Math.trunc(Number(v) * 100) / 100);
     const entries = new Set();
     for (const t of cx.trades) {
       const k = at(t.entry); if (k < start) continue;
       entries.add(t.entry); shown++;
-      const long = t.side === "LONG";
-      marks.push({ time: cxBars[k].t + shift, position: long ? "belowBar" : "aboveBar", color: blue, shape: long ? "arrowUp" : "arrowDown", text: long ? "BT long" : "BT short" });
+      const long = t.side === "LONG", opt = / (CE|PE)\b/.exec(t.contract || "");
+      const text = opt ? `Buy ${opt[1]} ${px(t.entry_px)}` : `${long ? "Buy" : "Sell"} ${px(t.entry_px)}`;
+      marks.push({ time: cxBars[k].t + shift, position: long ? "belowBar" : "aboveBar", color: blue, shape: long ? "arrowUp" : "arrowDown", text });
     }
     for (const t of cx.trades) {
       if (entries.has(t.exit)) continue; // a reversal: the next trade's entry marker already shows it
       const k = at(t.exit); if (k < start) continue;
-      marks.push({ time: cxBars[k].t + shift, position: t.side === "LONG" ? "aboveBar" : "belowBar", color: yellow, shape: "circle", text: "BT exit" });
+      marks.push({ time: cxBars[k].t + shift, position: t.side === "LONG" ? "aboveBar" : "belowBar", color: yellow, shape: "circle", text: `Exit ${px(t.exit_px)}` });
     }
     marks.sort((a, b) => a.time - b.time);
   }
@@ -878,7 +881,7 @@ function drawChart(fit) {
   paintLegends(null);
   const lastTr = trend[trend.length - 1], lastSt = st[st.length - 1];
   $("chartInfo").textContent = `${assetName()} · ${tfName(cx.tf)} · ${candles.length} candles · ${ha ? "Heikin Ashi" : "Supertrend"} ${lastTr === 1 ? "▲ up" : lastTr === -1 ? "▼ down" : "–"}${isNaN(lastSt) ? "" : " at " + fmtNum(+lastSt.toFixed(2))} · last ${fmtNum(cxBars[cxBars.length - 1].c)}` +
-    (cx.trades ? ` · backtest #${cx.tradesId}: ${shown} of ${cx.trades.length} trades in view (blue = entries, yellow = exits)` : "");
+    (cx.trades ? ` · backtest #${cx.tradesId}: ${shown} of ${cx.trades.length} filled trades in view, marked on the candle where each order filled (blue = entry, yellow = exit only)` : "");
   paintLive();
 }
 function paintLive() {
