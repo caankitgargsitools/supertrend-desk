@@ -195,7 +195,7 @@ legend { padding: 0; margin-bottom: 4px; }
 <div class="wrap" id="app">
   <aside class="rail">
     <div class="rail-head"><span class="label">Strategies</span>
-      <span class="actions"><button class="btn small" id="newFlip" type="button">+ Flip</button><button class="btn small" id="newTimed" type="button">+ Timed</button></span></div>
+      <span class="actions"><button class="btn small" id="newFlip" type="button">+ New strategy</button></span></div>
     <div id="stratList" class="rail" aria-live="polite"><div class="strat"><span class="nm">Connecting to your Supabase project…</span></div></div>
     <details class="arch" id="archBox" hidden><summary id="archSum">Archived</summary><div id="archList" class="rail"></div></details>
     <p class="hint"><strong>Flip</strong>: trades when Supertrend turns on its own timeframe.<br><strong>Timed</strong>: a higher-timeframe Supertrend picks CE or PE, bought and sold at fixed times.</p>
@@ -252,6 +252,7 @@ legend { padding: 0; margin-bottom: 4px; }
           <label class="f"><span>Range</span><select id="cx_range"></select></label>
           <label class="f"><span>ATR</span><input id="cx_atr" class="tiny" type="number" min="1" max="200" step="1" value="10"></label>
           <label class="f"><span>Factor</span><input id="cx_fac" class="tiny" type="number" min="0.1" step="0.1" value="3"></label>
+          <label class="f"><span>Signal</span><select id="cx_sig"><option value="ST">Supertrend</option><option value="HA">Heikin Ashi</option></select></label>
           <label class="f"><span>Live refresh</span><select id="cx_live"><option value="0">Off</option><option value="5">Every 5 s</option><option value="15">Every 15 s</option><option value="60">Every 60 s</option></select></label>
         </div>
         <div class="grid" id="cx_custom" style="margin-top:10px" hidden>
@@ -287,10 +288,14 @@ legend { padding: 0; margin-bottom: 4px; }
 
         <form id="stratForm" hidden>
           <fieldset><legend class="label">Strategy type</legend>
-            <div class="kind">
-              <label><span><input type="radio" name="kind" id="k_flip" value="FLIP"><strong>Supertrend flip</strong></span><span class="hint">Enters when Supertrend turns on the chosen candle timeframe; exits on the opposite turn or at square-off.</span></label>
-              <label><span><input type="radio" name="kind" id="k_timed" value="TIMED"><strong>Higher-timeframe bias, timed</strong></span><span class="hint">At a fixed time, buys a call if the higher-timeframe Supertrend is up or a put if it's down, and exits at a fixed time (e.g. next morning).</span></label>
+            <div class="grid">
+              <label class="f wide"><span>Strategy based on</span><select id="f_kind">
+                <option value="FLIP">Supertrend flip</option>
+                <option value="HA">Heikin Ashi flip</option>
+                <option value="TIMED">Higher-timeframe bias (timed)</option>
+              </select></label>
             </div>
+            <p class="hint" id="kindHint"></p>
           </fieldset>
           <fieldset><legend class="label">Strategy</legend>
             <div class="grid">
@@ -301,15 +306,18 @@ legend { padding: 0; margin-bottom: 4px; }
               <label class="f"><span>Data instrument</span><input id="f_data_instrument"></label>
             </div>
           </fieldset>
-          <fieldset><legend class="label">Supertrend</legend>
+          <fieldset><legend class="label" id="sigLegend">Supertrend</legend>
             <div class="grid">
               <label class="f flip-only"><span>Candle timeframe (minutes)</span><input id="f_timeframe_min" type="number" min="1" max="375" step="1"></label>
               <label class="f timed-only"><span>Bias timeframe</span><select id="f_bias_timeframe"><option value="D">Daily</option><option value="240">4 hours (240 min)</option><option value="125">125 minutes</option><option value="75">75 minutes</option><option value="60">1 hour</option><option value="30">30 minutes</option><option value="15">15 minutes</option></select></label>
               <label class="f timed-only"><span>Read the bias from</span><select id="f_bias_source"><option value="COMPLETED">Last completed candle</option><option value="LIVE">Live candle, including today so far</option></select></label>
-              <label class="f"><span>ATR period</span><input id="f_atr_period" type="number" min="1" max="200" step="1"></label>
-              <label class="f"><span>Multiplier (factor)</span><input id="f_factor" type="number" min="0.1" step="0.1"></label>
+              <label class="f st-only"><span>ATR period</span><input id="f_atr_period" type="number" min="1" max="200" step="1"></label>
+              <label class="f st-only"><span>Multiplier (factor)</span><input id="f_factor" type="number" min="0.1" step="0.1"></label>
               <label class="f flip-only"><span>When to enter</span><select id="f_entry_mode"><option value="FLIP">Only on a fresh flip</option><option value="JOIN">Join the current trend</option></select></label>
+              <label class="f flip-only"><span>Place the order</span><select id="f_entry_trigger"><option value="CLOSE">At the signal candle's close</option><option value="BREAKOUT">On breakout of signal candle high / low ± buffer</option></select></label>
+              <label class="f flip-only buffer-only"><span>Buffer (points)</span><input id="f_buffer_points" type="number" min="0" step="0.05"></label>
             </div>
+            <p class="hint flip-only buffer-only">Breakout: after a buy signal the order triggers only if the next candle trades above the signal candle's high + buffer (sell: below its low − buffer). If it doesn't, the order is cancelled and re-placed from that candle's high / low, and so on until it fills or the signal turns. The trade is filled at the trigger price on normal candles.</p>
           </fieldset>
           <fieldset class="timed-only"><legend class="label">Timing (IST)</legend>
             <div class="grid">
@@ -404,7 +412,7 @@ const PRESETS = {
   NIFTY:  { data_security_id: "13", data_segment: "IDX_I", data_instrument: "INDEX", exchange: "NSE", dhan_symbol: "NIFTY", futures_symbol: "NIFTY1!", strike_step: 50, expiry_weekday: 2, lot_size: 65 },
   SENSEX: { data_security_id: "51", data_segment: "IDX_I", data_instrument: "INDEX", exchange: "BSE", dhan_symbol: "SENSEX", futures_symbol: "SENSEX1!", strike_step: 100, expiry_weekday: 4, lot_size: 20 },
 };
-const FIELDS = ["name","underlying","data_security_id","data_segment","data_instrument","timeframe_min","atr_period","factor","entry_mode",
+const FIELDS = ["name","underlying","data_security_id","data_segment","data_instrument","timeframe_min","atr_period","factor","entry_mode","entry_trigger","buffer_points",
   "bias_timeframe","bias_source","entry_time","exit_time","exit_next_day",
   "trade_type","direction","lots","lot_size","qty_mode","product_type","exchange","dhan_symbol","futures_symbol",
   "strike_step","strike_offset","expiry_weekday","roll_on_expiry","expiry_override","session_start","last_entry","square_off","intraday","after_hours_flip",
@@ -413,7 +421,7 @@ const INT_FIELDS = ["timeframe_min","atr_period","lots","lot_size","strike_step"
 const BOOL_FIELDS = ["roll_on_expiry","intraday","exit_next_day"];
 const TIME_FIELDS = ["session_start","last_entry","square_off","entry_time","exit_time"];
 const ENUMS = { entry_mode: ["FLIP","JOIN"], trade_type: ["OPTIONS","FUTURES"], direction: ["BOTH","LONG_ONLY","SHORT_ONLY"], qty_mode: ["LOTS","UNITS"],
-  product_type: ["I","M"], exchange: ["NSE","BSE"], bias_source: ["COMPLETED","LIVE"], after_hours_flip: ["FIRST_CLOSE","OPEN"] };
+  product_type: ["I","M"], exchange: ["NSE","BSE"], bias_source: ["COMPLETED","LIVE"], after_hours_flip: ["FIRST_CLOSE","OPEN"], entry_trigger: ["CLOSE","BREAKOUT"] };
 
 const $ = (id) => document.getElementById(id);
 let state = { settings: null, strategies: [] }, selected = null, pending = null, formDirty = false;
@@ -422,7 +430,8 @@ let eqChart = null, eqS = null, btPoll = null, currentTab = "log";
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 3600); }
 function lit(v) { if (v === null || v === undefined || v === "") return "null"; return "'" + String(v).replace(/'/g, "''") + "'"; }
 function fmtNum(v) { return v === null || v === undefined ? "–" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 }); }
-function rupees(v) { if (v === null || v === undefined) return "–"; const n = Number(v); return (n < 0 ? "−₹" : "₹") + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
+// Whole rupees: paisa are dropped, never rounded up or down.
+function rupees(v) { if (v === null || v === undefined) return "–"; const n = Math.trunc(Number(v)); return (n < 0 ? "−₹" : "₹") + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
 function istText(iso) {
   if (!iso) return "–";
   return new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
@@ -475,18 +484,20 @@ async function loadDetail() {
 function cur() { return state.strategies.find((s) => s.id === selected); }
 function needsUpgrade() { return false; }
 function isTimed(s) { return s && s.strategy_kind === "TIMED"; }
+function isHA(s) { return s && s.strategy_kind === "HA"; }
+function kindName(s) { return isTimed(s) ? "Timed" : isHA(s) ? "Heikin Ashi" : "Supertrend"; }
 function biasName(tf) { return tf === "D" ? "Daily" : (Number(tf) % 60 === 0 ? `${Number(tf) / 60}-hour` : `${tf}-minute`); }
 
 function showEmpty() {
   $("stratPane").hidden = true; $("emptyPane").hidden = false;
-  $("emptyPane").innerHTML = '<div class="empty"><div><h3 style="margin-bottom:6px">No strategies yet</h3><p>Create one with “+ Flip” or “+ Timed”. New strategies start paused and in paper mode, so nothing is sent until you switch them on and go live.</p></div></div>';
+  $("emptyPane").innerHTML = '<div class="empty"><div><h3 style="margin-bottom:6px">No strategies yet</h3><p>Create one with “+ New strategy”, then pick Supertrend, Heikin Ashi or higher-timeframe in its Settings. New strategies start paused and in paper mode, so nothing is sent until you switch them on and go live.</p></div></div>';
 }
 
 function chipsFor(s) {
   const c = [];
   c.push(s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>');
   c.push(s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>');
-  c.push(`<span class="chip blue">${isTimed(s) ? "Timed" : "Flip"}</span>`);
+  c.push(`<span class="chip blue">${kindName(s)}</span>`);
   if (s.position === "LONG") c.push(`<span class="chip green">${s.trade_type === "OPTIONS" ? "Holding CE" : "Long"}</span>`);
   if (s.position === "SHORT") c.push(`<span class="chip red">${s.trade_type === "OPTIONS" ? "Holding PE" : "Short"}</span>`);
   if (s.last_error) c.push('<span class="chip red">Error</span>');
@@ -496,7 +507,9 @@ function chipsFor(s) {
 function describe(s) {
   const st = `ST(${s.atr_period}, ${Number(s.factor)})`;
   if (isTimed(s)) return `${s.underlying} · ${biasName(s.bias_timeframe)} ${st} · buy ${String(s.entry_time).slice(0, 5)}, sell ${s.exit_next_day ? "next day " : ""}${String(s.exit_time).slice(0, 5)}`;
-  return `${s.underlying} · ${s.timeframe_min}m ${st} · ${s.trade_type === "OPTIONS" ? "Options" : "Futures"}`;
+  const sig = isHA(s) ? "Heikin Ashi" : st;
+  const ord = s.entry_trigger === "BREAKOUT" ? ` · breakout ±${Number(s.buffer_points)}` : "";
+  return `${s.underlying} · ${s.timeframe_min}m ${sig}${ord} · ${s.trade_type === "OPTIONS" ? "Options" : "Futures"}`;
 }
 
 function stratButton(s) {
@@ -558,15 +571,27 @@ function renderStrategy() {
   $("st_line").textContent = fmtNum(s.last_supertrend);
   let pos = "Flat";
   if (s.position !== "FLAT") pos = s.trade_type === "OPTIONS" ? `${s.pos_strike} ${s.pos_option_type} ×${s.pos_qty}` : `${s.position === "LONG" ? "Long" : "Short"} ×${s.pos_qty}`;
+  if (s.pending_target && s.pending_trigger != null) {
+    const up = s.pending_target === "LONG" || (s.pending_target === "FLAT" && s.position === "SHORT");
+    const till = new Date((Number(s.pending_to) + 19800) * 1000).toISOString().slice(11, 16);
+    pos += ` · ${s.pending_target === "FLAT" ? "exit" : s.pending_target === "LONG" ? "buy" : "sell"} ${up ? "above" : "below"} ${fmtNum(Number(s.pending_trigger))} till ${till}`;
+  }
   $("st_pos").textContent = pos;
   $("st_run").textContent = istText(s.last_run_at);
   if (!formDirty) fillForm(s);
 }
 
 function applyKindVisibility() {
-  const timed = $("k_timed").checked;
+  const kind = $("f_kind").value, timed = kind === "TIMED", ha = kind === "HA";
   document.querySelectorAll(".timed-only").forEach((el) => el.hidden = !timed);
   document.querySelectorAll(".flip-only").forEach((el) => el.hidden = timed);
+  document.querySelectorAll(".st-only").forEach((el) => el.hidden = ha);
+  if (!timed) document.querySelectorAll(".buffer-only").forEach((el) => el.hidden = $("f_entry_trigger").value !== "BREAKOUT");
+  $("sigLegend").textContent = ha ? "Heikin Ashi signal" : "Supertrend";
+  $("kindHint").textContent = ha
+    ? "Signals come from Heikin Ashi candle colour: green after red = buy, red after green = sell (stop and reverse). Orders use normal candle prices."
+    : timed ? "At a fixed time, buys a call if the higher-timeframe Supertrend is up or a put if it's down, and exits at a fixed time (e.g. next morning)."
+    : "Stop and reverse on Supertrend: buy when it turns green, sell and go short when it turns red.";
   $("optSet").hidden = $("f_trade_type").value !== "OPTIONS";
 }
 
@@ -578,7 +603,7 @@ function fillForm(s) {
     if (TIME_FIELDS.includes(k) && v) v = String(v).slice(0, 5);
     el.value = v === null || v === undefined ? "" : String(v);
   }
-  $("k_timed").checked = isTimed(s); $("k_flip").checked = !isTimed(s);
+  $("f_kind").value = s.strategy_kind || "FLIP";
   applyKindVisibility();
   $("formMsg").textContent = "";
 }
@@ -609,7 +634,7 @@ const TFS = [["1", "1m"], ["3", "3m"], ["5", "5m"], ["15", "15m"], ["30", "30m"]
 const RANGES = [["1", "Today"], ["7", "5 days"], ["31", "1 month"], ["92", "3 months"], ["184", "6 months"], ["366", "1 year"], ["731", "2 years"], ["1095", "3 years"], ["1827", "5 years"], ["3660", "10 years"], ["7320", "20 years"]];
 function tfMaxDays(tf) { if (tf === "D") return 3660; if (tf === "W") return 7320; const n = Number(tf); return n <= 1 ? 31 : n <= 3 ? 92 : n <= 10 ? 184 : n <= 30 ? 366 : n <= 125 ? 731 : 1095; }
 function tfDefaultRange(tf) { return { "1": "7", "3": "31", "5": "31", "15": "92", "30": "92", "60": "184", "120": "366", "240": "366", D: "731", W: "1827" }[tf] || "92"; }
-let cx = { asset: "13", sec: "13", seg: "IDX_I", instr: "INDEX", tf: "5", range: "31", atr: 10, fac: 3, live: "15", paint: true, marks: true };
+let cx = { asset: "13", sec: "13", seg: "IDX_I", instr: "INDEX", tf: "5", range: "31", atr: 10, fac: 3, sig: "ST", live: "15", paint: true, marks: true };
 try { Object.assign(cx, JSON.parse(localStorage.getItem("cx-prefs") || "{}")); } catch {}
 function saveCx() { try { localStorage.setItem("cx-prefs", JSON.stringify({ live: cx.live, paint: cx.paint, marks: cx.marks })); } catch {} }
 let chartFor = null, cxBars = [], cxReq = 0, cxTimer = null, cxLast = null;
@@ -644,6 +669,16 @@ function supertrendJS(bars, period, factor) {
   return { st, trend };
 }
 
+/* Heikin Ashi colour, same rules as the engine: 1 green, -1 red, a doji keeps the previous colour. */
+function heikinAshiJS(bars) {
+  const n = bars.length, trend = new Array(n).fill(0); let ho = 0, hc = 0;
+  for (let i = 0; i < n; i++) {
+    const b = bars[i], c = (b.o + b.h + b.l + b.c) / 4, o = i === 0 ? (b.o + b.c) / 2 : (ho + hc) / 2;
+    ho = o; hc = c; trend[i] = c > o ? 1 : c < o ? -1 : i > 0 ? trend[i - 1] : 0;
+  }
+  return { st: new Array(n).fill(NaN), trend };
+}
+
 function buildCxControls() {
   $("cx_asset").innerHTML = ""; for (const a of ASSETS) { const o = document.createElement("option"); o.value = a.key; o.textContent = a.name; $("cx_asset").append(o); }
   $("cx_tf").innerHTML = "";
@@ -666,7 +701,8 @@ function paintCx() {
   for (const [v, label] of RANGES) if (Number(v) <= max) { const o = document.createElement("option"); o.value = v; o.textContent = label; $("cx_range").append(o); }
   if (Number(cx.range) > max) cx.range = String(max >= 31 ? [...RANGES].reverse().find(([v]) => Number(v) <= max)[0] : "7");
   $("cx_range").value = cx.range;
-  $("cx_atr").value = cx.atr; $("cx_fac").value = cx.fac; $("cx_live").value = cx.live;
+  $("cx_atr").value = cx.atr; $("cx_fac").value = cx.fac; $("cx_live").value = cx.live; $("cx_sig").value = cx.sig;
+  $("cx_atr").disabled = $("cx_fac").disabled = cx.sig === "HA";
   $("cx_paint").checked = cx.paint; $("cx_marks").checked = cx.marks;
 }
 function cxFromStrategy(s) {
@@ -676,7 +712,7 @@ function cxFromStrategy(s) {
   Object.assign(cx, a ? { asset: a.key, sec: a.sec, seg: a.seg, instr: a.instr } : { asset: "custom", sec: String(s.data_security_id), seg: s.data_segment, instr: s.data_instrument });
   cx.tf = s.strategy_kind === "TIMED" ? String(s.bias_timeframe) : String(s.timeframe_min);
   cx.range = tfDefaultRange(cx.tf);
-  cx.atr = s.atr_period; cx.fac = Number(s.factor);
+  cx.atr = s.atr_period; cx.fac = Number(s.factor); cx.sig = s.strategy_kind === "HA" ? "HA" : "ST";
   paintCx();
 }
 function assetName() { const a = ASSETS.find((x) => x.key === cx.asset); return a && a.key !== "custom" ? a.name : `ID ${cx.sec} (${cx.seg})`; }
@@ -718,7 +754,8 @@ function drawChart(fit) {
   if (!ensureChart()) { $("chartInfo").textContent = "The chart library didn't load."; return; }
   const intraday = cx.tf !== "D" && cx.tf !== "W";
   chart.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: false } });
-  const { st, trend } = supertrendJS(cxBars, Math.max(1, Number(cx.atr) || 10), Number(cx.fac) > 0 ? Number(cx.fac) : 3);
+  const ha = cx.sig === "HA";
+  const { st, trend } = ha ? heikinAshiJS(cxBars) : supertrendJS(cxBars, Math.max(1, Number(cx.atr) || 10), Number(cx.fac) > 0 ? Number(cx.fac) : 3);
   const viewT = Date.parse(cx.viewFrom + "T00:00:00+05:30") / 1000;
   let start = cxBars.findIndex((b) => b.t >= viewT); if (start < 0) start = 0;
   const up = cssVar("--logo-green"), dn = cssVar("--logo-red"), shift = 19800;
@@ -758,7 +795,7 @@ function drawChart(fit) {
   candleS.setData(candles); stS.setData(line); candleS.setMarkers(marks);
   if (fit) chart.timeScale().fitContent();
   const lastTr = trend[trend.length - 1], lastSt = st[st.length - 1];
-  $("chartInfo").textContent = `${assetName()} · ${tfName(cx.tf)} · ${candles.length} candles · Supertrend ${lastTr === 1 ? "▲ up" : lastTr === -1 ? "▼ down" : "–"}${isNaN(lastSt) ? "" : " at " + fmtNum(+lastSt.toFixed(2))} · last ${fmtNum(cxBars[cxBars.length - 1].c)}` +
+  $("chartInfo").textContent = `${assetName()} · ${tfName(cx.tf)} · ${candles.length} candles · ${ha ? "Heikin Ashi" : "Supertrend"} ${lastTr === 1 ? "▲ up" : lastTr === -1 ? "▼ down" : "–"}${isNaN(lastSt) ? "" : " at " + fmtNum(+lastSt.toFixed(2))} · last ${fmtNum(cxBars[cxBars.length - 1].c)}` +
     (cx.trades ? ` · backtest #${cx.tradesId}: ${shown} of ${cx.trades.length} trades in view (blue = entries, yellow = exits)` : "");
   paintLive();
 }
@@ -815,6 +852,7 @@ $("cx_load").addEventListener("click", () => {
 $("cx_range").addEventListener("change", () => { cx.range = $("cx_range").value; loadChart(); });
 const redraw = () => { const a = Number($("cx_atr").value), f = Number($("cx_fac").value); if (a >= 1 && f > 0) { cx.atr = a; cx.fac = f; if (cxBars.length) drawChart(false); } };
 $("cx_atr").addEventListener("change", redraw); $("cx_fac").addEventListener("change", redraw);
+$("cx_sig").addEventListener("change", () => { cx.sig = $("cx_sig").value; paintCx(); if (cxBars.length) drawChart(false); });
 $("cx_live").addEventListener("change", () => { cx.live = $("cx_live").value; saveCx(); startCxLive(); });
 $("cx_paint").addEventListener("change", () => { cx.paint = $("cx_paint").checked; saveCx(); if (cxBars.length) drawChart(false); });
 $("cx_marks").addEventListener("change", () => { cx.marks = $("cx_marks").checked; saveCx(); if (cxBars.length) drawChart(false); });
@@ -1090,7 +1128,6 @@ async function createStrategy(kind) {
   toast("New strategy created. It starts paused, in paper mode.");
 }
 $("newFlip").addEventListener("click", (e) => run(e.currentTarget, () => createStrategy("FLIP")));
-$("newTimed").addEventListener("click", (e) => run(e.currentTarget, () => createStrategy("TIMED")));
 
 /* tabs */
 function showTab(which) {
@@ -1104,10 +1141,10 @@ $("t_bt").addEventListener("click", () => showTab("bt"));
 
 /* strategy form */
 $("stratForm").addEventListener("input", () => { formDirty = true; });
-$("k_flip").addEventListener("change", applyKindVisibility);
-$("k_timed").addEventListener("change", () => {
+$("f_entry_trigger").addEventListener("change", applyKindVisibility);
+$("f_kind").addEventListener("change", () => {
   applyKindVisibility();
-  if ($("f_product_type").value === "I" && $("f_exit_next_day").value === "true") { $("f_product_type").value = "M"; $("formMsg").textContent = "Switched product type to M (carry forward), since timed trades are held overnight."; }
+  if ($("f_kind").value === "TIMED" && $("f_product_type").value === "I" && $("f_exit_next_day").value === "true") { $("f_product_type").value = "M"; $("formMsg").textContent = "Switched product type to M (carry forward), since timed trades are held overnight."; }
 });
 $("f_trade_type").addEventListener("change", applyKindVisibility);
 $("f_exit_next_day").addEventListener("change", () => {
@@ -1120,12 +1157,14 @@ $("f_underlying").addEventListener("change", () => {
 });
 
 function readForm() {
-  const out = { strategy_kind: $("k_timed").checked ? "TIMED" : "FLIP" };
+  const out = { strategy_kind: $("f_kind").value };
+  if (!["FLIP", "HA", "TIMED"].includes(out.strategy_kind)) throw new Error("Pick a strategy type.");
   for (const k of FIELDS) {
     const el = $("f_" + k); let v = el.value.trim();
     const name = el.closest(".f") ? el.closest(".f").querySelector("span").textContent : k;
     if (INT_FIELDS.includes(k)) { const n = Number(v); if (v === "" || !Number.isInteger(n)) throw new Error(`“${name}” must be a whole number.`); v = n; }
     else if (k === "factor") { const n = Number(v); if (!(n > 0)) throw new Error("Multiplier must be above 0."); v = n; }
+    else if (k === "buffer_points") { const n = Number(v || 0); if (!(n >= 0)) throw new Error("Buffer must be 0 or more points."); v = n; }
     else if (BOOL_FIELDS.includes(k)) v = v === "true";
     else if (TIME_FIELDS.includes(k)) { if (!/^\d{2}:\d{2}$/.test(v)) throw new Error(`“${name}” must be a time (HH:MM).`); }
     else if (k === "expiry_override") { if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new Error("Expiry override must be a date."); v = v || null; }
@@ -1135,7 +1174,7 @@ function readForm() {
     out[k] = v;
   }
   if (out.timeframe_min < 1 || out.timeframe_min > 375) throw new Error("Candle timeframe must be 1–375 minutes.");
-  if (out.strategy_kind === "FLIP") {
+  if (out.strategy_kind !== "TIMED") {
     if (out.session_start >= out.last_entry) throw new Error("“First trade from” must be earlier than “No trades after”.");
     if (out.intraday && out.last_entry > out.square_off) throw new Error("“No trades after” must not be later than the square-off time.");
   } else {
@@ -1161,6 +1200,9 @@ $("stratForm").addEventListener("submit", (e) => {
   if (s.position !== "FLAT" && (v.strategy_kind !== s.strategy_kind || v.trade_type !== s.trade_type)) { $("formMsg").textContent = "Exit the open position before changing the strategy type or instrument."; return; }
   const patch = { ...v };
   if (v.strategy_kind !== s.strategy_kind) Object.assign(patch, { last_candle_ts: null, last_entry_day: null });
+  // Any change to the signal or order rules cancels an armed breakout order; the next candle close re-arms it.
+  if (["strategy_kind", "entry_trigger", "buffer_points", "timeframe_min", "atr_period", "factor", "direction"].some((k) => String(v[k]) !== String(s[k])))
+    Object.assign(patch, { pending_target: null, pending_trigger: null, pending_from: null, pending_to: null });
   run(e.submitter, async () => {
     must(await db.from("algo_strategies").update(patch).eq("id", s.id));
     formDirty = false; await loadAll(); showTab("set"); $("formMsg").textContent = "Saved. Press Refresh chart to see the new candles."; toast("Strategy saved.");

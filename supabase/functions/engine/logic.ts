@@ -147,3 +147,26 @@ export function fillTemplate(tpl: string, vals: Record<string, string | number>)
   });
   return JSON.parse(s);
 }
+
+/** Heikin Ashi candles and their colour. trend: 1 = green (HA close above HA open), -1 = red; a doji keeps the previous colour. */
+export function heikinAshi(bars: { o: number; h: number; l: number; c: number }[]) {
+  const n = bars.length;
+  const ho = new Array<number>(n), hc = new Array<number>(n), trend = new Array<number>(n).fill(0);
+  for (let i = 0; i < n; i++) {
+    const b = bars[i];
+    hc[i] = (b.o + b.h + b.l + b.c) / 4;
+    ho[i] = i === 0 ? (b.o + b.c) / 2 : (ho[i - 1] + hc[i - 1]) / 2;
+    trend[i] = hc[i] > ho[i] ? 1 : hc[i] < ho[i] ? -1 : i > 0 ? trend[i - 1] : 0;
+  }
+  return { ho, hc, trend };
+}
+
+/** The signal series a flip-style strategy trades on: Supertrend, or Heikin Ashi colour. */
+export function signalSeries(s: { strategy_kind: string; atr_period: number; factor: number | string }, bars: { o: number; h: number; l: number; c: number }[]) {
+  if (s.strategy_kind === "HA") {
+    const { trend } = heikinAshi(bars);
+    return { trend, st: new Array<number>(bars.length).fill(NaN) };
+  }
+  const { trend, st } = supertrend(bars, s.atr_period, Number(s.factor));
+  return { trend, st };
+}

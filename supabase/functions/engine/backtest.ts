@@ -6,7 +6,7 @@
 import { Dhan, type OptBar } from "./dhan.ts";
 import {
   addDays, aggregate, type Bar, type DayBar, ist, minToTime, partialDay, type Raw,
-  strikeFor, supertrend, timeToMin, weekdayOf,
+  signalSeries, strikeFor, supertrend, timeToMin, weekdayOf,
 } from "./logic.ts";
 
 export type BtParams = { from: string; to: string; capital: number; brokerage: number; other_pct: number; near_code: number };
@@ -15,6 +15,7 @@ type Side = "LONG" | "SHORT";
 export type Plan = {
   side: Side; opt: "CE" | "PE" | null; entryDay: string; entryMin: number; exitDay: string; exitMin: number;
   spotIn: number; spotOut: number | null; strike: number | null; why: string; exitWhy: string;
+  fillIn?: number; fillOut?: number; // exact index fills for breakout orders
 };
 export type Acc = {
   equity: number; peak: number; maxDd: number; grossWin: number; grossLoss: number; wins: number;
@@ -81,7 +82,7 @@ export async function planBacktest(
   const step = Number(s.strike_step);
   const kind = s.strategy_kind;
   const biasTf = String(s.bias_timeframe);
-  const base = kind === "FLIP" && s.timeframe_min % 5 !== 0 ? 1 : 5;
+  const base = kind !== "TIMED" && s.timeframe_min % 5 !== 0 ? 1 : 5;
   if (base === 1 && (Date.parse(p.to) - Date.parse(p.from)) / 86400000 > 366) {
     throw new Error("Timeframes that aren't a multiple of 5 minutes need 1-minute data; test those up to 1 year per run.");
   }
@@ -89,7 +90,7 @@ export async function planBacktest(
   // Long warm-up (500+ candles) so Supertrend has settled to the same values the chart shows.
   const warmBars = Math.max(500, s.atr_period * 10);
   let warm = 3;
-  if (kind === "FLIP") warm = Math.ceil(((warmBars * s.timeframe_min) / 375) * 1.5) + 5;
+  if (kind !== "TIMED") warm = Math.ceil(((warmBars * s.timeframe_min) / 375) * 1.5) + 5;
   else if (biasTf !== "D") warm = Math.ceil(((warmBars * Number(biasTf)) / 375) * 1.5) + 5;
   const fetchTo = addDays(p.to, 6) < today ? addDays(p.to, 6) : today;
 
@@ -107,40 +108,85 @@ export async function planBacktest(
     return { side, opt, entryDay: day, entryMin: min, exitDay: "", exitMin: 0, spotIn: decide, spotOut: null, strike: opt ? strikeFor(decide, step, s.strike_offset, opt) : null, why, exitWhy: "" };
   };
 
-  if (kind === "FLIP") {
-    await progress("Replaying Supertrend signals");
+  if (kind !== "TIMED") {
+    const sigName = kind === "HA" ? "Heikin Ashi" : "Supertrend";
+    await progress(`Replaying ${sigName} signals`);
     const nowSec = Date.now() / 1000;
     const bars: Bar[] = aggregate(raw, s.timeframe_min).filter((b) => b.endT <= nowSec);
-    const { trend } = supertrend(bars, s.atr_period, Number(s.factor));
+    const { trend } = signalSeries(s as any, bars);
     const ss = timeToMin(String(s.session_start)), le = timeToMin(String(s.last_entry)), sq = timeToMin(String(s.square_off));
-    // Stop-and-reverse, acting only when a candle closes inside the trading window:
-    //  - Supertrend up   -> hold long (calls), down -> hold short (puts); the opposite position is closed and reversed.
-    //  - A flip after "no new trades after" is not traded that day. By default (FIRST_CLOSE) the position is matched,
-    //    at the close of the next day's first candle in the window, to Supertrend as it stands then (no trade if it has
-    //    already flipped back). With after_hours_flip = OPEN it is reversed at the next session start instead.
+    const breakout = s.entry_trigger === "BREAKOUT";
+    const buf = Number(s.buffer_points) || 0;
+    // Stop-and-reverse on the signal (Supertrend, or Heikin Ashi colour), decided when a candle closes inside the window:
+    //  - Up -> hold long (calls), down -> hold short (puts); the opposite position is closed and reversed.
+    //  - Entry at close (CLOSE): trade at that candle's close.
+    //    Breakout (BREAKOUT): arm an order at the signal candle's high + buffer (buy) or low - buffer (sell). It fills only if
+    //    the next candle trades through it; otherwise it is cancelled and re-armed from that candle, and so on.
+    //  - A flip after "no new trades after" is not traded that day. By default (FIRST_CLOSE) it is decided at the close of the
+    //    next day's first candle in the window, using the signal as it stands then; with OPEN it is acted on at the session start.
     //  - Intraday mode squares off at the square-off time.
-    let pos: Plan | null = null;
-    const close = (day: string, min: number, why: string) => { if (pos) { pos.exitDay = day; pos.exitMin = min; pos.exitWhy = why; plans.push(pos); pos = null; } };
+    type Pending = { target: Side | null; up: boolean; trig: number; valid: number; why: string };
+    let pos = null as Plan | null;
+    let pending = null as Pending | null;
+    const close = (day: string, min: number, why: string, px?: number) => {
+      if (!pos) return;
+      pos.exitDay = day; pos.exitMin = min; pos.exitWhy = why; if (px != null) pos.fillOut = px;
+      plans.push(pos); pos = null;
+    };
     const want = (t: number): Side | null => t === 1 ? (dirOk("LONG") ? "LONG" : null) : t === -1 ? (dirOk("SHORT") ? "SHORT" : null) : null;
+    const okMin = (m: number) => m >= ss && m < le && (!s.intraday || m < sq);
+    const armFrom = (target: Side | null, ref: { h: number; l: number }, valid: number, why: string): Pending => {
+      const up = target === "LONG" || (target === null && pos?.side === "SHORT");
+      const trig = up ? ref.h + buf : ref.l - buf;
+      return { target, up, trig, valid, why: `${why}; ${up ? "broke above" : "broke below"} ${+trig.toFixed(2)}` };
+    };
     for (let i = 1; i < bars.length; i++) {
       const b = bars[i];
       if (b.day > p.to) break;
-      if (pos && s.intraday && (b.day !== (pos as Plan).entryDay || b.endMin >= sq)) close((pos as Plan).entryDay, sq, "Square-off");
+      const newDay = b.day !== bars[i - 1].day;
+      if (pos && s.intraday && (b.day !== pos.entryDay || b.endMin >= sq)) close(pos.entryDay, sq, "Square-off");
+      if (s.intraday && newDay) pending = null;
       if (b.day < p.from || trend[i] === 0 || trend[i - 1] === 0) continue;
+
       // OPEN mode: a flip from after hours yesterday is acted on at today's session start.
-      if (s.after_hours_flip === "OPEN" && b.day !== bars[i - 1].day) {
+      if (s.after_hours_flip === "OPEN" && newDay) {
         const d0 = want(trend[i - 1]);
-        if (pos && (pos as Plan).side !== d0) {
-          close(b.day, ss, "Supertrend turned after hours (acted on at the open)");
+        const mism = pos ? pos.side !== d0 : false;
+        if (breakout) {
+          if (mism || (!pos && d0 && s.entry_mode === "JOIN")) pending = armFrom(d0, bars[i - 1], i, `${sigName} turned after hours`);
+        } else if (mism) {
+          close(b.day, ss, `${sigName} turned after hours (acted on at the open)`);
           if (d0) pos = mkPlan(d0, b.day, ss, b.o, "Reversed at the open (flip happened after hours)");
         } else if (!pos && d0 && s.entry_mode === "JOIN") pos = mkPlan(d0, b.day, ss, b.o, "Joined trend");
       }
+
+      // Breakout order armed for this candle: fill at the first base candle that trades through the trigger.
+      if (breakout && pending && pending.valid === i) {
+        const pd = pending;
+        const hit = (byDay.get(b.day) ?? []).find((r) => r.min >= b.startMin && r.min < b.endMin && okMin(r.min) && (pd.up ? r.h >= pd.trig : r.l <= pd.trig));
+        if (hit) {
+          const px = pd.up ? Math.max(hit.o, pd.trig) : Math.min(hit.o, pd.trig);
+          const m = hit.min + base;
+          if (pos && pos.side !== pd.target) close(b.day, m, pd.target ? `${sigName} turned (breakout filled)` : "Exit (breakout filled)", px);
+          if (pd.target && !pos) { pos = mkPlan(pd.target, b.day, m, px, pd.why); pos.fillIn = px; }
+          pending = null;
+        }
+      }
+
       const inWindow = b.endMin >= ss && b.endMin < le && (!s.intraday || b.endMin < sq) && b.endMin < 930;
       if (!inWindow) continue;
       const desired = want(trend[i]);
       const flipped = trend[i] !== trend[i - 1];
+      if (breakout) {
+        const mism = pos ? pos.side !== desired : false;
+        if (mism || (!pos && desired && (s.entry_mode === "JOIN" || flipped || pending?.target === desired))) {
+          const why = flipped ? (pos ? "Reversed on flip" : "Fresh flip") : pending ? "Re-armed from the next candle" : pos ? "Reversed (flip happened after hours)" : "Joined trend";
+          pending = armFrom(desired, b, i + 1, why);
+        } else pending = null;
+        continue;
+      }
       let reversing = false;
-      if (pos && (pos as Plan).side !== desired) { close(b.day, b.endMin, flipped ? "Supertrend turned" : "Supertrend turned after hours (acted on at first candle close)"); reversing = true; }
+      if (pos && pos.side !== desired) { close(b.day, b.endMin, flipped ? `${sigName} turned` : `${sigName} turned after hours (acted on at first candle close)`); reversing = true; }
       if (!pos && desired && (s.entry_mode === "JOIN" || flipped || reversing)) {
         pos = mkPlan(desired, b.day, b.endMin, b.c, flipped ? (reversing ? "Reversed on flip" : "Fresh flip") : reversing ? "Reversed at first candle close (flip happened after hours)" : "Joined trend");
       }
@@ -202,8 +248,8 @@ export async function planBacktest(
 
   // Record the index price at each entry and exit so pricing never needs the index data again.
   for (const pl of plans) {
-    pl.spotIn = priceAt(byDay.get(pl.entryDay), pl.entryMin)?.px ?? pl.spotIn;
-    pl.spotOut = priceAt(byDay.get(pl.exitDay), pl.exitMin)?.px ?? null;
+    pl.spotIn = pl.fillIn ?? priceAt(byDay.get(pl.entryDay), pl.entryMin)?.px ?? pl.spotIn;
+    pl.spotOut = pl.fillOut ?? priceAt(byDay.get(pl.exitDay), pl.exitMin)?.px ?? null;
   }
   return { plans, calls: dhan.calls };
 }
@@ -271,8 +317,9 @@ export async function priceBatch(
     }
     if (inPx == null || outPx == null) { skip("No historical price for that contract and time"); continue; }
     const dir = isOpt ? 1 : t.side === "LONG" ? 1 : -1;
-    const g = (outPx - inPx) * dir * units;
-    const c = 2 * p.brokerage + ((inPx + outPx) * units * p.other_pct) / 100;
+    // Whole rupees only: paisa are dropped (not rounded up or down).
+    const g = Math.trunc((outPx - inPx) * dir * units);
+    const c = Math.trunc(2 * p.brokerage + ((inPx + outPx) * units * p.other_pct) / 100);
     const net = g - c;
     acc.gross += g; acc.costs += c; acc.equity += net;
     if (net > 0) { acc.wins++; acc.grossWin += net; } else acc.grossLoss += -net;
@@ -281,7 +328,7 @@ export async function priceBatch(
     trades.push({
       entry: `${t.entryDay} ${minToTime(t.entryMin)}`, exit: `${t.exitDay} ${minToTime(t.exitMin)}`, side: t.side, contract,
       why: t.why, exit_why: t.exitWhy, entry_px: +inPx.toFixed(2), exit_px: +outPx.toFixed(2), units,
-      gross: +g.toFixed(2), costs: +c.toFixed(2), net: +net.toFixed(2), equity: +acc.equity.toFixed(2),
+      gross: g, costs: c, net, equity: Math.trunc(acc.equity),
     });
   }
   acc.calls += dhan.calls;
@@ -295,11 +342,11 @@ export function summarize(s: Record<string, any>, p: BtParams, planned: number, 
   return {
     trades: n, planned, wins: acc.wins, losses: n - acc.wins,
     win_rate: n ? +((acc.wins / n) * 100).toFixed(1) : 0,
-    gross: +acc.gross.toFixed(2), costs: +acc.costs.toFixed(2), net: +net.toFixed(2),
+    gross: Math.trunc(acc.gross), costs: Math.trunc(acc.costs), net: Math.trunc(net),
     return_pct: +((net / p.capital) * 100).toFixed(2),
-    max_dd: +acc.maxDd.toFixed(2), max_dd_pct: +((acc.maxDd / p.capital) * 100).toFixed(2),
+    max_dd: Math.trunc(acc.maxDd), max_dd_pct: +((acc.maxDd / p.capital) * 100).toFixed(2),
     profit_factor: acc.grossLoss > 0 ? +(acc.grossWin / acc.grossLoss).toFixed(2) : null,
-    avg_net: n ? +(net / n).toFixed(2) : 0,
+    avg_net: n ? Math.trunc(net / n) : 0,
     skipped: acc.skipped, priced_with: s.trade_type === "OPTIONS" ? "Dhan expired-options data (5-minute)" : "Index prices as a futures proxy",
     dhan_calls: acc.calls, last_day_done: acc.lastDone, partial,
   };

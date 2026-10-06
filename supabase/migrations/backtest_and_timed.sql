@@ -38,3 +38,14 @@ select 'ok' as done;
 
 -- After-hours flip handling for flip strategies
 alter table algo_strategies add column if not exists after_hours_flip text not null default 'FIRST_CLOSE' check (after_hours_flip in ('FIRST_CLOSE','OPEN'));
+
+-- Heikin Ashi strategy type and breakout entries with a buffer
+alter table algo_strategies drop constraint algo_strategies_strategy_kind_check;
+alter table algo_strategies add constraint algo_strategies_strategy_kind_check check (strategy_kind in ('FLIP','HA','TIMED'));
+alter table algo_strategies
+  add column if not exists entry_trigger text not null default 'CLOSE' check (entry_trigger in ('CLOSE','BREAKOUT')),
+  add column if not exists buffer_points numeric not null default 0 check (buffer_points >= 0),
+  add column if not exists pending_target text check (pending_target in ('LONG','SHORT','FLAT')),
+  add column if not exists pending_trigger numeric,
+  add column if not exists pending_from bigint,
+  add column if not exists pending_to bigint;

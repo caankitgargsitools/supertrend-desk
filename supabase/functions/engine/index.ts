@@ -6,7 +6,7 @@ import { Dhan } from "./dhan.ts";
 import { newAcc, planBacktest, priceBatch, summarize, validateParams, type Acc, type Plan } from "./backtest.ts";
 import {
   addDays, aggregate, CLOSE_MIN, fillTemplate, isComplete, ist, nextExpiry, OPEN_MIN, partialDay,
-  pickBaseInterval, strikeFor, supertrend, timeToMin,
+  pickBaseInterval, signalSeries, strikeFor, supertrend, timeToMin,
 } from "./logic.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
@@ -38,6 +38,8 @@ function warmDays(tf: number, atr: number) {
   return Math.min(400, Math.max(5, Math.ceil(((Math.max(WARM_BARS, atr * 10) * tf) / 375) * 1.5) + 4));
 }
 const FLAT_STATE = { position: "FLAT", pos_option_type: null, pos_strike: null, pos_expiry: null, pos_qty: null, pos_entry_date: null };
+const NO_PENDING = { pending_target: null, pending_trigger: null, pending_from: null, pending_to: null };
+const hhmm = (sec: number) => fmtIst(sec, true).slice(11, 16);
 
 function fmtIst(epochSec: number, withTime: boolean): string {
   const d = new Date((epochSec + 19800) * 1000).toISOString();
@@ -58,7 +60,7 @@ async function saveChart(s: Strategy, bars: ChartBar[], st: number[], trend: num
   await sb.from("algo_chart").upsert({ strategy_id: s.id, bars: chart, updated_at: new Date().toISOString() });
 }
 
-/** Supertrend on the strategy's own candles (flip strategies). */
+/** Signal (Supertrend or Heikin Ashi colour) on the strategy's own candles (flip strategies). */
 async function flipSeries(s: Strategy, dhan: Dhan) {
   const tf = s.timeframe_min;
   const baseInt = pickBaseInterval(tf);
@@ -66,7 +68,7 @@ async function flipSeries(s: Strategy, dhan: Dhan) {
   const raw = await intradaySpan(dhan, s, baseInt, warmDays(tf, s.atr_period), now);
   const bars = aggregate(raw, tf).filter((b) => isComplete(b, baseInt, now));
   if (bars.length < s.atr_period + 2) throw new Error(`Only ${bars.length} completed candles came back from Dhan; need at least ${s.atr_period + 2}.`);
-  const { st, trend } = supertrend(bars, s.atr_period, Number(s.factor));
+  const { st, trend } = signalSeries(s as any, bars);
   await saveChart(s, bars, st, trend);
   return { bars, st, trend };
 }
@@ -200,7 +202,8 @@ async function finish(s: Strategy, set: Settings, update: Record<string, unknown
 }
 
 async function processFlip(s: Strategy, set: Settings, action: string) {
-  const { bars, st, trend } = await flipSeries(s, dhanFor(set));
+  const dhan = dhanFor(set);
+  const { bars, st, trend } = await flipSeries(s, dhan);
   const n = bars.length;
   const last = bars[n - 1];
   const tNow = trend[n - 1], tPrev = trend[n - 2];
@@ -210,29 +213,42 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
   };
   const candle = { t: last.t, trend: tNow, c: last.c, st: stNow };
   if (action === "refresh") { await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
-  if (action === "flatten") { await flatten(s, set, update, candle); await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
+  if (action === "flatten") {
+    Object.assign(update, NO_PENDING);
+    await flatten(s, set, update, candle); await sb.from("algo_strategies").update(update).eq("id", s.id); return;
+  }
 
   const nowSec = Date.now() / 1000;
   const now = ist(nowSec);
   const sqOff = timeToMin(String(s.square_off));
+  const sigName = s.strategy_kind === "HA" ? "Heikin Ashi" : "Supertrend";
+  const breakout = s.entry_trigger === "BREAKOUT";
+  const buf = Number(s.buffer_points) || 0;
   let position: Pos = s.position;
   const legs: Record<string, unknown>[] = [];
   const notes: string[] = [];
   let event = "";
   let newState: Record<string, unknown> = {};
+  let pendingPatch: Record<string, unknown> | null = null;
 
-  if (s.intraday && position !== "FLAT" && now.min >= sqOff) {
-    legs.push(exitLeg(s, 1));
-    notes.push(`Square-off: ${exitLabel(s)}`);
-    event = "SQUARE_OFF";
-    newState = FLAT_STATE;
+  if (s.intraday && now.min >= sqOff) {
+    if (s.pending_target) pendingPatch = NO_PENDING;
+    if (position !== "FLAT") {
+      legs.push(exitLeg(s, 1));
+      notes.push(`Square-off: ${exitLabel(s)}`);
+      event = "SQUARE_OFF";
+      newState = FLAT_STATE;
+    }
   } else {
-    // Stop-and-reverse, decided when a candle closes inside the trading window. A flip after "no new trades after"
-    // is not traded that day. Next day it is acted on either
-    //   FIRST_CLOSE (default): at the close of the first candle in the window, using Supertrend as it stands then
-    //                          (no trade if it has already flipped back), or
+    // Stop-and-reverse on the signal (Supertrend, or Heikin Ashi colour), decided when a candle closes inside the window.
+    //   Entry at close (CLOSE): trade straight away.
+    //   Breakout (BREAKOUT): arm a trigger at the signal candle's high + buffer (buy) or low - buffer (sell). It fills only if
+    //   the next candle trades through it (checked every minute); otherwise it is re-armed from that candle, and so on.
+    // A flip after "no new trades after" is not traded that day. Next day it is acted on either
+    //   FIRST_CLOSE (default): at the close of the first candle in the window, using the signal as it stands then, or
     //   OPEN: at the session start, from the previous day's last candle.
     const ss = timeToMin(String(s.session_start)), le = timeToMin(String(s.last_entry));
+    const okMin = (m: number) => m >= ss && m < le && (!s.intraday || m < sqOff);
     const openMode = s.after_hours_flip === "OPEN";
     const newCandle = last.t !== s.last_candle_ts;
     const fresh = last.day === now.date && nowSec - last.endT <= Math.max(600, s.timeframe_min * 120);
@@ -240,32 +256,84 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
     const nowInWindow = now.min >= ss && now.min < le && (!s.intraday || now.min < sqOff) && now.min < CLOSE_MIN;
     const recent = nowSec - last.endT <= 5 * 86400; // stale-data guard (weekends and holidays allowed)
     const atOpen = openMode && nowInWindow && recent && !(last.day === now.date && last.endMin >= ss);
-    if (s.last_candle_ts == null) {
-      notes.push(`Started tracking. Trend is ${tNow === 1 ? "up" : "down"}; waiting for the next candle.`);
-      event = "INFO";
-    } else if ((newCandle && fresh && candleInWindow && now.min < CLOSE_MIN) || atOpen) {
-      const desired: Pos = tNow === 1 ? (s.direction === "SHORT_ONLY" ? "FLAT" : "LONG") : (s.direction === "LONG_ONLY" ? "FLAT" : "SHORT");
-      const flipped = !atOpen && tNow !== tPrev;
-      let reversing = false;
-      if (position !== "FLAT" && position !== desired) {
-        legs.push(exitLeg(s, legs.length + 1));
-        const why = flipped ? "turned" : atOpen ? "turned after hours, so reversing at the open:" : "turned after hours; first candle close confirms, reversing:";
-        notes.push(`Supertrend ${why} ${tNow === 1 ? "up" : "down"}: ${exitLabel(s)}`);
-        event = "EXIT";
-        position = "FLAT";
-        newState = FLAT_STATE;
-        reversing = true;
+    const desiredFor = (t: number): Pos => t === 1 ? (s.direction === "SHORT_ONLY" ? "FLAT" : "LONG") : (s.direction === "LONG_ONLY" ? "FLAT" : "SHORT");
+
+    // 1) Breakout: has the armed trigger been traded through?
+    let pend = breakout && s.pending_target && s.pending_trigger != null
+      ? { target: s.pending_target as Pos, trig: Number(s.pending_trigger), from: Number(s.pending_from), to: Number(s.pending_to) }
+      : null;
+    if (pend && nowSec >= pend.from && now.min <= CLOSE_MIN + 5) {
+      const pd = pend;
+      const up = pd.target === "LONG" || (pd.target === "FLAT" && position === "SHORT");
+      const mins = await dhan.intraday(s.data_security_id, s.data_segment, s.data_instrument, 1, `${now.date} 09:00:00`, fmtIst(nowSec + 120, true));
+      let hit = mins.find((m) => m.t >= pd.from && m.t < pd.to && okMin(ist(m.t).min) && (up ? m.h >= pd.trig : m.l <= pd.trig)) != null;
+      if (!hit && nowSec < pd.to && okMin(now.min)) {
+        try { const ltp = await dhan.ltp(s.data_segment, s.data_security_id); if (ltp && (up ? ltp >= pd.trig : ltp <= pd.trig)) hit = true; } catch { /* LTP is optional */ }
       }
-      if (desired !== "FLAT" && position === "FLAT" && (s.entry_mode === "JOIN" || flipped || reversing)) {
-        const e = entryLeg(s, desired, last.c, legs.length + 1);
-        legs.push(e.leg);
-        notes.push(`${flipped ? "Supertrend flipped" : reversing ? "Reversing" : "Joining trend"} ${tNow === 1 ? "up" : "down"}: ${e.label}`);
-        event = event === "EXIT" ? "REVERSE" : "ENTRY";
-        newState = { position: desired, ...e.state };
+      if (hit) {
+        if (position !== "FLAT" && position !== pd.target) {
+          legs.push(exitLeg(s, legs.length + 1));
+          notes.push(`${sigName} breakout ${up ? "above" : "below"} ${pd.trig}: ${exitLabel(s)}`);
+          event = "EXIT"; position = "FLAT"; newState = FLAT_STATE;
+        }
+        if (pd.target !== "FLAT" && position === "FLAT") {
+          const e = entryLeg(s, pd.target, pd.trig, legs.length + 1);
+          legs.push(e.leg);
+          notes.push(`${sigName} breakout ${up ? "above" : "below"} ${pd.trig}: ${e.label}`);
+          event = event === "EXIT" ? "REVERSE" : "ENTRY";
+          newState = { position: pd.target, ...e.state };
+          position = pd.target;
+        }
+        pendingPatch = NO_PENDING; pend = null;
+      }
+    }
+
+    // 2) Decision on a candle close inside the window (or at the open in OPEN mode).
+    if (s.last_candle_ts == null) {
+      notes.push(`Started tracking. ${sigName} is ${tNow === 1 ? "up" : "down"}; waiting for the next candle.`);
+      if (!event) event = "INFO";
+    } else if ((newCandle && fresh && candleInWindow && now.min < CLOSE_MIN) || atOpen) {
+      const desired = desiredFor(tNow);
+      const flipped = !atOpen && tNow !== tPrev;
+      if (breakout) {
+        const mism = position !== "FLAT" && position !== desired;
+        if (mism || (position === "FLAT" && desired !== "FLAT" && (s.entry_mode === "JOIN" || flipped || pend?.target === desired))) {
+          const up = desired === "LONG" || (desired === "FLAT" && position === "SHORT");
+          const trig = +(up ? last.h + buf : last.l - buf).toFixed(2);
+          const dayStart = Date.parse(`${now.date}T09:15:00+05:30`) / 1000, dayEnd = dayStart + 375 * 60;
+          const from = atOpen ? dayStart : last.endT;
+          const to = Math.min(from + s.timeframe_min * 60, dayEnd);
+          if (!(atOpen && Number(s.pending_from) === from)) {
+            pendingPatch = { pending_target: desired, pending_trigger: trig, pending_from: from, pending_to: to };
+            const action = desired === "FLAT" ? `exit ${String(position).toLowerCase()}` : position !== "FLAT" ? `reverse to ${desired.toLowerCase()}` : desired === "LONG" ? "buy" : "sell";
+            notes.push(`${sigName} ${tNow === 1 ? "up" : "down"}${atOpen ? " (turned after hours)" : ""}: ${action} if price goes ${up ? "above" : "below"} ${trig} ` +
+              `(${up ? "high" : "low"} ${up ? last.h : last.l} ${up ? "+" : "−"} ${buf}) between ${hhmm(from)} and ${hhmm(to)}.`);
+            if (!event) event = "INFO";
+          }
+        } else if (s.pending_target && !pendingPatch) pendingPatch = NO_PENDING;
+      } else {
+        let reversing = false;
+        if (position !== "FLAT" && position !== desired) {
+          legs.push(exitLeg(s, legs.length + 1));
+          const why = flipped ? "turned" : atOpen ? "turned after hours, so reversing at the open:" : "turned after hours; first candle close confirms, reversing:";
+          notes.push(`${sigName} ${why} ${tNow === 1 ? "up" : "down"}: ${exitLabel(s)}`);
+          event = "EXIT";
+          position = "FLAT";
+          newState = FLAT_STATE;
+          reversing = true;
+        }
+        if (desired !== "FLAT" && position === "FLAT" && (s.entry_mode === "JOIN" || flipped || reversing)) {
+          const e = entryLeg(s, desired, last.c, legs.length + 1);
+          legs.push(e.leg);
+          notes.push(`${flipped ? `${sigName} flipped` : reversing ? "Reversing" : "Joining trend"} ${tNow === 1 ? "up" : "down"}: ${e.label}`);
+          event = event === "EXIT" ? "REVERSE" : "ENTRY";
+          newState = { position: desired, ...e.state };
+        }
       }
     }
     update.last_candle_ts = last.t;
   }
+  if (pendingPatch) { Object.assign(update, pendingPatch); newState = { ...newState, ...pendingPatch }; }
   await finish(s, set, update, legs, event, notes, newState, candle);
 }
 
