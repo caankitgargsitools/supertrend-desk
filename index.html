@@ -391,10 +391,25 @@ legend { padding: 0; margin-bottom: 4px; }
               <label class="f"><span>From</span><input id="bt_from" type="date"></label>
               <label class="f"><span>To</span><input id="bt_to" type="date"></label>
               <label class="f"><span>Capital (₹)</span><input id="bt_capital" type="number" min="1000" step="1000" value="500000"></label>
-              <label class="f"><span>Brokerage per order (₹)</span><input id="bt_brokerage" type="number" min="0" step="1" value="20"></label>
-              <label class="f"><span>STT &amp; other charges (% of turnover)</span><input id="bt_other" type="number" min="0" step="0.01" value="0.10"></label>
+              <label class="f"><span>Brokerage per order (₹, max)</span><input id="bt_brokerage" type="number" min="0" step="1" value="20"></label>
               <label class="f"><span>Dhan code for nearest expiry</span><select id="bt_code"><option value="1">1 (Dhan's examples)</option><option value="0">0 (Dhan's annexure)</option></select></label>
             </div>
+            <details id="btCharges" style="margin:10px 0">
+              <summary class="label" style="cursor:pointer">Brokerage &amp; statutory charges (rates in %) <span class="hint" id="btChargesSum"></span></summary>
+              <p class="hint">Worked out per trade the way the broker's calculator does: brokerage on each order (futures: the lower of the ₹ amount above and the % below; options: flat ₹ per order), STT on the sell side, exchange and SEBI charges on total turnover, GST on brokerage + exchange + SEBI, stamp duty on the buy side. STT and stamp duty are rounded to the rupee, as the exchanges do. Net P&amp;L per trade is then taken in whole rupees.</p>
+              <div class="grid">
+                <label class="f"><span>Futures brokerage (% of order)</span><input id="ch_brk_pct" type="number" min="0" step="0.001"></label>
+                <label class="f"><span>STT futures (sell side)</span><input id="ch_stt_fut" type="number" min="0" step="0.001"></label>
+                <label class="f"><span>STT options (sell premium)</span><input id="ch_stt_opt" type="number" min="0" step="0.001"></label>
+                <label class="f"><span>Exchange txn futures</span><input id="ch_exch_fut" type="number" min="0" step="0.00001"></label>
+                <label class="f"><span>Exchange txn options (premium)</span><input id="ch_exch_opt" type="number" min="0" step="0.00001"></label>
+                <label class="f"><span>SEBI fees</span><input id="ch_sebi" type="number" min="0" step="0.00001"></label>
+                <label class="f"><span>GST (on brokerage + exch + SEBI)</span><input id="ch_gst" type="number" min="0" step="0.1"></label>
+                <label class="f"><span>Stamp duty futures (buy side)</span><input id="ch_stamp_fut" type="number" min="0" step="0.0001"></label>
+                <label class="f"><span>Stamp duty options (buy side)</span><input id="ch_stamp_opt" type="number" min="0" step="0.0001"></label>
+              </div>
+              <div class="formbar"><button class="btn small" type="button" id="ch_reset">Reset to current NSE / BSE rates</button></div>
+            </details>
             <p class="hint">Uses the strategy's saved settings. Option trades are priced from Dhan's expired-options data (5-minute, up to 5 years back, strikes within 10 of ATM). Futures are approximated with index prices. Up to 5 years per run; long runs are priced in batches and take a few minutes (roughly 1 minute per year). You can leave the page and come back to the result.</p>
             <div class="formbar"><button class="btn primary" type="submit" id="bt_run">Run backtest</button><span class="hint" id="btMsg"></span></div>
           </form>
@@ -477,7 +492,7 @@ async function loadAll() {
 
 async function loadDetail() {
   const id = selected; if (!id) return;
-  if (chartFor !== id) { chartFor = id; cxFromStrategy(cur()); loadChart(); }
+  if (chartFor !== id) { chartFor = id; cxFromStrategy(cur()); loadChart(); fillCharges((cur() || {}).exchange); }
   const [signals, bts] = await Promise.all([
     db.from("algo_signals").select("id, created_at, event, description, mode, status, payload, response").eq("strategy_id", id).order("id", { ascending: false }).limit(60).then(must),
     db.from("algo_backtests").select("id, created_at, status, params, summary").eq("strategy_id", id).order("id", { ascending: false }).limit(12).then(must),
@@ -1150,19 +1165,24 @@ function btSummaryRows(r) {
   return [
     ["Strategy", m.name], ["Type", m.kind], ["Instrument", m.instrument], ["Order entry", m.order],
     ["Period", `${r.params.from} to ${r.params.to}`], ["Capital (Rs)", Math.trunc(Number(r.params.capital))],
-    ["Brokerage per order (Rs)", Number(r.params.brokerage)], ["Other charges (%)", Number(r.params.other_pct)],
+    ["Brokerage per order (Rs, max)", Number(r.params.brokerage)],
+    ...(r.params.charges ? [["Charge rates (%)", `STT fut ${r.params.charges.stt_fut} / opt ${r.params.charges.stt_opt}; exchange fut ${r.params.charges.exch_fut} / opt ${r.params.charges.exch_opt}; SEBI ${r.params.charges.sebi}; GST ${r.params.charges.gst}; stamp fut ${r.params.charges.stamp_fut} / opt ${r.params.charges.stamp_opt}; futures brokerage ${r.params.charges.brk_pct}`]]
+      : [["Other charges (% of turnover)", Number(r.params.other_pct)]]),
     ["Net P&L (Rs)", Math.trunc(s.net || 0)], ["Return on capital (%)", s.return_pct ?? 0],
     ["Trades", s.trades ?? 0], ["Wins", s.wins ?? 0], ["Losses", s.losses ?? 0], ["Win rate (%)", s.win_rate ?? 0],
     ["Gross P&L (Rs)", Math.trunc(s.gross || 0)], ["Brokerage & charges (Rs)", Math.trunc(s.costs || 0)],
+    ...(s.charges ? [["  Brokerage (Rs)", s.charges.brokerage], ["  STT (Rs)", s.charges.stt], ["  Exchange txn (Rs)", s.charges.exch], ["  SEBI (Rs)", s.charges.sebi], ["  GST (Rs)", s.charges.gst], ["  Stamp duty (Rs)", s.charges.stamp]] : []),
     ["Max drawdown (Rs)", Math.trunc(s.max_dd || 0)], ["Max drawdown (%)", s.max_dd_pct ?? 0],
     ["Profit factor", s.profit_factor ?? "–"], ["Average per trade (Rs)", Math.trunc(s.avg_net || 0)],
     ["Priced with", s.priced_with || ""], ["Skipped trades", skipped], ["Status", r.status === "partial" ? "Partial: " + (r.progress || "") : "Complete"],
   ];
 }
-const BT_COLS = ["#", "Entry (IST)", "Exit (IST)", "Side", "Contract", "Entry reason", "Exit reason", "Entry price", "Exit price", "Qty", "Gross (Rs)", "Charges (Rs)", "Net (Rs)", "Equity (Rs)"];
+const BT_COLS = ["#", "Entry (IST)", "Exit (IST)", "Side", "Contract", "Entry reason", "Exit reason", "Entry price", "Exit price", "Qty", "Gross (Rs)", "Charges (Rs)", "Net (Rs)", "Equity (Rs)",
+  "Brokerage", "STT", "Exchange txn", "SEBI", "GST", "Stamp duty", "Total charges (exact)"];
 function btTradeRows(r) {
   return (r.trades || []).map((t, i) => [i + 1, t.entry, t.exit, t.side === "LONG" ? "Long" : "Short", t.contract, t.why, t.exit_why,
-    Number(t.entry_px), Number(t.exit_px), t.units, Math.trunc(t.gross), Math.trunc(t.costs), Math.trunc(t.net), Math.trunc(t.equity)]);
+    Number(t.entry_px), Number(t.exit_px), t.units, Math.trunc(t.gross), Math.trunc(t.costs), Math.trunc(t.net), Math.trunc(t.equity),
+    ...(t.chg ? [t.chg.brokerage, t.chg.stt, t.chg.exch, t.chg.sebi, t.chg.gst, t.chg.stamp, t.chg.total] : ["", "", "", "", "", "", ""])]);
 }
 function btFileName(r, ext) {
   const nm = btMeta(r).name.replace(/[^A-Za-z0-9 _-]+/g, "").trim().replace(/\s+/g, "-").slice(0, 60) || "strategy";
@@ -1175,8 +1195,8 @@ async function downloadExcel(r) {
   sum["!cols"] = [{ wch: 28 }, { wch: 70 }];
   XLSX.utils.book_append_sheet(wb, sum, "Summary");
   const tr = XLSX.utils.aoa_to_sheet([BT_COLS, ...btTradeRows(r)]);
-  tr["!cols"] = [5, 17, 17, 7, 30, 44, 44, 11, 11, 7, 12, 11, 12, 13].map((w) => ({ wch: w }));
-  tr["!autofilter"] = { ref: `A1:N${(r.trades || []).length + 1}` };
+  tr["!cols"] = [5, 17, 17, 7, 30, 44, 44, 11, 11, 7, 12, 11, 12, 13, 10, 8, 12, 7, 8, 10, 18].map((w) => ({ wch: w }));
+  tr["!autofilter"] = { ref: `A1:U${(r.trades || []).length + 1}` };
   XLSX.utils.book_append_sheet(wb, tr, "Trades");
   XLSX.writeFile(wb, btFileName(r, "xlsx"));
   toast("Excel file downloaded.");
@@ -1213,7 +1233,8 @@ function renderBacktest(r) {
   const head = document.createElement("div"); head.className = "head";
   head.innerHTML = `<h3></h3><span class="hint"></span>`;
   head.firstChild.textContent = `Backtest #${r.id} · ${r.params.from} → ${r.params.to}`;
-  head.lastChild.textContent = `Capital ${rupees(r.params.capital)} · brokerage ₹${r.params.brokerage}/order · charges ${r.params.other_pct}%`;
+  head.lastChild.textContent = `Capital ${rupees(r.params.capital)} · brokerage up to ₹${r.params.brokerage}/order · ` +
+    (r.params.charges ? "STT, exchange, SEBI, GST & stamp duty at broker rates" : `other charges ${r.params.other_pct}% of turnover (old method)`);
   box.append(head);
   if (r.status === "queued" || r.status === "running") {
     const b = document.createElement("div"); b.className = "banner info"; b.textContent = `Running… ${r.progress || ""}`; box.append(b); return;
@@ -1238,6 +1259,7 @@ function renderBacktest(r) {
   box.append(stats);
   const notes = [];
   notes.push(`Priced with ${s.priced_with || "historical data"}.`);
+  if (s.charges) notes.push(`Charges: brokerage ${rupees(s.charges.brokerage)}, STT ${rupees(s.charges.stt)}, exchange ${rupees(s.charges.exch)}, SEBI ${rupees(s.charges.sebi)}, GST ${rupees(s.charges.gst)}, stamp duty ${rupees(s.charges.stamp)}.`);
   const sk = s.skipped || {}; const skN = Object.values(sk).reduce((a, b) => a + b, 0);
   if (skN) notes.push(`${skN} of ${s.planned} planned trades were skipped: ${Object.entries(sk).map(([k, v]) => `${k} (${v})`).join("; ")}.`);
   const n = document.createElement("p"); n.className = "hint"; n.textContent = notes.join(" "); box.append(n);
@@ -1300,18 +1322,32 @@ $("bt_quick").addEventListener("click", (e) => {
   $("bt_to").value = istDate(-1); $("bt_from").value = istDate(-Number(b.dataset.days));
   [...$("bt_quick").children].forEach((x) => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
 });
+// Current F&O rates (as on brokers' calculators, Oct 2026). BSE exchange charges differ from NSE.
+const CHARGE_KEYS = ["brk_pct", "stt_fut", "stt_opt", "exch_fut", "exch_opt", "sebi", "gst", "stamp_fut", "stamp_opt"];
+function defaultCharges(exchange) {
+  const bse = exchange === "BSE";
+  return { brk_pct: 0.03, stt_fut: 0.05, stt_opt: 0.15, exch_fut: bse ? 0 : 0.00183, exch_opt: bse ? 0.0325 : 0.03553, sebi: 0.0001, gst: 18, stamp_fut: 0.002, stamp_opt: 0.003 };
+}
+function fillCharges(exchange) {
+  const d = defaultCharges(exchange);
+  for (const k of CHARGE_KEYS) $("ch_" + k).value = String(d[k]);
+  $("btChargesSum").textContent = `· ${exchange === "BSE" ? "BSE" : "NSE"} rates`;
+}
+$("ch_reset").addEventListener("click", () => fillCharges((cur() || {}).exchange));
 $("btForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const s = cur();
   const from = $("bt_from").value, to = $("bt_to").value;
-  const capital = Number($("bt_capital").value), brokerage = Number($("bt_brokerage").value), other = Number($("bt_other").value), code = Number($("bt_code").value);
+  const capital = Number($("bt_capital").value), brokerage = Number($("bt_brokerage").value), code = Number($("bt_code").value);
+  if (CHARGE_KEYS.some((k) => $("ch_" + k).value === "")) fillCharges(s.exchange);
+  const charges = Object.fromEntries(CHARGE_KEYS.map((k) => [k, Number($("ch_" + k).value)]));
   if (!from || !to || from > to) { $("btMsg").textContent = "Pick a start date before the end date."; return; }
   if ((Date.parse(to) - Date.parse(from)) / 86400000 > 1827) { $("btMsg").textContent = "Keep each run to 5 years or less."; return; }
   if (from < istDate(-1826)) { $("btMsg").textContent = "Dhan's option history goes back 5 years; pick a later start date."; return; }
   if (to > istDate(0)) { $("btMsg").textContent = "The end date can't be in the future."; return; }
-  if (!(capital > 0) || !(brokerage >= 0) || !(other >= 0)) { $("btMsg").textContent = "Capital, brokerage and charges must be numbers."; return; }
+  if (!(capital > 0) || !(brokerage >= 0) || CHARGE_KEYS.some((k) => !(charges[k] >= 0))) { $("btMsg").textContent = "Capital, brokerage and charge rates must be 0 or more."; return; }
   if (!state.settings || !state.settings.has_token) { $("btMsg").textContent = "Add your Dhan access token under Dhan connection first."; openConn(); return; }
-  const params = JSON.stringify({ from, to, capital, brokerage, other_pct: other, near_code: code });
+  const params = JSON.stringify({ from, to, capital, brokerage, charges, near_code: code });
   $("btMsg").textContent = "";
   run($("bt_run"), async () => {
     const btId = must(await db.rpc("start_backtest", { p_strategy: s.id, p_params: JSON.parse(params) }));

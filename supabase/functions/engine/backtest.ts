@@ -9,7 +9,32 @@ import {
   signalSeries, strikeFor, supertrend, timeToMin, weekdayOf,
 } from "./logic.ts";
 
-export type BtParams = { from: string; to: string; capital: number; brokerage: number; other_pct: number; near_code: number };
+/** Statutory charge rates in %, as used by brokers' calculators (e.g. Zerodha / Dhan, NSE F&O). */
+export type ChargeRates = {
+  brk_pct: number; stt_fut: number; stt_opt: number; exch_fut: number; exch_opt: number; sebi: number; gst: number; stamp_fut: number; stamp_opt: number;
+};
+export type BtParams = { from: string; to: string; capital: number; brokerage: number; other_pct?: number; charges?: ChargeRates; near_code: number };
+export type ChargeBreakdown = { brokerage: number; stt: number; exch: number; sebi: number; gst: number; stamp: number; total: number };
+
+/** Charges for one round trip (one buy and one sell order), the way the broker's calculator works them out. */
+export function tradeCharges(p: BtParams, isOpt: boolean, buyVal: number, sellVal: number): ChargeBreakdown {
+  const c = p.charges;
+  if (!c) { // older backtests: flat % of turnover
+    const total = 2 * p.brokerage + ((buyVal + sellVal) * (p.other_pct ?? 0)) / 100;
+    return { brokerage: 2 * p.brokerage, stt: 0, exch: 0, sebi: 0, gst: 0, stamp: 0, total };
+  }
+  const perOrder = (v: number) => isOpt ? p.brokerage : Math.min(p.brokerage, (v * c.brk_pct) / 100);
+  const turnover = buyVal + sellVal;
+  const brokerage = perOrder(buyVal) + perOrder(sellVal);
+  const stt = Math.round((sellVal * (isOpt ? c.stt_opt : c.stt_fut)) / 100);
+  const exch = (turnover * (isOpt ? c.exch_opt : c.exch_fut)) / 100;
+  const sebi = (turnover * c.sebi) / 100;
+  const gst = ((brokerage + exch + sebi) * c.gst) / 100;
+  const stamp = Math.round((buyVal * (isOpt ? c.stamp_opt : c.stamp_fut)) / 100);
+  const r2 = (x: number) => Math.round(x * 100) / 100;
+  const parts = { brokerage: r2(brokerage), stt, exch: r2(exch), sebi: r2(sebi), gst: r2(gst), stamp };
+  return { ...parts, total: r2(parts.brokerage + stt + parts.exch + parts.sebi + parts.gst + stamp) };
+}
 type MBar = Raw & { day: string; min: number };
 type Side = "LONG" | "SHORT";
 export type Plan = {
@@ -20,6 +45,7 @@ export type Plan = {
 export type Acc = {
   equity: number; peak: number; maxDd: number; grossWin: number; grossLoss: number; wins: number;
   gross: number; costs: number; skipped: Record<string, number>; lastDone: string; calls: number; rounds: number;
+  chg?: { brokerage: number; stt: number; exch: number; sebi: number; gst: number; stamp: number };
 };
 
 export const MAX_DAYS = 1827; // 5 years, the depth of Dhan's expired-options history
@@ -320,10 +346,14 @@ export async function priceBatch(
     }
     if (inPx == null || outPx == null) { skip("No historical price for that contract and time"); continue; }
     const dir = isOpt ? 1 : t.side === "LONG" ? 1 : -1;
+    // Buy and sell legs: a long (or any option buy) buys at entry and sells at exit; a short does the reverse.
+    const buyVal = (dir === 1 ? inPx : outPx) * units, sellVal = (dir === 1 ? outPx : inPx) * units;
+    const ch = tradeCharges(p, isOpt, buyVal, sellVal);
     // Whole rupees only: paisa are dropped (not rounded up or down).
-    const g = Math.trunc((outPx - inPx) * dir * units);
-    const c = Math.trunc(2 * p.brokerage + ((inPx + outPx) * units * p.other_pct) / 100);
-    const net = g - c;
+    const exact = (outPx - inPx) * dir * units;
+    const g = Math.trunc(exact), c = Math.trunc(ch.total), net = Math.trunc(exact - ch.total);
+    acc.chg = acc.chg ?? { brokerage: 0, stt: 0, exch: 0, sebi: 0, gst: 0, stamp: 0 };
+    for (const k of ["brokerage", "stt", "exch", "sebi", "gst", "stamp"] as const) acc.chg[k] += ch[k];
     acc.gross += g; acc.costs += c; acc.equity += net;
     if (net > 0) { acc.wins++; acc.grossWin += net; } else acc.grossLoss += -net;
     acc.peak = Math.max(acc.peak, acc.equity); acc.maxDd = Math.max(acc.maxDd, acc.peak - acc.equity);
@@ -332,6 +362,7 @@ export async function priceBatch(
       entry: `${t.entryDay} ${minToTime(t.entryMin)}`, exit: `${t.exitDay} ${minToTime(t.exitMin)}`, side: t.side, contract,
       why: t.why, exit_why: t.exitWhy, entry_px: +inPx.toFixed(2), exit_px: +outPx.toFixed(2), units,
       gross: g, costs: c, net, equity: Math.trunc(acc.equity),
+      chg: { brokerage: ch.brokerage, stt: ch.stt, exch: ch.exch, sebi: ch.sebi, gst: ch.gst, stamp: ch.stamp, total: ch.total },
     });
   }
   acc.calls += dhan.calls;
@@ -341,7 +372,7 @@ export async function priceBatch(
 /** Phase 3: totals. */
 export function summarize(s: Record<string, any>, p: BtParams, planned: number, tradeCount: number, acc: Acc, partial: boolean) {
   const n = tradeCount;
-  const net = acc.gross - acc.costs;
+  const net = acc.equity - Number(p.capital); // sum of each trade's whole-rupee net
   return {
     trades: n, planned, wins: acc.wins, losses: n - acc.wins,
     win_rate: n ? +((acc.wins / n) * 100).toFixed(1) : 0,
@@ -352,5 +383,6 @@ export function summarize(s: Record<string, any>, p: BtParams, planned: number, 
     avg_net: n ? Math.trunc(net / n) : 0,
     skipped: acc.skipped, priced_with: s.trade_type === "OPTIONS" ? "Dhan expired-options data (5-minute)" : "Index prices as a futures proxy",
     dhan_calls: acc.calls, last_day_done: acc.lastDone, partial,
+    charges: acc.chg ? Object.fromEntries(Object.entries(acc.chg).map(([k, v]) => [k, Math.trunc(v)])) : null,
   };
 }
