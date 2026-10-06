@@ -86,9 +86,11 @@ export async function planBacktest(
     throw new Error("Timeframes that aren't a multiple of 5 minutes need 1-minute data; test those up to 1 year per run.");
   }
 
+  // Long warm-up (500+ candles) so Supertrend has settled to the same values the chart shows.
+  const warmBars = Math.max(500, s.atr_period * 10);
   let warm = 3;
-  if (kind === "FLIP") warm = Math.ceil(((s.atr_period * 10 * s.timeframe_min) / 375) * 1.6) + 5;
-  else if (biasTf !== "D") warm = Math.ceil(((s.atr_period * 10 * Number(biasTf)) / 375) * 1.6) + 5;
+  if (kind === "FLIP") warm = Math.ceil(((warmBars * s.timeframe_min) / 375) * 1.5) + 5;
+  else if (biasTf !== "D") warm = Math.ceil(((warmBars * Number(biasTf)) / 375) * 1.5) + 5;
   const fetchTo = addDays(p.to, 6) < today ? addDays(p.to, 6) : today;
 
   const raw = await intradayRange(dhan, s, base, addDays(p.from, -warm), fetchTo, progress);
@@ -111,29 +113,44 @@ export async function planBacktest(
     const bars: Bar[] = aggregate(raw, s.timeframe_min).filter((b) => b.endT <= nowSec);
     const { trend } = supertrend(bars, s.atr_period, Number(s.factor));
     const ss = timeToMin(String(s.session_start)), le = timeToMin(String(s.last_entry)), sq = timeToMin(String(s.square_off));
+    // Stop-and-reverse, acting only when a candle closes inside the trading window:
+    //  - Supertrend up   -> hold long (calls), down -> hold short (puts); the opposite position is closed and reversed.
+    //  - A flip after "no new trades after" is carried and executed at the next session start.
+    //  - Intraday mode squares off at the square-off time.
     let pos: Plan | null = null;
     const close = (day: string, min: number, why: string) => { if (pos) { pos.exitDay = day; pos.exitMin = min; pos.exitWhy = why; plans.push(pos); pos = null; } };
+    const want = (t: number): Side | null => t === 1 ? (dirOk("LONG") ? "LONG" : null) : t === -1 ? (dirOk("SHORT") ? "SHORT" : null) : null;
     for (let i = 1; i < bars.length; i++) {
       const b = bars[i];
       if (b.day > p.to) break;
       if (pos && s.intraday && (b.day !== (pos as Plan).entryDay || b.endMin >= sq)) close((pos as Plan).entryDay, sq, "Square-off");
       if (b.day < p.from || trend[i] === 0 || trend[i - 1] === 0) continue;
-      const desired: Side | null = trend[i] === 1 ? (dirOk("LONG") ? "LONG" : null) : (dirOk("SHORT") ? "SHORT" : null);
-      const flipped = trend[i] !== trend[i - 1];
-      if (pos && (pos as Plan).side !== desired) close(b.day, b.endMin, "Supertrend turned");
+      // New day: a flip that happened after the window closed yesterday is acted on at today's session start.
+      if (b.day !== bars[i - 1].day) {
+        const d0 = want(trend[i - 1]);
+        if (pos && (pos as Plan).side !== d0) {
+          close(b.day, ss, "Supertrend turned after hours");
+          if (d0) pos = mkPlan(d0, b.day, ss, b.o, "Reversed at the open (flip happened after hours)");
+        } else if (!pos && d0 && s.entry_mode === "JOIN") pos = mkPlan(d0, b.day, ss, b.o, "Joined trend");
+      }
       const inWindow = b.endMin >= ss && b.endMin < le && (!s.intraday || b.endMin < sq) && b.endMin < 930;
-      if (!pos && desired && inWindow && (s.entry_mode === "JOIN" || flipped)) {
-        pos = mkPlan(desired, b.day, b.endMin, b.c, flipped ? "Fresh flip" : "Joined trend");
+      if (!inWindow) continue;
+      const desired = want(trend[i]);
+      const flipped = trend[i] !== trend[i - 1];
+      let reversing = false;
+      if (pos && (pos as Plan).side !== desired) { close(b.day, b.endMin, flipped ? "Supertrend turned" : "Supertrend turned after hours"); reversing = true; }
+      if (!pos && desired && (s.entry_mode === "JOIN" || flipped || reversing)) {
+        pos = mkPlan(desired, b.day, b.endMin, b.c, flipped ? (reversing ? "Reversed on flip" : "Fresh flip") : reversing ? "Reversed (flip happened after hours)" : "Joined trend");
       }
     }
-    if (pos) close(testDays[testDays.length - 1] ?? p.to, 925, "End of test");
+    if (pos) close(testDays[testDays.length - 1] ?? p.to, 925, "Still open at end of test (valued at the last price)");
   } else {
     await progress("Working out the bias for each day");
     const entryMin = timeToMin(String(s.entry_time)), exitMin = timeToMin(String(s.exit_time));
     let biasAt: (day: string) => number;
     if (biasTf === "D") {
       const daily: DayBar[] = await dhan.daily(s.data_security_id, s.data_segment, s.data_instrument,
-        addDays(p.from, -Math.ceil((s.atr_period * 8 + 60) * 1.5)), addDays(p.to, 1));
+        addDays(p.from, -Math.ceil(Math.max(500, s.atr_period * 10) * 1.5)), addDays(p.to, 1));
       const full = supertrend(daily, s.atr_period, Number(s.factor)).trend;
       let ptr = -1; // index of the last daily bar before the current day (days are visited in order)
       biasAt = (day) => {

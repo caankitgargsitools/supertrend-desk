@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Supertrend Desk</title>
+<title>CA Ankit Garg Trade Desk</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500;600&display=swap">
 <meta name="robots" content="noindex, nofollow">
@@ -173,7 +173,7 @@ legend { padding: 0; margin-bottom: 4px; }
 <body>
 
 <header class="bar">
-  <div class="brand"><h1><span class="b">Super</span><span class="r">trend</span> <span class="y">De</span><span class="g">sk</span></h1><small>Dhan · NSE / BSE</small></div>
+  <div class="brand"><h1><span class="b">CA</span> <span class="r">Ankit</span> <span class="y">Garg</span> <span class="g">Trade Desk</span></h1><small>Dhan · NSE / BSE</small></div>
   <span class="mk"><span class="dot" id="mktDot"></span><span id="mktText">Checking market hours…</span></span>
   <button class="btn small" id="openSettings" type="button">Dhan connection</button>
   <span class="mk" id="who" hidden></span><button class="btn small" id="signOut" type="button" hidden>Sign out</button>
@@ -182,7 +182,7 @@ legend { padding: 0; margin-bottom: 4px; }
 <div id="gate" class="gate" hidden>
   <div class="card">
     <h2 style="margin-bottom:6px" id="g_title">Sign in</h2>
-    <p class="hint" id="g_hint">Supertrend Desk is private. Sign in with the owner account.</p>
+    <p class="hint" id="g_hint">CA Ankit Garg Trade Desk is private. Sign in with the owner account.</p>
     <form id="loginForm" style="margin-top:12px">
       <label class="f"><span>Email</span><input id="g_email" type="email" autocomplete="username" required></label>
       <label class="f"><span>Password</span><input id="g_pass" type="password" autocomplete="current-password" required minlength="10"></label>
@@ -264,6 +264,7 @@ legend { padding: 0; margin-bottom: 4px; }
           <label><input type="checkbox" id="cx_paint" checked> Colour candles by Supertrend</label>
           <label><input type="checkbox" id="cx_marks" checked> Buy / Sell flip markers</label>
           <button class="btn small" id="cx_match" type="button">Use this strategy's settings</button>
+          <button class="btn small" id="cx_hidebt" type="button" hidden>Hide backtest trades</button>
         </div>
         <div id="chart" style="margin-top:10px"></div>
         <div class="chart-foot"><span id="chartInfo">Loading candles…</span><span id="liveInfo"></span></div>
@@ -341,11 +342,12 @@ legend { padding: 0; margin-bottom: 4px; }
           </fieldset>
           <fieldset class="flip-only"><legend class="label">Session (IST)</legend>
             <div class="grid">
-              <label class="f"><span>First entry from</span><input id="f_session_start" type="time"></label>
-              <label class="f"><span>No new entries after</span><input id="f_last_entry" type="time"></label>
+              <label class="f"><span>First trade from</span><input id="f_session_start" type="time"></label>
+              <label class="f"><span>No trades after</span><input id="f_last_entry" type="time"></label>
               <label class="f"><span>Square off at</span><input id="f_square_off" type="time"></label>
               <label class="f"><span>Square off daily</span><select id="f_intraday"><option value="true">Yes (intraday)</option><option value="false">No (carry overnight)</option></select></label>
             </div>
+            <p class="hint">Stop and reverse: when Supertrend turns green the strategy buys (closing any short first); when it turns red it sells the long and goes short. Decisions are taken when a candle closes. Nothing is traded at or after “No trades after”; if Supertrend flips after that, the position is reversed at the next day's “First trade from” time.</p>
           </fieldset>
           <details>
             <summary class="label" style="cursor:pointer">Order format (advanced)</summary>
@@ -668,6 +670,7 @@ function paintCx() {
 }
 function cxFromStrategy(s) {
   if (!s) return;
+  cx.trades = null; $("cx_hidebt").hidden = true;
   const a = ASSETS.find((x) => x.sec === String(s.data_security_id) && x.seg === s.data_segment);
   Object.assign(cx, a ? { asset: a.key, sec: a.sec, seg: a.seg, instr: a.instr } : { asset: "custom", sec: String(s.data_security_id), seg: s.data_segment, instr: s.data_instrument });
   cx.tf = s.strategy_kind === "TIMED" ? String(s.bias_timeframe) : String(s.timeframe_min);
@@ -679,7 +682,8 @@ function assetName() { const a = ASSETS.find((x) => x.key === cx.asset); return 
 function tfName(tf) { const t = TFS.find(([v]) => v === tf); return t ? t[1] : `${tf}m`; }
 
 function warmDays() {
-  const bars = cx.atr * 10 + 20;
+  // 500+ candles of warm-up so the chart's Supertrend matches the engine and the backtester.
+  const bars = Math.max(500, cx.atr * 10);
   if (cx.tf === "D") return Math.ceil(bars * 1.5);
   if (cx.tf === "W") return bars * 7;
   return Math.ceil((bars * Number(cx.tf)) / 375 * 1.5) + 3;
@@ -697,7 +701,7 @@ async function loadChart() {
   const my = ++cxReq; stopCxLive();
   clearChart(`Loading ${assetName()} · ${tfName(cx.tf)}…`);
   const to = istDate(0);
-  const days = Number(cx.range) <= 1 ? 0 : Number(cx.range);
+  const days = Number(cx.range) <= 1 ? 0 : Math.max(1, Math.min(Number(cx.range), tfMaxDays(cx.tf) - warmDays()));
   const from = istDate(-(days + warmDays()));
   cx.viewFrom = istDate(-days);
   try {
@@ -730,10 +734,31 @@ function drawChart(fit) {
       marks.push(tr === 1 ? { time, position: "belowBar", color: up, shape: "arrowUp", text: "Buy" } : { time, position: "aboveBar", color: dn, shape: "arrowDown", text: "Sell" });
     }
   }
+  let shown = 0;
+  if (cx.trades && cx.trades.length) {
+    // Each backtest trade sits on the candle whose close triggered it (the last candle starting before the trade time).
+    const blue = cssVar("--logo-blue"), yellow = cssVar("--logo-yellow");
+    const at = (txt) => { const t = Date.parse(txt.replace(" ", "T") + ":00+05:30") / 1000; let lo = 0, hi = cxBars.length - 1, k = -1;
+      while (lo <= hi) { const m = (lo + hi) >> 1; if (cxBars[m].t < t) { k = m; lo = m + 1; } else hi = m - 1; } return k; };
+    const entries = new Set();
+    for (const t of cx.trades) {
+      const k = at(t.entry); if (k < start) continue;
+      entries.add(t.entry); shown++;
+      const long = t.side === "LONG";
+      marks.push({ time: cxBars[k].t + shift, position: long ? "belowBar" : "aboveBar", color: blue, shape: long ? "arrowUp" : "arrowDown", text: long ? "BT long" : "BT short" });
+    }
+    for (const t of cx.trades) {
+      if (entries.has(t.exit)) continue; // a reversal: the next trade's entry marker already shows it
+      const k = at(t.exit); if (k < start) continue;
+      marks.push({ time: cxBars[k].t + shift, position: t.side === "LONG" ? "aboveBar" : "belowBar", color: yellow, shape: "circle", text: "BT exit" });
+    }
+    marks.sort((a, b) => a.time - b.time);
+  }
   candleS.setData(candles); stS.setData(line); candleS.setMarkers(marks);
   if (fit) chart.timeScale().fitContent();
   const lastTr = trend[trend.length - 1], lastSt = st[st.length - 1];
-  $("chartInfo").textContent = `${assetName()} · ${tfName(cx.tf)} · ${candles.length} candles · Supertrend ${lastTr === 1 ? "▲ up" : lastTr === -1 ? "▼ down" : "–"}${isNaN(lastSt) ? "" : " at " + fmtNum(+lastSt.toFixed(2))} · last ${fmtNum(cxBars[cxBars.length - 1].c)}`;
+  $("chartInfo").textContent = `${assetName()} · ${tfName(cx.tf)} · ${candles.length} candles · Supertrend ${lastTr === 1 ? "▲ up" : lastTr === -1 ? "▼ down" : "–"}${isNaN(lastSt) ? "" : " at " + fmtNum(+lastSt.toFixed(2))} · last ${fmtNum(cxBars[cxBars.length - 1].c)}` +
+    (cx.trades ? ` · backtest #${cx.tradesId}: ${shown} of ${cx.trades.length} trades in view (blue = entries, yellow = exits)` : "");
   paintLive();
 }
 function paintLive() {
@@ -793,6 +818,18 @@ $("cx_live").addEventListener("change", () => { cx.live = $("cx_live").value; sa
 $("cx_paint").addEventListener("change", () => { cx.paint = $("cx_paint").checked; saveCx(); if (cxBars.length) drawChart(false); });
 $("cx_marks").addEventListener("change", () => { cx.marks = $("cx_marks").checked; saveCx(); if (cxBars.length) drawChart(false); });
 $("cx_match").addEventListener("click", () => { cxFromStrategy(cur()); loadChart(); });
+$("cx_hidebt").addEventListener("click", () => { cx.trades = null; $("cx_hidebt").hidden = true; if (cxBars.length) drawChart(false); });
+function showTradesOnChart(r) {
+  cxFromStrategy((r.params && r.params.strategy) || cur());
+  cx.trades = r.trades || []; cx.tradesId = r.id; $("cx_hidebt").hidden = false;
+  const need = Math.ceil((Date.now() - Date.parse(r.params.from + "T00:00:00+05:30")) / 86400000) + 1;
+  const max = tfMaxDays(cx.tf) - warmDays();
+  const fit = RANGES.find(([v]) => Number(v) >= need && Number(v) <= tfMaxDays(cx.tf));
+  cx.range = fit ? fit[0] : [...RANGES].reverse().find(([v]) => Number(v) <= tfMaxDays(cx.tf))[0];
+  paintCx(); loadChart();
+  $("chart").scrollIntoView({ behavior: "smooth", block: "center" });
+  if (need > max) toast("This timeframe's chart reaches back only part of the backtest, so the earliest trades aren't shown.");
+}
 
 /* signal log */
 const EVENT_NAMES = { ENTRY: "Entry", EXIT: "Exit", REVERSE: "Reverse", SQUARE_OFF: "Square-off", FLATTEN: "Manual exit", INFO: "Info" };
@@ -910,7 +947,9 @@ function renderBacktest(r) {
       if (pts[0].time >= pts[1].time) pts[0].time = pts[1].time - 1;
       eqS.setData(pts); eqChart.timeScale().fitContent();
     }
-    const cap = document.createElement("p"); cap.className = "hint"; cap.textContent = "Equity after each trade (blue area). Times are IST."; box.append(cap);
+    const cap = document.createElement("p"); cap.className = "hint"; cap.textContent = "Equity after each trade (blue area). Times are IST; each trade happens at the close of the candle that triggered it."; box.append(cap);
+    const showBtn = document.createElement("button"); showBtn.type = "button"; showBtn.className = "btn small"; showBtn.textContent = "Show these trades on the chart";
+    showBtn.addEventListener("click", () => showTradesOnChart(r)); box.append(showBtn);
 
     const wrap = document.createElement("div"); wrap.className = "scroll";
     const tbl = document.createElement("table");
@@ -1096,8 +1135,8 @@ function readForm() {
   }
   if (out.timeframe_min < 1 || out.timeframe_min > 375) throw new Error("Candle timeframe must be 1–375 minutes.");
   if (out.strategy_kind === "FLIP") {
-    if (out.session_start >= out.last_entry) throw new Error("“First entry from” must be earlier than “No new entries after”.");
-    if (out.intraday && out.last_entry > out.square_off) throw new Error("“No new entries after” must not be later than the square-off time.");
+    if (out.session_start >= out.last_entry) throw new Error("“First trade from” must be earlier than “No trades after”.");
+    if (out.intraday && out.last_entry > out.square_off) throw new Error("“No trades after” must not be later than the square-off time.");
   } else {
     const inMkt = (t) => t >= "09:15" && t < "15:30";
     if (!inMkt(out.entry_time) || !inMkt(out.exit_time)) throw new Error("Buy and sell times must be between 09:15 and 15:29.");
@@ -1151,7 +1190,7 @@ function showLogin(msg) {
 }
 function paintGate() {
   $("g_title").textContent = setupMode ? "Create the owner account" : "Sign in";
-  $("g_hint").textContent = setupMode ? "One-time setup. Use the invited owner email and choose a password of at least 10 characters." : "Supertrend Desk is private. Sign in with the owner account.";
+  $("g_hint").textContent = setupMode ? "One-time setup. Use the invited owner email and choose a password of at least 10 characters." : "CA Ankit Garg Trade Desk is private. Sign in with the owner account.";
   $("g_go").textContent = setupMode ? "Create account" : "Sign in";
   $("g_switch").textContent = setupMode ? "Already set up? Sign in" : "First time here? Create the owner account";
   $("g_pass").autocomplete = setupMode ? "new-password" : "current-password";

@@ -1,4 +1,4 @@
-# Supertrend Desk
+# CA Ankit Garg Trade Desk
 
 Private control panel for Supertrend algo strategies (Dhan + Supabase).
 

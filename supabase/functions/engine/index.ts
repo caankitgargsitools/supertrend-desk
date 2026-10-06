@@ -21,6 +21,22 @@ type Pos = "FLAT" | "LONG" | "SHORT";
 type ChartBar = { t: number; o: number; h: number; l: number; c: number };
 
 const CHART_BARS = 160;
+const WARM_BARS = 500; // same Supertrend warm-up as the chart and the backtester
+
+/** Intraday candles over more than Dhan's 90-day request limit. */
+async function intradaySpan(dhan: Dhan, s: Strategy, interval: number, days: number, nowSec: number) {
+  const out = new Map<number, ReturnType<typeof Object>>();
+  const today = fmtIst(nowSec, false);
+  for (let back = days; back > 0; back -= 85) {
+    const a = addDays(today, -back), z = back - 85 > 0 ? addDays(today, -(back - 85) - 1) : null;
+    const rows = await dhan.intraday(s.data_security_id, s.data_segment, s.data_instrument, interval, `${a} 09:00:00`, z ? `${z} 15:31:00` : fmtIst(nowSec + 120, true));
+    for (const r of rows) out.set(r.t, r);
+  }
+  return [...out.values()].sort((x: any, y: any) => x.t - y.t) as { t: number; o: number; h: number; l: number; c: number }[];
+}
+function warmDays(tf: number, atr: number) {
+  return Math.min(400, Math.max(5, Math.ceil(((Math.max(WARM_BARS, atr * 10) * tf) / 375) * 1.5) + 4));
+}
 const FLAT_STATE = { position: "FLAT", pos_option_type: null, pos_strike: null, pos_expiry: null, pos_qty: null, pos_entry_date: null };
 
 function fmtIst(epochSec: number, withTime: boolean): string {
@@ -46,10 +62,8 @@ async function saveChart(s: Strategy, bars: ChartBar[], st: number[], trend: num
 async function flipSeries(s: Strategy, dhan: Dhan) {
   const tf = s.timeframe_min;
   const baseInt = pickBaseInterval(tf);
-  const days = Math.min(85, Math.max(5, Math.ceil((((s.atr_period * 10 + CHART_BARS) * tf) / 375) * 1.5) + 4));
   const now = Date.now() / 1000;
-  const raw = await dhan.intraday(s.data_security_id, s.data_segment, s.data_instrument, baseInt,
-    `${fmtIst(now - days * 86400, false)} 09:00:00`, fmtIst(now + 120, true));
+  const raw = await intradaySpan(dhan, s, baseInt, warmDays(tf, s.atr_period), now);
   const bars = aggregate(raw, tf).filter((b) => isComplete(b, baseInt, now));
   if (bars.length < s.atr_period + 2) throw new Error(`Only ${bars.length} completed candles came back from Dhan; need at least ${s.atr_period + 2}.`);
   const { st, trend } = supertrend(bars, s.atr_period, Number(s.factor));
@@ -66,16 +80,14 @@ async function biasSeries(s: Strategy, dhan: Dhan, nowSec: number) {
   let bars: ChartBar[];
   if (String(s.bias_timeframe) === "D") {
     const daily = await dhan.daily(s.data_security_id, s.data_segment, s.data_instrument,
-      addDays(now.date, -Math.ceil((s.atr_period * 8 + CHART_BARS) * 1.5)), addDays(now.date, 1));
+      addDays(now.date, -Math.ceil(Math.max(WARM_BARS, s.atr_period * 10) * 1.5)), addDays(now.date, 1));
     bars = daily.filter((d) => d.day < now.date);
     const part = s.bias_source === "LIVE" ? partialDay(today, now.date) : null;
     if (part) bars = [...bars, part];
   } else {
     const tf = Number(s.bias_timeframe);
     const baseInt = pickBaseInterval(tf);
-    const days = Math.min(85, Math.max(5, Math.ceil((((s.atr_period * 10 + CHART_BARS) * tf) / 375) * 1.5) + 4));
-    const raw = await dhan.intraday(s.data_security_id, s.data_segment, s.data_instrument, baseInt,
-      `${fmtIst(nowSec - days * 86400, false)} 09:00:00`, fmtIst(nowSec + 120, true));
+    const raw = await intradaySpan(dhan, s, baseInt, warmDays(tf, s.atr_period), nowSec);
     const agg = aggregate(raw, tf);
     bars = s.bias_source === "LIVE" ? agg.filter((b) => b.t <= nowSec) : agg.filter((b) => isComplete(b, baseInt, nowSec));
   }
@@ -214,27 +226,33 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
     notes.push(`Square-off: ${exitLabel(s)}`);
     event = "SQUARE_OFF";
     newState = FLAT_STATE;
-  } else if (last.t !== s.last_candle_ts) {
-    const fresh = last.day === now.date && nowSec - last.endT <= Math.max(600, s.timeframe_min * 120);
+  } else {
+    // Stop-and-reverse: inside the trading window the position always follows the last completed candle's
+    // Supertrend. Flips are acted on when the candle closes; a flip after "no new trades after" is acted on
+    // at the next session start.
+    const ss = timeToMin(String(s.session_start)), le = timeToMin(String(s.last_entry));
+    const newCandle = last.t !== s.last_candle_ts;
+    const nowInWindow = now.min >= ss && now.min < le && (!s.intraday || now.min < sqOff) && now.min < CLOSE_MIN;
+    const recent = nowSec - last.endT <= 5 * 86400; // guards against stale data (weekends and holidays allowed)
     if (s.last_candle_ts == null) {
       notes.push(`Started tracking. Trend is ${tNow === 1 ? "up" : "down"}; waiting for the next candle.`);
       event = "INFO";
-    } else if (fresh) {
+    } else if (nowInWindow && recent) {
       const desired: Pos = tNow === 1 ? (s.direction === "SHORT_ONLY" ? "FLAT" : "LONG") : (s.direction === "LONG_ONLY" ? "FLAT" : "SHORT");
-      const flipped = tNow !== tPrev;
-      const inWindow = now.min >= timeToMin(String(s.session_start)) && now.min < timeToMin(String(s.last_entry)) &&
-        (!s.intraday || now.min < sqOff) && now.min >= OPEN_MIN && now.min < CLOSE_MIN;
+      const flipped = newCandle && tNow !== tPrev && last.day === now.date && last.endMin >= ss;
+      let reversing = false;
       if (position !== "FLAT" && position !== desired) {
         legs.push(exitLeg(s, legs.length + 1));
-        notes.push(`Supertrend turned ${tNow === 1 ? "up" : "down"}: ${exitLabel(s)}`);
+        notes.push(`Supertrend ${flipped ? "turned" : "turned after hours, so reversing at the open:"} ${tNow === 1 ? "up" : "down"}: ${exitLabel(s)}`);
         event = "EXIT";
         position = "FLAT";
         newState = FLAT_STATE;
+        reversing = true;
       }
-      if (desired !== "FLAT" && position === "FLAT" && inWindow && (s.entry_mode === "JOIN" || flipped)) {
+      if (desired !== "FLAT" && position === "FLAT" && (s.entry_mode === "JOIN" || flipped || reversing)) {
         const e = entryLeg(s, desired, last.c, legs.length + 1);
         legs.push(e.leg);
-        notes.push(`${flipped ? "Supertrend flipped" : "Joining trend"} ${tNow === 1 ? "up" : "down"}: ${e.label}`);
+        notes.push(`${flipped ? "Supertrend flipped" : reversing ? "Reversing" : "Joining trend"} ${tNow === 1 ? "up" : "down"}: ${e.label}`);
         event = event === "EXIT" ? "REVERSE" : "ENTRY";
         newState = { position: desired, ...e.state };
       }
