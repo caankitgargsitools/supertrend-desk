@@ -3,7 +3,7 @@
 // "backtest" (portal; runs in the background). Every call must carry the x-engine-secret header.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { Dhan } from "./dhan.ts";
-import { runBacktest } from "./backtest.ts";
+import { newAcc, planBacktest, priceBatch, summarize, validateParams, type Acc, type Plan } from "./backtest.ts";
 import {
   addDays, aggregate, CLOSE_MIN, fillTemplate, isComplete, ist, nextExpiry, OPEN_MIN, partialDay,
   pickBaseInterval, strikeFor, supertrend, timeToMin,
@@ -296,24 +296,67 @@ async function processTimed(s: Strategy, set: Settings, action: string) {
   await finish(s, set, update, legs, event, notes, newState, candle);
 }
 
+const MAX_ROUNDS = 40; // safety stop for the self-chaining backtest
+
+/** Ask the engine to continue this backtest in a fresh invocation (each one has its own time budget). */
+async function chainBacktest(id: number) {
+  const { data: sec } = await sb.from("engine_secret").select("secret").single();
+  await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/engine`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-engine-secret": sec!.secret },
+    body: JSON.stringify({ action: "backtest", backtest_id: id }),
+  });
+}
+
 async function runBacktestJob(id: number) {
+  const started = Date.now();
   const { data: bt } = await sb.from("algo_backtests").select("*").eq("id", id).single();
-  if (!bt) return;
-  const setStatus = (fields: Record<string, unknown>) => sb.from("algo_backtests").update(fields).eq("id", id);
-  await setStatus({ status: "running", progress: "Starting" });
+  if (!bt || !["queued", "running"].includes(bt.status)) return;
+  const setRow = (fields: Record<string, unknown>) => sb.from("algo_backtests").update(fields).eq("id", id);
   try {
-    const { data: s } = await sb.from("algo_strategies").select("*").eq("id", bt.strategy_id).single();
     const { data: set } = await sb.from("portal_settings").select("*").single();
-    if (!s) throw new Error("Strategy not found.");
-    const strategy = { ...s, ...(bt.params?.strategy ?? {}) };
-    const res = await runBacktest(strategy, { client: set?.dhan_client_id ?? "", token: set?.dhan_access_token ?? "" }, bt.params,
-      async (msg) => { await setStatus({ progress: msg }); }, Date.now() + 125000);
-    await setStatus({
-      status: res.partial ? "partial" : "done", summary: res.summary, trades: res.trades, finished_at: new Date().toISOString(),
-      progress: res.partial ? `Stopped at the time limit after ${res.trades.length} trades (up to ${res.summary.last_day_done}). Run the rest as a separate backtest.` : "Finished",
+    const creds = { client: set?.dhan_client_id ?? "", token: set?.dhan_access_token ?? "" };
+    let params = bt.params;
+    let plans: Plan[] | null = bt.plans;
+    let acc: Acc = bt.acc ?? newAcc(Number(params.capital));
+    let cursor: number = bt.cursor ?? 0;
+    let trades: Record<string, unknown>[] = bt.trades ?? [];
+
+    if (!plans) {
+      await setRow({ status: "running", progress: "Starting" });
+      validateParams(params);
+      const { data: s } = await sb.from("algo_strategies").select("*").eq("id", bt.strategy_id).single();
+      if (!s) throw new Error("Strategy not found.");
+      // Freeze the strategy settings so every instalment uses the same rules.
+      const snapshot = { ...s };
+      for (const k of ["position", "pos_option_type", "pos_strike", "pos_expiry", "pos_qty", "pos_entry_date", "last_candle_ts", "last_trend",
+        "last_close", "last_supertrend", "last_run_at", "last_error", "last_entry_day", "leg_template_fut", "leg_template_opt"]) delete snapshot[k];
+      const res = await planBacktest(snapshot, creds, params, async (m) => { await setRow({ progress: m }); });
+      plans = res.plans; acc = newAcc(Number(params.capital)); acc.calls = res.calls; cursor = 0; trades = [];
+      params = { ...params, strategy: snapshot };
+      await setRow({ params, plans, acc, cursor, trades, progress: `Planned ${plans.length} trades. Pricing them now.` });
+    }
+
+    const s = params.strategy;
+    acc.rounds = (acc.rounds ?? 0) + 1;
+    const deadline = started + 110000;
+    const res = await priceBatch(s, creds, params, plans!, cursor, acc, deadline, async (m) => { await setRow({ progress: m }); });
+    trades = trades.concat(res.trades);
+    cursor = res.next; acc = res.acc;
+
+    if (cursor < plans!.length && acc.rounds < MAX_ROUNDS) {
+      await setRow({ acc, cursor, trades, progress: `Priced ${cursor} of ${plans!.length} trades. Continuing…` });
+      await chainBacktest(id);
+      return;
+    }
+    const partial = cursor < plans!.length;
+    await setRow({
+      status: partial ? "partial" : "done", acc, cursor, trades, plans: null,
+      summary: summarize(s, params, plans!.length, trades.length, acc, partial), finished_at: new Date().toISOString(),
+      progress: partial ? `Stopped after ${trades.length} trades (up to ${acc.lastDone}). Run the remaining dates as a separate backtest.` : "Finished",
     });
   } catch (e) {
-    await setStatus({ status: "failed", error: e instanceof Error ? e.message : String(e), finished_at: new Date().toISOString() });
+    await setRow({ status: "failed", error: e instanceof Error ? e.message : String(e), finished_at: new Date().toISOString() });
   }
 }
 

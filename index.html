@@ -365,6 +365,10 @@ legend { padding: 0; margin-bottom: 4px; }
 
         <div id="btView" class="btwrap" hidden>
           <form id="btForm">
+            <div class="chartopts" style="margin:0 0 10px">
+              <span class="hint">Quick period:</span>
+              <span class="seg" id="bt_quick"><button type="button" data-days="92">3M</button><button type="button" data-days="184">6M</button><button type="button" data-days="366">1Y</button><button type="button" data-days="731">2Y</button><button type="button" data-days="1096">3Y</button><button type="button" data-days="1826">5Y</button></span>
+            </div>
             <div class="grid">
               <label class="f"><span>From</span><input id="bt_from" type="date"></label>
               <label class="f"><span>To</span><input id="bt_to" type="date"></label>
@@ -373,7 +377,7 @@ legend { padding: 0; margin-bottom: 4px; }
               <label class="f"><span>STT &amp; other charges (% of turnover)</span><input id="bt_other" type="number" min="0" step="0.01" value="0.10"></label>
               <label class="f"><span>Dhan code for nearest expiry</span><select id="bt_code"><option value="1">1 (Dhan's examples)</option><option value="0">0 (Dhan's annexure)</option></select></label>
             </div>
-            <p class="hint">Uses the strategy's saved settings. Option trades are priced from Dhan's expired-options data (5-minute, up to 5 years back, strikes within 10 of ATM). Futures are approximated with index prices. Up to 6 months per run.</p>
+            <p class="hint">Uses the strategy's saved settings. Option trades are priced from Dhan's expired-options data (5-minute, up to 5 years back, strikes within 10 of ATM). Futures are approximated with index prices. Up to 5 years per run; long runs are priced in batches and take a few minutes (roughly 1 minute per year). You can leave the page and come back to the result.</p>
             <div class="formbar"><button class="btn primary" type="submit" id="bt_run">Run backtest</button><span class="hint" id="btMsg"></span></div>
           </form>
           <div id="btResult"></div>
@@ -934,13 +938,19 @@ function renderBacktest(r) {
   }
 }
 
+$("bt_quick").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  $("bt_to").value = istDate(-1); $("bt_from").value = istDate(-Number(b.dataset.days));
+  [...$("bt_quick").children].forEach((x) => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+});
 $("btForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const s = cur();
   const from = $("bt_from").value, to = $("bt_to").value;
   const capital = Number($("bt_capital").value), brokerage = Number($("bt_brokerage").value), other = Number($("bt_other").value), code = Number($("bt_code").value);
   if (!from || !to || from > to) { $("btMsg").textContent = "Pick a start date before the end date."; return; }
-  if ((Date.parse(to) - Date.parse(from)) / 86400000 > 184) { $("btMsg").textContent = "Keep each run to 6 months or less."; return; }
+  if ((Date.parse(to) - Date.parse(from)) / 86400000 > 1827) { $("btMsg").textContent = "Keep each run to 5 years or less."; return; }
+  if (from < istDate(-1826)) { $("btMsg").textContent = "Dhan's option history goes back 5 years; pick a later start date."; return; }
   if (to > istDate(0)) { $("btMsg").textContent = "The end date can't be in the future."; return; }
   if (!(capital > 0) || !(brokerage >= 0) || !(other >= 0)) { $("btMsg").textContent = "Capital, brokerage and charges must be numbers."; return; }
   if (!state.settings || !state.settings.has_token) { $("btMsg").textContent = "Add your Dhan access token under Dhan connection first."; openConn(); return; }
@@ -949,7 +959,8 @@ $("btForm").addEventListener("submit", (e) => {
   run($("bt_run"), async () => {
     const btId = must(await db.rpc("start_backtest", { p_strategy: s.id, p_params: JSON.parse(params) }));
     $("bt_run").disabled = true;
-    toast("Backtest started. It usually takes under a minute.");
+    const yrs = (Date.parse(to) - Date.parse(from)) / 86400000 / 365;
+    toast(yrs > 1 ? `Backtest started. About ${Math.max(2, Math.round(yrs * 1.2))} minutes for this period; the progress shows below.` : "Backtest started. It usually takes under a minute.");
     await watchBacktest(btId);
   }, true);
 });
