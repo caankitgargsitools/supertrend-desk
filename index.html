@@ -103,6 +103,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .banner.info { background: var(--blue-soft); color: var(--blue); }
 .banner.ok { background: var(--green-soft); color: var(--green); }
 #chart, #eqChart { height: 340px; width: 100%; }
+#chartHA { height: 280px; width: 100%; }
+.chartbox { position: relative; margin-top: 10px; }
+.ohlc { position: absolute; top: 6px; left: 8px; z-index: 3; pointer-events: none; font: 12px var(--font-data); color: var(--muted);
+  background: var(--panel); padding: 2px 6px; border-radius: 4px; display: flex; flex-wrap: wrap; gap: 2px 10px; max-width: calc(100% - 90px); }
+.ohlc b { color: var(--ink); font-weight: 600; }
+.ohlc .u { color: var(--logo-green); } .ohlc .d { color: var(--logo-red); }
 #eqChart { height: 240px; }
 .chart-foot { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 8px; }
 .legend-up { color: var(--green); font-weight: 700; } .legend-dn { color: var(--red); font-weight: 700; }
@@ -262,12 +268,13 @@ legend { padding: 0; margin-bottom: 4px; }
           <div class="f"><span>&nbsp;</span><button class="btn" id="cx_load" type="button">Load</button></div>
         </div>
         <div class="chartopts">
-          <label><input type="checkbox" id="cx_paint" checked> Colour candles by Supertrend</label>
+          <label><input type="checkbox" id="cx_paint" checked> Colour candles by signal (Supertrend / Heikin Ashi)</label>
           <label><input type="checkbox" id="cx_marks" checked> Buy / Sell flip markers</label>
           <button class="btn small" id="cx_match" type="button">Use this strategy's settings</button>
           <button class="btn small" id="cx_hidebt" type="button" hidden>Hide backtest trades</button>
         </div>
-        <div id="chart" style="margin-top:10px"></div>
+        <div class="chartbox"><div id="chart"></div><div class="ohlc" id="ohlcMain"></div></div>
+        <div class="chartbox" id="haBox" hidden><div id="chartHA"></div><div class="ohlc" id="ohlcHA"></div></div>
         <div class="chart-foot"><span id="chartInfo">Loading candles…</span><span id="liveInfo"></span></div>
         <p class="hint" style="margin:6px 0 0">Supertrend is calculated the same way as TradingView (ATR with Wilder smoothing on the high-low midpoint). Candles are coloured by trend when that box is ticked; untick it to see each candle's own up/down colour.</p>
       </section>
@@ -638,7 +645,8 @@ let cx = { asset: "13", sec: "13", seg: "IDX_I", instr: "INDEX", tf: "5", range:
 try { Object.assign(cx, JSON.parse(localStorage.getItem("cx-prefs") || "{}")); } catch {}
 function saveCx() { try { localStorage.setItem("cx-prefs", JSON.stringify({ live: cx.live, paint: cx.paint, marks: cx.marks })); } catch {} }
 let chartFor = null, cxBars = [], cxReq = 0, cxTimer = null, cxLast = null;
-let chart = null, candleS = null, stS = null;
+let chart = null, candleS = null, stS = null, haChart = null, haS = null, haMarkS = null;
+let cxView = { main: [], ha: [] }, syncing = false;
 
 function ensureChart() {
   if (chart) return true;
@@ -647,9 +655,67 @@ function ensureChart() {
   const up = cssVar("--logo-green"), dn = cssVar("--logo-red");
   candleS = chart.addCandlestickSeries({ upColor: up, downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn });
   stS = chart.addLineSeries({ color: up, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+  chart.applyOptions({ rightPriceScale: { minimumWidth: 84 } });
+  chart.timeScale().subscribeVisibleLogicalRangeChange((r) => syncRange(r, haChart));
+  chart.subscribeCrosshairMove((p) => onCross(p, "main"));
   return true;
 }
-function clearChart(msg) { if (chart) { candleS.setData([]); candleS.setMarkers([]); stS.setData([]); } $("chartInfo").textContent = msg || "Loading candles…"; }
+// Heikin Ashi pane under the main chart; both panes scroll, zoom and hover together.
+function ensureHA() {
+  if (haChart) return true;
+  if (!window.LightweightCharts) return false;
+  haChart = LightweightCharts.createChart($("chartHA"), baseChartOpts());
+  haChart.applyOptions({ rightPriceScale: { minimumWidth: 84 } });
+  const up = cssVar("--logo-green"), dn = cssVar("--logo-red");
+  haS = haChart.addCandlestickSeries({ upColor: up, downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn });
+  haChart.timeScale().subscribeVisibleLogicalRangeChange((r) => syncRange(r, chart));
+  haChart.subscribeCrosshairMove((p) => onCross(p, "ha"));
+  return true;
+}
+function syncRange(r, other) {
+  if (syncing || !r || !other || $("haBox").hidden) return;
+  syncing = true; try { other.timeScale().setVisibleLogicalRange(r); } finally { syncing = false; }
+}
+function barAt(list, time) {
+  let lo = 0, hi = list.length - 1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (list[m].time === time) return m; if (list[m].time < time) lo = m + 1; else hi = m - 1; }
+  return -1;
+}
+function onCross(p, from) {
+  const time = p && p.time !== undefined && p.point && p.point.x >= 0 ? p.time : null;
+  paintLegends(time);
+  if (syncing || $("haBox").hidden || !haChart) return;
+  const otherChart = from === "main" ? haChart : chart, otherSeries = from === "main" ? haS : candleS, list = from === "main" ? cxView.ha : cxView.main;
+  syncing = true;
+  try {
+    const k = time === null ? -1 : barAt(list, time);
+    if (k >= 0) otherChart.setCrosshairPosition(list[k].close, time, otherSeries); else otherChart.clearCrosshairPosition();
+  } finally { syncing = false; }
+}
+// TradingView-style O H L C read-out for the hovered candle (or the latest one).
+function legendHTML(label, list, k) {
+  if (k < 0 || !list[k]) return `<b>${esc(label)}</b>`;
+  const b = list[k], prev = k > 0 ? list[k - 1].close : b.open, chg = b.close - prev, pct = prev ? (chg / prev) * 100 : 0;
+  const cls = b.close >= b.open ? "u" : "d", f = (v) => esc(fmtNum(+v.toFixed(2)));
+  const when = new Date(b.time * 1000).toISOString().slice(0, 16).replace("T", " ");
+  return `<b>${esc(label)}</b><span>${esc(when)}</span><span>O <span class="${cls}">${f(b.open)}</span></span><span>H <span class="${cls}">${f(b.high)}</span></span>` +
+    `<span>L <span class="${cls}">${f(b.low)}</span></span><span>C <span class="${cls}">${f(b.close)}</span></span>` +
+    `<span class="${chg >= 0 ? "u" : "d"}">${chg >= 0 ? "+" : "−"}${f(Math.abs(chg))} (${chg >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(2)}%)</span>`;
+}
+function paintLegends(time) {
+  const km = time === null ? cxView.main.length - 1 : barAt(cxView.main, time);
+  $("ohlcMain").innerHTML = legendHTML(`${assetName()} · ${tfName(cx.tf)}`, cxView.main, km);
+  if (!$("haBox").hidden) {
+    const kh = time === null ? cxView.ha.length - 1 : barAt(cxView.ha, time);
+    $("ohlcHA").innerHTML = legendHTML("Heikin Ashi", cxView.ha, kh);
+  }
+}
+function clearChart(msg) {
+  if (chart) { candleS.setData([]); candleS.setMarkers([]); stS.setData([]); }
+  if (haChart) { haS.setData([]); haS.setMarkers([]); }
+  cxView = { main: [], ha: [] }; $("ohlcMain").innerHTML = ""; $("ohlcHA").innerHTML = "";
+  $("chartInfo").textContent = msg || "Loading candles…";
+}
 
 /* Same rules as TradingView's ta.supertrend (and as the engine). trend: 1 up, -1 down. */
 function supertrendJS(bars, period, factor) {
@@ -671,12 +737,12 @@ function supertrendJS(bars, period, factor) {
 
 /* Heikin Ashi colour, same rules as the engine: 1 green, -1 red, a doji keeps the previous colour. */
 function heikinAshiJS(bars) {
-  const n = bars.length, trend = new Array(n).fill(0); let ho = 0, hc = 0;
+  const n = bars.length, trend = new Array(n).fill(0), hO = new Array(n), hC = new Array(n);
   for (let i = 0; i < n; i++) {
-    const b = bars[i], c = (b.o + b.h + b.l + b.c) / 4, o = i === 0 ? (b.o + b.c) / 2 : (ho + hc) / 2;
-    ho = o; hc = c; trend[i] = c > o ? 1 : c < o ? -1 : i > 0 ? trend[i - 1] : 0;
+    const b = bars[i], c = (b.o + b.h + b.l + b.c) / 4, o = i === 0 ? (b.o + b.c) / 2 : (hO[i - 1] + hC[i - 1]) / 2;
+    hO[i] = o; hC[i] = c; trend[i] = c > o ? 1 : c < o ? -1 : i > 0 ? trend[i - 1] : 0;
   }
-  return { st: new Array(n).fill(NaN), trend };
+  return { st: new Array(n).fill(NaN), trend, hO, hC };
 }
 
 function buildCxControls() {
@@ -755,7 +821,8 @@ function drawChart(fit) {
   const intraday = cx.tf !== "D" && cx.tf !== "W";
   chart.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: false } });
   const ha = cx.sig === "HA";
-  const { st, trend } = ha ? heikinAshiJS(cxBars) : supertrendJS(cxBars, Math.max(1, Number(cx.atr) || 10), Number(cx.fac) > 0 ? Number(cx.fac) : 3);
+  const sig = ha ? heikinAshiJS(cxBars) : supertrendJS(cxBars, Math.max(1, Number(cx.atr) || 10), Number(cx.fac) > 0 ? Number(cx.fac) : 3);
+  const { st, trend } = sig;
   const viewT = Date.parse(cx.viewFrom + "T00:00:00+05:30") / 1000;
   let start = cxBars.findIndex((b) => b.t >= viewT); if (start < 0) start = 0;
   const up = cssVar("--logo-green"), dn = cssVar("--logo-red"), shift = 19800;
@@ -793,7 +860,22 @@ function drawChart(fit) {
     marks.sort((a, b) => a.time - b.time);
   }
   candleS.setData(candles); stS.setData(line); candleS.setMarkers(marks);
-  if (fit) chart.timeScale().fitContent();
+  cxView.main = candles;
+  // Heikin Ashi pane: HA candles coloured by HA colour, with the same signal and trade markers.
+  $("haBox").hidden = !ha;
+  if (ha && ensureHA()) {
+    haChart.applyOptions({ timeScale: { timeVisible: intraday, secondsVisible: false } });
+    const haCandles = [];
+    for (let i = start; i < cxBars.length; i++) {
+      const b = cxBars[i], o = sig.hO[i], c = sig.hC[i], col = trend[i] === -1 ? dn : up;
+      haCandles.push({ time: b.t + shift, open: o, high: Math.max(b.h, o, c), low: Math.min(b.l, o, c), close: c, color: col, borderColor: col, wickColor: col });
+    }
+    haS.setData(haCandles); haS.setMarkers(marks); cxView.ha = haCandles;
+    const r = chart.timeScale().getVisibleLogicalRange();
+    if (!fit && r) { syncing = true; try { haChart.timeScale().setVisibleLogicalRange(r); } finally { syncing = false; } }
+  } else cxView.ha = [];
+  if (fit) { chart.timeScale().fitContent(); if (ha && haChart) haChart.timeScale().fitContent(); }
+  paintLegends(null);
   const lastTr = trend[trend.length - 1], lastSt = st[st.length - 1];
   $("chartInfo").textContent = `${assetName()} · ${tfName(cx.tf)} · ${candles.length} candles · ${ha ? "Heikin Ashi" : "Supertrend"} ${lastTr === 1 ? "▲ up" : lastTr === -1 ? "▼ down" : "–"}${isNaN(lastSt) ? "" : " at " + fmtNum(+lastSt.toFixed(2))} · last ${fmtNum(cxBars[cxBars.length - 1].c)}` +
     (cx.trades ? ` · backtest #${cx.tradesId}: ${shown} of ${cx.trades.length} trades in view (blue = entries, yellow = exits)` : "");
