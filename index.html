@@ -467,14 +467,17 @@ function renderRail() {
   }
 }
 
-function renderConn() {
+// Refreshes only the "saved" labels. What you have typed stays until you save (connDirty).
+let connDirty = false;
+function renderConn(afterSave) {
   const st = state.settings || {};
-  $("c_client").value = st.client_id || "";
+  if (afterSave || !connDirty) $("c_client").value = st.client_id || "";
   $("tokState").textContent = st.has_token ? `(saved, ends …${st.token_tail})` : "(not set)";
   $("urlState").textContent = st.has_url ? `(saved, ${st.url_host || "set"})` : "(not set)";
   $("secState").textContent = st.has_secret ? "(saved)" : "(not set)";
-  ["c_token", "c_url", "c_secret"].forEach((id) => $(id).value = "");
+  if (afterSave) { ["c_token", "c_url", "c_secret"].forEach((id) => $(id).value = ""); connDirty = false; }
 }
+document.getElementById("connForm").addEventListener("input", () => { connDirty = true; });
 
 function renderStrategy() {
   const s = cur(); if (!s) return showEmpty();
@@ -877,7 +880,7 @@ $("connForm").addEventListener("submit", (e) => {
   if (url && !/^https:\/\//.test(url)) { $("connMsg").textContent = "The webhook URL must start with https://"; return; }
   run(e.submitter, async () => {
     must(await db.rpc("save_portal_settings", { p_client: $("c_client").value.trim(), p_token: tok, p_url: url, p_secret: sec }));
-    await loadAll(); $("connMsg").textContent = "Saved."; toast("Connection saved. Press Refresh chart to test it.");
+    await loadAll(); renderConn(true); $("connMsg").textContent = "Saved."; toast("Connection saved. Press Refresh chart to test it.");
   });
 });
 
@@ -928,9 +931,14 @@ async function enterDesk(session) {
   clearInterval(timer);
   timer = setInterval(async () => { if (document.hidden || !marketOpen() || pending || btPoll) return; try { await loadAll(); } catch {} }, 60000);
 }
+// Supabase re-announces the session when you return to the tab; only (re)enter the desk for a new user.
+let deskUser = null;
 db.auth.onAuthStateChange((event, session) => {
-  if (event === "SIGNED_OUT" || !session) { clearInterval(timer); stopBtPoll(); showLogin(event === "SIGNED_OUT" ? "Signed out." : ""); return; }
-  if (event === "SIGNED_IN" || event === "INITIAL_SESSION") setTimeout(() => enterDesk(session), 0);
+  if (event === "SIGNED_OUT" || !session) { deskUser = null; clearInterval(timer); stopBtPoll(); showLogin(event === "SIGNED_OUT" ? "Signed out." : ""); return; }
+  if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session.user.id !== deskUser) {
+    deskUser = session.user.id;
+    setTimeout(() => enterDesk(session), 0);
+  }
 });
 if (location.hash === "#setup") setupMode = true;
 paintGate();
