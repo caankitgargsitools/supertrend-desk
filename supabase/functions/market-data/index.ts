@@ -2,7 +2,8 @@
 // timeframe and date range, plus the live price. Only the signed-in desk owner may call it.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { Dhan } from "./dhan.ts";
-import { addDays, aggregate, type DayBar, ist, partialDay, pickBaseInterval } from "./logic.ts";
+import { addDays, aggregate, type DayBar, isCommodity, ist, partialDay, pickBaseInterval, sessionFor } from "./logic.ts";
+import { dataSecurity } from "./instruments.ts";
 
 const URL_ = Deno.env.get("SUPABASE_URL")!;
 const service = createClient(URL_, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
@@ -43,7 +44,7 @@ Deno.serve(async (req) => {
     const b = await req.json().catch(() => ({}));
     const sec = String(b.sec ?? "").trim(), seg = String(b.seg ?? ""), instr = String(b.instr ?? "");
     const tf = String(b.tf ?? "");
-    if (!/^\d{1,10}$/.test(sec) || !/^[A-Z_]{3,12}$/.test(seg) || !/^[A-Z]{3,10}$/.test(instr)) return reply(400, { error: "Pick a valid instrument." });
+    if (!/^(\d{1,10}|[A-Z][A-Z0-9]{1,19})$/.test(sec) || !/^[A-Z_]{3,12}$/.test(seg) || !/^[A-Z]{3,10}$/.test(instr)) return reply(400, { error: "Pick a valid instrument." });
     if (!(tf === "D" || tf === "W" || (/^\d{1,3}$/.test(tf) && Number(tf) >= 1 && Number(tf) <= 375))) return reply(400, { error: "Unsupported timeframe." });
     const nowSec = Date.now() / 1000, today = ist(nowSec).date;
     let to = isDate(b.to) ? b.to : today; if (to > today) to = today;
@@ -57,15 +58,19 @@ Deno.serve(async (req) => {
     const dhan = new Dhan(set.dhan_client_id, set.dhan_access_token);
 
     const now = ist(nowSec);
-    const marketOpen = now.wd >= 1 && now.wd <= 5 && now.min >= 555 && now.min <= 935;
+    const sess = sessionFor(seg, today);
+    const marketOpen = now.wd >= 1 && now.wd <= 5 && now.min >= sess.open && now.min <= sess.close + 5;
+    // Commodities: candles come from the current near-month contract (daily history is Dhan's continuous series).
+    const resolved = await dataSecurity(service, { client: set.dhan_client_id, token: set.dhan_access_token }, seg, sec, today);
+    const secId = resolved.sec;
     const wantLive = to === today && marketOpen;
     let bars: { t: number; o: number; h: number; l: number; c: number }[] = [];
 
     if (tf === "D" || tf === "W") {
-      const daily: DayBar[] = await dhan.daily(sec, seg, instr, tf === "W" ? mondayOf(from) : from, addDays(to, 1));
+      const daily: DayBar[] = await dhan.daily(secId, seg, instr, tf === "W" ? mondayOf(from) : from, addDays(to, 1));
       let days = daily.filter((d) => d.day < today || !wantLive);
       if (wantLive) {
-        const intr = await dhan.intraday(sec, seg, instr, 1, `${today} 09:00:00`, fmtIst(nowSec + 60));
+        const intr = await dhan.intraday(secId, seg, instr, 1, `${today} 09:00:00`, fmtIst(nowSec + 60));
         const part = partialDay(intr.filter((r) => ist(r.t).date === today), today);
         const existing = daily.find((d) => d.day === today);
         if (part) days.push({ ...part, t: existing?.t ?? Date.parse(`${today}T00:00:00+05:30`) / 1000 });
@@ -89,27 +94,29 @@ Deno.serve(async (req) => {
       const raw = [];
       for (let a = from; a <= to; a = addDays(a, 86)) {
         const z = addDays(a, 85) < to ? addDays(a, 85) : to;
-        raw.push(...await dhan.intraday(sec, seg, instr, base, `${a} 09:00:00`, z === today ? fmtIst(nowSec + 60) : `${z} 15:31:00`));
+        raw.push(...await dhan.intraday(secId, seg, instr, base, `${a} 09:00:00`, z === today ? fmtIst(nowSec + 60) : `${z} 23:59:00`));
       }
       const seen = new Set<number>();
       const uniq = raw.filter((r) => (seen.has(r.t) ? false : (seen.add(r.t), true))).sort((x, y) => x.t - y.t);
-      bars = aggregate(uniq, n).map(({ t, o, h, l, c }) => ({ t, o, h, l, c }));
+      bars = aggregate(uniq, n, seg).map(({ t, o, h, l, c, v }) => ({ t, o, h, l, c, v }));
     }
 
     let ltp: number | null = null;
     if (wantLive && bars.length) {
-      try { ltp = await dhan.ltp(seg, sec); } catch { ltp = null; }
+      try { ltp = await dhan.ltp(seg, secId); } catch { ltp = null; }
       if (ltp && ltp > 0) {
         let last = bars[bars.length - 1];
-        if (tf !== "D" && tf !== "W" && now.min >= 555 && now.min < 930) {
+        if (tf !== "D" && tf !== "W" && now.min >= sess.open && now.min < sess.close) {
           const n = Number(tf);
-          const bucket = Date.parse(`${today}T00:00:00+05:30`) / 1000 + (555 + Math.floor((now.min - 555) / n) * n) * 60;
+          const bucket = Date.parse(`${today}T00:00:00+05:30`) / 1000 + (sess.open + Math.floor((now.min - sess.open) / n) * n) * 60;
           if (last.t < bucket) { last = { t: bucket, o: ltp, h: ltp, l: ltp, c: ltp }; bars.push(last); }
         }
         last.c = ltp; last.h = Math.max(last.h, ltp); last.l = Math.min(last.l, ltp);
       }
     }
-    return reply(200, { bars, from, to, live: wantLive, ltp, fetched_at: new Date().toISOString() });
+    return reply(200, { bars, from, to, live: wantLive, ltp, fetched_at: new Date().toISOString(),
+      contract: resolved.contract ? { name: resolved.contract.display, expiry: resolved.contract.expiry } : null,
+      session: sess, commodity: isCommodity(seg) });
   } catch (e) {
     return reply(502, { error: e instanceof Error ? e.message : String(e) });
   }

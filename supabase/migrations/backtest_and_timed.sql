@@ -69,3 +69,29 @@ begin
 end $$;
 revoke all on function public.resume_backtest(bigint) from public, anon;
 grant execute on function public.resume_backtest(bigint) to authenticated;
+
+-- ── Commodities, condition strategies and option writing (Oct 2026) ─────────────────────────────
+-- MCX futures contracts (security IDs change each expiry); refreshed by the engine from Dhan's instrument list.
+create table if not exists public.mcx_contracts (
+  sec_id text primary key,
+  underlying text not null,
+  display text,
+  expiry date not null,
+  synced_at timestamptz not null default now()
+);
+create index if not exists mcx_contracts_und_exp on public.mcx_contracts (underlying, expiry);
+alter table public.mcx_contracts enable row level security;
+drop policy if exists mcx_contracts_owner_read on public.mcx_contracts;
+create policy mcx_contracts_owner_read on public.mcx_contracts for select using (public.is_owner());
+
+-- Condition-based strategies (rule sets), option writing and monthly expiries.
+alter table public.algo_strategies drop constraint if exists algo_strategies_strategy_kind_check;
+alter table public.algo_strategies add constraint algo_strategies_strategy_kind_check check (strategy_kind in ('FLIP','HA','TIMED','RULES'));
+alter table public.algo_strategies add column if not exists rules jsonb;
+alter table public.algo_strategies add column if not exists option_side text not null default 'BUY' check (option_side in ('BUY','SELL'));
+alter table public.algo_strategies add column if not exists pos_option_side text check (pos_option_side in ('BUY','SELL'));
+alter table public.algo_strategies add column if not exists expiry_flag text not null default 'WEEK' check (expiry_flag in ('WEEK','MONTH'));
+
+-- Tick every minute 08:30–00:29 IST on weekdays, covering MCX's evening session (the engine skips closed markets).
+select cron.unschedule('supertrend-engine-tick');
+select cron.schedule('supertrend-engine-tick', '* 3-18 * * 1-5', $$select public.engine_call('tick')$$);

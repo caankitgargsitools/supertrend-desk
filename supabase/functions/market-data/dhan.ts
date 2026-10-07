@@ -5,9 +5,14 @@ export type OptBar = { t: number; o: number; c: number; strike: number | null; s
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Dhan was temporarily unavailable (timeouts, 5xx, rate limits) — worth retrying later, unlike a bad token. */
+export class DhanBusyError extends Error {}
+
 export class Dhan {
   private last = 0;
   calls = 0;
+  /** Epoch ms after which no more retries are attempted (keeps a backtest round inside the function's time limit). */
+  deadline = Infinity;
   private clientId: string;
   private token: string;
   constructor(clientId: string, token: string) {
@@ -16,22 +21,37 @@ export class Dhan {
   }
 
   async post(path: string, body: unknown): Promise<any> {
+    let lastErr = "";
     for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt > 0 && Date.now() + 22000 > this.deadline) break; // out of time for another try
       const wait = this.last + 260 - Date.now();
       if (wait > 0) await sleep(wait);
       this.last = Date.now();
       this.calls++;
-      const r = await fetch("https://api.dhan.co/v2" + path, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json", Accept: "application/json",
-          "access-token": this.token, "client-id": this.clientId,
-        },
-        body: JSON.stringify(body),
-      });
-      const text = await r.text();
+      let r: Response, text: string;
+      try {
+        r = await fetch("https://api.dhan.co/v2" + path, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json", Accept: "application/json",
+            "access-token": this.token, "client-id": this.clientId,
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(20000),
+        });
+        text = await r.text();
+      } catch (e) { // network error or no answer within 20 s: try again
+        lastErr = e instanceof Error ? e.message : String(e);
+        await sleep(2000 * (attempt + 1));
+        continue;
+      }
       if (r.status === 429 || (!r.ok && /\b805\b|too many/i.test(text))) {
         await sleep(1500 * (attempt + 1));
+        continue;
+      }
+      if (r.status >= 500) { // Dhan's servers busy or timing out (502/503/504): try again
+        lastErr = `HTTP ${r.status}`;
+        await sleep(2000 * (attempt + 1));
         continue;
       }
       if (!r.ok) {
@@ -42,7 +62,9 @@ export class Dhan {
       }
       return text ? JSON.parse(text) : {};
     }
-    throw new Error(`Dhan kept rate-limiting ${path}. Try again in a minute.`);
+    throw new DhanBusyError(lastErr
+      ? `Dhan's server didn't answer ${path} after several tries (${lastErr}).`
+      : `Dhan kept rate-limiting ${path}. Try again in a minute.`);
   }
 
   /** Minute candles (interval 1/5/15/25/60). Dates as "YYYY-MM-DD HH:mm:ss" IST, max ~90 days per call. */
@@ -51,28 +73,29 @@ export class Dhan {
       securityId: String(sec), exchangeSegment: seg, instrument: instr, interval: String(interval), oi: false, fromDate, toDate,
     });
     const ts: number[] = j.timestamp ?? [];
-    const shift = normaliseTimestamps(ts);
-    return ts.map((t, i) => ({ t: t + shift, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i] }));
+    const shift = normaliseTimestamps(ts, seg);
+    return ts.map((t, i) => ({ t: t + shift, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0) }));
   }
 
   /** Daily candles; toDate is exclusive. */
   async daily(sec: string, seg: string, instr: string, fromDate: string, toDate: string): Promise<DayBar[]> {
+    // For futures, expiryCode 0 returns Dhan's continuous near-month series (years of history).
     const j = await this.post("/charts/historical", {
       securityId: String(sec), exchangeSegment: seg, instrument: instr, expiryCode: 0, oi: false, fromDate, toDate,
     });
     const ts: number[] = j.timestamp ?? [];
-    return ts.map((t, i) => ({ t, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], day: ist(t).date }))
+    return ts.map((t, i) => ({ t, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0), day: ist(t).date }))
       .sort((a, b) => a.t - b.t);
   }
 
-  /** Expired weekly index options by strike relative to spot (ATM, ATM+k). Up to 30 days per call. */
+  /** Expired index options (weekly or monthly series) by strike relative to spot (ATM, ATM+k). Up to 30 days per call. */
   async rolling(o: {
-    sec: string; segment: string; interval: number; code: number; k: number; type: "CALL" | "PUT"; from: string; to: string;
+    sec: string; segment: string; interval: number; code: number; k: number; type: "CALL" | "PUT"; from: string; to: string; flag?: "WEEK" | "MONTH";
   }): Promise<OptBar[]> {
     const strike = o.k === 0 ? "ATM" : o.k > 0 ? `ATM+${o.k}` : `ATM${o.k}`;
     const j = await this.post("/charts/rollingoption", {
       exchangeSegment: o.segment, interval: String(o.interval), securityId: Number(o.sec), instrument: "OPTIDX",
-      expiryFlag: "WEEK", expiryCode: o.code, strike, drvOptionType: o.type,
+      expiryFlag: o.flag ?? "WEEK", expiryCode: o.code, strike, drvOptionType: o.type,
       requiredData: ["open", "close", "strike", "spot"], fromDate: o.from, toDate: o.to,
     });
     const d = j?.data?.[o.type === "CALL" ? "ce" : "pe"];

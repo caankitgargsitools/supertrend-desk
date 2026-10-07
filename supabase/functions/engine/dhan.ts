@@ -73,28 +73,29 @@ export class Dhan {
       securityId: String(sec), exchangeSegment: seg, instrument: instr, interval: String(interval), oi: false, fromDate, toDate,
     });
     const ts: number[] = j.timestamp ?? [];
-    const shift = normaliseTimestamps(ts);
-    return ts.map((t, i) => ({ t: t + shift, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i] }));
+    const shift = normaliseTimestamps(ts, seg);
+    return ts.map((t, i) => ({ t: t + shift, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0) }));
   }
 
   /** Daily candles; toDate is exclusive. */
   async daily(sec: string, seg: string, instr: string, fromDate: string, toDate: string): Promise<DayBar[]> {
+    // For futures, expiryCode 0 returns Dhan's continuous near-month series (years of history).
     const j = await this.post("/charts/historical", {
       securityId: String(sec), exchangeSegment: seg, instrument: instr, expiryCode: 0, oi: false, fromDate, toDate,
     });
     const ts: number[] = j.timestamp ?? [];
-    return ts.map((t, i) => ({ t, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], day: ist(t).date }))
+    return ts.map((t, i) => ({ t, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0), day: ist(t).date }))
       .sort((a, b) => a.t - b.t);
   }
 
-  /** Expired weekly index options by strike relative to spot (ATM, ATM+k). Up to 30 days per call. */
+  /** Expired index options (weekly or monthly series) by strike relative to spot (ATM, ATM+k). Up to 30 days per call. */
   async rolling(o: {
-    sec: string; segment: string; interval: number; code: number; k: number; type: "CALL" | "PUT"; from: string; to: string;
+    sec: string; segment: string; interval: number; code: number; k: number; type: "CALL" | "PUT"; from: string; to: string; flag?: "WEEK" | "MONTH";
   }): Promise<OptBar[]> {
     const strike = o.k === 0 ? "ATM" : o.k > 0 ? `ATM+${o.k}` : `ATM${o.k}`;
     const j = await this.post("/charts/rollingoption", {
       exchangeSegment: o.segment, interval: String(o.interval), securityId: Number(o.sec), instrument: "OPTIDX",
-      expiryFlag: "WEEK", expiryCode: o.code, strike, drvOptionType: o.type,
+      expiryFlag: o.flag ?? "WEEK", expiryCode: o.code, strike, drvOptionType: o.type,
       requiredData: ["open", "close", "strike", "spot"], fromDate: o.from, toDate: o.to,
     });
     const d = j?.data?.[o.type === "CALL" ? "ce" : "pe"];

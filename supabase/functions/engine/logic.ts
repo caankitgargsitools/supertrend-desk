@@ -4,7 +4,7 @@ export const IST_OFFSET = 19800; // seconds (+05:30)
 export const OPEN_MIN = 555; // 09:15
 export const CLOSE_MIN = 930; // 15:30
 
-export type Raw = { t: number; o: number; h: number; l: number; c: number };
+export type Raw = { t: number; o: number; h: number; l: number; c: number; v?: number };
 export type Bar = Raw & { day: string; startMin: number; endMin: number; endT: number; lastBaseStart: number };
 
 export function ist(epochSec: number) {
@@ -22,11 +22,27 @@ export function timeToMin(t: string): number {
   return h * 60 + m;
 }
 
+/** Trading session in IST minutes. NSE/BSE: 09:15–15:30. MCX: 09:00–23:30 while US daylight saving is on, else 23:55. */
+export type Session = { open: number; close: number };
+export function isCommodity(seg: string): boolean { return seg === "MCX_COMM"; }
+function nthSunday(y: number, month: number, n: number): string {
+  const first = new Date(Date.UTC(y, month - 1, 1)).getUTCDay();
+  const day = 1 + ((7 - first) % 7) + (n - 1) * 7;
+  return `${y}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+export function sessionFor(seg: string, date: string): Session {
+  if (!isCommodity(seg)) return { open: OPEN_MIN, close: CLOSE_MIN };
+  const y = Number(date.slice(0, 4));
+  const usDst = date >= nthSunday(y, 3, 2) && date < nthSunday(y, 11, 1);
+  return { open: 540, close: usDst ? 1410 : 1435 };
+}
+
 /** Dhan has returned both true-UTC and IST-shifted epochs at different times; detect which. */
-export function normaliseTimestamps(ts: number[]): number {
+export function normaliseTimestamps(ts: number[], seg = "IDX_I"): number {
   if (!ts.length) return 0;
+  const lo = isCommodity(seg) ? 540 : OPEN_MIN, hi = isCommodity(seg) ? 1435 : CLOSE_MIN;
   let inside = 0;
-  for (const t of ts) { const m = ist(t).min; if (m >= OPEN_MIN && m < CLOSE_MIN) inside++; }
+  for (const t of ts) { const m = ist(t).min; if (m >= lo && m < hi) inside++; }
   return inside >= ts.length * 0.8 ? 0 : -IST_OFFSET;
 }
 
@@ -34,27 +50,29 @@ export function pickBaseInterval(tf: number): number {
   return [60, 25, 15, 5, 1].find((b) => tf % b === 0)!;
 }
 
-/** Build tf-minute candles anchored to 09:15 IST each day from smaller base candles. */
-export function aggregate(raw: Raw[], tf: number): Bar[] {
+/** Build tf-minute candles anchored to the session open (09:15 NSE/BSE, 09:00 MCX) each day from smaller base candles. */
+export function aggregate(raw: Raw[], tf: number, seg = "IDX_I"): Bar[] {
   const out: Bar[] = [];
   let cur: Bar | null = null;
-  let key = "";
+  let key = "", sessDay = "", sess: Session = { open: OPEN_MIN, close: CLOSE_MIN };
   for (const b of raw) {
     const p = ist(b.t);
-    if (p.min < OPEN_MIN || p.min >= CLOSE_MIN) continue;
-    const idx = Math.floor((p.min - OPEN_MIN) / tf);
+    if (p.date !== sessDay) { sessDay = p.date; sess = sessionFor(seg, p.date); }
+    if (p.min < sess.open || p.min >= sess.close) continue;
+    const idx = Math.floor((p.min - sess.open) / tf);
     const k = `${p.date}#${idx}`;
     if (k !== key) {
       if (cur) out.push(cur);
       key = k;
-      const startMin = OPEN_MIN + idx * tf;
-      const endMin = Math.min(CLOSE_MIN, startMin + tf);
+      const startMin = sess.open + idx * tf;
+      const endMin = Math.min(sess.close, startMin + tf);
       const t = b.t - (p.min - startMin) * 60;
-      cur = { t, o: b.o, h: b.h, l: b.l, c: b.c, day: p.date, startMin, endMin, endT: t + (endMin - startMin) * 60, lastBaseStart: b.t };
+      cur = { t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v ?? 0, day: p.date, startMin, endMin, endT: t + (endMin - startMin) * 60, lastBaseStart: b.t };
     } else if (cur) {
       cur.h = Math.max(cur.h, b.h);
       cur.l = Math.min(cur.l, b.l);
       cur.c = b.c;
+      cur.v = (cur.v ?? 0) + (b.v ?? 0);
       cur.lastBaseStart = b.t;
     }
   }
@@ -110,12 +128,34 @@ export function nextExpiry(todayIst: { y: number; m: number; d: number; wd: numb
   return d.toISOString().slice(0, 10);
 }
 
+/** Monthly expiry: the last given weekday (1=Mon..5=Fri) of the month, rolling to next month once passed (or on the day, if asked). */
+export function nextMonthlyExpiry(todayIst: { y: number; m: number; d: number }, weekday: number, roll: boolean): string {
+  const lastOf = (y: number, m: number) => {
+    const d = new Date(Date.UTC(y, m, 0)); // last day of month m (1-based)
+    while (d.getUTCDay() !== weekday) d.setUTCDate(d.getUTCDate() - 1);
+    return d.toISOString().slice(0, 10);
+  };
+  const today = `${todayIst.y}-${String(todayIst.m).padStart(2, "0")}-${String(todayIst.d).padStart(2, "0")}`;
+  const cur = lastOf(todayIst.y, todayIst.m);
+  if (cur > today || (cur === today && !roll)) return cur;
+  return todayIst.m === 12 ? lastOf(todayIst.y + 1, 1) : lastOf(todayIst.y, todayIst.m + 1);
+}
+
+/** Is this date a monthly expiry day (the last such weekday of its month)? */
+export function isLastWeekdayOfMonth(date: string, weekday: number): boolean {
+  const [y, m, d] = date.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCDay() !== weekday) return false;
+  dt.setUTCDate(dt.getUTCDate() + 7);
+  return dt.getUTCMonth() !== m - 1;
+}
+
 export function strikeFor(close: number, step: number, offset: number, optType: "CE" | "PE"): number {
   const atm = Math.round(close / step) * step;
   return optType === "CE" ? atm + offset * step : atm - offset * step;
 }
 
-export type DayBar = { t: number; o: number; h: number; l: number; c: number; day: string };
+export type DayBar = { t: number; o: number; h: number; l: number; c: number; v?: number; day: string };
 
 /** Calendar arithmetic on YYYY-MM-DD strings. */
 export function addDays(date: string, n: number): string {

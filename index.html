@@ -108,6 +108,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .ohlc { position: absolute; top: 6px; left: 8px; z-index: 3; pointer-events: none; font: 12px var(--font-data); color: var(--muted);
   background: var(--panel); padding: 2px 6px; border-radius: 4px; display: flex; flex-wrap: wrap; gap: 2px 10px; max-width: calc(100% - 90px); }
 .ohlc b { color: var(--ink); font-weight: 600; }
+.ruleset { border: 1px solid var(--line); border-radius: var(--r); padding: 12px; display: grid; gap: 8px; background: var(--bg); }
+.ruleset h4 { font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ruleset h4 select { width: auto; padding: 4px 8px; }
+.ruleset.buy { border-left: 4px solid var(--logo-green); } .ruleset.sell { border-left: 4px solid var(--logo-red); }
+.ruleset.exit { border-left: 4px solid var(--logo-yellow); }
+.condrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: end; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.condrow label { display: grid; gap: 2px; font-size: 11px; color: var(--muted); }
+.condrow select, .condrow input { padding: 5px 7px; font-size: 13px; }
+.condrow input[type=number] { width: 78px; }
+.condrow .x { margin-left: auto; align-self: center; }
+.condrow .join { align-self: center; font-size: 12px; font-weight: 700; color: var(--muted); }
 .ohlc .u { color: var(--logo-green); } .ohlc .d { color: var(--logo-red); }
 #eqChart { height: 240px; }
 .chart-foot { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 8px; }
@@ -299,6 +310,7 @@ legend { padding: 0; margin-bottom: 4px; }
               <label class="f wide"><span>Strategy based on</span><select id="f_kind">
                 <option value="FLIP">Supertrend flip</option>
                 <option value="HA">Heikin Ashi flip</option>
+                <option value="RULES">Conditions you choose (RSI, EMA, MACD, VWAP, …)</option>
                 <option value="TIMED">Higher-timeframe bias (timed)</option>
               </select></label>
             </div>
@@ -307,7 +319,7 @@ legend { padding: 0; margin-bottom: 4px; }
           <fieldset><legend class="label">Strategy</legend>
             <div class="grid">
               <label class="f wide"><span>Name</span><input id="f_name" maxlength="80"></label>
-              <label class="f"><span>Underlying</span><select id="f_underlying"><option>NIFTY</option><option>SENSEX</option><option value="CUSTOM">Custom</option></select></label>
+              <label class="f"><span>Underlying</span><select id="f_underlying"></select></label>
               <label class="f"><span>Data security ID</span><input id="f_data_security_id"></label>
               <label class="f"><span>Data segment</span><input id="f_data_segment"></label>
               <label class="f"><span>Data instrument</span><input id="f_data_instrument"></label>
@@ -315,16 +327,20 @@ legend { padding: 0; margin-bottom: 4px; }
           </fieldset>
           <fieldset><legend class="label" id="sigLegend">Supertrend</legend>
             <div class="grid">
-              <label class="f flip-only"><span>Candle timeframe (minutes)</span><input id="f_timeframe_min" type="number" min="1" max="375" step="1"></label>
+              <label class="f flip-only"><span id="tfLabel">Candle timeframe (minutes)</span><input id="f_timeframe_min" type="number" min="1" max="375" step="1"></label>
               <label class="f timed-only"><span>Bias timeframe</span><select id="f_bias_timeframe"><option value="D">Daily</option><option value="240">4 hours (240 min)</option><option value="125">125 minutes</option><option value="75">75 minutes</option><option value="60">1 hour</option><option value="30">30 minutes</option><option value="15">15 minutes</option></select></label>
               <label class="f timed-only"><span>Read the bias from</span><select id="f_bias_source"><option value="COMPLETED">Last completed candle</option><option value="LIVE">Live candle, including today so far</option></select></label>
               <label class="f st-only"><span>ATR period</span><input id="f_atr_period" type="number" min="1" max="200" step="1"></label>
               <label class="f st-only"><span>Multiplier (factor)</span><input id="f_factor" type="number" min="0.1" step="0.1"></label>
-              <label class="f flip-only"><span>When to enter</span><select id="f_entry_mode"><option value="FLIP">Only on a fresh flip</option><option value="JOIN">Join the current trend</option></select></label>
-              <label class="f flip-only"><span>Place the order</span><select id="f_entry_trigger"><option value="CLOSE">At the signal candle's close</option><option value="BREAKOUT">On breakout of signal candle high / low ± buffer</option></select></label>
-              <label class="f flip-only buffer-only"><span>Buffer (points)</span><input id="f_buffer_points" type="number" min="0" step="0.05"></label>
+              <label class="f flip-only"><span>When to enter</span><select id="f_entry_mode"><option value="FLIP" id="emFresh">Only on a fresh flip</option><option value="JOIN" id="emJoin">Join the current trend</option></select></label>
+              <label class="f flip-only no-rules"><span>Place the order</span><select id="f_entry_trigger"><option value="CLOSE">At the signal candle's close</option><option value="BREAKOUT">On breakout of signal candle high / low ± buffer</option></select></label>
+              <label class="f flip-only buffer-only no-rules"><span>Buffer (points)</span><input id="f_buffer_points" type="number" min="0" step="0.05"></label>
             </div>
-            <p class="hint flip-only buffer-only">Breakout: after a buy signal the order triggers only if the next candle trades above the signal candle's high + buffer (sell: below its low − buffer). If it doesn't, the order is cancelled and re-placed from that candle's high / low, and so on until it fills or the signal turns. The trade is filled at the trigger price on normal candles.</p>
+            <p class="hint flip-only buffer-only no-rules">Breakout: after a buy signal the order triggers only if the next candle trades above the signal candle's high + buffer (sell: below its low − buffer). If it doesn't, the order is cancelled and re-placed from that candle's high / low, and so on until it fills or the signal turns. The trade is filled at the trigger price on normal candles.</p>
+          </fieldset>
+          <fieldset class="rules-only" id="rulesSet"><legend class="label">Conditions</legend>
+            <p class="hint">Conditions are checked each time a candle of the decision timeframe above closes, using the latest <em>completed</em> candle of each condition's own timeframe. Orders go in at that close. A long is closed by the “Exit long” rules if you add any; otherwise by the Sell rules (reversing into a short); with neither, as soon as the Buy rules stop being true. Shorts mirror this.</p>
+            <div id="rs_long"></div><div id="rs_short"></div><div id="rs_exitLong"></div><div id="rs_exitShort"></div>
           </fieldset>
           <fieldset class="timed-only"><legend class="label">Timing (IST)</legend>
             <div class="grid">
@@ -335,23 +351,25 @@ legend { padding: 0; margin-bottom: 4px; }
           </fieldset>
           <fieldset><legend class="label">Trade</legend>
             <div class="grid">
-              <label class="f"><span>Instrument</span><select id="f_trade_type"><option value="OPTIONS">Options (buy CE / PE)</option><option value="FUTURES">Futures (long / short)</option></select></label>
+              <label class="f"><span>Instrument</span><select id="f_trade_type"><option value="OPTIONS">Options</option><option value="FUTURES">Futures (long / short)</option></select></label>
               <label class="f"><span>Direction</span><select id="f_direction"><option value="BOTH">Both</option><option value="LONG_ONLY">Up-trend only (calls / long)</option><option value="SHORT_ONLY">Down-trend only (puts / short)</option></select></label>
               <label class="f"><span>Lots</span><input id="f_lots" type="number" min="1" step="1"></label>
-              <label class="f"><span>Lot size (verify current)</span><input id="f_lot_size" type="number" min="1" step="1"></label>
+              <label class="f"><span id="lotLabel">Lot size (verify current)</span><input id="f_lot_size" type="number" min="1" step="1"></label>
               <label class="f"><span>Send quantity as</span><select id="f_qty_mode"><option value="LOTS">Lots</option><option value="UNITS">Units</option></select></label>
               <label class="f"><span>Product type</span><select id="f_product_type"><option value="I">I · Intraday</option><option value="M">M · Carry forward</option></select></label>
-              <label class="f"><span>Exchange</span><select id="f_exchange"><option>NSE</option><option>BSE</option></select></label>
+              <label class="f"><span>Exchange</span><select id="f_exchange"><option>NSE</option><option>BSE</option><option>MCX</option></select></label>
               <label class="f"><span>Option symbol (Dhan)</span><input id="f_dhan_symbol"></label>
               <label class="f"><span>Futures symbol (Dhan)</span><input id="f_futures_symbol"></label>
             </div>
           </fieldset>
           <fieldset id="optSet"><legend class="label">Option contract</legend>
             <div class="grid">
+              <label class="f"><span>Buy or write</span><select id="f_option_side"><option value="BUY">Buy options (bullish → CE, bearish → PE)</option><option value="SELL">Write options (bullish → sell PE, bearish → sell CE)</option></select></label>
+              <label class="f"><span>Expiry series</span><select id="f_expiry_flag"><option value="WEEK">Weekly</option><option value="MONTH">Monthly (last expiry weekday of the month)</option></select></label>
               <label class="f"><span>Strike gap</span><input id="f_strike_step" type="number" min="1" step="1"></label>
               <label class="f"><span>Strike offset (+ OTM, − ITM)</span><input id="f_strike_offset" type="number" step="1"></label>
-              <label class="f"><span>Weekly expiry day</span><select id="f_expiry_weekday"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option></select></label>
-              <label class="f"><span>On expiry day</span><select id="f_roll_on_expiry"><option value="true">Use next week's expiry</option><option value="false">Use today's expiry</option></select></label>
+              <label class="f"><span>Expiry weekday</span><select id="f_expiry_weekday"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option></select></label>
+              <label class="f"><span>On expiry day</span><select id="f_roll_on_expiry"><option value="true">Use the next expiry</option><option value="false">Use today's expiry</option></select></label>
               <label class="f"><span>Expiry override (holiday weeks)</span><input id="f_expiry_override" type="date"></label>
             </div>
           </fieldset>
@@ -361,9 +379,9 @@ legend { padding: 0; margin-bottom: 4px; }
               <label class="f"><span>No trades after</span><input id="f_last_entry" type="time"></label>
               <label class="f"><span>Square off at</span><input id="f_square_off" type="time"></label>
               <label class="f"><span>Square off daily</span><select id="f_intraday"><option value="true">Yes (intraday)</option><option value="false">No (carry overnight)</option></select></label>
-              <label class="f"><span>Flip after “No trades after”</span><select id="f_after_hours_flip"><option value="FIRST_CLOSE">Decide at next day's first candle close</option><option value="OPEN">Reverse at next day's open</option></select></label>
+              <label class="f no-rules"><span>Flip after “No trades after”</span><select id="f_after_hours_flip"><option value="FIRST_CLOSE">Decide at next day's first candle close</option><option value="OPEN">Reverse at next day's open</option></select></label>
             </div>
-            <p class="hint">Stop and reverse: when Supertrend turns green the strategy buys (closing any short first); when it turns red it sells the long and goes short. Decisions are taken when a candle closes. Nothing is traded at or after “No trades after”. If Supertrend flips after that, the next day either waits for the first candle to close and follows Supertrend as it stands then (no trade if it has turned back), or reverses straight away at “First trade from”.</p>
+            <p class="hint no-rules">Stop and reverse: when Supertrend turns green the strategy buys (closing any short first); when it turns red it sells the long and goes short. Decisions are taken when a candle closes. Nothing is traded at or after “No trades after”. If Supertrend flips after that, the next day either waits for the first candle to close and follows Supertrend as it stands then (no trade if it has turned back), or reverses straight away at “First trade from”.</p>
           </fieldset>
           <details>
             <summary class="label" style="cursor:pointer">Order format (advanced)</summary>
@@ -430,20 +448,63 @@ const PROJECT_ID = "umryzxusbdttbcshkajt";
 const SUPABASE_URL = "https://umryzxusbdttbcshkajt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_RcHPBb3pNGfkuDcUU-49BA_FKyXp-sF";
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
+// Tradable underlyings. Indices: Dhan IDX_I security IDs (checked against Dhan's instrument list). Lot sizes change;
+// verify before going live. Commodities: MCX futures; the data ID is the underlying symbol and the engine picks the
+// current near-month contract each day. For commodities "lot size" is the P&L multiplier per lot (price unit × lot).
+const IDX = (id, sym, ex, step, wd, lot, flag, name) => ({ group: "Indices (F&O)", name, data_security_id: id, data_segment: "IDX_I", data_instrument: "INDEX", exchange: ex, dhan_symbol: sym, futures_symbol: sym + "1!", strike_step: step, expiry_weekday: wd, expiry_flag: flag, lot_size: lot });
+const MCX = (sym, name, mult, group) => ({ group, name, data_security_id: sym, data_segment: "MCX_COMM", data_instrument: "FUTCOM", exchange: "MCX", dhan_symbol: sym, futures_symbol: sym + "1!", lot_size: mult, commodity: true });
 const PRESETS = {
-  NIFTY:  { data_security_id: "13", data_segment: "IDX_I", data_instrument: "INDEX", exchange: "NSE", dhan_symbol: "NIFTY", futures_symbol: "NIFTY1!", strike_step: 50, expiry_weekday: 2, lot_size: 65 },
-  SENSEX: { data_security_id: "51", data_segment: "IDX_I", data_instrument: "INDEX", exchange: "BSE", dhan_symbol: "SENSEX", futures_symbol: "SENSEX1!", strike_step: 100, expiry_weekday: 4, lot_size: 20 },
+  NIFTY: IDX("13", "NIFTY", "NSE", 50, 2, 65, "WEEK", "Nifty 50"),
+  BANKNIFTY: IDX("25", "BANKNIFTY", "NSE", 100, 2, 30, "MONTH", "Bank Nifty"),
+  FINNIFTY: IDX("27", "FINNIFTY", "NSE", 50, 2, 60, "MONTH", "Fin Nifty"),
+  MIDCPNIFTY: IDX("442", "MIDCPNIFTY", "NSE", 25, 2, 120, "MONTH", "Midcap Nifty Select"),
+  NIFTYNXT50: IDX("38", "NIFTYNXT50", "NSE", 100, 2, 25, "MONTH", "Nifty Next 50"),
+  SENSEX: IDX("51", "SENSEX", "BSE", 100, 4, 20, "WEEK", "Sensex"),
+  BANKEX: IDX("69", "BANKEX", "BSE", 100, 4, 30, "MONTH", "Bankex"),
+  GOLD: MCX("GOLD", "Gold (1 kg, ₹/10 g)", 100, "Bullion (MCX)"),
+  GOLDM: MCX("GOLDM", "Gold Mini (100 g)", 10, "Bullion (MCX)"),
+  GOLDTEN: MCX("GOLDTEN", "Gold Ten (10 g)", 1, "Bullion (MCX)"),
+  GOLDGUINEA: MCX("GOLDGUINEA", "Gold Guinea (8 g)", 1, "Bullion (MCX)"),
+  GOLDPETAL: MCX("GOLDPETAL", "Gold Petal (1 g)", 1, "Bullion (MCX)"),
+  SILVER: MCX("SILVER", "Silver (30 kg, ₹/kg)", 30, "Bullion (MCX)"),
+  SILVERM: MCX("SILVERM", "Silver Mini (5 kg)", 5, "Bullion (MCX)"),
+  SILVERMIC: MCX("SILVERMIC", "Silver Micro (1 kg)", 1, "Bullion (MCX)"),
+  CRUDEOIL: MCX("CRUDEOIL", "Crude Oil (100 bbl)", 100, "Energy (MCX)"),
+  CRUDEOILM: MCX("CRUDEOILM", "Crude Oil Mini (10 bbl)", 10, "Energy (MCX)"),
+  NATURALGAS: MCX("NATURALGAS", "Natural Gas (1,250 mmBtu)", 1250, "Energy (MCX)"),
+  NATGASMINI: MCX("NATGASMINI", "Natural Gas Mini (250 mmBtu)", 250, "Energy (MCX)"),
+  COPPER: MCX("COPPER", "Copper (2,500 kg)", 2500, "Base metals (MCX)"),
+  ZINC: MCX("ZINC", "Zinc (5 t)", 5000, "Base metals (MCX)"),
+  ZINCMINI: MCX("ZINCMINI", "Zinc Mini (1 t)", 1000, "Base metals (MCX)"),
+  LEAD: MCX("LEAD", "Lead (5 t)", 5000, "Base metals (MCX)"),
+  LEADMINI: MCX("LEADMINI", "Lead Mini (1 t)", 1000, "Base metals (MCX)"),
+  ALUMINIUM: MCX("ALUMINIUM", "Aluminium (5 t)", 5000, "Base metals (MCX)"),
+  ALUMINI: MCX("ALUMINI", "Aluminium Mini (1 t)", 1000, "Base metals (MCX)"),
+  NICKEL: MCX("NICKEL", "Nickel (250 kg)", 250, "Base metals (MCX)"),
 };
+const isMcx = (seg) => seg === "MCX_COMM";
+function fillUnderlyingSelect(sel, withCustom) {
+  sel.innerHTML = "";
+  const groups = {};
+  for (const [k, p] of Object.entries(PRESETS)) (groups[p.group] = groups[p.group] || []).push([k, p]);
+  for (const [g, items] of Object.entries(groups)) {
+    const og = document.createElement("optgroup"); og.label = g;
+    for (const [k, p] of items) { const o = document.createElement("option"); o.value = k; o.textContent = p.name; og.append(o); }
+    sel.append(og);
+  }
+  if (withCustom) { const o = document.createElement("option"); o.value = "CUSTOM"; o.textContent = "Custom…"; sel.append(o); }
+}
 const FIELDS = ["name","underlying","data_security_id","data_segment","data_instrument","timeframe_min","atr_period","factor","entry_mode","entry_trigger","buffer_points",
   "bias_timeframe","bias_source","entry_time","exit_time","exit_next_day",
   "trade_type","direction","lots","lot_size","qty_mode","product_type","exchange","dhan_symbol","futures_symbol",
-  "strike_step","strike_offset","expiry_weekday","roll_on_expiry","expiry_override","session_start","last_entry","square_off","intraday","after_hours_flip",
+  "option_side","expiry_flag","strike_step","strike_offset","expiry_weekday","roll_on_expiry","expiry_override","session_start","last_entry","square_off","intraday","after_hours_flip",
   "leg_template_opt","leg_template_fut"];
 const INT_FIELDS = ["timeframe_min","atr_period","lots","lot_size","strike_step","strike_offset","expiry_weekday"];
 const BOOL_FIELDS = ["roll_on_expiry","intraday","exit_next_day"];
 const TIME_FIELDS = ["session_start","last_entry","square_off","entry_time","exit_time"];
 const ENUMS = { entry_mode: ["FLIP","JOIN"], trade_type: ["OPTIONS","FUTURES"], direction: ["BOTH","LONG_ONLY","SHORT_ONLY"], qty_mode: ["LOTS","UNITS"],
-  product_type: ["I","M"], exchange: ["NSE","BSE"], bias_source: ["COMPLETED","LIVE"], after_hours_flip: ["FIRST_CLOSE","OPEN"], entry_trigger: ["CLOSE","BREAKOUT"] };
+  product_type: ["I","M"], exchange: ["NSE","BSE","MCX"], bias_source: ["COMPLETED","LIVE"], after_hours_flip: ["FIRST_CLOSE","OPEN"], entry_trigger: ["CLOSE","BREAKOUT"],
+  option_side: ["BUY","SELL"], expiry_flag: ["WEEK","MONTH"] };
 
 const $ = (id) => document.getElementById(id);
 let state = { settings: null, strategies: [] }, selected = null, pending = null, formDirty = false;
@@ -460,11 +521,21 @@ function istText(iso) {
 }
 function istDate(offsetDays) { return new Date(Date.now() + 19800000 + offsetDays * 86400000).toISOString().slice(0, 10); }
 function istNow() { const d = new Date(Date.now() + 19800000); return { wd: d.getUTCDay(), min: d.getUTCHours() * 60 + d.getUTCMinutes() }; }
-function marketOpen() { const n = istNow(); return n.wd >= 1 && n.wd <= 5 && n.min >= 555 && n.min < 930; }
+// NSE/BSE 09:15–15:30; MCX 09:00–23:30 while US daylight saving is on, else 23:55.
+function mcxClose(date) {
+  const y = Number(date.slice(0, 4));
+  const nth = (m, n) => { const f = new Date(Date.UTC(y, m - 1, 1)).getUTCDay(); return `${y}-${String(m).padStart(2, "0")}-${String(1 + ((7 - f) % 7) + (n - 1) * 7).padStart(2, "0")}`; };
+  return date >= nth(3, 2) && date < nth(11, 1) ? 1410 : 1435;
+}
+function marketOpenFor(seg) {
+  const n = istNow(); if (n.wd < 1 || n.wd > 5) return false;
+  return isMcx(seg) ? n.min >= 540 && n.min < mcxClose(istDate(0)) : n.min >= 555 && n.min < 930;
+}
+function marketOpen() { return marketOpenFor("IDX_I") || marketOpenFor("MCX_COMM"); }
 function paintMarket() {
-  const open = marketOpen();
-  $("mktDot").classList.toggle("on", open);
-  $("mktText").textContent = open ? "Market open · engine checking every minute" : "Market closed · engine idle";
+  const nse = marketOpenFor("IDX_I"), mcx = marketOpenFor("MCX_COMM");
+  $("mktDot").classList.toggle("on", nse || mcx);
+  $("mktText").textContent = nse ? "NSE/BSE & MCX open · engine checking every minute" : mcx ? "MCX open · engine checking every minute" : "Markets closed · engine idle";
 }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
@@ -507,12 +578,12 @@ function cur() { return state.strategies.find((s) => s.id === selected); }
 function needsUpgrade() { return false; }
 function isTimed(s) { return s && s.strategy_kind === "TIMED"; }
 function isHA(s) { return s && s.strategy_kind === "HA"; }
-function kindName(s) { return isTimed(s) ? "Timed" : isHA(s) ? "Heikin Ashi" : "Supertrend"; }
+function kindName(s) { return isTimed(s) ? "Timed" : isHA(s) ? "Heikin Ashi" : s && s.strategy_kind === "RULES" ? "Conditions" : "Supertrend"; }
 function biasName(tf) { return tf === "D" ? "Daily" : (Number(tf) % 60 === 0 ? `${Number(tf) / 60}-hour` : `${tf}-minute`); }
 
 function showEmpty() {
   $("stratPane").hidden = true; $("emptyPane").hidden = false;
-  $("emptyPane").innerHTML = '<div class="empty"><div><h3 style="margin-bottom:6px">No strategies yet</h3><p>Create one with “+ New strategy”, then pick Supertrend, Heikin Ashi or higher-timeframe in its Settings. New strategies start paused and in paper mode, so nothing is sent until you switch them on and go live.</p></div></div>';
+  $("emptyPane").innerHTML = '<div class="empty"><div><h3 style="margin-bottom:6px">No strategies yet</h3><p>Create one with “+ New strategy”, then pick Supertrend, Heikin Ashi, your own conditions or higher-timeframe in its Settings. New strategies start paused and in paper mode, so nothing is sent until you switch them on and go live.</p></div></div>';
 }
 
 function chipsFor(s) {
@@ -520,8 +591,9 @@ function chipsFor(s) {
   c.push(s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>');
   c.push(s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>');
   c.push(`<span class="chip blue">${kindName(s)}</span>`);
-  if (s.position === "LONG") c.push(`<span class="chip green">${s.trade_type === "OPTIONS" ? "Holding CE" : "Long"}</span>`);
-  if (s.position === "SHORT") c.push(`<span class="chip red">${s.trade_type === "OPTIONS" ? "Holding PE" : "Short"}</span>`);
+  const optTxt = (side) => s.pos_option_type ? `${s.pos_option_side === "SELL" ? "Short" : "Holding"} ${s.pos_option_type}` : side;
+  if (s.position === "LONG") c.push(`<span class="chip green">${s.trade_type === "OPTIONS" ? optTxt("Bullish") : "Long"}</span>`);
+  if (s.position === "SHORT") c.push(`<span class="chip red">${s.trade_type === "OPTIONS" ? optTxt("Bearish") : "Short"}</span>`);
   if (s.last_error) c.push('<span class="chip red">Error</span>');
   return c.join("");
 }
@@ -529,9 +601,11 @@ function chipsFor(s) {
 function describe(s) {
   const st = `ST(${s.atr_period}, ${Number(s.factor)})`;
   if (isTimed(s)) return `${s.underlying} · ${biasName(s.bias_timeframe)} ${st} · buy ${String(s.entry_time).slice(0, 5)}, sell ${s.exit_next_day ? "next day " : ""}${String(s.exit_time).slice(0, 5)}`;
-  const sig = isHA(s) ? "Heikin Ashi" : st;
-  const ord = s.entry_trigger === "BREAKOUT" ? ` · breakout ±${Number(s.buffer_points)}` : "";
-  return `${s.underlying} · ${s.timeframe_min}m ${sig}${ord} · ${s.trade_type === "OPTIONS" ? "Options" : "Futures"}`;
+  const n = s.rules ? ["long", "short", "exitLong", "exitShort"].reduce((a, k) => a + ((s.rules[k] && s.rules[k].conds) || []).length, 0) : 0;
+  const sig = isHA(s) ? "Heikin Ashi" : s.strategy_kind === "RULES" ? `${n} condition${n === 1 ? "" : "s"}` : st;
+  const ord = s.strategy_kind !== "RULES" && s.entry_trigger === "BREAKOUT" ? ` · breakout ±${Number(s.buffer_points)}` : "";
+  const inst = s.trade_type === "OPTIONS" ? (s.option_side === "SELL" ? "Option writing" : "Options") : "Futures";
+  return `${(PRESETS[s.underlying] && PRESETS[s.underlying].name) || s.underlying} · ${s.timeframe_min}m ${sig}${ord} · ${inst}`;
 }
 
 function stratButton(s) {
@@ -603,18 +677,126 @@ function renderStrategy() {
   if (!formDirty) fillForm(s);
 }
 
+/* ---------- condition builder ---------- */
+const IND_DEFS = {
+  ST: { name: "Supertrend", params: [["atr", "ATR", 10], ["factor", "Factor", 3]], ops: [["up", "is up (green)"], ["down", "is down (red)"], ["turns_up", "turns up"], ["turns_down", "turns down"]] },
+  HA: { name: "Heikin Ashi", params: [], ops: [["green", "is green"], ["red", "is red"], ["turns_green", "turns green"], ["turns_red", "turns red"]] },
+  RSI: { name: "RSI", params: [["len", "Length", 14]], ops: [["gt", "is above"], ["lt", "is below"], ["cross_above", "crosses above"], ["cross_below", "crosses below"]], value: 60 },
+  EMA: { name: "EMA", params: [["len", "Length", 20], ["len2", "Slow (fast/slow)", 50]], ops: [["price_above", "price above EMA"], ["price_below", "price below EMA"], ["price_cross_above", "price crosses above EMA"], ["price_cross_below", "price crosses below EMA"], ["fast_above_slow", "fast EMA above slow"], ["fast_below_slow", "fast EMA below slow"], ["fast_cross_above", "fast crosses above slow"], ["fast_cross_below", "fast crosses below slow"]] },
+  SMA: { name: "SMA", params: [["len", "Length", 20], ["len2", "Slow (fast/slow)", 50]], ops: [["price_above", "price above SMA"], ["price_below", "price below SMA"], ["price_cross_above", "price crosses above SMA"], ["price_cross_below", "price crosses below SMA"], ["fast_above_slow", "fast SMA above slow"], ["fast_below_slow", "fast SMA below slow"], ["fast_cross_above", "fast crosses above slow"], ["fast_cross_below", "fast crosses below slow"]] },
+  MACD: { name: "MACD", params: [["fast", "Fast", 12], ["slow", "Slow", 26], ["sig", "Signal", 9]], ops: [["above_signal", "MACD above signal"], ["below_signal", "MACD below signal"], ["cross_above_signal", "MACD crosses above signal"], ["cross_below_signal", "MACD crosses below signal"], ["hist_pos", "histogram positive"], ["hist_neg", "histogram negative"], ["above_zero", "MACD above zero"], ["below_zero", "MACD below zero"]] },
+  VWAP: { name: "VWAP", params: [], ops: [["price_above", "price above VWAP"], ["price_below", "price below VWAP"], ["price_cross_above", "price crosses above VWAP"], ["price_cross_below", "price crosses below VWAP"]] },
+  BB: { name: "Bollinger Bands", params: [["len", "Length", 20], ["mult", "Std dev", 2]], ops: [["close_above_upper", "close above upper band"], ["close_below_lower", "close below lower band"], ["cross_above_upper", "crosses above upper band"], ["cross_below_lower", "crosses below lower band"], ["price_above_mid", "price above middle band"], ["price_below_mid", "price below middle band"]] },
+  ADX: { name: "ADX / DMI", params: [["len", "Length", 14]], ops: [["gt", "ADX is above"], ["lt", "ADX is below"], ["cross_above", "ADX crosses above"], ["cross_below", "ADX crosses below"], ["plus_above_minus", "+DI above −DI"], ["minus_above_plus", "−DI above +DI"]], value: 25 },
+  ATR: { name: "ATR (points)", params: [["len", "Length", 14]], ops: [["gt", "is above"], ["lt", "is below"]], value: 50 },
+  PDHL: { name: "Previous day high / low", params: [], ops: [["above_pdh", "price above prev-day high"], ["below_pdl", "price below prev-day low"], ["cross_above_pdh", "crosses above prev-day high"], ["cross_below_pdl", "crosses below prev-day low"]] },
+  ORB: { name: "Opening range", params: [["mins", "First minutes", 15]], ops: [["above_orh", "price above range high"], ["below_orl", "price below range low"], ["cross_above_orh", "breaks above range high"], ["cross_below_orl", "breaks below range low"]] },
+};
+const VALUE_OPS = new Set(["gt", "lt", "cross_above", "cross_below"]);
+const COND_TFS = [["base", "Strategy timeframe"], ["1", "1 min"], ["3", "3 min"], ["5", "5 min"], ["15", "15 min"], ["30", "30 min"], ["60", "1 hour"], ["120", "2 hours"], ["240", "4 hours"], ["D", "Daily"]];
+const RULE_SETS = [
+  ["long", "buy", "Buy (go long / bullish options) when", true],
+  ["short", "sell", "Sell (go short / bearish options) when", true],
+  ["exitLong", "exit", "Exit a long when (optional)", false],
+  ["exitShort", "exit", "Exit a short when (optional)", false],
+];
+const DEFAULT_RULES = {
+  long: { mode: "ALL", conds: [{ ind: "ST", tf: "60", p: { atr: 10, factor: 3 }, op: "up" }, { ind: "RSI", tf: "base", p: { len: 14 }, op: "gt", v: 60 }] },
+  short: { mode: "ALL", conds: [{ ind: "ST", tf: "60", p: { atr: 10, factor: 3 }, op: "down" }, { ind: "RSI", tf: "base", p: { len: 14 }, op: "lt", v: 40 }] },
+  exitLong: { mode: "ANY", conds: [] }, exitShort: { mode: "ANY", conds: [] },
+};
+let ruleState = JSON.parse(JSON.stringify(DEFAULT_RULES));
+const mkSel = (opts, val) => { const s = document.createElement("select"); for (const [v, t] of opts) { const o = document.createElement("option"); o.value = v; o.textContent = t; s.append(o); } if (val !== undefined) s.value = String(val); return s; };
+const wrapLabel = (text, el) => { const l = document.createElement("label"); const sp = document.createElement("span"); sp.textContent = text; l.append(sp, el); return l; };
+function condRow(setKey, idx, c) {
+  const def = IND_DEFS[c.ind] || IND_DEFS.RSI;
+  const row = document.createElement("div"); row.className = "condrow";
+  if (idx > 0) { const j = document.createElement("span"); j.className = "join"; j.textContent = ruleState[setKey].mode === "ANY" ? "OR" : "AND"; row.append(j); }
+  const ind = mkSel(Object.entries(IND_DEFS).map(([k, d]) => [k, d.name]), c.ind);
+  ind.addEventListener("change", () => {
+    const d = IND_DEFS[ind.value];
+    ruleState[setKey].conds[idx] = { ind: ind.value, tf: c.tf, p: Object.fromEntries(d.params.map(([k, , dv]) => [k, dv])), op: d.ops[0][0], ...(d.value !== undefined ? { v: d.value } : {}) };
+    renderRules(); formDirty = true;
+  });
+  row.append(wrapLabel("Indicator", ind));
+  const tf = mkSel(COND_TFS, c.tf); tf.addEventListener("change", () => { c.tf = tf.value; formDirty = true; });
+  row.append(wrapLabel("Timeframe", tf));
+  for (const [k, label, dv] of def.params) {
+    const inp = document.createElement("input"); inp.type = "number"; inp.step = k === "factor" || k === "mult" ? "0.1" : "1"; inp.min = "1";
+    inp.value = String((c.p && c.p[k] !== undefined) ? c.p[k] : dv);
+    inp.addEventListener("input", () => { c.p = c.p || {}; c.p[k] = Number(inp.value); });
+    row.append(wrapLabel(label, inp));
+  }
+  const op = mkSel(def.ops, c.op);
+  const val = document.createElement("input"); val.type = "number"; val.step = "any"; val.value = String(c.v ?? def.value ?? 0);
+  const valWrap = wrapLabel("Value", val);
+  const showVal = () => { valWrap.hidden = !VALUE_OPS.has(op.value); };
+  op.addEventListener("change", () => { c.op = op.value; showVal(); formDirty = true; });
+  val.addEventListener("input", () => { c.v = Number(val.value); });
+  row.append(wrapLabel("Condition", op), valWrap); showVal();
+  const x = document.createElement("button"); x.type = "button"; x.className = "btn small x"; x.textContent = "✕"; x.title = "Remove condition";
+  x.addEventListener("click", () => { ruleState[setKey].conds.splice(idx, 1); renderRules(); formDirty = true; });
+  row.append(x);
+  return row;
+}
+function renderRules() {
+  for (const [key, cls, title] of RULE_SETS) {
+    const box = $("rs_" + key); box.innerHTML = "";
+    const set = ruleState[key] = ruleState[key] || { mode: "ALL", conds: [] };
+    const wrap = document.createElement("div"); wrap.className = "ruleset " + cls;
+    const h = document.createElement("h4"); h.append(document.createTextNode(title + " "));
+    const mode = mkSel([["ALL", "ALL"], ["ANY", "ANY"]], set.mode);
+    mode.addEventListener("change", () => { set.mode = mode.value; renderRules(); formDirty = true; });
+    h.append(mode, document.createTextNode(" of these are true"));
+    wrap.append(h);
+    set.conds.forEach((c, i) => wrap.append(condRow(key, i, c)));
+    if (!set.conds.length) { const p = document.createElement("p"); p.className = "hint"; p.textContent = key.startsWith("exit") ? "No exit rules: the position closes on the opposite signal (or when its own rules stop being true)." : "No conditions: this side won't trade."; wrap.append(p); }
+    const add = document.createElement("button"); add.type = "button"; add.className = "btn small"; add.textContent = "+ Add condition";
+    add.disabled = set.conds.length >= 6;
+    add.addEventListener("click", () => { set.conds.push({ ind: "RSI", tf: "base", p: { len: 14 }, op: "gt", v: 60 }); renderRules(); formDirty = true; });
+    wrap.append(add);
+    box.append(wrap);
+  }
+}
+function readRules() {
+  const r = JSON.parse(JSON.stringify(ruleState));
+  for (const k of Object.keys(r)) {
+    for (const c of r[k].conds) {
+      const def = IND_DEFS[c.ind];
+      c.p = Object.fromEntries(def.params.map(([pk, , dv]) => [pk, Number.isFinite(Number(c.p?.[pk])) && Number(c.p?.[pk]) > 0 ? Number(c.p[pk]) : dv]));
+      if (VALUE_OPS.has(c.op)) { if (!Number.isFinite(Number(c.v))) throw new Error(`Enter a value for ${def.name}.`); c.v = Number(c.v); } else delete c.v;
+      if (c.ind === "VWAP" && c.tf === "D") throw new Error("VWAP is an intraday measure; pick an intraday timeframe for it.");
+    }
+  }
+  if (!r.long.conds.length && !r.short.conds.length) throw new Error("Add at least one Buy or Sell condition.");
+  return r;
+}
+
 function applyKindVisibility() {
-  const kind = $("f_kind").value, timed = kind === "TIMED", ha = kind === "HA";
+  const kind = $("f_kind").value, timed = kind === "TIMED", ha = kind === "HA", rules = kind === "RULES";
+  const mcx = isMcx($("f_data_segment").value);
   document.querySelectorAll(".timed-only").forEach((el) => el.hidden = !timed);
   document.querySelectorAll(".flip-only").forEach((el) => el.hidden = timed);
-  document.querySelectorAll(".st-only").forEach((el) => el.hidden = ha);
+  document.querySelectorAll(".st-only").forEach((el) => el.hidden = ha || rules);
+  document.querySelectorAll(".rules-only").forEach((el) => el.hidden = !rules);
   if (!timed) document.querySelectorAll(".buffer-only").forEach((el) => el.hidden = $("f_entry_trigger").value !== "BREAKOUT");
-  $("sigLegend").textContent = ha ? "Heikin Ashi signal" : "Supertrend";
+  if (rules) document.querySelectorAll(".no-rules").forEach((el) => el.hidden = true);
+  else document.querySelectorAll(".no-rules:not(.buffer-only)").forEach((el) => el.hidden = timed && el.closest(".flip-only") !== null);
+  $("sigLegend").textContent = ha ? "Heikin Ashi signal" : rules ? "Decision timeframe" : "Supertrend";
+  $("tfLabel").textContent = rules ? "Decide when a candle of this many minutes closes" : "Candle timeframe (minutes)";
+  $("emFresh").textContent = rules ? "Only when the rules newly become true" : "Only on a fresh flip";
+  $("emJoin").textContent = rules ? "Whenever the rules are true" : "Join the current trend";
   $("kindHint").textContent = ha
     ? "Signals come from Heikin Ashi candle colour: green after red = buy, red after green = sell (stop and reverse). Orders use normal candle prices."
     : timed ? "At a fixed time, buys a call if the higher-timeframe Supertrend is up or a put if it's down, and exits at a fixed time (e.g. next morning)."
+    : rules ? "Build Buy and Sell rules from indicators on any timeframe, e.g. “Supertrend on 1 hour is up AND RSI on 15 min is above 60 → buy”. Combine 2–6 conditions with ALL or ANY."
     : "Stop and reverse on Supertrend: buy when it turns green, sell and go short when it turns red.";
+  // Commodities trade as MCX futures here (Dhan has no expired commodity-option history to backtest with).
+  if (mcx && $("f_trade_type").value === "OPTIONS") $("f_trade_type").value = "FUTURES";
+  $("f_trade_type").querySelector('option[value="OPTIONS"]').disabled = mcx;
+  $("lotLabel").textContent = mcx ? "P&L multiplier per lot (price unit × lot)" : "Lot size (verify current)";
   $("optSet").hidden = $("f_trade_type").value !== "OPTIONS";
+  if (rules) renderRules();
 }
 
 function fillForm(s) {
@@ -626,6 +808,7 @@ function fillForm(s) {
     el.value = v === null || v === undefined ? "" : String(v);
   }
   $("f_kind").value = s.strategy_kind || "FLIP";
+  ruleState = JSON.parse(JSON.stringify(s.rules && (s.rules.long || s.rules.short) ? { ...DEFAULT_RULES, exitLong: { mode: "ANY", conds: [] }, exitShort: { mode: "ANY", conds: [] }, ...s.rules } : DEFAULT_RULES));
   applyKindVisibility();
   $("formMsg").textContent = "";
 }
@@ -643,14 +826,8 @@ function baseChartOpts() {
 }
 /* chart explorer */
 const ASSETS = [
-  { key: "13", name: "NIFTY 50", sec: "13", seg: "IDX_I", instr: "INDEX" },
-  { key: "25", name: "BANK NIFTY", sec: "25", seg: "IDX_I", instr: "INDEX" },
-  { key: "27", name: "FIN NIFTY", sec: "27", seg: "IDX_I", instr: "INDEX" },
-  { key: "442", name: "MIDCAP NIFTY", sec: "442", seg: "IDX_I", instr: "INDEX" },
-  { key: "51", name: "SENSEX", sec: "51", seg: "IDX_I", instr: "INDEX" },
-  { key: "69", name: "BANKEX", sec: "69", seg: "IDX_I", instr: "INDEX" },
-  { key: "21", name: "INDIA VIX", sec: "21", seg: "IDX_I", instr: "INDEX" },
-  { key: "custom", name: "Other instrument…" },
+  ...Object.entries(PRESETS).map(([k, p]) => ({ key: p.data_security_id, name: p.name, group: p.group, sec: p.data_security_id, seg: p.data_segment, instr: p.data_instrument })),
+  { key: "custom", name: "Other instrument…", group: "Other" },
 ];
 const TFS = [["1", "1m"], ["3", "3m"], ["5", "5m"], ["15", "15m"], ["30", "30m"], ["60", "1h"], ["120", "2h"], ["240", "4h"], ["D", "1D"], ["W", "1W"]];
 const RANGES = [["1", "Today"], ["7", "5 days"], ["31", "1 month"], ["92", "3 months"], ["184", "6 months"], ["366", "1 year"], ["731", "2 years"], ["1095", "3 years"], ["1827", "5 years"], ["3660", "10 years"], ["7320", "20 years"]];
@@ -763,7 +940,13 @@ function heikinAshiJS(bars) {
 }
 
 function buildCxControls() {
-  $("cx_asset").innerHTML = ""; for (const a of ASSETS) { const o = document.createElement("option"); o.value = a.key; o.textContent = a.name; $("cx_asset").append(o); }
+  $("cx_asset").innerHTML = "";
+  const gs = {}; for (const a of ASSETS) (gs[a.group] = gs[a.group] || []).push(a);
+  for (const [g, items] of Object.entries(gs)) {
+    const og = document.createElement("optgroup"); og.label = g;
+    for (const a of items) { const o = document.createElement("option"); o.value = a.key; o.textContent = a.name; og.append(o); }
+    $("cx_asset").append(og);
+  }
   $("cx_tf").innerHTML = "";
   for (const [v, label] of TFS) {
     const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.dataset.tf = v;
@@ -796,13 +979,13 @@ function cxFromStrategy(s) {
   cx.tf = s.strategy_kind === "TIMED" ? String(s.bias_timeframe) : String(s.timeframe_min);
   cx.range = tfDefaultRange(cx.tf);
   cx.atr = s.atr_period; cx.fac = Number(s.factor); cx.sig = s.strategy_kind === "HA" ? "HA" : "ST";
-  cx.sim = s.strategy_kind === "TIMED" ? null : s;
+  cx.sim = s.strategy_kind === "TIMED" || s.strategy_kind === "RULES" ? null : s;
   paintCx();
 }
 // The strategy whose rules drive the "filled trades" markers, when the chart shows that strategy's own asset, timeframe and settings.
 function simStrategy() {
   const s = cx.sim && (state.strategies.find((x) => x.id === cx.sim.id) || cx.sim);
-  if (!s || s.strategy_kind === "TIMED") return null;
+  if (!s || s.strategy_kind === "TIMED" || s.strategy_kind === "RULES") return null; // condition strategies: use "Show these trades on the chart" from a backtest
   if (String(s.data_security_id) !== String(cx.sec) || s.data_segment !== cx.seg || String(s.timeframe_min) !== cx.tf) return null;
   if ((s.strategy_kind === "HA") !== (cx.sig === "HA")) return null;
   if (s.strategy_kind !== "HA" && (Number(s.atr_period) !== Number(cx.atr) || Number(s.factor) !== Number(cx.fac))) return null;
@@ -1008,7 +1191,7 @@ function drawChart(fit) {
 }
 function paintLive() {
   const secs = Number(cx.live);
-  const on = secs > 0 && marketOpen();
+  const on = secs > 0 && marketOpenFor(cx.seg);
   const when = cxLast ? new Date(cxLast).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false }) : "–";
   $("liveInfo").innerHTML = "";
   const dot = document.createElement("span"); dot.className = "livedot" + (on ? " on" : "");
@@ -1023,7 +1206,7 @@ function startCxLive() {
   if (!secs) { paintLive(); return; }
   cxTimer = setTimeout(async function tick() {
     const my = cxReq;
-    if (!document.hidden && marketOpen() && cxBars.length) {
+    if (!document.hidden && marketOpenFor(cx.seg) && cxBars.length) {
       try {
         const lastT = cxBars[cxBars.length - 1].t;
         const lastDay = new Date((lastT + 19800) * 1000).toISOString().slice(0, 10);
@@ -1338,13 +1521,15 @@ $("bt_quick").addEventListener("click", (e) => {
 // Current F&O rates (as on brokers' calculators, Oct 2026). BSE exchange charges differ from NSE.
 const CHARGE_KEYS = ["brk_pct", "stt_fut", "stt_opt", "exch_fut", "exch_opt", "sebi", "gst", "stamp_fut", "stamp_opt"];
 function defaultCharges(exchange) {
-  const bse = exchange === "BSE";
+  const bse = exchange === "BSE", mcx = exchange === "MCX";
+  // MCX: commodity transaction tax (CTT) 0.01% on the sell side of non-agri futures in place of STT; exchange charge ~0.0021%.
+  if (mcx) return { brk_pct: 0.03, stt_fut: 0.01, stt_opt: 0.05, exch_fut: 0.0021, exch_opt: 0.0418, sebi: 0.0001, gst: 18, stamp_fut: 0.002, stamp_opt: 0.003 };
   return { brk_pct: 0.03, stt_fut: 0.05, stt_opt: 0.15, exch_fut: bse ? 0 : 0.00183, exch_opt: bse ? 0.0325 : 0.03553, sebi: 0.0001, gst: 18, stamp_fut: 0.002, stamp_opt: 0.003 };
 }
 function fillCharges(exchange) {
   const d = defaultCharges(exchange);
   for (const k of CHARGE_KEYS) $("ch_" + k).value = String(d[k]);
-  $("btChargesSum").textContent = `· ${exchange === "BSE" ? "BSE" : "NSE"} rates`;
+  $("btChargesSum").textContent = `· ${exchange === "BSE" ? "BSE" : exchange === "MCX" ? "MCX (CTT in the STT box)" : "NSE"} rates`;
 }
 $("ch_reset").addEventListener("click", () => fillCharges((cur() || {}).exchange));
 $("btForm").addEventListener("submit", (e) => {
@@ -1478,15 +1663,26 @@ $("f_trade_type").addEventListener("change", applyKindVisibility);
 $("f_exit_next_day").addEventListener("change", () => {
   if ($("f_exit_next_day").value === "true" && $("f_product_type").value === "I") { $("f_product_type").value = "M"; $("formMsg").textContent = "Switched product type to M (carry forward) for overnight holding."; }
 });
+fillUnderlyingSelect($("f_underlying"), true);
 $("f_underlying").addEventListener("change", () => {
   const p = PRESETS[$("f_underlying").value]; if (!p) return;
-  for (const [k, v] of Object.entries(p)) { const el = $("f_" + k); if (el) el.value = String(v); }
-  $("formMsg").textContent = "Filled the usual values for " + $("f_underlying").value + ". Check the lot size and expiry day.";
+  for (const [k, v] of Object.entries(p)) { const el = $("f_" + k); if (el && k !== "name") el.value = String(v); }
+  if (p.commodity) {
+    // MCX futures: quantity in lots, evening session.
+    $("f_trade_type").value = "FUTURES"; $("f_qty_mode").value = "LOTS";
+    if ($("f_session_start").value < "09:00" || $("f_last_entry").value <= "15:30") { $("f_session_start").value = "09:15"; $("f_last_entry").value = "23:00"; $("f_square_off").value = "23:15"; }
+    $("formMsg").textContent = `Filled MCX values for ${p.name}: futures only, quantity in lots, session 09:15–23:00 (square-off 23:15). Check the multiplier and session times.`;
+  } else {
+    if ($("f_last_entry").value > "15:30") { $("f_session_start").value = "09:20"; $("f_last_entry").value = "15:00"; $("f_square_off").value = "15:15"; }
+    $("formMsg").textContent = `Filled the usual values for ${p.name}. Check the lot size and expiry day.`;
+  }
+  applyKindVisibility();
 });
 
 function readForm() {
   const out = { strategy_kind: $("f_kind").value };
-  if (!["FLIP", "HA", "TIMED"].includes(out.strategy_kind)) throw new Error("Pick a strategy type.");
+  if (!["FLIP", "HA", "TIMED", "RULES"].includes(out.strategy_kind)) throw new Error("Pick a strategy type.");
+  if (out.strategy_kind === "RULES") out.rules = readRules();
   for (const k of FIELDS) {
     const el = $("f_" + k); let v = el.value.trim();
     const name = el.closest(".f") ? el.closest(".f").querySelector("span").textContent : k;
@@ -1506,8 +1702,9 @@ function readForm() {
     if (out.session_start >= out.last_entry) throw new Error("“First trade from” must be earlier than “No trades after”.");
     if (out.intraday && out.last_entry > out.square_off) throw new Error("“No trades after” must not be later than the square-off time.");
   } else {
-    const inMkt = (t) => t >= "09:15" && t < "15:30";
-    if (!inMkt(out.entry_time) || !inMkt(out.exit_time)) throw new Error("Buy and sell times must be between 09:15 and 15:29.");
+    const mcx = isMcx(out.data_segment);
+    const inMkt = (t) => mcx ? t >= "09:00" && t < "23:30" : t >= "09:15" && t < "15:30";
+    if (!inMkt(out.entry_time) || !inMkt(out.exit_time)) throw new Error(mcx ? "Buy and sell times must be between 09:00 and 23:29." : "Buy and sell times must be between 09:15 and 15:29.");
     if (!out.exit_next_day && out.exit_time <= out.entry_time) throw new Error("For a same-day exit, “Sell at” must be later than “Buy at”.");
     if (out.exit_next_day && out.trade_type === "OPTIONS" && !out.roll_on_expiry) throw new Error("For overnight option trades, set “On expiry day” to use next week's expiry; today's contract expires before your exit.");
     if (out.exit_next_day && out.product_type === "I") throw new Error("Overnight trades need product type M (carry forward); intraday positions get squared off by the broker.");
