@@ -8,7 +8,8 @@ import { type Bar, type DayBar, heikinAshi, ist, sessionFor, supertrend } from "
 
 export type Cond = { ind: string; tf: string; p?: Record<string, number>; op: string; v?: number };
 export type RuleSet = { mode: "ALL" | "ANY"; conds: Cond[] };
-export type Rules = { long?: RuleSet; short?: RuleSet; exitLong?: RuleSet; exitShort?: RuleSet };
+/** daily: decide once a day at the session open from completed daily candles (all conditions on "D"). */
+export type Rules = { long?: RuleSet; short?: RuleSet; exitLong?: RuleSet; exitShort?: RuleSet; daily?: boolean };
 export type Signals = { long: boolean; short: boolean; exitLong: boolean | null; exitShort: boolean | null };
 type Side = "LONG" | "SHORT";
 
@@ -22,6 +23,7 @@ export function allConds(r: Rules): Cond[] {
 
 /** Timeframes (in minutes, or "D") a rule book needs, with the strategy's own timeframe resolved. */
 export function ruleTimeframes(r: Rules, baseTf: number): { intraday: number[]; daily: boolean } {
+  if (r.daily) return { intraday: [], daily: true };
   const tfs = new Set<number>([baseTf]);
   let daily = false;
   for (const c of allConds(r)) {
@@ -90,9 +92,12 @@ export class RuleBook {
   private daily: DayBar[];
   private baseByDay: Map<string, { min: number; h: number; l: number }[]>;
   private seg: string;
+  private memo: Map<string, unknown>;
+  /** memo: optional cache of indicator series shared by many rule books on the same candles (the strategy lab). */
   constructor(rules: Rules, baseTf: number, frames: Map<number, Bar[]>, daily: DayBar[],
-    baseByDay: Map<string, { min: number; h: number; l: number }[]>, seg: string) {
+    baseByDay: Map<string, { min: number; h: number; l: number }[]>, seg: string, memo?: Map<string, unknown>) {
     this.rules = rules; this.baseTf = baseTf; this.frames = frames; this.daily = daily; this.baseByDay = baseByDay; this.seg = seg;
+    this.memo = memo ?? new Map();
     for (const c of allConds(rules)) this.checks.set(c, this.build(c));
   }
 
@@ -107,7 +112,13 @@ export class RuleBook {
   private build(c: Cond): { frame: Frame; check: Check } {
     const frame = this.frameFor(c);
     const b = frame.bars as (Bar & DayBar)[];
-    const close = b.map((x) => x.c);
+    const fk = c.tf === "D" ? "D" : String(c.tf === "base" ? this.baseTf : Number(c.tf));
+    const M = <T>(name: string, fn: () => T): T => {
+      const key = `${fk}|${b.length}|${name}`;
+      if (!this.memo.has(key)) this.memo.set(key, fn());
+      return this.memo.get(key) as T;
+    };
+    const close = M("close", () => b.map((x) => x.c));
     const p = c.p ?? {}, v = Number(c.v ?? 0);
     const ok = (...xs: number[]) => xs.every((x) => !isNaN(x));
     const above = (a: number[], bb: number[] | number, k: number) => { const y = typeof bb === "number" ? bb : bb[k]; return ok(a[k], y) && a[k] > y; };
@@ -117,27 +128,27 @@ export class RuleBook {
     let check: Check = () => false;
     switch (c.ind) {
       case "ST": {
-        const tr = supertrend(b, p.atr ?? 10, p.factor ?? 3).trend;
+        const tr = M(`ST${p.atr ?? 10},${p.factor ?? 3}`, () => supertrend(b, p.atr ?? 10, p.factor ?? 3).trend);
         check = (k) => c.op === "up" ? tr[k] === 1 : c.op === "down" ? tr[k] === -1
           : c.op === "turns_up" ? k > 0 && tr[k] === 1 && tr[k - 1] === -1 : c.op === "turns_down" ? k > 0 && tr[k] === -1 && tr[k - 1] === 1 : false;
         break;
       }
       case "HA": {
-        const tr = heikinAshi(b).trend;
+        const tr = M("HA", () => heikinAshi(b).trend);
         check = (k) => c.op === "green" ? tr[k] === 1 : c.op === "red" ? tr[k] === -1
           : c.op === "turns_green" ? k > 0 && tr[k] === 1 && tr[k - 1] === -1 : c.op === "turns_red" ? k > 0 && tr[k] === -1 && tr[k - 1] === 1 : false;
         break;
       }
       case "RSI": case "ADX": case "ATR": {
-        const d = c.ind === "ADX" ? adx(b, p.len ?? 14) : null;
-        const s = c.ind === "RSI" ? rsi(close, p.len ?? 14) : c.ind === "ATR" ? atr(b, p.len ?? 14) : d!.adx;
+        const d = c.ind === "ADX" ? M(`ADX${p.len ?? 14}`, () => adx(b, p.len ?? 14)) : null;
+        const s = c.ind === "RSI" ? M(`RSI${p.len ?? 14}`, () => rsi(close, p.len ?? 14)) : c.ind === "ATR" ? M(`ATR${p.len ?? 14}`, () => atr(b, p.len ?? 14)) : d!.adx;
         check = (k) => c.op === "gt" ? above(s, v, k) : c.op === "lt" ? below(s, v, k) : c.op === "cross_above" ? xUp(s, v, k) : c.op === "cross_below" ? xDn(s, v, k)
           : c.op === "plus_above_minus" ? above(d!.plus, d!.minus, k) : c.op === "minus_above_plus" ? above(d!.minus, d!.plus, k) : false;
         break;
       }
       case "EMA": case "SMA": {
         const f = c.ind === "EMA" ? ema : sma;
-        const m1 = f(close, p.len ?? 20), m2 = p.len2 ? f(close, p.len2) : m1;
+        const m1 = M(`${c.ind}${p.len ?? 20}`, () => f(close, p.len ?? 20)), m2 = p.len2 ? M(`${c.ind}${p.len2}`, () => f(close, p.len2!)) : m1;
         check = (k) => ({
           price_above: () => above(close, m1, k), price_below: () => below(close, m1, k),
           price_cross_above: () => xUp(close, m1, k), price_cross_below: () => xDn(close, m1, k),
@@ -147,7 +158,7 @@ export class RuleBook {
         break;
       }
       case "MACD": {
-        const m = macd(close, p.fast ?? 12, p.slow ?? 26, p.sig ?? 9);
+        const m = M(`MACD${p.fast ?? 12},${p.slow ?? 26},${p.sig ?? 9}`, () => macd(close, p.fast ?? 12, p.slow ?? 26, p.sig ?? 9));
         check = (k) => ({
           above_signal: () => above(m.line, m.signal, k), below_signal: () => below(m.line, m.signal, k),
           cross_above_signal: () => xUp(m.line, m.signal, k), cross_below_signal: () => xDn(m.line, m.signal, k),
@@ -158,14 +169,14 @@ export class RuleBook {
       }
       case "VWAP": {
         if (frame.isDaily) break; // VWAP is an intraday measure
-        const w = vwap(b);
+        const w = M("VWAP", () => vwap(b));
         check = (k) => c.op === "price_above" ? above(close, w, k) : c.op === "price_below" ? below(close, w, k)
           : c.op === "price_cross_above" ? xUp(close, w, k) && b[k - 1].day === b[k].day
           : c.op === "price_cross_below" ? xDn(close, w, k) && b[k - 1].day === b[k].day : false;
         break;
       }
       case "BB": {
-        const bb = bollinger(close, p.len ?? 20, p.mult ?? 2);
+        const bb = M(`BB${p.len ?? 20},${p.mult ?? 2}`, () => bollinger(close, p.len ?? 20, p.mult ?? 2));
         check = (k) => ({
           close_above_upper: () => above(close, bb.upper, k), close_below_lower: () => below(close, bb.lower, k),
           cross_above_upper: () => xUp(close, bb.upper, k), cross_below_lower: () => xDn(close, bb.lower, k),
@@ -180,7 +191,8 @@ export class RuleBook {
         let cacheDay = "", pd: DayBar | null = null;
         const get = (day: string) => { if (day !== cacheDay) { cacheDay = day; pd = prevDay(day); } return pd; };
         check = (k, _T, day) => {
-          const d = get(day); if (!d) return false;
+          // On daily candles compare the candle with the day before it; intraday, with the day before today.
+          const d = get(frame.isDaily ? b[k].day : day); if (!d) return false;
           const sameDay = k > 0 && b[k - 1].day === b[k].day;
           return c.op === "above_pdh" ? close[k] > d.h : c.op === "below_pdl" ? close[k] < d.l
             : c.op === "cross_above_pdh" ? close[k] > d.h && (!sameDay || close[k - 1] <= d.h)
@@ -291,6 +303,12 @@ export function validateRules(r: unknown): Rules {
     }
   }
   if (!has(rules.long) && !has(rules.short)) throw new Error("Add at least one Buy or Sell condition.");
+  if (rules.daily) {
+    for (const c of allConds(rules)) {
+      if (c.tf !== "D") throw new Error("A once-a-day strategy uses daily candles only; set every condition's timeframe to Daily.");
+      if (c.ind === "VWAP" || c.ind === "ORB") throw new Error("VWAP and opening range need intraday candles, so they can't be used in a once-a-day strategy.");
+    }
+  }
   return rules;
 }
 

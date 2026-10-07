@@ -184,6 +184,26 @@ legend { padding: 0; margin-bottom: 4px; }
 .gate { max-width: 560px; margin: 40px auto; padding-inline: 16px; }
 .btwrap { display: grid; gap: 16px; }
 .pos-num { color: var(--green); } .neg-num { color: var(--red); }
+.pair { display: flex; gap: 6px; min-width: 0; }
+.pair select { width: auto !important; flex: 0 0 auto; }
+.pair input { flex: 1 1 60px; }
+/* strategy lab */
+.labbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; }
+.labbar .f { min-width: 0; }
+.lab-table td.lbl { min-width: 260px; max-width: 520px; }
+.lab-table td.lbl .t { font-weight: 600; overflow-wrap: anywhere; }
+.lab-table tr.sel td { background: var(--blue-soft); }
+.months { display: grid; grid-template-columns: repeat(auto-fit, minmax(42px, 1fr)); gap: 4px; align-items: end; height: 150px; margin-top: 8px; }
+.months .mb { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 3px; min-width: 0; }
+.months .bar { width: 100%; border-radius: 3px 3px 0 0; min-height: 2px; }
+.months .bar.up { background: var(--logo-green); } .months .bar.dn { background: var(--logo-red); border-radius: 0 0 3px 3px; }
+.months .mt { font: 10px var(--font-data); color: var(--muted); white-space: nowrap; }
+.months .split { outline: 2px dashed var(--yellow); outline-offset: 2px; }
+.kv { display: grid; grid-template-columns: minmax(130px, max-content) 1fr; gap: 6px 14px; font-size: 13px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+.assetpick { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.assetpick label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; cursor: pointer; }
+.assetpick input { accent-color: var(--blue); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -192,6 +212,7 @@ legend { padding: 0; margin-bottom: 4px; }
 <header class="bar">
   <div class="brand"><h1><span class="b">CA</span> <span class="r">Ankit</span> <span class="y">Garg</span> <span class="g">Trade Desk</span></h1><small>Dhan · NSE / BSE</small></div>
   <span class="mk"><span class="dot" id="mktDot"></span><span id="mktText">Checking market hours…</span></span>
+  <button class="btn small" id="openLab" type="button">Strategy Lab</button>
   <button class="btn small" id="openSettings" type="button">Dhan connection</button>
   <span class="mk" id="who" hidden></span><button class="btn small" id="signOut" type="button" hidden>Sign out</button>
 </header>
@@ -339,7 +360,10 @@ legend { padding: 0; margin-bottom: 4px; }
             <p class="hint flip-only buffer-only no-rules">Breakout: after a buy signal the order triggers only if the next candle trades above the signal candle's high + buffer (sell: below its low − buffer). If it doesn't, the order is cancelled and re-placed from that candle's high / low, and so on until it fills or the signal turns. The trade is filled at the trigger price on normal candles.</p>
           </fieldset>
           <fieldset class="rules-only" id="rulesSet"><legend class="label">Conditions</legend>
-            <p class="hint">Conditions are checked each time a candle of the decision timeframe above closes, using the latest <em>completed</em> candle of each condition's own timeframe. Orders go in at that close. A long is closed by the “Exit long” rules if you add any; otherwise by the Sell rules (reversing into a short); with neither, as soon as the Buy rules stop being true. Shorts mirror this.</p>
+            <div class="grid"><label class="f wide"><span>When to check the conditions</span><select id="f_rules_daily">
+              <option value="false">Each time a candle of the decision timeframe closes</option>
+              <option value="true">Once a day at the open, on completed daily candles (positional)</option></select></label></div>
+            <p class="hint">Conditions are checked each time a candle of the decision timeframe above closes (or, once-a-day, at the session open on yesterday's daily candle), using the latest <em>completed</em> candle of each condition's own timeframe. Orders go in at that close. A long is closed by the “Exit long” rules if you add any; otherwise by the Sell rules (reversing into a short); with neither, as soon as the Buy rules stop being true. Shorts mirror this.</p>
             <div id="rs_long"></div><div id="rs_short"></div><div id="rs_exitLong"></div><div id="rs_exitShort"></div>
           </fieldset>
           <fieldset class="timed-only"><legend class="label">Timing (IST)</legend>
@@ -372,6 +396,17 @@ legend { padding: 0; margin-bottom: 4px; }
               <label class="f"><span>On expiry day</span><select id="f_roll_on_expiry"><option value="true">Use the next expiry</option><option value="false">Use today's expiry</option></select></label>
               <label class="f"><span>Expiry override (holiday weeks)</span><input id="f_expiry_override" type="date"></label>
             </div>
+          </fieldset>
+          <fieldset id="riskSet"><legend class="label">Stop loss, target &amp; risk</legend>
+            <div class="grid">
+              <label class="f"><span>Measure stops on</span><select id="r_basis"><option value="UNDERLYING">Index / commodity price</option><option value="PREMIUM">Option premium</option></select></label>
+              <div class="f"><span>Stop loss</span><div class="pair"><select id="r_sl_type" aria-label="Stop loss type"></select><input id="r_sl_val" type="number" min="0" step="any" aria-label="Stop loss value"></div></div>
+              <div class="f"><span>Target (take profit)</span><div class="pair"><select id="r_tgt_type" aria-label="Target type"></select><input id="r_tgt_val" type="number" min="0" step="any" aria-label="Target value"></div></div>
+              <div class="f"><span>Trailing stop</span><div class="pair"><select id="r_trail_type" aria-label="Trailing stop type"></select><input id="r_trail_val" type="number" min="0" step="any" aria-label="Trailing stop value"></div></div>
+              <label class="f"><span>ATR length (for ATR-based levels)</span><input id="r_atr_len" type="number" min="2" max="100" step="1" value="14"></label>
+              <label class="f"><span>Max loss per day (₹, blank = off)</span><input id="r_mdl" type="number" min="0" step="100" placeholder="e.g. 5000"></label>
+            </div>
+            <p class="hint" id="riskHint"></p>
           </fieldset>
           <fieldset class="flip-only"><legend class="label">Session (IST)</legend>
             <div class="grid">
@@ -438,6 +473,54 @@ legend { padding: 0; margin-bottom: 4px; }
           </div>
         </div>
       </section>
+    </div>
+
+    <div id="labPane" class="pane" hidden>
+      <section class="card">
+        <div class="head">
+          <div><span class="label">Research</span><h2>Strategy Lab</h2></div>
+          <div class="actions">
+            <button class="btn" id="lab_settings_btn" type="button">Lab settings</button>
+            <button class="btn danger" id="lab_stop" type="button" hidden>Stop tonight's run</button>
+            <button class="btn primary" id="lab_run" type="button">Run now</button>
+          </div>
+        </div>
+        <p class="hint" style="margin:8px 0 0">Every evening at 16:05 IST the lab invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and only <strong>pass</strong> if they also made money in the last 3 months, which the ranking never saw.</p>
+        <div id="lab_status" style="margin-top:12px"></div>
+        <form id="labSetForm" hidden style="margin-top:14px">
+          <div class="grid">
+            <label class="f"><span>Nightly run</span><select id="ls_enabled"><option value="true">On (16:05 IST every day)</option><option value="false">Off (only “Run now”)</option></select></label>
+            <label class="f"><span>New strategies per run</span><input id="ls_per_night" type="number" min="10" max="1000" step="10"></label>
+            <label class="f"><span>Best ones priced with real options</span><input id="ls_top" type="number" min="0" max="60" step="1"></label>
+            <label class="f"><span>Capital for return % (₹)</span><input id="ls_capital" type="number" min="10000" step="10000"></label>
+          </div>
+          <div class="f"><span>Assets to research</span><div class="assetpick" id="ls_assets"></div></div>
+          <p class="hint">Indices are tested on 5-minute candles (and once-a-day); commodities on daily candles, because Dhan keeps intraday history only for the current MCX contract. Mini contracts move like their big contracts, so testing both mostly repeats work.</p>
+          <div class="formbar"><button class="btn primary" type="submit">Save lab settings</button><span class="hint" id="ls_msg"></span></div>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="labbar">
+          <div class="f"><span>Results as</span><div class="seg" id="lab_view" role="group" aria-label="Instrument">
+            <button type="button" data-v="FUT" aria-pressed="true">Futures</button><button type="button" data-v="BUY" aria-pressed="false">Option buying</button><button type="button" data-v="SELL" aria-pressed="false">Option writing</button></div></div>
+          <label class="f"><span>Asset</span><select id="lab_asset"><option value="ALL">All assets</option></select></label>
+          <label class="f"><span>From</span><select id="lab_period"><option value="run">Latest run only</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option></select></label>
+          <label class="f"><span>Stop loss</span><select id="lab_stopf"><option value="ANY">With or without</option><option value="WITH">With stop / target</option><option value="WITHOUT">Without</option></select></label>
+          <label class="f"><span>Show</span><select id="lab_only"><option value="true">Passed only</option><option value="false">All tested</option></select></label>
+          <label class="f"><span>Sort by</span><select id="lab_sort"><option value="score">Score (first 9 months)</option><option value="test">Last 3 months net</option><option value="net">Net P&amp;L (1 year)</option><option value="pf">Profit factor</option><option value="win">Win rate</option><option value="cons">Profitable months</option><option value="dd">Smallest drawdown</option><option value="nights">Nights passed</option></select></label>
+        </div>
+        <p class="hint" id="lab_count" style="margin:10px 0 0"></p>
+        <div class="scroll" style="margin-top:8px">
+          <table class="lab-table">
+            <thead><tr><th>#</th><th>Strategy</th><th class="n">Trades</th><th class="n">Win %</th><th class="n">Net (1 yr)</th><th class="n">Last 3 mo</th><th class="n">Max DD</th><th class="n">PF</th><th class="n">Months +</th><th class="n">Score</th><th class="n">Nights</th></tr></thead>
+            <tbody id="lab_body"></tbody>
+          </table>
+        </div>
+        <p class="hint" style="margin:8px 0 0">Score = net profit of the first 9 months ÷ the worst drawdown in them × the share of those months that made money. Figures are for 1 lot after brokerage and statutory charges, in whole rupees. Nights = how many runs tested this exact strategy (it passed in how many).</p>
+      </section>
+
+      <section class="card" id="lab_detail" hidden></section>
     </div>
   </main>
 </div>
@@ -582,6 +665,7 @@ function kindName(s) { return isTimed(s) ? "Timed" : isHA(s) ? "Heikin Ashi" : s
 function biasName(tf) { return tf === "D" ? "Daily" : (Number(tf) % 60 === 0 ? `${Number(tf) / 60}-hour` : `${tf}-minute`); }
 
 function showEmpty() {
+  if (lab.open) return;
   $("stratPane").hidden = true; $("emptyPane").hidden = false;
   $("emptyPane").innerHTML = '<div class="empty"><div><h3 style="margin-bottom:6px">No strategies yet</h3><p>Create one with “+ New strategy”, then pick Supertrend, Heikin Ashi, your own conditions or higher-timeframe in its Settings. New strategies start paused and in paper mode, so nothing is sent until you switch them on and go live.</p></div></div>';
 }
@@ -594,18 +678,21 @@ function chipsFor(s) {
   const optTxt = (side) => s.pos_option_type ? `${s.pos_option_side === "SELL" ? "Short" : "Holding"} ${s.pos_option_type}` : side;
   if (s.position === "LONG") c.push(`<span class="chip green">${s.trade_type === "OPTIONS" ? optTxt("Bullish") : "Long"}</span>`);
   if (s.position === "SHORT") c.push(`<span class="chip red">${s.trade_type === "OPTIONS" ? optTxt("Bearish") : "Short"}</span>`);
+  if (s.risk && s.risk.max_day_loss && String(s.day_pnl_date) === istDate(0) && Number(s.day_pnl) <= -s.risk.max_day_loss) c.push('<span class="chip red">Loss limit</span>');
   if (s.last_error) c.push('<span class="chip red">Error</span>');
   return c.join("");
 }
 
 function describe(s) {
   const st = `ST(${s.atr_period}, ${Number(s.factor)})`;
-  if (isTimed(s)) return `${s.underlying} · ${biasName(s.bias_timeframe)} ${st} · buy ${String(s.entry_time).slice(0, 5)}, sell ${s.exit_next_day ? "next day " : ""}${String(s.exit_time).slice(0, 5)}`;
+  if (isTimed(s)) return `${s.underlying} · ${biasName(s.bias_timeframe)} ${st} · buy ${String(s.entry_time).slice(0, 5)}, sell ${s.exit_next_day ? "next day " : ""}${String(s.exit_time).slice(0, 5)}${s.risk ? " · " + riskText(s.risk, true) : ""}`;
   const n = s.rules ? ["long", "short", "exitLong", "exitShort"].reduce((a, k) => a + ((s.rules[k] && s.rules[k].conds) || []).length, 0) : 0;
   const sig = isHA(s) ? "Heikin Ashi" : s.strategy_kind === "RULES" ? `${n} condition${n === 1 ? "" : "s"}` : st;
   const ord = s.strategy_kind !== "RULES" && s.entry_trigger === "BREAKOUT" ? ` · breakout ±${Number(s.buffer_points)}` : "";
   const inst = s.trade_type === "OPTIONS" ? (s.option_side === "SELL" ? "Option writing" : "Options") : "Futures";
-  return `${(PRESETS[s.underlying] && PRESETS[s.underlying].name) || s.underlying} · ${s.timeframe_min}m ${sig}${ord} · ${inst}`;
+  const rk = s.risk ? ` · ${riskText(s.risk, true)}` : "";
+  const tfTxt = s.strategy_kind === "RULES" && s.rules && s.rules.daily ? "daily" : `${s.timeframe_min}m`;
+  return `${(PRESETS[s.underlying] && PRESETS[s.underlying].name) || s.underlying} · ${tfTxt} ${sig}${ord} · ${inst}${rk}`;
 }
 
 function stratButton(s) {
@@ -616,7 +703,7 @@ function stratButton(s) {
   const ch = document.createElement("span"); ch.className = "chips"; ch.innerHTML = s.archived ? '<span class="chip">Archived</span>' : chipsFor(s);
   b.append(nm, meta, ch);
   b.addEventListener("click", async () => {
-    selected = s.id; formDirty = false; closeConfirm(); stopBtPoll(); $("btResult").innerHTML = "";
+    closeLab(); selected = s.id; formDirty = false; closeConfirm(); stopBtPoll(); $("btResult").innerHTML = "";
     renderRail(); renderStrategy(); $("logBody").innerHTML = "";
     try { await loadDetail(); } catch (e) { toast(errorText(e)); }
   });
@@ -647,6 +734,7 @@ function renderConn(afterSave) {
 document.getElementById("connForm").addEventListener("input", () => { connDirty = true; });
 
 function renderStrategy() {
+  if (lab.open) return;
   const s = cur(); if (!s) return showEmpty();
   $("emptyPane").hidden = true; $("stratPane").hidden = false;
   $("sp_name").textContent = s.name;
@@ -671,6 +759,10 @@ function renderStrategy() {
     const up = s.pending_target === "LONG" || (s.pending_target === "FLAT" && s.position === "SHORT");
     const till = new Date((Number(s.pending_to) + 19800) * 1000).toISOString().slice(11, 16);
     pos += ` · ${s.pending_target === "FLAT" ? "exit" : s.pending_target === "LONG" ? "buy" : "sell"} ${up ? "above" : "below"} ${fmtNum(Number(s.pending_trigger))} till ${till}`;
+  }
+  pos += posLevels(s);
+  if (s.risk && s.risk.max_day_loss && String(s.day_pnl_date) === istDate(0)) {
+    pos += ` · today ${rupees(s.day_pnl)}${Number(s.day_pnl) <= -s.risk.max_day_loss ? " (daily loss limit hit: no new trades today)" : ""}`;
   }
   $("st_pos").textContent = pos;
   $("st_run").textContent = istText(s.last_run_at);
@@ -719,7 +811,8 @@ function condRow(setKey, idx, c) {
     renderRules(); formDirty = true;
   });
   row.append(wrapLabel("Indicator", ind));
-  const tf = mkSel(COND_TFS, c.tf); tf.addEventListener("change", () => { c.tf = tf.value; formDirty = true; });
+  const tf = mkSel(COND_TFS, ruleState.daily ? "D" : c.tf); tf.addEventListener("change", () => { c.tf = tf.value; formDirty = true; });
+  if (ruleState.daily) tf.disabled = true;
   row.append(wrapLabel("Timeframe", tf));
   for (const [k, label, dv] of def.params) {
     const inp = document.createElement("input"); inp.type = "number"; inp.step = k === "factor" || k === "mult" ? "0.1" : "1"; inp.min = "1";
@@ -760,8 +853,14 @@ function renderRules() {
 }
 function readRules() {
   const r = JSON.parse(JSON.stringify(ruleState));
+  const daily = $("f_rules_daily").value === "true";
+  delete r.daily;
   for (const k of Object.keys(r)) {
     for (const c of r[k].conds) {
+      if (daily) {
+        c.tf = "D";
+        if (c.ind === "VWAP" || c.ind === "ORB") throw new Error("VWAP and opening range need intraday candles; remove them for a once-a-day strategy.");
+      }
       const def = IND_DEFS[c.ind];
       c.p = Object.fromEntries(def.params.map(([pk, , dv]) => [pk, Number.isFinite(Number(c.p?.[pk])) && Number(c.p?.[pk]) > 0 ? Number(c.p[pk]) : dv]));
       if (VALUE_OPS.has(c.op)) { if (!Number.isFinite(Number(c.v))) throw new Error(`Enter a value for ${def.name}.`); c.v = Number(c.v); } else delete c.v;
@@ -769,6 +868,7 @@ function readRules() {
     }
   }
   if (!r.long.conds.length && !r.short.conds.length) throw new Error("Add at least one Buy or Sell condition.");
+  if (daily) r.daily = true;
   return r;
 }
 
@@ -796,6 +896,9 @@ function applyKindVisibility() {
   $("f_trade_type").querySelector('option[value="OPTIONS"]').disabled = mcx;
   $("lotLabel").textContent = mcx ? "P&L multiplier per lot (price unit × lot)" : "Lot size (verify current)";
   $("optSet").hidden = $("f_trade_type").value !== "OPTIONS";
+  const dailyRules = rules && $("f_rules_daily").value === "true";
+  $("f_timeframe_min").closest(".f").hidden = timed || dailyRules;
+  applyRiskVisibility();
   if (rules) renderRules();
 }
 
@@ -809,6 +912,9 @@ function fillForm(s) {
   }
   $("f_kind").value = s.strategy_kind || "FLIP";
   ruleState = JSON.parse(JSON.stringify(s.rules && (s.rules.long || s.rules.short) ? { ...DEFAULT_RULES, exitLong: { mode: "ANY", conds: [] }, exitShort: { mode: "ANY", conds: [] }, ...s.rules } : DEFAULT_RULES));
+  $("f_rules_daily").value = s.rules && s.rules.daily ? "true" : "false";
+  ruleState.daily = $("f_rules_daily").value === "true";
+  fillRisk(s.risk);
   applyKindVisibility();
   $("formMsg").textContent = "";
 }
@@ -1336,7 +1442,9 @@ function loadScript(src) {
 function btMeta(r) {
   const st = (r.params && r.params.strategy) || cur() || {};
   const kind = st.strategy_kind === "TIMED" ? `Higher-timeframe bias (${biasName(st.bias_timeframe)} Supertrend ${st.atr_period}, ${Number(st.factor)})`
-    : st.strategy_kind === "HA" ? `Heikin Ashi flip, ${st.timeframe_min}-minute candles` : `Supertrend flip (${st.atr_period}, ${Number(st.factor)}), ${st.timeframe_min}-minute candles`;
+    : st.strategy_kind === "HA" ? `Heikin Ashi flip, ${st.timeframe_min}-minute candles`
+    : st.strategy_kind === "RULES" ? `Conditions${st.rules && st.rules.daily ? " (once a day, daily candles)" : `, decided on ${st.timeframe_min}-minute candles`}: buy when ${setText(st.rules && st.rules.long)}; sell when ${setText(st.rules && st.rules.short)}`
+    : `Supertrend flip (${st.atr_period}, ${Number(st.factor)}), ${st.timeframe_min}-minute candles`;
   const order = st.strategy_kind === "TIMED" ? `Buy ${String(st.entry_time || "").slice(0, 5)}, exit ${st.exit_next_day ? "next day " : ""}${String(st.exit_time || "").slice(0, 5)}`
     : st.entry_trigger === "BREAKOUT" ? `Breakout of signal candle high/low ± ${Number(st.buffer_points)} points` : "At signal candle close";
   return { st, name: st.name || `Strategy ${r.strategy_id || ""}`, kind, order,
@@ -1346,7 +1454,7 @@ function btSummaryRows(r) {
   const s = r.summary || {}, m = btMeta(r), sk = s.skipped || {};
   const skipped = Object.entries(sk).map(([k, v]) => `${k} (${v})`).join("; ") || "None";
   return [
-    ["Strategy", m.name], ["Type", m.kind], ["Instrument", m.instrument], ["Order entry", m.order],
+    ["Strategy", m.name], ["Type", m.kind], ["Instrument", m.instrument], ["Order entry", m.order], ["Stop loss & risk", riskText(m.st.risk)],
     ["Period", `${r.params.from} to ${r.params.to}`], ["Capital (Rs)", Math.trunc(Number(r.params.capital))],
     ["Brokerage per order (Rs, max)", Number(r.params.brokerage)],
     ...(r.params.charges ? [["Charge rates (%)", `STT fut ${r.params.charges.stt_fut} / opt ${r.params.charges.stt_opt}; exchange fut ${r.params.charges.exch_fut} / opt ${r.params.charges.exch_opt}; SEBI ${r.params.charges.sebi}; GST ${r.params.charges.gst}; stamp fut ${r.params.charges.stamp_fut} / opt ${r.params.charges.stamp_opt}; futures brokerage ${r.params.charges.brk_pct}`]]
@@ -1709,6 +1817,8 @@ function readForm() {
     if (out.exit_next_day && out.trade_type === "OPTIONS" && !out.roll_on_expiry) throw new Error("For overnight option trades, set “On expiry day” to use next week's expiry; today's contract expires before your exit.");
     if (out.exit_next_day && out.product_type === "I") throw new Error("Overnight trades need product type M (carry forward); intraday positions get squared off by the broker.");
   }
+  out.risk = readRisk(out);
+  if (out.rules && out.rules.daily && out.intraday) throw new Error("A once-a-day strategy holds positions overnight; set “Square off daily” to No.");
   const sample = { side: "B", qty: "1", exchange: "NSE", symbol: "NIFTY", product: "I", sort: "1", option_type: "CE", strike: "25000", expiry: "2026-10-13" };
   for (const k of ["leg_template_opt", "leg_template_fut"]) {
     try { JSON.parse(out[k].replace(/\{(\w+)\}/g, (m, p) => p in sample ? sample[p] : m)); }
@@ -1747,6 +1857,320 @@ $("connForm").addEventListener("submit", (e) => {
     await loadAll(); renderConn(true); $("connMsg").textContent = "Saved."; toast("Connection saved. Press Refresh chart to test it.");
   });
 });
+
+/* ---------- stop loss & risk (strategy form) ---------- */
+const RISK_TYPES = [["NONE", "Off"], ["POINTS", "Points"], ["PCT", "%"], ["ATR", "× ATR"]];
+for (const id of ["r_sl_type", "r_tgt_type", "r_trail_type"]) { const el = $(id); for (const [v, t] of RISK_TYPES) { const o = document.createElement("option"); o.value = v; o.textContent = t; el.append(o); } }
+function riskText(r, short) {
+  if (!r) return short ? "" : "No stop loss";
+  const q = (x) => x.type === "POINTS" ? `${x.value} pts` : x.type === "PCT" ? `${x.value}%` : `${x.value}×ATR(${r.atr_len || 14})`;
+  const parts = [];
+  if (r.sl) parts.push(`SL ${q(r.sl)}`);
+  if (r.tgt) parts.push(`target ${q(r.tgt)}`);
+  if (r.trail) parts.push(`trail ${q(r.trail)}`);
+  if (parts.length && !short) parts[parts.length - 1] += r.basis === "PREMIUM" ? " (on premium)" : " (on underlying)";
+  else if (parts.length && r.basis === "PREMIUM") parts[parts.length - 1] += " prem";
+  if (r.max_day_loss) parts.push(`max loss ${rupees(r.max_day_loss)}/day`);
+  return parts.join(short ? ", " : " · ");
+}
+function applyRiskVisibility() {
+  const opt = $("f_trade_type").value === "OPTIONS", timed = $("f_kind").value === "TIMED";
+  $("r_basis").querySelector('option[value="PREMIUM"]').disabled = !opt;
+  if (!opt && $("r_basis").value === "PREMIUM") $("r_basis").value = "UNDERLYING";
+  const premium = $("r_basis").value === "PREMIUM";
+  for (const k of ["sl", "tgt", "trail"]) {
+    const sel = $(`r_${k}_type`);
+    sel.querySelector('option[value="ATR"]').disabled = premium || timed;
+    if (sel.value === "ATR" && (premium || timed)) sel.value = "PCT";
+    $(`r_${k}_val`).disabled = sel.value === "NONE";
+  }
+  $("r_atr_len").closest(".f").hidden = premium || timed;
+  $("riskHint").textContent = premium
+    ? "Levels are on the option's own premium. Buying: the stop is below the entry premium and the target above it. Writing: the stop is above (premium rising against you) and the target below. Points = rupees of premium. Checked every minute live (from Dhan's option chain) and on 5-minute option candles in backtests."
+    : "Levels are on the index / commodity price, in the direction of the trade; for options, in the direction of the signal (a bullish PE write is stopped if the index falls). Checked every minute live and on 5-minute candles in backtests. A trailing stop follows the best price reached. After a stop or target the strategy waits for its next entry signal. Max loss per day: once the day's closed trades have lost this much (estimated, before charges), no new trades that day.";
+}
+function fillRisk(r) {
+  r = r || {};
+  $("r_basis").value = r.basis === "PREMIUM" ? "PREMIUM" : "UNDERLYING";
+  for (const k of ["sl", "tgt", "trail"]) { const q = r[k]; $(`r_${k}_type`).value = q && q.type ? q.type : "NONE"; $(`r_${k}_val`).value = q && q.value ? String(q.value) : ""; }
+  $("r_atr_len").value = String(r.atr_len || 14);
+  $("r_mdl").value = r.max_day_loss ? String(r.max_day_loss) : "";
+  applyRiskVisibility();
+}
+function readRisk(out) {
+  const basis = $("r_basis").value;
+  if (basis === "PREMIUM" && out.trade_type !== "OPTIONS") throw new Error("Stops on the option premium need an options strategy.");
+  const r = { basis, atr_len: Number($("r_atr_len").value) || 14 };
+  if (!(r.atr_len >= 2 && r.atr_len <= 100)) throw new Error("ATR length must be 2–100.");
+  const names = { sl: "Stop loss", tgt: "Target", trail: "Trailing stop" };
+  for (const k of ["sl", "tgt", "trail"]) {
+    const type = $(`r_${k}_type`).value;
+    if (type === "NONE") { r[k] = null; continue; }
+    const v = Number($(`r_${k}_val`).value);
+    if (!(v > 0)) throw new Error(`${names[k]}: enter a value above 0, or switch it off.`);
+    if (type === "PCT" && v >= 100 && !(basis === "PREMIUM" && k === "tgt" && out.option_side !== "SELL")) throw new Error(`${names[k]} must be under 100%.`);
+    if (type === "ATR" && (basis === "PREMIUM" || out.strategy_kind === "TIMED")) throw new Error("ATR-based levels work on the underlying price of candle strategies; use points or % here.");
+    r[k] = { type, value: v };
+  }
+  const mdl = $("r_mdl").value.trim();
+  r.max_day_loss = mdl ? Number(mdl) : null;
+  if (mdl && !(r.max_day_loss > 0)) throw new Error("Max loss per day must be above 0, or blank to switch it off.");
+  return r.sl || r.tgt || r.trail || r.max_day_loss ? r : null;
+}
+["r_basis", "r_sl_type", "r_tgt_type", "r_trail_type"].forEach((id) => $(id).addEventListener("change", applyRiskVisibility));
+$("f_rules_daily").addEventListener("change", () => { ruleState.daily = $("f_rules_daily").value === "true"; renderRules(); applyKindVisibility(); formDirty = true; });
+/** Live stop / target for an open position, for the header. */
+function posLevels(s) {
+  const p = s.pos_risk; if (!p || p.dir === undefined || s.position === "FLAT") return "";
+  const d = (q, ref) => q.type === "POINTS" ? q.value : q.type === "PCT" ? ref * q.value / 100 : q.value * (p.trailAtr || 0);
+  let stop = p.stop;
+  if (p.trail) { const tr = p.best - p.dir * d(p.trail, p.best); stop = stop == null ? tr : p.dir === 1 ? Math.max(stop, tr) : Math.min(stop, tr); }
+  const parts = [];
+  if (stop != null) parts.push(`SL ${fmtNum(+stop.toFixed(2))}`);
+  if (p.tgt != null) parts.push(`T ${fmtNum(+p.tgt.toFixed(2))}`);
+  return parts.length ? ` · ${parts.join(" · ")}${p.basis === "PREMIUM" ? " (premium)" : ""}` : "";
+}
+
+/* ---------- strategy lab ---------- */
+const lab = { open: false, settings: null, runs: [], rows: [], view: "FUT", asset: "ALL", period: "30", stopf: "ANY", only: true, sort: "score", poll: null, sel: null };
+const LAB_IND = { ST: "Supertrend", HA: "Heikin Ashi", RSI: "RSI", EMA: "EMA", SMA: "SMA", MACD: "MACD", VWAP: "VWAP", BB: "Bollinger", ADX: "ADX", ATR: "ATR", PDHL: "Prev-day H/L", ORB: "Opening range" };
+function condText(c) {
+  const def = IND_DEFS[c.ind] || { name: c.ind, ops: [] };
+  const p = c.p || {};
+  const params = c.ind === "ST" ? `(${p.atr ?? 10}, ${p.factor ?? 3})` : c.ind === "MACD" ? `(${p.fast ?? 12}, ${p.slow ?? 26}, ${p.sig ?? 9})` : c.ind === "BB" ? `(${p.len ?? 20}, ${p.mult ?? 2})`
+    : (c.ind === "EMA" || c.ind === "SMA") ? (p.len2 && /fast/.test(c.op) ? `(${p.len ?? 9}/${p.len2})` : `(${p.len ?? 20})`) : c.ind === "ORB" ? `(${p.mins ?? 15} min)` : p.len ? `(${p.len})` : "";
+  const tf = c.tf === "D" ? "daily" : c.tf === "base" ? "decision candles" : `${c.tf}-min`;
+  const op = (def.ops.find(([v]) => v === c.op) || [c.op, c.op])[1];
+  return `${def.name}${params} on ${tf} ${op}${c.v !== undefined && VALUE_OPS.has(c.op) ? " " + c.v : ""}`;
+}
+function setText(set) { return set && set.conds && set.conds.length ? set.conds.map(condText).join(set.mode === "ANY" ? " OR " : " AND ") : "—"; }
+function labMetricsFor(r) { return lab.view === "FUT" ? r.metrics : lab.view === "BUY" ? r.ob && r.ob.metrics : r.os && r.os.metrics; }
+function openLab() {
+  lab.open = true;
+  $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true; $("labPane").hidden = false;
+  document.querySelectorAll("#stratList .strat, #archList .strat").forEach((b) => b.setAttribute("aria-current", "false"));
+  $("openLab").classList.add("primary");
+  loadLab().catch((e) => toast(errorText(e)));
+}
+function closeLab() { if (!lab.open) return; lab.open = false; $("labPane").hidden = true; $("openLab").classList.remove("primary"); stopLabPoll(); }
+function stopLabPoll() { if (lab.poll) { clearTimeout(lab.poll); lab.poll = null; } }
+async function loadLab() {
+  const [settings, runs] = await Promise.all([
+    db.from("lab_settings").select("*").eq("id", 1).maybeSingle().then(must),
+    db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at").order("id", { ascending: false }).limit(8).then(must),
+  ]);
+  lab.settings = settings; lab.runs = runs;
+  let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, score, metrics, starred, promoted_id, ob:opt_buy->summary, os:opt_sell->summary")
+    .in("stage", ["screened", "opt_queue", "pricing", "priced"]);
+  if (lab.period === "run") q = q.eq("run_id", runs[0] ? runs[0].id : -1);
+  else q = q.gte("created_at", new Date(Date.now() - Number(lab.period) * 86400000).toISOString());
+  if (lab.only && lab.view === "FUT") q = q.eq("passed", true);
+  if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : "opt_sell", "is", null);
+  if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
+  lab.rows = must(await q.order("score", { ascending: false }).limit(2000));
+  renderLabStatus(); renderLabTable();
+  stopLabPoll();
+  if (lab.open && runs[0] && runs[0].status === "running") lab.poll = setTimeout(() => loadLab().catch(() => {}), 15000);
+}
+function renderLabStatus() {
+  const box = $("lab_status"); const r = lab.runs[0];
+  $("lab_stop").hidden = !(r && r.status === "running");
+  $("lab_run").disabled = !!(r && r.status === "running");
+  if (!r) { box.innerHTML = '<div class="banner info">No runs yet. The first one starts at 16:05 IST, or press “Run now”.</div>'; return; }
+  const c = r.counts || {};
+  const chip = r.status === "running" ? '<span class="chip blue">Running</span>' : r.status === "done" ? '<span class="chip green">Finished</span>' : r.status === "failed" ? '<span class="chip red">Failed</span>' : '<span class="chip">Stopped</span>';
+  const phases = { data: "1 of 4 · updating candles", generate: "2 of 4 · writing strategies", screen: "3 of 4 · backtesting", options: "4 of 4 · real option prices", done: "done" };
+  box.innerHTML = `<div class="stats">
+    <div class="stat"><span class="label">Latest run</span><span class="v" style="font-size:14px">#${r.id} ${chip}</span></div>
+    <div class="stat"><span class="label">Started</span><span class="v" style="font-size:14px">${esc(istText(r.created_at))}</span></div>
+    <div class="stat"><span class="label">Strategies tested</span><span class="v">${c.generated ?? "–"}</span></div>
+    <div class="stat"><span class="label">Passed</span><span class="v up">${c.passed ?? "–"}</span></div>
+    <div class="stat"><span class="label">Priced as options</span><span class="v">${c.priced ?? (c.to_price ?? "–")}</span></div>
+    <div class="stat"><span class="label">Test year</span><span class="v" style="font-size:13px">${esc(r.from_day || "")} → ${esc(r.to_day || "")}<br><span class="hint">ranked to ${esc(r.split_day || "")}</span></span></div>
+  </div>
+  <p class="hint" style="margin:8px 0 0">${r.status === "running" ? `Step ${esc(phases[r.phase] || r.phase)}: ${esc(r.progress || "")}` : esc(r.progress || "")}</p>
+  ${r.error ? `<div class="banner err" style="margin-top:8px">${esc(r.error)}</div>` : ""}`;
+}
+function labGroup() {
+  // One line per strategy (same rules and stops), showing its latest result and how often it passed.
+  const by = new Map();
+  for (const r of lab.rows) {
+    const m = labMetricsFor(r); if (!m) continue;
+    if (lab.view !== "FUT" && lab.only && !m.passed) continue;
+    const risk = r.config && r.config.risk;
+    if (lab.stopf === "WITH" && !risk && lab.view === "FUT") continue;
+    if (lab.stopf === "WITHOUT" && risk && lab.view === "FUT") continue;
+    const g = by.get(r.fingerprint);
+    if (!g) by.set(r.fingerprint, { r, m, nights: 1, passes: m.passed ? 1 : 0 });
+    else { g.nights++; if (m.passed) g.passes++; if (r.run_id > g.r.run_id) { g.r = r; g.m = m; } }
+  }
+  const key = { score: (g) => g.m.score, test: (g) => g.m.test.net, net: (g) => g.m.full.net, pf: (g) => g.m.full.pf ?? 0, win: (g) => g.m.full.win_rate,
+    cons: (g) => g.m.pos_months / Math.max(1, g.m.months_n), dd: (g) => -g.m.full.max_dd, nights: (g) => g.passes * 1000 + g.m.score }[lab.sort];
+  return [...by.values()].sort((a, b) => key(b) - key(a));
+}
+function renderLabTable() {
+  const list = labGroup(); const body = $("lab_body"); body.innerHTML = "";
+  $("lab_count").textContent = list.length ? `${list.length} strategies${list.length > 150 ? " (showing the top 150)" : ""}.` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
+  list.slice(0, 150).forEach((g, i) => {
+    const m = g.m, r = g.r, c = r.config || {};
+    const tr = document.createElement("tr"); tr.className = "pick" + (lab.sel === r.id ? " sel" : "");
+    const chips = [`<span class="chip blue">${esc(r.asset)}</span>`, `<span class="chip">${c.rules && c.rules.daily ? "Daily" : (c.timeframe_min + "m · " + (c.intraday ? "intraday" : "positional"))}</span>`,
+      c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.champion ? '<span class="chip green">Re-tested</span>' : "",
+      r.starred ? '<span class="chip yellow">★</span>' : "", r.promoted_id ? '<span class="chip green">Saved as strategy</span>' : "",
+      m.passed ? "" : '<span class="chip red">Not passed</span>'].join("");
+    const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : r.os) : null;
+    const pc = (v) => `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${rupees(v)}</span>`;
+    tr.innerHTML = `<td class="n">${i + 1}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}</div>${ver ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
+      <td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}</td><td class="n">${pc(m.test.net)}</td>
+      <td class="n">${rupees(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${m.score}</td><td class="n">${g.passes}/${g.nights}</td>`;
+    tr.querySelector(".t").textContent = r.label;
+    tr.addEventListener("click", () => openLabDetail(r.id).catch((e) => toast(errorText(e))));
+    body.append(tr);
+  });
+}
+function monthsHTML(m) {
+  const max = Math.max(1, ...m.months.map((x) => Math.abs(x.net)));
+  const split = m.months.length - Math.max(0, m.months_n - m.train_months_n);
+  return `<div class="months">${m.months.map((x, i) => `<div class="mb${i === split ? " split" : ""}" title="${x.m}: ${rupees(x.net)} from ${x.n} trades">
+    <div class="bar ${x.net >= 0 ? "up" : "dn"}" style="height:${Math.max(2, Math.round((Math.abs(x.net) / max) * 110))}px"></div><span class="mt">${x.m.slice(2).replace("-", "/")}</span></div>`).join("")}</div>
+    <p class="hint" style="margin:6px 0 0">Net per month (by exit date). The dashed month starts the last-3-months check, which the ranking never saw.</p>`;
+}
+function statsTable(m) {
+  const row = (name, p) => `<tr><td>${name}</td><td class="n">${p.n}</td><td class="n">${p.win_rate}</td><td class="n ${p.net > 0 ? "pos-num" : p.net < 0 ? "neg-num" : ""}">${rupees(p.net)}</td><td class="n">${rupees(p.gross)}</td><td class="n">${rupees(p.costs)}</td><td class="n">${p.pf ?? "–"}</td><td class="n">${rupees(p.max_dd)}</td><td class="n">${rupees(p.avg)}</td><td class="n">${rupees(p.best)}</td><td class="n">${rupees(p.worst)}</td></tr>`;
+  return `<div class="scroll"><table><thead><tr><th>Period</th><th class="n">Trades</th><th class="n">Win %</th><th class="n">Net</th><th class="n">Gross</th><th class="n">Charges</th><th class="n">PF</th><th class="n">Max DD</th><th class="n">Avg/trade</th><th class="n">Best</th><th class="n">Worst</th></tr></thead>
+    <tbody>${row("Whole year", m.full)}${row("First 9 months (ranked)", m.train)}${row("Last 3 months (check)", m.test)}</tbody></table></div>`;
+}
+let labDetailRow = null, labDetailTrades = [];
+async function openLabDetail(id) {
+  lab.sel = id; renderLabTable();
+  const r = must(await db.from("lab_results").select("*, run:lab_runs(id, from_day, split_day, to_day, created_at, settings)").eq("id", id).single());
+  labDetailRow = r;
+  const box = $("lab_detail"); box.hidden = false;
+  const c = r.config, run = r.run || {}, a = PRESETS[c.underlying] || {};
+  const versions = [{ key: "FUT", label: c.data_segment === "MCX_COMM" ? "MCX futures (near month)" : "Index futures (index price as proxy)", side: null, risk: c.risk, metrics: r.metrics, trades: r.trades || [] }];
+  for (const [col, side] of [["opt_buy", "BUY"], ["opt_sell", "SELL"]]) for (const v of ((r[col] && r[col].variants) || [])) versions.push({ key: side, label: v.label, side, risk: v.risk, metrics: v.metrics, trades: v.trades || [], skipped: v.skipped });
+  let pickI = Math.max(0, versions.findIndex((v) => v.key === lab.view));
+  const isMcxA = c.data_segment === "MCX_COMM";
+  const decideTxt = c.rules && c.rules.daily ? `Checked once a day at the session open on yesterday's completed daily candle; orders at the open. Positional.`
+    : `Decides at the close of each ${c.timeframe_min}-minute candle. First trade from ${String(c.session_start).slice(0, 5)}, no new trades after ${String(c.last_entry).slice(0, 5)}${c.intraday ? `, square-off ${String(c.square_off).slice(0, 5)} (intraday)` : " (positions carried overnight)"}.`;
+  const kv = [
+    ["Asset", `${a.name || c.underlying} (${c.underlying}) · ${isMcxA ? "MCX futures" : (c.exchange + " index")}`],
+    ["Decision", decideTxt],
+    ["Direction", { BOTH: "Long and short (reverses on the opposite signal)", LONG_ONLY: "Long only", SHORT_ONLY: "Short only" }[c.direction]],
+    ["Entry", c.entry_mode === "JOIN" ? "Whenever the Buy / Sell rules are true" : "Only when the Buy / Sell rules newly become true"],
+    ["Buy when", setText(c.rules.long)], ["Sell when", setText(c.rules.short)],
+    ["Exit a long when", setText(c.rules.exitLong) === "—" ? "Opposite signal, or when the Buy rules stop being true (if there are no Sell rules)" : setText(c.rules.exitLong)],
+    ["Exit a short when", setText(c.rules.exitShort) === "—" ? "Opposite signal, or when the Sell rules stop being true (if there are no Buy rules)" : setText(c.rules.exitShort)],
+    ["Stop loss & target", riskText(c.risk)],
+    ["Quantity", `1 lot · ${isMcxA ? "P&L multiplier" : "lot size"} ${c.lot_size}`],
+    ["Charges", `Brokerage ₹20 per order (futures: lower of ₹20 and 0.03%), STT, exchange, SEBI, GST and stamp duty at current ${isMcxA ? "MCX" : c.exchange} rates; net P&L in whole rupees`],
+    ["Test period", `${run.from_day} to ${run.to_day} · ranked on trades exiting before ${run.split_day}; the last 3 months are the check`],
+    ["Options (when priced)", `ATM strike (gap ${c.strike_step}), ${c.expiry_flag === "MONTH" ? "monthly" : "weekly"} expiry, next expiry on expiry day; Dhan expired-options data, 5-minute`],
+    ["Tested", `Run #${r.run_id} on ${istText(run.created_at)}${r.champion ? " · re-test of an earlier winner" : ""} · lab strategy #${r.id}`],
+  ];
+  const draw = () => {
+    const v = versions[pickI], m = v.metrics;
+    labDetailTrades = v.trades;
+    box.innerHTML = `<div class="head"><div><span class="label">Lab strategy #${r.id}</span><h2 style="font-size:18px"></h2></div>
+      <div class="actions"><button class="btn small" id="ld_star" type="button">${r.starred ? "★ Starred" : "☆ Star (keep)"}</button><button class="btn small" id="ld_xlsx" type="button">Download Excel</button><button class="btn primary small" id="ld_save" type="button">Save as strategy</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
+      <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.key === "FUT" ? "Futures" : x.label)}</button>`).join("")}</div>
+      ${m.passed ? '<div class="banner ok" style="margin-top:12px">Passed: profitable in the ranked 9 months and in the 3 months after.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc(m.why.join("; "))}.</div>`}
+      <div class="stats" style="margin-top:12px">
+        <div class="stat"><span class="label">Net (1 year)</span><span class="v ${m.full.net >= 0 ? "up" : "down"}">${rupees(m.full.net)}</span></div>
+        <div class="stat"><span class="label">Last 3 months</span><span class="v ${m.test.net >= 0 ? "up" : "down"}">${rupees(m.test.net)}</span></div>
+        <div class="stat"><span class="label">Trades · win rate</span><span class="v">${m.full.n} · ${m.full.win_rate}%</span></div>
+        <div class="stat"><span class="label">Profit factor</span><span class="v">${m.full.pf ?? "–"}</span></div>
+        <div class="stat"><span class="label">Max drawdown</span><span class="v">${rupees(m.full.max_dd)}</span></div>
+        <div class="stat"><span class="label">Profitable months</span><span class="v">${m.pos_months} of ${m.months_n}</span></div>
+        <div class="stat"><span class="label">Score</span><span class="v">${m.score}</span></div>
+      </div>
+      ${monthsHTML(m)}
+      <h3 style="font-size:15px;margin:16px 0 6px">Results by period</h3>${statsTable(m)}
+      <h3 style="font-size:15px;margin:16px 0 6px">Every parameter used</h3>
+      <dl class="kv">${kv.map(([k, val]) => `<dt>${esc(k)}</dt><dd>${esc(val)}</dd>`).join("")}<dt>This version</dt><dd>${esc(v.label)}${v.key !== "FUT" ? ` · stops: ${esc(riskText(v.risk))}` : ""}</dd>
+        ${v.skipped && Object.keys(v.skipped).length ? `<dt>Skipped trades</dt><dd>${esc(Object.entries(v.skipped).map(([k2, n]) => `${k2} (${n})`).join("; "))}</dd>` : ""}</dl>
+      <h3 style="font-size:15px;margin:16px 0 6px">Trades ${v.trades.length ? `(${v.trades.length})` : ""}</h3>
+      ${v.trades.length ? `<div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Entry</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">In</th><th class="n">Out</th><th class="n">Net</th><th>Exit reason</th></tr></thead><tbody>${v.trades.map((t) => `<tr><td class="when">${esc(t.entry)}</td><td class="when">${esc(t.exit)}</td><td>${t.side === "LONG" ? "Long" : "Short"}</td><td>${esc(t.contract)}</td><td class="n">${fmtNum(t.entry_px)}</td><td class="n">${fmtNum(t.exit_px)}</td><td class="n ${t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : ""}">${rupees(t.net)}</td><td>${esc(t.exit_why)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="hint">Trade lists are kept for strategies that passed.</p>'}`;
+    box.querySelector("h2").textContent = r.label;
+    box.querySelectorAll("#ld_vers button").forEach((b) => b.addEventListener("click", () => { pickI = Number(b.dataset.i); draw(); }));
+    $("ld_close").addEventListener("click", () => { box.hidden = true; lab.sel = null; renderLabTable(); });
+    $("ld_star").addEventListener("click", (e) => run(e.currentTarget, async () => { must(await db.from("lab_results").update({ starred: !r.starred }).eq("id", r.id)); r.starred = !r.starred; draw(); toast(r.starred ? "Starred: kept beyond 45 days." : "Star removed."); }));
+    $("ld_xlsx").addEventListener("click", (e) => run(e.currentTarget, () => downloadLabExcel(r, versions[pickI], kv)));
+    $("ld_save").addEventListener("click", (e) => run(e.currentTarget, () => promoteLab(r, versions[pickI])));
+    box.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
+  draw();
+}
+async function downloadLabExcel(r, v, kv) {
+  await loadScript("vendor/xlsx.mini.min.js");
+  const m = v.metrics, wb = XLSX.utils.book_new();
+  const p = (name, x) => [[name], ["Trades", x.n], ["Win rate (%)", x.win_rate], ["Net (Rs)", x.net], ["Gross (Rs)", x.gross], ["Charges (Rs)", x.costs], ["Profit factor", x.pf ?? "–"], ["Max drawdown (Rs)", x.max_dd], [] ];
+  const sum = XLSX.utils.aoa_to_sheet([["CA Ankit Garg Trade Desk · Strategy Lab #" + r.id], [r.label], [], ...kv, ["This version", v.label], ["Stops in this version", riskText(v.risk)], ["Passed", m.passed ? "Yes" : "No: " + m.why.join("; ")], ["Score", m.score], [],
+    ...p("Whole year", m.full), ...p("First 9 months (ranked)", m.train), ...p("Last 3 months (check)", m.test), ["Month", "Net (Rs)", "Trades"], ...m.months.map((x) => [x.m, x.net, x.n])]);
+  sum["!cols"] = [{ wch: 26 }, { wch: 90 }];
+  XLSX.utils.book_append_sheet(wb, sum, "Summary");
+  const tr = XLSX.utils.aoa_to_sheet([["#", "Entry (IST)", "Exit (IST)", "Side", "Contract", "Entry reason", "Exit reason", "Entry price", "Exit price", "Gross (Rs)", "Charges (Rs)", "Net (Rs)", "Equity (Rs)"],
+    ...v.trades.map((t, i) => [i + 1, t.entry, t.exit, t.side === "LONG" ? "Long" : "Short", t.contract, t.why, t.exit_why, t.entry_px, t.exit_px, t.gross, t.costs, t.net, t.equity])]);
+  XLSX.utils.book_append_sheet(wb, tr, "Trades");
+  XLSX.writeFile(wb, `Lab-${r.id}-${r.asset}-${v.key}.xlsx`);
+  toast("Excel file downloaded.");
+}
+async function promoteLab(r, v) {
+  const c = r.config;
+  const keys = ["strategy_kind", "underlying", "data_security_id", "data_segment", "data_instrument", "exchange", "dhan_symbol", "futures_symbol", "timeframe_min", "rules", "direction", "entry_mode",
+    "session_start", "last_entry", "square_off", "intraday", "trade_type", "option_side", "lots", "lot_size", "qty_mode", "product_type", "strike_step", "strike_offset", "expiry_weekday", "expiry_flag",
+    "roll_on_expiry", "atr_period", "factor", "entry_trigger", "buffer_points", "after_hours_flip", "risk"];
+  const row = Object.fromEntries(keys.filter((k) => k in c).map((k) => [k, c[k]]));
+  if (v.side) Object.assign(row, { trade_type: "OPTIONS", option_side: v.side, risk: v.risk || null, strike_offset: 0 });
+  row.name = `Lab #${r.id} · ${v.key === "FUT" ? "Futures" : v.side === "SELL" ? "Option writing" : "Option buying"} · ${r.label}`.slice(0, 80);
+  row.active = false; row.live = false;
+  const created = must(await db.from("algo_strategies").insert(row).select("id").single());
+  must(await db.from("lab_results").update({ promoted_id: created.id }).eq("id", r.id));
+  closeLab(); selected = created.id; formDirty = false; await loadAll(); showTab("set");
+  toast("Saved as a new strategy, paused and in paper mode. Check the lot size, symbols and order format before using it.");
+}
+function renderLabSettings() {
+  const s = lab.settings || {};
+  $("ls_enabled").value = s.enabled === false ? "false" : "true"; $("ls_per_night").value = s.per_night ?? 300; $("ls_top").value = s.top_options ?? 20; $("ls_capital").value = s.capital ?? 500000;
+  const box = $("ls_assets"); box.innerHTML = "";
+  for (const [k, p] of Object.entries(PRESETS)) {
+    const l = document.createElement("label"); const i = document.createElement("input"); i.type = "checkbox"; i.value = k; i.checked = (s.assets || []).includes(k);
+    l.append(i, document.createTextNode(p.name)); box.append(l);
+  }
+}
+$("openLab").addEventListener("click", () => lab.open ? null : openLab());
+$("lab_settings_btn").addEventListener("click", () => { const f = $("labSetForm"); f.hidden = !f.hidden; if (!f.hidden) renderLabSettings(); });
+$("labSetForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const assets = [...document.querySelectorAll("#ls_assets input:checked")].map((i) => i.value);
+  const per = Number($("ls_per_night").value), top = Number($("ls_top").value), cap = Number($("ls_capital").value);
+  if (!assets.length) { $("ls_msg").textContent = "Pick at least one asset."; return; }
+  if (!(per >= 10 && per <= 1000)) { $("ls_msg").textContent = "Strategies per run must be 10–1000."; return; }
+  if (!(top >= 0 && top <= 60)) { $("ls_msg").textContent = "Option pricing count must be 0–60."; return; }
+  if (!(cap >= 10000)) { $("ls_msg").textContent = "Capital must be at least ₹10,000."; return; }
+  run(e.submitter, async () => {
+    must(await db.from("lab_settings").update({ enabled: $("ls_enabled").value === "true", per_night: Math.trunc(per), top_options: Math.trunc(top), capital: cap, assets, updated_at: new Date().toISOString() }).eq("id", 1));
+    $("ls_msg").textContent = "Saved. Changes apply from the next run."; await loadLab();
+  });
+});
+$("lab_run").addEventListener("click", (e) => run(e.currentTarget, async () => {
+  must(await db.rpc("lab_run_now")); toast("Lab run started. It takes a while; you can leave this page.");
+  await new Promise((r) => setTimeout(r, 4000)); await loadLab();
+}, true));
+$("lab_stop").addEventListener("click", (e) => run(e.currentTarget, async () => { must(await db.rpc("lab_stop")); toast("Run stopped. Results so far are kept."); await loadLab(); }));
+$("lab_view").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+  lab.view = b.dataset.v; $("lab_view").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+  $("lab_stopf").disabled = lab.view !== "FUT"; loadLab().catch((e) => toast(errorText(e)));
+}));
+{
+  const sel = $("lab_asset");
+  for (const [k, p] of Object.entries(PRESETS)) { const o = document.createElement("option"); o.value = k; o.textContent = p.name; sel.append(o); }
+  sel.addEventListener("change", () => { lab.asset = sel.value; loadLab().catch((e) => toast(errorText(e))); });
+  $("lab_period").addEventListener("change", () => { lab.period = $("lab_period").value; loadLab().catch((e) => toast(errorText(e))); });
+  $("lab_only").addEventListener("change", () => { lab.only = $("lab_only").value === "true"; loadLab().catch((e) => toast(errorText(e))); });
+  $("lab_stopf").addEventListener("change", () => { lab.stopf = $("lab_stopf").value; renderLabTable(); });
+  $("lab_sort").addEventListener("change", () => { lab.sort = $("lab_sort").value; renderLabTable(); });
+}
 
 /* boot */
 $("bt_to").value = istDate(-1); $("bt_from").value = istDate(-91);

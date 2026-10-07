@@ -1,9 +1,10 @@
 // Thin Dhan v2 data client with pacing and retry on rate limits.
 import { type DayBar, ist, normaliseTimestamps, type Raw } from "./logic.ts";
 
-export type OptBar = { t: number; o: number; c: number; strike: number | null; spot: number | null };
+export type OptBar = { t: number; o: number; h?: number; l?: number; c: number; strike: number | null; spot: number | null };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+let lastChainAt = 0; // Dhan allows one option-chain request every 3 seconds
 
 /** Dhan was temporarily unavailable (timeouts, 5xx, rate limits) — worth retrying later, unlike a bad token. */
 export class DhanBusyError extends Error {}
@@ -96,7 +97,7 @@ export class Dhan {
     const j = await this.post("/charts/rollingoption", {
       exchangeSegment: o.segment, interval: String(o.interval), securityId: Number(o.sec), instrument: "OPTIDX",
       expiryFlag: o.flag ?? "WEEK", expiryCode: o.code, strike, drvOptionType: o.type,
-      requiredData: ["open", "close", "strike", "spot"], fromDate: o.from, toDate: o.to,
+      requiredData: ["open", "high", "low", "close", "strike", "spot"], fromDate: o.from, toDate: o.to,
     });
     const d = j?.data?.[o.type === "CALL" ? "ce" : "pe"];
     if (!d || !Array.isArray(d.timestamp)) return [];
@@ -104,9 +105,39 @@ export class Dhan {
     const shift = normaliseTimestamps(ts);
     return ts.map((t, i) => ({
       t: t + shift, o: +d.open?.[i], c: +d.close?.[i],
+      h: Array.isArray(d.high) && d.high[i] != null ? +d.high[i] : undefined, l: Array.isArray(d.low) && d.low[i] != null ? +d.low[i] : undefined,
       strike: Array.isArray(d.strike) && d.strike[i] != null ? +d.strike[i] : null,
       spot: Array.isArray(d.spot) && d.spot[i] != null ? +d.spot[i] : null,
     }));
+  }
+
+  /** Option chain for one expiry: strike -> { ce, pe } with last_price and security_id. */
+  async optionChain(sec: string, seg: string, expiry: string): Promise<Record<string, any>> {
+    const wait = lastChainAt + 3100 - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastChainAt = Date.now();
+    const j = await this.post("/optionchain", { UnderlyingScrip: Number(sec), UnderlyingSeg: seg, Expiry: expiry });
+    return j?.data?.oc ?? {};
+  }
+
+  /** Live premium of one option; falls back to the next listed expiry if the computed date isn't one (holiday weeks). */
+  async premium(sec: string, seg: string, expiry: string, strike: number, type: "CE" | "PE"): Promise<number | null> {
+    const find = (oc: Record<string, any>) => {
+      for (const [k, v] of Object.entries(oc)) {
+        if (Math.abs(Number(k) - strike) < 0.01) { const p = Number(v?.[type === "CE" ? "ce" : "pe"]?.last_price); return p > 0 ? p : null; }
+      }
+      return null;
+    };
+    let px: number | null = null;
+    try { px = find(await this.optionChain(sec, seg, expiry)); } catch { px = null; }
+    if (px !== null) return px;
+    try {
+      const j = await this.post("/optionchain/expirylist", { UnderlyingScrip: Number(sec), UnderlyingSeg: seg });
+      const list: string[] = (j?.data ?? []).map(String).sort();
+      const e = list.find((x) => x >= expiry);
+      if (e && e !== expiry) return find(await this.optionChain(sec, seg, e));
+    } catch { /* no premium available */ }
+    return null;
   }
 
   /** Last traded price for one instrument (Data API; 1 request per second). */

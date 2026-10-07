@@ -19,7 +19,7 @@ export async function syncMcx(sb: SupabaseClient, clientId: string, token: strin
   const iSec = col("SECURITY_ID"), iIns = col("INSTRUMENT"), iUnd = col("UNDERLYING_SYMBOL"), iDisp = col("DISPLAY_NAME"), iExp = col("SM_EXPIRY_DATE");
   if ([iSec, iIns, iUnd, iExp].some((i) => i < 0)) throw new Error("Dhan's MCX instrument list has an unexpected format.");
   const now = new Date().toISOString();
-  const rows = [];
+  const rows: Record<string, unknown>[] = [];
   for (const line of lines.slice(1)) {
     const a = line.split(",");
     if (a[iIns] !== "FUTCOM" || !/^\d{4}-\d{2}-\d{2}/.test(a[iExp] ?? "")) continue;

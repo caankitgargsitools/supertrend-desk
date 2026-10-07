@@ -10,6 +10,9 @@ import {
 } from "./logic.ts";
 import { dataSecurity, syncMcx } from "./instruments.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
+import { atr as atrSeries } from "./indicators.ts";
+import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
+import { labStart, labStep } from "./lab.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -40,7 +43,7 @@ function warmDays(tf: number, atr: number, seg = "IDX_I", bars = WARM_BARS) {
   const dayMins = isCommodity(seg) ? 860 : 375;
   return Math.min(400, Math.max(5, Math.ceil(((Math.max(bars, atr * 10) * tf) / dayMins) * 1.5) + 4));
 }
-const FLAT_STATE = { position: "FLAT", pos_option_type: null, pos_option_side: null, pos_strike: null, pos_expiry: null, pos_qty: null, pos_entry_date: null };
+const FLAT_STATE = { position: "FLAT", pos_option_type: null, pos_option_side: null, pos_strike: null, pos_expiry: null, pos_qty: null, pos_entry_date: null, pos_risk: null };
 const NO_PENDING = { pending_target: null, pending_trigger: null, pending_from: null, pending_to: null };
 const hhmm = (sec: number) => fmtIst(sec, true).slice(11, 16);
 
@@ -126,7 +129,7 @@ function entryLeg(s: Strategy, want: Pos, close: number, sort: number) {
       leg: fillTemplate(s.leg_template_fut, {
         side: want === "LONG" ? "B" : "S", qty, exchange: s.exchange, product: s.product_type, sort, symbol: s.futures_symbol,
       }),
-      state: { pos_option_type: null, pos_option_side: null, pos_strike: null, pos_expiry: null, pos_qty: qty, pos_entry_date: today.date },
+      state: { pos_option_type: null, pos_option_side: null, pos_strike: null, pos_expiry: null, pos_qty: qty, pos_entry_date: today.date, _px: close },
       label: `${want === "LONG" ? "Buy" : "Sell"} ${s.futures_symbol} x ${qty}`,
     };
   }
@@ -142,7 +145,7 @@ function entryLeg(s: Strategy, want: Pos, close: number, sort: number) {
       side: selling ? "S" : "B", qty, exchange: s.exchange, product: s.product_type, sort, symbol: s.dhan_symbol,
       option_type: optType, strike, expiry,
     }),
-    state: { pos_option_type: optType, pos_option_side: selling ? "SELL" : "BUY", pos_strike: strike, pos_expiry: expiry, pos_qty: qty, pos_entry_date: today.date },
+    state: { pos_option_type: optType, pos_option_side: selling ? "SELL" : "BUY", pos_strike: strike, pos_expiry: expiry, pos_qty: qty, pos_entry_date: today.date, _px: close },
     label: `${selling ? "Sell" : "Buy"} ${s.dhan_symbol} ${strike} ${optType} (${expiry}) x ${qty}`,
   };
 }
@@ -153,6 +156,94 @@ function exitLabel(s: Strategy): string {
 }
 
 type Candle = { t?: number; trend?: number; c?: number; st?: number };
+
+/* ---------- stop loss, target, trailing stop, daily loss limit (live) ---------- */
+type PosRisk = Partial<RiskState> & { basis: string; entry?: number; entryPrem?: number | null };
+const riskOf = (s: Strategy) => normaliseRisk(s.risk, s.trade_type === "OPTIONS");
+const unitsOf = (s: Strategy) => s.qty_mode === "LOTS" ? Number(s.pos_qty) * Number(s.lot_size) : Number(s.pos_qty);
+const todayIst = () => ist(Date.now() / 1000).date;
+/** False once today's closed trades have lost the strategy's daily limit. */
+function canEnter(s: Strategy): boolean {
+  const r = riskOf(s);
+  return !(r?.max_day_loss && String(s.day_pnl_date) === todayIst() && Number(s.day_pnl) <= -r.max_day_loss);
+}
+async function premiumOf(dhan: Dhan, s: Strategy, st: Record<string, any>): Promise<number | null> {
+  try { return await dhan.premium(s.data_security_id, s.data_segment, String(st.pos_expiry), Number(st.pos_strike), st.pos_option_type); } catch { return null; }
+}
+/** Stop / target levels for a position just entered (stored in pos_risk). */
+async function armRisk(s: Strategy, set: Settings, st: Record<string, any>, px: number, atrNow: number, notes: string[]) {
+  const r = riskOf(s);
+  if (!r) return;
+  const pr: PosRisk = { basis: r.basis, entry: px };
+  const opt = s.trade_type === "OPTIONS";
+  if (opt && (r.basis === "PREMIUM" || r.max_day_loss)) pr.entryPrem = await premiumOf(dhanFor(set), s, st);
+  if (hasLevels(r)) {
+    const premium = r.basis === "PREMIUM";
+    const dir = premium ? (st.pos_option_side === "SELL" ? -1 : 1) : (st.position === "LONG" ? 1 : -1);
+    const ref = premium ? pr.entryPrem : px;
+    const rs = ref ? riskInit(r, dir, ref, atrNow, Math.floor(Date.now() / 60000) * 60) : null;
+    if (rs) {
+      Object.assign(pr, rs);
+      const f = (x: number | null | undefined) => x == null ? "–" : (+x.toFixed(2)).toString();
+      notes.push(`${premium ? `Premium ${f(ref)}` : "Levels"}: stop ${f(rs.stop)}, target ${f(rs.tgt)}${rs.trail ? ", trailing" : ""}`);
+    } else notes.push(premium ? "Stop not set: couldn't read the option's premium." : "Stop not set: ATR not available yet.");
+  }
+  st.pos_risk = pr;
+}
+/** Estimated P&L of the position being closed (before charges), added to today's total for the daily loss limit. */
+async function bookPnl(s: Strategy, set: Settings, update: Record<string, unknown>, exitPx: number | undefined) {
+  const r = riskOf(s), pr = (s.pos_risk ?? {}) as PosRisk;
+  if (!r?.max_day_loss || s.position === "FLAT") return;
+  let pnl: number | null = null;
+  if (s.trade_type === "OPTIONS") {
+    if (pr.entryPrem) { const now = await premiumOf(dhanFor(set), s, s); if (now) pnl = (now - pr.entryPrem) * (s.pos_option_side === "SELL" ? -1 : 1) * unitsOf(s); }
+  } else if (pr.entry && exitPx) pnl = (exitPx - pr.entry) * (s.position === "LONG" ? 1 : -1) * unitsOf(s);
+  if (pnl === null) return;
+  const today = todayIst();
+  const base = String(s.day_pnl_date) === today ? Number(s.day_pnl) || 0 : 0;
+  update.day_pnl = Math.trunc(base + pnl); update.day_pnl_date = today;
+  if (base + pnl <= -r.max_day_loss) update.last_error = null;
+}
+/** Checks an open position against its stop / target every minute. Returns the strategy as it stands afterwards. */
+async function liveRisk(s: Strategy, set: Settings): Promise<Strategy> {
+  const r = riskOf(s), pr = s.pos_risk as PosRisk | null;
+  if (s.position === "FLAT" || !pr || !hasLevels(r) || pr.dir === undefined) return s;
+  const nowSec = Date.now() / 1000, now = ist(nowSec), sess = sessionFor(s.data_segment, now.date);
+  if (now.min < sess.open || now.min >= sess.close) return s;
+  const dhan = dhanFor(set);
+  let rows: { t: number; o: number; h: number; l: number }[] = [];
+  const minuteNow = Math.floor(nowSec / 60) * 60;
+  if (pr.basis === "PREMIUM") {
+    const p = await premiumOf(dhan, s, s);
+    if (p) rows = [{ t: minuteNow, o: p, h: p, l: p }];
+  } else {
+    const mins = await dhan.intraday(s.data_security_id, s.data_segment, s.data_instrument, 1, `${now.date} 09:00:00`, fmtIst(nowSec + 120, true));
+    rows = mins.filter((m) => m.t >= Number(pr.scanFrom) && m.t + 60 <= nowSec);
+    try { const l = await dhan.ltp(s.data_segment, s.data_security_id); if (l) rows.push({ t: minuteNow, o: l, h: l, l }); } catch { /* LTP optional */ }
+  }
+  if (!rows.length) return s;
+  const rs = { dir: pr.dir!, stop: pr.stop ?? null, tgt: pr.tgt ?? null, trail: pr.trail ?? null, trailAtr: pr.trailAtr ?? 0, best: Number(pr.best), scanFrom: Number(pr.scanFrom) } as RiskState;
+  const hit = riskScan(rs, rows);
+  const update: Record<string, unknown> = { last_run_at: new Date().toISOString() };
+  if (!hit) {
+    update.pos_risk = { ...pr, best: rs.best, scanFrom: minuteNow };
+    await sb.from("algo_strategies").update(update).eq("id", s.id);
+    return { ...s, ...update };
+  }
+  const event = /Target/.test(hit.why) ? "TARGET" : /Trailing/.test(hit.why) ? "TRAIL_STOP" : "STOP_LOSS";
+  const under = pr.basis === "PREMIUM" ? undefined : hit.px;
+  const ok = await sendOrders(s, set, event, [exitLeg(s, 1)], `${hit.why}${pr.basis === "PREMIUM" ? " (premium)" : ""}: ${exitLabel(s)}`, { t: hit.t, c: under });
+  if (!ok) {
+    update.last_error = "Stop-loss exit failed to send, so the strategy was paused. Close the position in Dhan.";
+    update.active = false;
+    await sb.from("algo_strategies").update(update).eq("id", s.id);
+    return { ...s, ...update };
+  }
+  await bookPnl(s, set, update, under ?? rows.at(-1)!.o);
+  Object.assign(update, FLAT_STATE);
+  await sb.from("algo_strategies").update(update).eq("id", s.id);
+  return { ...s, ...update };
+}
 
 async function sendOrders(s: Strategy, set: Settings, event: string, legs: Record<string, unknown>[], description: string, candle: Candle): Promise<boolean> {
   const payload = { secret: set.webhook_secret ?? "", alertType: "multi_leg_order", order_legs: legs };
@@ -192,12 +283,18 @@ async function logSignal(s: Strategy, event: string, description: string, candle
 async function flatten(s: Strategy, set: Settings, update: Record<string, unknown>, candle: Candle) {
   if (s.position === "FLAT") return;
   const ok = await sendOrders(s, set, "FLATTEN", [exitLeg(s, 1)], `Manual exit: ${exitLabel(s)}`, candle);
-  if (ok) Object.assign(update, FLAT_STATE);
+  if (ok) { await bookPnl(s, set, update, candle.c); Object.assign(update, FLAT_STATE); }
   else Object.assign(update, { last_error: "Exit order failed to send. Check the log and close the position in Dhan.", active: false });
 }
 
-async function finish(s: Strategy, set: Settings, update: Record<string, unknown>, legs: Record<string, unknown>[], event: string, notes: string[], newState: Record<string, unknown>, candle: Candle) {
+async function finish(s: Strategy, set: Settings, update: Record<string, unknown>, legs: Record<string, unknown>[], event: string, notes: string[], newState: Record<string, unknown>, candle: Candle, atrNow = 0) {
   if (legs.length) {
+    const entryPx = newState._px as number | undefined;
+    delete newState._px;
+    const entering = (newState.position === "LONG" || newState.position === "SHORT") && entryPx !== undefined;
+    const exiting = s.position !== "FLAT" && ["EXIT", "REVERSE", "SQUARE_OFF"].includes(event);
+    if (exiting) await bookPnl(s, set, update, candle.c);
+    if (entering) await armRisk(s, set, newState, entryPx!, atrNow, notes);
     const ok = await sendOrders(s, set, event, legs, notes.join(" | "), candle);
     if (ok) Object.assign(update, newState);
     else Object.assign(update, { last_error: "Order failed to send, so the strategy was paused. Check the log and your Dhan positions.", active: false });
@@ -230,6 +327,8 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
   const sigName = s.strategy_kind === "HA" ? "Heikin Ashi" : "Supertrend";
   const breakout = s.entry_trigger === "BREAKOUT";
   const buf = Number(s.buffer_points) || 0;
+  const halted = !canEnter(s); // daily loss limit reached: exits only
+  const atrNow = (() => { const r = riskOf(s); if (!r) return 0; const a = atrSeries(bars, r.atr_len ?? 14); return a[a.length - 1] || 0; })();
   let position: Pos = s.position;
   const legs: Record<string, unknown>[] = [];
   const notes: string[] = [];
@@ -283,7 +382,7 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
           notes.push(`${sigName} breakout ${up ? "above" : "below"} ${pd.trig}: ${exitLabel(s)}`);
           event = "EXIT"; position = "FLAT"; newState = FLAT_STATE;
         }
-        if (pd.target !== "FLAT" && position === "FLAT") {
+        if (pd.target !== "FLAT" && position === "FLAT" && !halted) {
           const e = entryLeg(s, pd.target, pd.trig, legs.length + 1);
           legs.push(e.leg);
           notes.push(`${sigName} breakout ${up ? "above" : "below"} ${pd.trig}: ${e.label}`);
@@ -304,7 +403,7 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
       const flipped = !atOpen && tNow !== tPrev;
       if (breakout) {
         const mism = position !== "FLAT" && position !== desired;
-        if (mism || (position === "FLAT" && desired !== "FLAT" && (s.entry_mode === "JOIN" || flipped || pend?.target === desired))) {
+        if (mism || (position === "FLAT" && desired !== "FLAT" && !halted && (s.entry_mode === "JOIN" || flipped || pend?.target === desired))) {
           const up = desired === "LONG" || (desired === "FLAT" && position === "SHORT");
           const trig = +(up ? last.h + buf : last.l - buf).toFixed(2);
           const sess = sessionFor(s.data_segment, now.date);
@@ -331,7 +430,7 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
           newState = FLAT_STATE;
           reversing = true;
         }
-        if (desired !== "FLAT" && position === "FLAT" && (s.entry_mode === "JOIN" || flipped || reversing)) {
+        if (desired !== "FLAT" && position === "FLAT" && !halted && (s.entry_mode === "JOIN" || flipped || reversing)) {
           const e = entryLeg(s, desired, last.c, legs.length + 1);
           legs.push(e.leg);
           notes.push(`${flipped ? `${sigName} flipped` : reversing ? "Reversing" : "Joining trend"} ${tNow === 1 ? "up" : "down"}: ${e.label}`);
@@ -343,7 +442,7 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
     update.last_candle_ts = last.t;
   }
   if (pendingPatch) { Object.assign(update, pendingPatch); newState = { ...newState, ...pendingPatch }; }
-  await finish(s, set, update, legs, event, notes, newState, candle);
+  await finish(s, set, update, legs, event, notes, newState, candle, atrNow);
 }
 
 /** Candles for every timeframe a rule book needs, plus daily candles and base candles by day (for opening ranges). */
@@ -377,8 +476,51 @@ async function rulesData(s: Strategy, dhan: Dhan, nowSec: number) {
   return { rules, book: new RuleBook(rules, s.timeframe_min, frames, daily, baseByDay, seg), bars: frames.get(s.timeframe_min)! };
 }
 
+/** Once-a-day condition strategies: decided at the session open from completed daily candles, like the backtest. */
+async function processRulesDaily(s: Strategy, set: Settings, action: string) {
+  const rules = validateRules(s.rules);
+  const dhan = dhanFor(set);
+  const nowSec = Date.now() / 1000, now = ist(nowSec), seg = String(s.data_segment);
+  const all = await dhan.daily(s.data_security_id, seg, s.data_instrument, addDays(now.date, -Math.ceil(warmBarsFor(rules) * 1.5)), addDays(now.date, 1));
+  const days = all.filter((d) => d.day < now.date);
+  if (days.length < 3) throw new Error(`Only ${days.length} daily candles came back from Dhan.`);
+  const book = new RuleBook(rules, s.timeframe_min, new Map(), days, new Map(), seg);
+  const openT = (day: string) => Date.parse(`${day}T00:00:00+05:30`) / 1000 + sessionFor(seg, day).open * 60 + 60;
+  const last = days[days.length - 1];
+  const sig = book.at(openT(now.date)), prev = book.at(openT(last.day));
+  let spot: number | null = null;
+  try { spot = await dhan.ltp(seg, s.data_security_id); } catch { spot = null; }
+  const tNow = sig.long && !sig.short ? 1 : sig.short && !sig.long ? -1 : 0;
+  const update: Record<string, unknown> = { last_trend: tNow, last_close: spot ?? last.c, last_supertrend: null, last_run_at: new Date().toISOString(), last_error: null };
+  const candle = { t: last.t, trend: tNow, c: spot ?? last.c };
+  await saveChart(s, days, days.map(() => NaN), days.map(() => 0));
+  if (action === "refresh") { await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
+  if (action === "flatten") { await flatten(s, set, update, candle); await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
+  const sess = sessionFor(seg, now.date);
+  const legs: Record<string, unknown>[] = [], notes: string[] = [];
+  let event = "", newState: Record<string, unknown> = {};
+  let position: Pos = s.position;
+  // Decide once, in the first half hour after the open (a strategy switched on later waits for tomorrow's open).
+  if (String(s.last_entry_day) !== now.date && now.min >= sess.open + 1 && now.min < sess.open + 30 && spot) {
+    update.last_entry_day = now.date;
+    const dirOk = (side: Pos) => s.direction === "BOTH" || (side === "LONG" ? s.direction === "LONG_ONLY" : s.direction === "SHORT_ONLY");
+    const d = decide(position === "FLAT" ? "FLAT" : position, sig, prev, { join: s.entry_mode === "JOIN", longOk: dirOk("LONG"), shortOk: dirOk("SHORT"), sets: ruleSets(rules) });
+    const label = (k: "long" | "short") => rules[k]!.conds.map(describeCond).join(rules[k]!.mode === "ANY" ? " or " : " & ");
+    if (d.exit && position !== "FLAT") { legs.push(exitLeg(s, 1)); notes.push(`${d.why}: ${exitLabel(s)}`); event = "EXIT"; position = "FLAT"; newState = FLAT_STATE; }
+    if (d.enter && position === "FLAT" && canEnter(s)) {
+      const e = entryLeg(s, d.enter, spot, legs.length + 1);
+      legs.push(e.leg); notes.push(`${d.enter === "LONG" ? "Buy" : "Sell"} rules met on yesterday's daily candle (${label(d.enter === "LONG" ? "long" : "short")}): ${e.label}`);
+      event = event === "EXIT" ? "REVERSE" : "ENTRY"; newState = { position: d.enter, ...e.state };
+    }
+  }
+  update.last_candle_ts = last.t;
+  const r = riskOf(s);
+  await finish(s, set, update, legs, event, notes, newState, candle, r ? (atrSeries(days, r.atr_len ?? 14).at(-1) || 0) : 0);
+}
+
 /** Condition-based strategies: decided at each close of a candle of the strategy's own timeframe. */
 async function processRules(s: Strategy, set: Settings, action: string) {
+  if (s.rules?.daily) return processRulesDaily(s, set, action);
   const dhan = dhanFor(set);
   const nowSec = Date.now() / 1000;
   const now = ist(nowSec);
@@ -419,7 +561,7 @@ async function processRules(s: Strategy, set: Settings, action: string) {
         legs.push(exitLeg(s, legs.length + 1)); notes.push(`${d.why}: ${exitLabel(s)}`);
         event = "EXIT"; position = "FLAT"; newState = FLAT_STATE;
       }
-      if (d.enter && position === "FLAT") {
+      if (d.enter && position === "FLAT" && canEnter(s)) {
         const e = entryLeg(s, d.enter, last.c, legs.length + 1);
         legs.push(e.leg); notes.push(`${d.enter === "LONG" ? "Buy" : "Sell"} rules met (${label(d.enter === "LONG" ? "long" : "short")}): ${e.label}`);
         event = event === "EXIT" ? "REVERSE" : "ENTRY";
@@ -428,7 +570,9 @@ async function processRules(s: Strategy, set: Settings, action: string) {
     }
     update.last_candle_ts = last.t;
   }
-  await finish(s, set, update, legs, event, notes, newState, candle);
+  const r = riskOf(s);
+  const atrNow = r ? (atrSeries(bars, r.atr_len ?? 14).at(-1) || 0) : 0;
+  await finish(s, set, update, legs, event, notes, newState, candle, atrNow);
 }
 
 async function processTimed(s: Strategy, set: Settings, action: string) {
@@ -466,7 +610,7 @@ async function processTimed(s: Strategy, set: Settings, action: string) {
   }
 
   const lastEntryDay = s.last_entry_day ? String(s.last_entry_day) : null;
-  if (position === "FLAT" && lastEntryDay !== now.date && now.min >= entryMin && now.min < entryMin + 10 && spot) {
+  if (position === "FLAT" && canEnter(s) && lastEntryDay !== now.date && now.min >= entryMin && now.min < entryMin + 10 && spot) {
     update.last_entry_day = now.date;
     const label = `${String(s.bias_timeframe) === "D" ? "Daily" : s.bias_timeframe + "-min"} Supertrend is ${tNow === 1 ? "up" : "down"}`;
     const desired: Pos = tNow === 1 ? (s.direction === "SHORT_ONLY" ? "FLAT" : "LONG") : (s.direction === "LONG_ONLY" ? "FLAT" : "SHORT");
@@ -496,6 +640,20 @@ async function chainBacktest(id: number) {
   });
 }
 
+/** Strategy lab: run one instalment, then hand over to a fresh invocation if there is more to do. */
+async function labLoop() {
+  const { data: set } = await sb.from("portal_settings").select("dhan_client_id, dhan_access_token").single();
+  const creds = { client: set?.dhan_client_id ?? "", token: set?.dhan_access_token ?? "" };
+  const chain = async () => {
+    const { data: sec } = await sb.from("engine_secret").select("secret").single();
+    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/engine`, {
+      method: "POST", headers: { "Content-Type": "application/json", "x-engine-secret": sec!.secret }, body: JSON.stringify({ action: "lab" }),
+    });
+  };
+  const more = await labStep({ sb, creds, started: Date.now(), chain });
+  if (more) await chain();
+}
+
 async function runBacktestJob(id: number) {
   const started = Date.now();
   const { data: bt } = await sb.from("algo_backtests").select("*").eq("id", id).single();
@@ -519,7 +677,8 @@ async function runBacktestJob(id: number) {
       // Freeze the strategy settings so every instalment uses the same rules.
       const snapshot = { ...s };
       for (const k of ["position", "pos_option_type", "pos_strike", "pos_expiry", "pos_qty", "pos_entry_date", "last_candle_ts", "last_trend",
-        "last_close", "last_supertrend", "last_run_at", "last_error", "last_entry_day", "leg_template_fut", "leg_template_opt"]) delete snapshot[k];
+        "last_close", "last_supertrend", "last_run_at", "last_error", "last_entry_day", "leg_template_fut", "leg_template_opt", "pos_risk", "day_pnl",
+        "day_pnl_date", "pos_option_side"]) delete snapshot[k];
       if (isCommodity(String(snapshot.data_segment))) {
         const r = await dataSecurity(sb, creds, String(snapshot.data_segment), String(snapshot.data_security_id), ist(Date.now() / 1000).date);
         snapshot.data_sec_resolved = r.sec;
@@ -583,6 +742,16 @@ Deno.serve(async (req) => {
     return Response.json({ accepted: true });
   }
 
+  if (action === "lab_start" || action === "lab_start_manual" || action === "lab") {
+    if (action !== "lab") {
+      const id = await labStart(sb, action === "lab_start_manual");
+      if (!id) return Response.json({ action, started: false, reason: "The lab is switched off." });
+    }
+    EdgeRuntime.waitUntil(labLoop().catch((e) => console.error("lab", e)));
+    return Response.json({ action, accepted: true });
+  }
+
+  if (!["tick", "refresh", "flatten", "sync_instruments"].includes(action)) return Response.json({ error: `Unknown action ${action}` }, { status: 400 });
   const nowIst = ist(Date.now() / 1000);
   if (action === "tick" && (nowIst.wd === 0 || nowIst.wd === 6)) return Response.json({ skipped: "weekend" });
 
@@ -607,6 +776,7 @@ Deno.serve(async (req) => {
         const r = await dataSecurity(sb, { client: set?.dhan_client_id ?? "", token: set?.dhan_access_token ?? "" }, s.data_segment, String(s.data_security_id), nowIst.date);
         s = { ...s, data_security_id: r.sec };
       }
+      if (action === "tick") s = await liveRisk(s, set as Settings);
       if (s.strategy_kind === "TIMED") await processTimed(s, set as Settings, action);
       else if (s.strategy_kind === "RULES") await processRules(s, set as Settings, action);
       else await processFlip(s, set as Settings, action);
