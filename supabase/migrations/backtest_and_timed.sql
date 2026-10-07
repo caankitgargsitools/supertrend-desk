@@ -49,3 +49,23 @@ alter table algo_strategies
   add column if not exists pending_trigger numeric,
   add column if not exists pending_from bigint,
   add column if not exists pending_to bigint;
+
+-- Resumable backtests (Dhan outages / expired token no longer lose the work done)
+alter table public.algo_backtests drop constraint algo_backtests_status_check;
+alter table public.algo_backtests add constraint algo_backtests_status_check check (status in ('queued','running','done','partial','failed','paused'));
+alter table public.algo_backtests add column if not exists resumable boolean generated always as (plans is not null and status in ('failed','paused')) stored;
+grant select (resumable) on public.algo_backtests to authenticated;
+create or replace function public.resume_backtest(p_backtest bigint) returns bigint
+language plpgsql security definer set search_path to 'public' as $$
+begin
+  if not public.is_owner() then raise exception 'Not allowed'; end if;
+  update public.algo_backtests
+     set status = 'queued', error = null, progress = 'Resuming', finished_at = null,
+         acc = coalesce(acc, '{}'::jsonb) - 'busy' || jsonb_build_object('rounds', 0)
+   where id = p_backtest and status in ('failed', 'paused') and plans is not null;
+  if not found then raise exception 'This backtest can''t be resumed. Run it again instead.'; end if;
+  perform public.engine_backtest(p_backtest);
+  return p_backtest;
+end $$;
+revoke all on function public.resume_backtest(bigint) from public, anon;
+grant execute on function public.resume_backtest(bigint) to authenticated;

@@ -390,6 +390,7 @@ async function processTimed(s: Strategy, set: Settings, action: string) {
 }
 
 const MAX_ROUNDS = 40; // safety stop for the self-chaining backtest
+const MAX_BUSY = 12; // after this many waits for Dhan, pause the backtest for a manual resume
 
 /** Ask the engine to continue this backtest in a fresh invocation (each one has its own time budget). */
 async function chainBacktest(id: number) {
@@ -405,6 +406,7 @@ async function runBacktestJob(id: number) {
   const started = Date.now();
   const { data: bt } = await sb.from("algo_backtests").select("*").eq("id", id).single();
   if (!bt || !["queued", "running"].includes(bt.status)) return;
+  if (bt.status === "queued" && bt.plans) await sb.from("algo_backtests").update({ status: "running", error: null, progress: "Resuming" }).eq("id", id);
   const setRow = (fields: Record<string, unknown>) => sb.from("algo_backtests").update(fields).eq("id", id);
   try {
     const { data: set } = await sb.from("portal_settings").select("*").single();
@@ -433,10 +435,25 @@ async function runBacktestJob(id: number) {
     const s = params.strategy;
     acc.rounds = (acc.rounds ?? 0) + 1;
     const deadline = started + 110000;
+    const busyBefore = acc.busy ?? 0;
     const res = await priceBatch(s, creds, params, plans!, cursor, acc, deadline, async (m) => { await setRow({ progress: m }); });
     trades = trades.concat(res.trades);
     cursor = res.next; acc = res.acc;
 
+    if ((acc.busy ?? 0) > busyBefore && cursor < plans!.length) {
+      // Dhan's option-data server didn't answer. Keep the work done; wait, then carry on, or pause for a manual resume.
+      if ((acc.busy ?? 0) > MAX_BUSY) {
+        await setRow({ status: "paused", acc, cursor, trades, summary: summarize(s, params, plans!.length, trades.length, acc, true),
+          progress: `Dhan's option-data server kept timing out. ${cursor} of ${plans!.length} trades are priced and saved; press Resume to continue from there.` });
+        return;
+      }
+      await setRow({ acc, cursor, trades, progress: `Dhan's server is slow to answer. Priced ${cursor} of ${plans!.length} trades; retrying in 30 seconds…` });
+      await new Promise((r) => setTimeout(r, Math.max(0, Math.min(30000, started + 140000 - Date.now()))));
+      acc.rounds -= 1; // a wait for Dhan doesn't count towards the round limit
+      await setRow({ acc });
+      await chainBacktest(id);
+      return;
+    }
     if (cursor < plans!.length && acc.rounds < MAX_ROUNDS) {
       await setRow({ acc, cursor, trades, progress: `Priced ${cursor} of ${plans!.length} trades. Continuing…` });
       await chainBacktest(id);

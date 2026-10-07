@@ -3,7 +3,7 @@
 //   1. planBacktest  – downloads index candles once and decides every trade (entry/exit times, strike)
 //   2. priceBatch    – prices as many planned trades as fit in one invocation; the engine chains the rest
 //   3. summarize     – totals once every trade is priced
-import { Dhan, type OptBar } from "./dhan.ts";
+import { Dhan, DhanBusyError, type OptBar } from "./dhan.ts";
 import {
   addDays, aggregate, type Bar, type DayBar, ist, minToTime, partialDay, type Raw,
   signalSeries, strikeFor, supertrend, timeToMin, weekdayOf,
@@ -46,6 +46,7 @@ export type Acc = {
   equity: number; peak: number; maxDd: number; grossWin: number; grossLoss: number; wins: number;
   gross: number; costs: number; skipped: Record<string, number>; lastDone: string; calls: number; rounds: number;
   chg?: { brokerage: number; stt: number; exch: number; sebi: number; gst: number; stamp: number };
+  busy?: number; // rounds cut short because Dhan was unavailable
 };
 
 export const MAX_DAYS = 1827; // 5 years, the depth of Dhan's expired-options history
@@ -286,11 +287,13 @@ export async function priceBatch(
   acc: Acc, deadline: number, progress: (msg: string) => Promise<void>,
 ): Promise<{ trades: Record<string, unknown>[]; next: number; acc: Acc }> {
   const dhan = new Dhan(creds.client, creds.token);
+  dhan.deadline = deadline + 25000;
   const isOpt = s.trade_type === "OPTIONS";
   const units = s.lots * s.lot_size;
   const step = Number(s.strike_step);
 
   const cache = new Map<string, Map<string, (OptBar & { min: number; day: string })[]>>();
+  let busyStreak = 0;
   const winStart = (day: string) => {
     const n = Math.floor((Date.parse(day) - Date.parse(p.from)) / 86400000 / 30);
     return addDays(p.from, n * 30);
@@ -300,7 +303,18 @@ export async function priceBatch(
     const key = `${type}|${k}|${code}|${ws}`;
     let m = cache.get(key);
     if (!m) {
-      const rows = await dhan.rolling({ sec: s.data_security_id, segment: optionsSegment(s), interval: 5, code, k, type, from: ws, to: addDays(ws, 30) });
+      const get = (from: string, to: string) => dhan.rolling({ sec: s.data_security_id, segment: optionsSegment(s), interval: 5, code, k, type, from, to });
+      let rows: OptBar[];
+      try { rows = await get(ws, addDays(ws, 30)); }
+      catch (e) {
+        if (!(e instanceof DhanBusyError)) throw e;
+        // Dhan timed out on 30 days at once: ask for 10 days at a time instead.
+        busyStreak++;
+        if (busyStreak > 6) throw e; // Dhan is down; stop this round and resume later
+        rows = [];
+        for (let a = 0; a < 30; a += 10) rows.push(...await get(addDays(ws, a), addDays(ws, a + 10)));
+      }
+      busyStreak = 0;
       m = groupByDay(rows.map((r) => { const q = ist(r.t); return { ...r, day: q.date, min: q.min }; }));
       cache.set(key, m);
     }
@@ -328,7 +342,7 @@ export async function priceBatch(
     if (Date.now() > deadline) break;
     const t = plans[i];
     if ((i - start) % 10 === 0) await progress(`Pricing trade ${i + 1} of ${plans.length}`);
-    let inPx: number | null, outPx: number | null, contract: string;
+    let inPx: number | null = null, outPx: number | null = null, contract = "";
     // Breakout fills are stamped with the base candle in which the trigger traded; price the option at that candle's end.
     const baseMin = s.strategy_kind !== "TIMED" && s.timeframe_min % 5 !== 0 ? 1 : 5;
     const inMin = t.fillIn != null ? t.entryMin + baseMin : t.entryMin, outMin = t.fillOut != null ? t.exitMin + baseMin : t.exitMin;
@@ -337,8 +351,14 @@ export async function priceBatch(
       const outCode = inCode - expiriesBetween(t.entryDay, t.exitDay);
       if (outCode < p.near_code) { skip("Contract expired before the exit (turn on next-week expiry)"); continue; }
       contract = `${s.dhan_symbol} ${t.strike} ${t.opt}${inCode > p.near_code ? " (next week)" : ""}`;
-      inPx = await optPrice(t.entryDay, inMin, t.spotIn, t.opt, t.strike, inCode);
-      outPx = inPx == null ? null : await optPrice(t.exitDay, outMin, t.spotOut ?? t.spotIn, t.opt, t.strike, outCode);
+      try {
+        inPx = await optPrice(t.entryDay, inMin, t.spotIn, t.opt, t.strike, inCode);
+        outPx = inPx == null ? null : await optPrice(t.exitDay, outMin, t.spotOut ?? t.spotIn, t.opt, t.strike, outCode);
+      } catch (e) {
+        // Dhan unavailable: keep everything priced so far; the engine retries from this trade in a little while.
+        if (e instanceof DhanBusyError) { acc.busy = (acc.busy ?? 0) + 1; break; }
+        throw e;
+      }
     } else {
       contract = `${s.underlying} index (futures proxy)`;
       inPx = t.spotIn;

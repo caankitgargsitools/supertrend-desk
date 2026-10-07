@@ -5,9 +5,14 @@ export type OptBar = { t: number; o: number; c: number; strike: number | null; s
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Dhan was temporarily unavailable (timeouts, 5xx, rate limits) — worth retrying later, unlike a bad token. */
+export class DhanBusyError extends Error {}
+
 export class Dhan {
   private last = 0;
   calls = 0;
+  /** Epoch ms after which no more retries are attempted (keeps a backtest round inside the function's time limit). */
+  deadline = Infinity;
   private clientId: string;
   private token: string;
   constructor(clientId: string, token: string) {
@@ -16,22 +21,37 @@ export class Dhan {
   }
 
   async post(path: string, body: unknown): Promise<any> {
+    let lastErr = "";
     for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt > 0 && Date.now() + 22000 > this.deadline) break; // out of time for another try
       const wait = this.last + 260 - Date.now();
       if (wait > 0) await sleep(wait);
       this.last = Date.now();
       this.calls++;
-      const r = await fetch("https://api.dhan.co/v2" + path, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json", Accept: "application/json",
-          "access-token": this.token, "client-id": this.clientId,
-        },
-        body: JSON.stringify(body),
-      });
-      const text = await r.text();
+      let r: Response, text: string;
+      try {
+        r = await fetch("https://api.dhan.co/v2" + path, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json", Accept: "application/json",
+            "access-token": this.token, "client-id": this.clientId,
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(20000),
+        });
+        text = await r.text();
+      } catch (e) { // network error or no answer within 20 s: try again
+        lastErr = e instanceof Error ? e.message : String(e);
+        await sleep(2000 * (attempt + 1));
+        continue;
+      }
       if (r.status === 429 || (!r.ok && /\b805\b|too many/i.test(text))) {
         await sleep(1500 * (attempt + 1));
+        continue;
+      }
+      if (r.status >= 500) { // Dhan's servers busy or timing out (502/503/504): try again
+        lastErr = `HTTP ${r.status}`;
+        await sleep(2000 * (attempt + 1));
         continue;
       }
       if (!r.ok) {
@@ -42,7 +62,9 @@ export class Dhan {
       }
       return text ? JSON.parse(text) : {};
     }
-    throw new Error(`Dhan kept rate-limiting ${path}. Try again in a minute.`);
+    throw new DhanBusyError(lastErr
+      ? `Dhan's server didn't answer ${path} after several tries (${lastErr}).`
+      : `Dhan kept rate-limiting ${path}. Try again in a minute.`);
   }
 
   /** Minute candles (interval 1/5/15/25/60). Dates as "YYYY-MM-DD HH:mm:ss" IST, max ~90 days per call. */

@@ -1113,7 +1113,7 @@ function renderBtHistory(rows) {
   for (const r of rows) {
     const tr = document.createElement("tr"); tr.className = "pick"; tr.tabIndex = 0;
     const net = r.net === null ? null : Number(r.net);
-    const sc = { done: "green", partial: "yellow", failed: "red", running: "blue", queued: "blue" }[r.status] || "";
+    const sc = { done: "green", partial: "yellow", paused: "yellow", failed: "red", running: "blue", queued: "blue" }[r.status] || "";
     tr.innerHTML = `<td class="when"></td><td class="mono"></td><td><span class="chip ${sc}"></span></td><td class="n"></td><td class="n"></td>`;
     tr.children[0].textContent = `#${r.id} · ${istText(r.created_at)}`;
     tr.children[1].textContent = `${r.from} → ${r.to}`;
@@ -1131,7 +1131,7 @@ async function watchBacktest(id) {
   stopBtPoll();
   const tick = async () => {
     let row;
-    try { row = must(await db.from("algo_backtests").select("id, status, progress, error, params, summary, trades").eq("id", Number(id)).maybeSingle()); }
+    try { row = must(await db.from("algo_backtests").select("id, status, progress, error, params, summary, trades, resumable").eq("id", Number(id)).maybeSingle()); }
     catch (e) { $("btResult").innerHTML = ""; const b = document.createElement("div"); b.className = "banner err"; b.textContent = errorText(e); $("btResult").append(b); return; }
     if (!row) return;
     renderBacktest(row);
@@ -1239,11 +1239,24 @@ function renderBacktest(r) {
   if (r.status === "queued" || r.status === "running") {
     const b = document.createElement("div"); b.className = "banner info"; b.textContent = `Running… ${r.progress || ""}`; box.append(b); return;
   }
+  const resumeBtn = () => {
+    const btn = document.createElement("button"); btn.type = "button"; btn.className = "btn small primary"; btn.textContent = "Resume from where it stopped";
+    btn.style.marginLeft = "10px";
+    btn.addEventListener("click", (e) => run(e.currentTarget, async () => { must(await db.rpc("resume_backtest", { p_backtest: r.id })); toast("Backtest resumed."); await watchBacktest(r.id); }));
+    return btn;
+  };
   if (r.status === "failed") {
-    const b = document.createElement("div"); b.className = "banner err"; b.textContent = r.error || "The backtest failed."; box.append(b); return;
+    const b = document.createElement("div"); b.className = "banner err";
+    b.textContent = (r.error || "The backtest failed.").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").slice(0, 220);
+    if (r.resumable) { b.append(document.createTextNode(" The trades priced so far are saved.")); b.append(resumeBtn()); }
+    box.append(b); return;
   }
   const s = r.summary || {};
-  if (r.status === "partial") { const b = document.createElement("div"); b.className = "banner warn"; b.textContent = r.progress; box.append(b); }
+  if (r.status === "partial" || r.status === "paused") {
+    const b = document.createElement("div"); b.className = "banner warn"; b.textContent = r.progress;
+    if (r.resumable) b.append(resumeBtn());
+    box.append(b);
+  }
   const stats = document.createElement("div"); stats.className = "stats";
   const tile = (label, value, cls) => { const d = document.createElement("div"); d.className = "stat"; d.innerHTML = `<span class="label"></span><span class="v ${cls || ""}"></span>`; d.children[0].textContent = label; d.children[1].textContent = value; return d; };
   stats.append(
