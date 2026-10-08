@@ -201,6 +201,9 @@ legend { padding: 0; margin-bottom: 4px; }
 .months .split { outline: 2px dashed var(--yellow); outline-offset: 2px; }
 .kv { display: grid; grid-template-columns: minmax(130px, max-content) 1fr; gap: 6px 14px; font-size: 13px; }
 .kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+.lab-table tr.sub td { background: var(--bg); }
+.lab-table tr.sub td.lbl { padding-left: 26px; }
+.lab-table .famBtn { margin-left: 6px; }
 .assetpick { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .assetpick label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; cursor: pointer; }
 .assetpick input { accent-color: var(--blue); }
@@ -556,16 +559,16 @@ legend { padding: 0; margin-bottom: 4px; }
           <label class="f"><span>From</span><select id="lab_period"><option value="run">Latest run only</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option></select></label>
           <label class="f"><span>Stop loss</span><select id="lab_stopf"><option value="ANY">With or without</option><option value="WITH">With stop / target</option><option value="WITHOUT">Without</option></select></label>
           <label class="f"><span>Show</span><select id="lab_only"><option value="true">Passed only</option><option value="false">All tested</option></select></label>
-          <label class="f"><span>Sort by</span><select id="lab_sort"><option value="score">Score (first 9 months)</option><option value="test">Last 3 months net</option><option value="net">Net P&amp;L (1 year)</option><option value="pf">Profit factor</option><option value="win">Win rate</option><option value="cons">Profitable months</option><option value="dd">Smallest drawdown</option><option value="nights">Nights passed</option></select></label>
+          <label class="f"><span>Sort by</span><select id="lab_sort"><option value="score">Score (first 9 months)</option><option value="test">Last 3 months net</option><option value="net">Net P&amp;L (1 year)</option><option value="rom">Return on margin</option><option value="pf">Profit factor</option><option value="win">Win rate</option><option value="cons">Profitable months</option><option value="dd">Smallest drawdown</option><option value="nights">Nights passed</option></select></label>
         </div>
         <p class="hint" id="lab_count" style="margin:10px 0 0"></p>
         <div class="scroll" style="margin-top:8px">
           <table class="lab-table">
-            <thead><tr><th>#</th><th>Strategy</th><th class="n">Trades</th><th class="n">Win %</th><th class="n">Net (1 yr)</th><th class="n">Last 3 mo</th><th class="n">Max DD</th><th class="n">PF</th><th class="n">Months +</th><th class="n">Score</th><th class="n">Nights</th></tr></thead>
+            <thead><tr><th>#</th><th>Strategy</th><th class="n">Trades</th><th class="n">Win %</th><th class="n">Net (1 yr)</th><th class="n">Margin / lot</th><th class="n">Return on margin</th><th class="n">Last 3 mo</th><th class="n">Max DD</th><th class="n">PF</th><th class="n">Months +</th><th class="n">Score</th><th class="n">Nights</th></tr></thead>
             <tbody id="lab_body"></tbody>
           </table>
         </div>
-        <p class="hint" style="margin:8px 0 0">Score = net profit of the first 9 months ÷ the worst drawdown in them × the share of those months that made money. Figures are for 1 lot after brokerage and statutory charges, in whole rupees. Nights = how many runs tested this exact strategy (it passed in how many).</p>
+        <p class="hint" style="margin:8px 0 0">Score = net profit of the first 9 months ÷ the worst drawdown in them × the share of those months that made money. Figures are for 1 lot after brokerage and statutory charges, in whole rupees. Margin / lot = money one lot ties up: about 12% of contract value for index futures and option writing, 10% for MCX, the average premium paid for option buying. Return on margin = the year's net ÷ margin. Similar strategies (same asset, same indicators and conditions, only settings such as lengths, levels, timeframe, stops or session differ) are grouped into one line showing the best of them; open “similar” to see the rest. Nights = how many runs tested this exact strategy (it passed in how many).</p>
       </section>
 
       <section class="card" id="lab_detail" hidden></section>
@@ -2236,27 +2239,52 @@ function labGroup() {
     else { g.nights++; if (m.passed) g.passes++; if (r.run_id > g.r.run_id) { g.r = r; g.m = m; } }
   }
   const key = { score: (g) => g.m.score, test: (g) => g.m.test.net, net: (g) => g.m.full.net, pf: (g) => g.m.full.pf ?? 0, win: (g) => g.m.full.win_rate,
-    cons: (g) => g.m.pos_months / Math.max(1, g.m.months_n), dd: (g) => -g.m.full.max_dd, nights: (g) => g.passes * 1000 + g.m.score }[lab.sort];
-  return [...by.values()].sort((a, b) => key(b) - key(a));
+    cons: (g) => g.m.pos_months / Math.max(1, g.m.months_n), dd: (g) => -g.m.full.max_dd, nights: (g) => g.passes * 1000 + g.m.score,
+    rom: (g) => g.m.ret_margin ?? -1e9 }[lab.sort];
+  // Families: same asset, decision style, direction and indicator/condition types; only settings differ.
+  const fam = new Map();
+  for (const g of by.values()) {
+    const k = familyKey(g.r);
+    const f = fam.get(k); if (f) f.members.push(g); else fam.set(k, { key: k, members: [g] });
+  }
+  const out = [...fam.values()].map((f) => { f.members.sort((a, b) => key(b) - key(a)); f.best = f.members[0]; return f; });
+  return out.sort((a, b) => key(b.best) - key(a.best));
+}
+function familyKey(r) {
+  const c = r.config || {}, ru = c.rules || {};
+  const sig = (set) => ((set && set.conds) || []).map((x) => `${x.ind}:${x.op}`).sort().join("+") || "-";
+  return [r.asset, ru.daily ? "D" : "I", c.direction, sig(ru.long), sig(ru.short)].join("|");
 }
 function renderLabTable() {
-  const list = labGroup(); const body = $("lab_body"); body.innerHTML = "";
-  $("lab_count").textContent = list.length ? `${list.length} strategies${list.length > 150 ? " (showing the top 150)" : ""}.` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
-  list.slice(0, 150).forEach((g, i) => {
+  const fams = labGroup(); const body = $("lab_body"); body.innerHTML = "";
+  lab.openFam = lab.openFam || new Set();
+  const nStrat = fams.reduce((a, f) => a + f.members.length, 0);
+  $("lab_count").textContent = fams.length ? `${fams.length} groups of similar strategies (${nStrat} strategies)${fams.length > 150 ? "; showing the top 150 groups" : ""}.` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
+  const pc = (v) => `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${rupees(v)}</span>`;
+  const rowFor = (g, num, f, sub) => {
     const m = g.m, r = g.r, c = r.config || {};
-    const tr = document.createElement("tr"); tr.className = "pick" + (lab.sel === r.id ? " sel" : "");
-    const chips = [`<span class="chip blue">${esc(r.asset)}</span>`, `<span class="chip">${c.rules && c.rules.daily ? "Daily" : (c.timeframe_min + "m · " + (c.intraday ? "intraday" : "positional"))}</span>`,
+    const tr = document.createElement("tr"); tr.className = "pick" + (sub ? " sub" : "") + (lab.sel === r.id ? " sel" : "");
+    const chips = [sub ? "" : `<span class="chip blue">${esc(r.asset)}</span>`, `<span class="chip">${c.rules && c.rules.daily ? "Daily" : (c.timeframe_min + "m · " + (c.intraday ? "intraday" : "positional"))}</span>`,
+      c.rules && c.rules.candles === "HA" ? '<span class="chip">HA candles</span>' : "",
       c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.champion ? '<span class="chip green">Re-tested</span>' : "",
       r.starred ? '<span class="chip yellow">★</span>' : "", r.promoted_id ? '<span class="chip green">Saved as strategy</span>' : "",
       m.passed ? "" : '<span class="chip red">Not passed</span>'].join("");
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : r.os) : null;
-    const pc = (v) => `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${rupees(v)}</span>`;
-    tr.innerHTML = `<td class="n">${i + 1}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}</div>${ver ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
-      <td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}</td><td class="n">${pc(m.test.net)}</td>
+    const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} similar</button>` : "";
+    tr.innerHTML = `<td class="n">${num}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}${more}</div>${ver ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
+      <td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}</td><td class="n">${m.margin_lot ? rupees(m.margin_lot) : "–"}</td>
+      <td class="n">${m.ret_margin == null ? "–" : `<span class="${m.ret_margin > 0 ? "pos-num" : m.ret_margin < 0 ? "neg-num" : ""}">${m.ret_margin}%</span>`}</td><td class="n">${pc(m.test.net)}</td>
       <td class="n">${rupees(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${m.score}</td><td class="n">${g.passes}/${g.nights}</td>`;
     tr.querySelector(".t").textContent = r.label;
-    tr.addEventListener("click", () => openLabDetail(r.id).catch((e) => toast(errorText(e))));
-    body.append(tr);
+    tr.addEventListener("click", (e) => {
+      if (e.target.closest(".famBtn")) { if (lab.openFam.has(f.key)) lab.openFam.delete(f.key); else lab.openFam.add(f.key); renderLabTable(); return; }
+      openLabDetail(r.id).catch((er) => toast(errorText(er)));
+    });
+    return tr;
+  };
+  fams.slice(0, 150).forEach((f, i) => {
+    body.append(rowFor(f.best, i + 1, f, false));
+    if (lab.openFam.has(f.key)) f.members.slice(1).forEach((g, j) => body.append(rowFor(g, `${i + 1}.${j + 2}`, f, true)));
   });
 }
 function monthsHTML(m) {
@@ -2314,6 +2342,8 @@ async function openLabDetail(id) {
         <div class="stat"><span class="label">Trades · win rate</span><span class="v">${m.full.n} · ${m.full.win_rate}%</span></div>
         <div class="stat"><span class="label">Profit factor</span><span class="v">${m.full.pf ?? "–"}</span></div>
         <div class="stat"><span class="label">Max drawdown</span><span class="v">${rupees(m.full.max_dd)}</span></div>
+        <div class="stat"><span class="label">Margin / lot</span><span class="v">${m.margin_lot ? rupees(m.margin_lot) : "–"}</span></div>
+        <div class="stat"><span class="label">Return on margin</span><span class="v ${m.ret_margin > 0 ? "up" : m.ret_margin < 0 ? "down" : ""}">${m.ret_margin == null ? "–" : m.ret_margin + "%"}</span></div>
         <div class="stat"><span class="label">Profitable months</span><span class="v">${m.pos_months} of ${m.months_n}</span></div>
         <div class="stat"><span class="label">Score</span><span class="v">${m.score}</span></div>
       </div>
@@ -2338,7 +2368,7 @@ async function downloadLabExcel(r, v, kv) {
   await loadScript("vendor/xlsx.mini.min.js");
   const m = v.metrics, wb = XLSX.utils.book_new();
   const p = (name, x) => [[name], ["Trades", x.n], ["Win rate (%)", x.win_rate], ["Net (Rs)", x.net], ["Gross (Rs)", x.gross], ["Charges (Rs)", x.costs], ["Profit factor", x.pf ?? "–"], ["Max drawdown (Rs)", x.max_dd], [] ];
-  const sum = XLSX.utils.aoa_to_sheet([["CA Ankit Garg Trade Desk · Strategy Lab #" + r.id], [r.label], [], ...kv, ["This version", v.label], ["Stops in this version", riskText(v.risk)], ["Passed", m.passed ? "Yes" : "No: " + m.why.join("; ")], ["Score", m.score], [],
+  const sum = XLSX.utils.aoa_to_sheet([["CA Ankit Garg Trade Desk · Strategy Lab #" + r.id], [r.label], [], ...kv, ["This version", v.label], ["Stops in this version", riskText(v.risk)], ["Passed", m.passed ? "Yes" : "No: " + m.why.join("; ")], ["Score", m.score], ["Margin per lot (Rs)", m.margin_lot ?? "–"], ["Return on margin (%)", m.ret_margin ?? "–"], [],
     ...p("Whole year", m.full), ...p("First 9 months (ranked)", m.train), ...p("Last 3 months (check)", m.test), ["Month", "Net (Rs)", "Trades"], ...m.months.map((x) => [x.m, x.net, x.n])]);
   sum["!cols"] = [{ wch: 26 }, { wch: 90 }];
   XLSX.utils.book_append_sheet(wb, sum, "Summary");
