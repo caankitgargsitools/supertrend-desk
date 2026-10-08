@@ -223,12 +223,13 @@ export function labMetrics(trades: T[], from: string, split: string, to: string,
   const splitM = split.slice(0, 7);
   const trainMonths = months.filter((x) => x.m < splitM);
   const f = stats(trades), tr = stats(train), te = stats(test);
-  const minN = daily ? 8 : 25, minTest = daily ? 2 : 5;
+  // Enough trades in the ranked 9 months to mean something (once-a-day strategies trade less often).
+  const minN = daily ? 6 : 20, minTest = daily ? 2 : 5;
   const avgAbs = train.length ? train.reduce((a, t) => a + Math.abs(t.net), 0) / train.length : 0;
   const trainPos = trainMonths.filter((x) => x.net > 0).length;
   const score = tr.n >= minN ? +((tr.net / Math.max(tr.max_dd, avgAbs * 3, 1)) * (trainMonths.length ? trainPos / trainMonths.length : 0)).toFixed(3) : 0;
   const why: string[] = [];
-  if (f.n < minN) why.push(`only ${f.n} trades (needs ${minN})`);
+  if (tr.n < minN) why.push(`only ${tr.n} trades in the first 9 months (needs ${minN})`);
   if (tr.net <= 0) why.push("lost money in the first 9 months");
   if (tr.pf !== null && tr.pf < 1.1) why.push("profit factor under 1.1 in the first 9 months");
   if (te.n < minTest) why.push(`only ${te.n} trades in the last 3 months`);
@@ -364,9 +365,10 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
       const left = await screenPhase(ctx, run, win);
       if (!left) {
         const top = Number(set.top_options ?? 20);
-        const { data: best } = await sb.from("lab_results").select("id, asset").eq("run_id", run.id).eq("stage", "screened").eq("passed", true)
+        // Options are priced for index strategies on intraday candles; positional once-a-day trades run across expiries.
+        const { data: best } = await sb.from("lab_results").select("id, asset, mode").eq("run_id", run.id).eq("stage", "screened").eq("passed", true)
           .order("score", { ascending: false }).limit(400);
-        const pickIds = (best ?? []).filter((b) => !LAB_ASSETS[b.asset]?.commodity).slice(0, top).map((b) => b.id);
+        const pickIds = (best ?? []).filter((b) => !LAB_ASSETS[b.asset]?.commodity && b.mode === "INTRADAY").slice(0, top).map((b) => b.id);
         if (pickIds.length) await sb.from("lab_results").update({ stage: "opt_queue" }).in("id", pickIds);
         const { count: passed } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).eq("passed", true);
         await patch({ phase: "options", progress: `Pricing the best ${pickIds.length} with real option prices`, counts: { ...counts, screened: counts.generated, passed, to_price: pickIds.length } });
@@ -496,7 +498,7 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
   const store = dbStore(sb);
   while (Date.now() - ctx.started < WALL_BUDGET - 15000) {
     const { data: rows } = await sb.from("lab_results").select("id, asset, config, opt_job, opt_buy, opt_sell, label").eq("run_id", run.id).in("stage", ["pricing", "opt_queue"])
-      .order("stage", { ascending: true }).order("score", { ascending: false }).limit(1);
+      .order("stage", { ascending: false }).order("score", { ascending: false }).limit(1);
     const row = rows?.[0];
     if (!row) return false;
     const a = LAB_ASSETS[row.asset];
@@ -522,6 +524,9 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
     job.trades = job.trades.concat(slim(res.trades)); job.cursor = res.next; job.acc = res.acc;
     if (job.cursor >= job.plans.length) {
       const metrics = labMetrics(job.trades, win.from, win.split, win.to, !!row.config.rules?.daily);
+      // Results with many trades that couldn't be priced aren't trustworthy.
+      const unpriced = Object.values(job.acc.skipped ?? {}).reduce((a: number, b) => a + Number(b), 0);
+      if (unpriced > job.plans.length * 0.2) { metrics.passed = false; metrics.why.push(`${unpriced} of ${job.plans.length} trades couldn't be priced with real option data`); }
       const out = { label: vr.label, risk: vr.risk, metrics, trades: job.trades, skipped: job.acc.skipped, planned: job.plans.length };
       const col = vr.side === "BUY" ? "opt_buy" : "opt_sell";
       const list = [...((row as any)[col]?.variants ?? []), out];
