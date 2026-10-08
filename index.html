@@ -213,6 +213,7 @@ legend { padding: 0; margin-bottom: 4px; }
   <div class="brand"><h1><span class="b">CA</span> <span class="r">Ankit</span> <span class="y">Garg</span> <span class="g">Trade Desk</span></h1><small>Dhan · NSE / BSE</small></div>
   <span class="mk"><span class="dot" id="mktDot"></span><span id="mktText">Checking market hours…</span></span>
   <button class="btn small" id="openLab" type="button">Strategy Lab</button>
+  <button class="btn small" id="openCap" type="button">Capital</button>
   <button class="btn small" id="openSettings" type="button">Dhan connection</button>
   <span class="mk" id="who" hidden></span><button class="btn small" id="signOut" type="button" hidden>Sign out</button>
 </header>
@@ -250,7 +251,8 @@ legend { padding: 0; margin-bottom: 4px; }
           <label class="f wide"><span>Order webhook URL <em id="urlState" class="hint"></em></span><input id="c_url" type="password" placeholder="Paste a new URL to replace" autocomplete="off"></label>
           <label class="f"><span>Webhook secret <em id="secState" class="hint"></em></span><input id="c_secret" type="password" placeholder="Paste to replace" autocomplete="off"></label>
         </div>
-        <p class="hint">These details are stored on the server and never shown in full again. The access token reads candles and historical option prices (Dhan Data API subscription needed). Orders go to the webhook URL with its secret, in the same JSON format your TradingView alerts send to Dhan. Dhan tokens expire; paste a fresh one when the desk reports an expired token.</p>
+        <div id="tokBox" style="margin-top:10px"></div>
+        <p class="hint">These details are stored on the server and never shown in full again. The access token reads candles, option prices and your Dhan funds (Dhan Data API subscription needed). Orders go to the webhook URL with its secret, in the same JSON format your TradingView alerts send to Dhan. Dhan tokens last 24 hours; the desk renews the saved token automatically (Dhan's RenewToken) every day before it expires, so you only paste one again if a renewal fails or the token has already expired.</p>
         <div class="formbar"><button class="btn primary" type="submit">Save connection</button><span class="hint" id="connMsg"></span></div>
       </form>
     </section>
@@ -362,7 +364,8 @@ legend { padding: 0; margin-bottom: 4px; }
           <fieldset class="rules-only" id="rulesSet"><legend class="label">Conditions</legend>
             <div class="grid"><label class="f wide"><span>When to check the conditions</span><select id="f_rules_daily">
               <option value="false">Each time a candle of the decision timeframe closes</option>
-              <option value="true">Once a day at the open, on completed daily candles (positional)</option></select></label></div>
+              <option value="true">Once a day at the open, on completed daily candles (positional)</option></select></label>
+              <label class="f"><span>Candles the indicators read</span><select id="f_rules_candles"><option value="NORMAL">Normal candles</option><option value="HA">Heikin Ashi candles</option></select></label></div>
             <p class="hint">Conditions are checked each time a candle of the decision timeframe above closes (or, once-a-day, at the session open on yesterday's daily candle), using the latest <em>completed</em> candle of each condition's own timeframe. Orders go in at that close. A long is closed by the “Exit long” rules if you add any; otherwise by the Sell rules (reversing into a short); with neither, as soon as the Buy rules stop being true. Shorts mirror this.</p>
             <div id="rs_long"></div><div id="rs_short"></div><div id="rs_exitLong"></div><div id="rs_exitShort"></div>
           </fieldset>
@@ -408,6 +411,18 @@ legend { padding: 0; margin-bottom: 4px; }
             </div>
             <p class="hint" id="riskHint"></p>
           </fieldset>
+          <fieldset id="sizeSet"><legend class="label">Position size</legend>
+            <div class="grid">
+              <label class="f wide"><span>Lots per trade</span><select id="z_mode"><option value="FIXED">Fixed (the “Lots” above)</option><option value="AUTO">Size from capital (ramps up and down)</option></select></label>
+              <label class="f z-auto"><span>Share of equity for this strategy (%)</span><input id="z_alloc" type="number" min="0.1" max="100" step="0.5"></label>
+              <label class="f z-auto"><span>Accept a drawdown of (% of that share)</span><input id="z_dd" type="number" min="1" max="100" step="1"></label>
+              <div class="f z-auto"><span>Worst drawdown for 1 lot (₹)</span><div class="pair"><input id="z_ddlot" type="number" min="0" step="100" placeholder="from a backtest"><button class="btn small" id="z_fromBt" type="button">Use backtest</button></div></div>
+              <label class="f z-auto"><span>Safety multiple on that drawdown</span><input id="z_mult" type="number" min="1" max="5" step="0.1"></label>
+              <label class="f z-auto"><span>Margin per lot (% of contract value)</span><input id="z_margin" type="number" min="1" max="100" step="0.5"></label>
+              <label class="f z-auto"><span>Maximum lots</span><input id="z_max" type="number" min="1" max="1000" step="1"></label>
+            </div>
+            <p class="hint" id="sizeHint"></p>
+          </fieldset>
           <fieldset class="flip-only"><legend class="label">Session (IST)</legend>
             <div class="grid">
               <label class="f"><span>First trade from</span><input id="f_session_start" type="time"></label>
@@ -447,6 +462,7 @@ legend { padding: 0; margin-bottom: 4px; }
               <label class="f"><span>Brokerage per order (₹, max)</span><input id="bt_brokerage" type="number" min="0" step="1" value="20"></label>
               <label class="f"><span>Dhan code for nearest expiry</span><select id="bt_code"><option value="1">1 (Dhan's examples)</option><option value="0">0 (Dhan's annexure)</option></select></label>
             </div>
+            <label class="chartopts" style="margin:10px 0 0"><input type="checkbox" id="bt_sizing"> Size lots from capital, trade by trade, with this strategy's position-size settings (starting from the capital above)</label>
             <details id="btCharges" style="margin:10px 0">
               <summary class="label" style="cursor:pointer">Brokerage &amp; statutory charges (rates in %) <span class="hint" id="btChargesSum"></span></summary>
               <p class="hint">Worked out per trade the way the broker's calculator does: brokerage on each order (futures: the lower of the ₹ amount above and the % below; options: flat ₹ per order), STT on the sell side, exchange and SEBI charges on total turnover, GST on brokerage + exchange + SEBI, stamp duty on the buy side. STT and stamp duty are rounded to the rupee, as the exchanges do. Net P&amp;L per trade is then taken in whole rupees.</p>
@@ -475,6 +491,38 @@ legend { padding: 0; margin-bottom: 4px; }
       </section>
     </div>
 
+    <div id="capPane" class="pane" hidden>
+      <section class="card">
+        <div class="head">
+          <div><span class="label">Money management</span><h2>Capital &amp; position sizing</h2></div>
+          <div class="actions">
+            <div class="seg" id="cap_mode" role="group" aria-label="Mode"><button type="button" data-m="LIVE" aria-pressed="true">Live</button><button type="button" data-m="PAPER" aria-pressed="false">Paper</button></div>
+            <button class="btn" id="cap_funds" type="button">Refresh Dhan funds</button>
+          </div>
+        </div>
+        <div id="cap_stats" style="margin-top:12px"></div>
+        <form id="capForm" style="margin-top:14px">
+          <div class="grid">
+            <label class="f"><span>Trading capital (₹)</span><input id="cap_capital" type="number" min="0" step="1000"></label>
+            <label class="f"><span>Count profits &amp; losses from</span><input id="cap_since" type="date"></label>
+            <label class="f"><span>Most capital tied up at once (%)</span><input id="cap_deploy" type="number" min="1" max="100" step="1"></label>
+          </div>
+          <p class="hint">Equity = trading capital + net profit or loss of the desk's closed trades since that date (live and paper are counted separately). Strategies set to “size from capital” work out their lots from equity before every entry, so they trade more lots after profits and fewer after losses. The cap stops all strategies together from tying up more than this share of equity in margin and premium.</p>
+          <div class="formbar"><button class="btn primary" type="submit">Save</button><span class="hint" id="cap_msg"></span></div>
+        </form>
+      </section>
+      <section class="card">
+        <h3 style="font-size:15px;margin:0 0 8px">Strategies</h3>
+        <div class="scroll"><table><thead><tr><th>Strategy</th><th>Mode</th><th>Position</th><th class="n">Capital held</th><th>Sizing</th><th class="n">Next entry</th><th class="n">Realised P&amp;L</th></tr></thead><tbody id="cap_body"></tbody></table></div>
+        <p class="hint" style="margin:8px 0 0">Capital held: margin for futures and option writing (contract value × margin %), premium paid for option buying, estimated at entry. “Next entry” uses the last price; option buying is sized at entry from the live premium.</p>
+      </section>
+      <section class="card">
+        <h3 style="font-size:15px;margin:0 0 8px">Closed trades</h3>
+        <div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Exit (IST)</th><th>Strategy</th><th>Contract</th><th class="n">Lots</th><th class="n">In</th><th class="n">Out</th><th class="n">Charges</th><th class="n">Net</th><th>Reason</th></tr></thead><tbody id="cap_trades"></tbody></table></div>
+        <p class="hint" style="margin:8px 0 0">Estimated by the desk from the index or futures price, or the option's premium from Dhan's option chain, with charges at current rates; whole rupees. Your Dhan contract notes are the final word.</p>
+      </section>
+    </div>
+
     <div id="labPane" class="pane" hidden>
       <section class="card">
         <div class="head">
@@ -485,7 +533,7 @@ legend { padding: 0; margin-bottom: 4px; }
             <button class="btn primary" id="lab_run" type="button">Run now</button>
           </div>
         </div>
-        <p class="hint" style="margin:8px 0 0">Every evening at 16:05 IST the lab invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and only <strong>pass</strong> if they also made money in the last 3 months, which the ranking never saw.</p>
+        <p class="hint" style="margin:8px 0 0">Every evening at 16:05 IST the lab invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. About a quarter of each night goes to variations of recent winners, with one or two settings changed (indicator lengths and levels, decision timeframe, stop distance, trailing stop or target, normal or Heikin Ashi candles, entry style, session times), so good ideas get tuned rather than found by luck once. The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and only <strong>pass</strong> if they also made money in the last 3 months, which the ranking never saw.</p>
         <div id="lab_status" style="margin-top:12px"></div>
         <form id="labSetForm" hidden style="margin-top:14px">
           <div class="grid">
@@ -634,6 +682,7 @@ async function loadAll() {
   const [settings, strategies] = await Promise.all([
     db.rpc("portal_status").then(must),
     db.from("algo_strategies").select("*").order("created_at").then(must),
+    loadCapStatus().catch(() => null),
   ]);
   state = { settings, strategies, has_bt: true };
   if (!selected || !state.strategies.find((s) => s.id === selected)) {
@@ -665,7 +714,7 @@ function kindName(s) { return isTimed(s) ? "Timed" : isHA(s) ? "Heikin Ashi" : s
 function biasName(tf) { return tf === "D" ? "Daily" : (Number(tf) % 60 === 0 ? `${Number(tf) / 60}-hour` : `${tf}-minute`); }
 
 function showEmpty() {
-  if (lab.open) return;
+  if (lab.open || cap.open) return;
   $("stratPane").hidden = true; $("emptyPane").hidden = false;
   $("emptyPane").innerHTML = '<div class="empty"><div><h3 style="margin-bottom:6px">No strategies yet</h3><p>Create one with “+ New strategy”, then pick Supertrend, Heikin Ashi, your own conditions or higher-timeframe in its Settings. New strategies start paused and in paper mode, so nothing is sent until you switch them on and go live.</p></div></div>';
 }
@@ -690,8 +739,8 @@ function describe(s) {
   const sig = isHA(s) ? "Heikin Ashi" : s.strategy_kind === "RULES" ? `${n} condition${n === 1 ? "" : "s"}` : st;
   const ord = s.strategy_kind !== "RULES" && s.entry_trigger === "BREAKOUT" ? ` · breakout ±${Number(s.buffer_points)}` : "";
   const inst = s.trade_type === "OPTIONS" ? (s.option_side === "SELL" ? "Option writing" : "Options") : "Futures";
-  const rk = s.risk ? ` · ${riskText(s.risk, true)}` : "";
-  const tfTxt = s.strategy_kind === "RULES" && s.rules && s.rules.daily ? "daily" : `${s.timeframe_min}m`;
+  const rk = (s.risk ? ` · ${riskText(s.risk, true)}` : "") + (s.sizing && s.sizing.mode === "AUTO" ? ` · lots from capital (${s.sizing.alloc_pct}%)` : "");
+  const tfTxt = (s.strategy_kind === "RULES" && s.rules && s.rules.daily ? "daily" : `${s.timeframe_min}m`) + (s.strategy_kind === "RULES" && s.rules && s.rules.candles === "HA" ? " HA candles" : "");
   return `${(PRESETS[s.underlying] && PRESETS[s.underlying].name) || s.underlying} · ${tfTxt} ${sig}${ord} · ${inst}${rk}`;
 }
 
@@ -703,7 +752,7 @@ function stratButton(s) {
   const ch = document.createElement("span"); ch.className = "chips"; ch.innerHTML = s.archived ? '<span class="chip">Archived</span>' : chipsFor(s);
   b.append(nm, meta, ch);
   b.addEventListener("click", async () => {
-    closeLab(); selected = s.id; formDirty = false; closeConfirm(); stopBtPoll(); $("btResult").innerHTML = "";
+    closeLab(); closeCap(); selected = s.id; formDirty = false; closeConfirm(); stopBtPoll(); $("btResult").innerHTML = "";
     renderRail(); renderStrategy(); $("logBody").innerHTML = "";
     try { await loadDetail(); } catch (e) { toast(errorText(e)); }
   });
@@ -729,12 +778,28 @@ function renderConn(afterSave) {
   $("tokState").textContent = st.has_token ? `(saved, ends …${st.token_tail})` : "(not set)";
   $("urlState").textContent = st.has_url ? `(saved, ${st.url_host || "set"})` : "(not set)";
   $("secState").textContent = st.has_secret ? "(saved)" : "(not set)";
+  renderTokenBox();
   if (afterSave) { ["c_token", "c_url", "c_secret"].forEach((id) => $(id).value = ""); connDirty = false; }
 }
 document.getElementById("connForm").addEventListener("input", () => { connDirty = true; });
+/** Token expiry and the automatic renewal, under the connection form. */
+function renderTokenBox() {
+  const st = state.settings || {}, box = $("tokBox"); if (!box) return;
+  if (!st.has_token) { box.innerHTML = ""; return; }
+  const exp = st.token_expires_at ? Date.parse(st.token_expires_at) : null, left = exp ? exp - Date.now() : null;
+  const cls = left === null ? "info" : left <= 0 ? "err" : left < 3 * 3600000 ? "warn" : "ok";
+  const hrs = left === null ? "" : left <= 0 ? "expired" : left < 3600000 ? `${Math.max(1, Math.round(left / 60000))} min left` : `${Math.floor(left / 3600000)} h ${Math.floor((left % 3600000) / 60000)} min left`;
+  box.innerHTML = `<div class="banner ${cls}" style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center"><span></span><button class="btn small" id="tok_renew" type="button">Renew now</button></div>`;
+  box.querySelector("span").textContent = (exp ? `Token valid until ${istText(st.token_expires_at)} IST (${hrs}).` : "Token expiry not checked yet.") +
+    (st.token_renewed_at ? ` Last renewed ${istText(st.token_renewed_at)}.` : "") + (st.token_note ? ` ${st.token_note}` : "");
+  $("tok_renew").addEventListener("click", (e) => run(e.currentTarget, async () => {
+    must(await db.rpc("portal_engine", { p_action: "token_renew", p_strategy: null }));
+    await new Promise((r) => setTimeout(r, 5000)); await loadAll(); toast(state.settings && /Renewed/.test(state.settings.token_note || "") ? "Token renewed for another 24 hours." : "Renewal didn't go through; see the note under the connection.");
+  }));
+}
 
 function renderStrategy() {
-  if (lab.open) return;
+  if (lab.open || cap.open) return;
   const s = cur(); if (!s) return showEmpty();
   $("emptyPane").hidden = true; $("stratPane").hidden = false;
   $("sp_name").textContent = s.name;
@@ -854,7 +919,7 @@ function renderRules() {
 function readRules() {
   const r = JSON.parse(JSON.stringify(ruleState));
   const daily = $("f_rules_daily").value === "true";
-  delete r.daily;
+  delete r.daily; delete r.candles;
   for (const k of Object.keys(r)) {
     for (const c of r[k].conds) {
       if (daily) {
@@ -869,6 +934,7 @@ function readRules() {
   }
   if (!r.long.conds.length && !r.short.conds.length) throw new Error("Add at least one Buy or Sell condition.");
   if (daily) r.daily = true;
+  if ($("f_rules_candles").value === "HA") r.candles = "HA"; else delete r.candles;
   return r;
 }
 
@@ -912,9 +978,12 @@ function fillForm(s) {
   }
   $("f_kind").value = s.strategy_kind || "FLIP";
   ruleState = JSON.parse(JSON.stringify(s.rules && (s.rules.long || s.rules.short) ? { ...DEFAULT_RULES, exitLong: { mode: "ANY", conds: [] }, exitShort: { mode: "ANY", conds: [] }, ...s.rules } : DEFAULT_RULES));
+  delete ruleState.candles;
   $("f_rules_daily").value = s.rules && s.rules.daily ? "true" : "false";
+  $("f_rules_candles").value = s.rules && s.rules.candles === "HA" ? "HA" : "NORMAL";
   ruleState.daily = $("f_rules_daily").value === "true";
   fillRisk(s.risk);
+  fillSizing(s);
   applyKindVisibility();
   $("formMsg").textContent = "";
 }
@@ -1448,13 +1517,14 @@ function btMeta(r) {
   const order = st.strategy_kind === "TIMED" ? `Buy ${String(st.entry_time || "").slice(0, 5)}, exit ${st.exit_next_day ? "next day " : ""}${String(st.exit_time || "").slice(0, 5)}`
     : st.entry_trigger === "BREAKOUT" ? `Breakout of signal candle high/low ± ${Number(st.buffer_points)} points` : "At signal candle close";
   return { st, name: st.name || `Strategy ${r.strategy_id || ""}`, kind, order,
-    instrument: `${st.underlying || ""} ${st.trade_type === "OPTIONS" ? "options" : "futures"} · ${st.lots} lot(s) × ${st.lot_size}` };
+    instrument: `${st.underlying || ""} ${st.trade_type === "OPTIONS" ? "options" : "futures"} · ${r.params && r.params.sizing ? "lots sized from capital" : `${st.lots} lot(s)`} × ${st.lot_size}` };
 }
 function btSummaryRows(r) {
   const s = r.summary || {}, m = btMeta(r), sk = s.skipped || {};
   const skipped = Object.entries(sk).map(([k, v]) => `${k} (${v})`).join("; ") || "None";
   return [
     ["Strategy", m.name], ["Type", m.kind], ["Instrument", m.instrument], ["Order entry", m.order], ["Stop loss & risk", riskText(m.st.risk)],
+    ["Position size", r.params.sizing ? `${sizeText(m.st.sizing)}; deployment cap ${r.params.deploy_pct}%` + (s.lots ? ` · lots used ${s.lots.min}–${s.lots.max} (average ${s.lots.avg})` : "") : `Fixed ${m.st.lots} lot(s)`],
     ["Period", `${r.params.from} to ${r.params.to}`], ["Capital (Rs)", Math.trunc(Number(r.params.capital))],
     ["Brokerage per order (Rs, max)", Number(r.params.brokerage)],
     ...(r.params.charges ? [["Charge rates (%)", `STT fut ${r.params.charges.stt_fut} / opt ${r.params.charges.stt_opt}; exchange fut ${r.params.charges.exch_fut} / opt ${r.params.charges.exch_opt}; SEBI ${r.params.charges.sebi}; GST ${r.params.charges.gst}; stamp fut ${r.params.charges.stamp_fut} / opt ${r.params.charges.stamp_opt}; futures brokerage ${r.params.charges.brk_pct}`]]
@@ -1468,11 +1538,11 @@ function btSummaryRows(r) {
     ["Priced with", s.priced_with || ""], ["Skipped trades", skipped], ["Status", r.status === "partial" ? "Partial: " + (r.progress || "") : "Complete"],
   ];
 }
-const BT_COLS = ["#", "Entry (IST)", "Exit (IST)", "Side", "Contract", "Entry reason", "Exit reason", "Entry price", "Exit price", "Qty", "Gross (Rs)", "Charges (Rs)", "Net (Rs)", "Equity (Rs)",
+const BT_COLS = ["#", "Entry (IST)", "Exit (IST)", "Side", "Contract", "Entry reason", "Exit reason", "Entry price", "Exit price", "Lots", "Qty", "Gross (Rs)", "Charges (Rs)", "Net (Rs)", "Equity (Rs)",
   "Brokerage", "STT", "Exchange txn", "SEBI", "GST", "Stamp duty", "Total charges (exact)"];
 function btTradeRows(r) {
   return (r.trades || []).map((t, i) => [i + 1, t.entry, t.exit, t.side === "LONG" ? "Long" : "Short", t.contract, t.why, t.exit_why,
-    Number(t.entry_px), Number(t.exit_px), t.units, Math.trunc(t.gross), Math.trunc(t.costs), Math.trunc(t.net), Math.trunc(t.equity),
+    Number(t.entry_px), Number(t.exit_px), t.lots ?? "", t.units, Math.trunc(t.gross), Math.trunc(t.costs), Math.trunc(t.net), Math.trunc(t.equity),
     ...(t.chg ? [t.chg.brokerage, t.chg.stt, t.chg.exch, t.chg.sebi, t.chg.gst, t.chg.stamp, t.chg.total] : ["", "", "", "", "", "", ""])]);
 }
 function btFileName(r, ext) {
@@ -1597,19 +1667,20 @@ function renderBacktest(r) {
 
     const wrap = document.createElement("div"); wrap.className = "scroll";
     const tbl = document.createElement("table");
-    tbl.innerHTML = `<thead><tr><th>Entry</th><th>Exit</th><th>Contract</th><th>Reason</th><th class="n">Buy/sell in</th><th class="n">Exit price</th><th class="n">Net</th><th class="n">Equity</th></tr></thead><tbody></tbody>`;
+    tbl.innerHTML = `<thead><tr><th>Entry</th><th>Exit</th><th>Contract</th><th>Reason</th><th class="n">Buy/sell in</th><th class="n">Exit price</th><th class="n">Lots</th><th class="n">Net</th><th class="n">Equity</th></tr></thead><tbody></tbody>`;
     const tb = tbl.querySelector("tbody");
     for (const t of trades.slice().reverse().slice(0, 300)) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td class="when"></td><td class="when"></td><td></td><td class="hint"></td><td class="n"></td><td class="n"></td><td class="n"></td><td class="n"></td>`;
+      tr.innerHTML = `<td class="when"></td><td class="when"></td><td></td><td class="hint"></td><td class="n"></td><td class="n"></td><td class="n"></td><td class="n"></td><td class="n"></td>`;
       tr.children[0].textContent = t.entry; tr.children[1].textContent = t.exit;
       tr.children[2].innerHTML = `<span class="chip ${t.side === "LONG" ? "green" : "red"}"></span> `;
       tr.children[2].firstChild.textContent = t.side === "LONG" ? (t.contract.includes(" CE") ? "CE" : "Long") : (t.contract.includes(" PE") ? "PE" : "Short");
       tr.children[2].append(document.createTextNode(t.contract));
       tr.children[3].textContent = `${t.why} → ${t.exit_why}`;
       tr.children[4].textContent = fmtNum(t.entry_px); tr.children[5].textContent = fmtNum(t.exit_px);
-      tr.children[6].textContent = rupees(t.net); tr.children[6].className = "n " + (t.net > 0 ? "pos-num" : "neg-num");
-      tr.children[7].textContent = rupees(t.equity);
+      tr.children[6].textContent = t.lots ?? "–";
+      tr.children[7].textContent = rupees(t.net); tr.children[7].className = "n " + (t.net > 0 ? "pos-num" : "neg-num");
+      tr.children[8].textContent = rupees(t.equity);
       tb.append(tr);
     }
     wrap.append(tbl); box.append(wrap);
@@ -1653,7 +1724,10 @@ $("btForm").addEventListener("submit", (e) => {
   if (to > istDate(0)) { $("btMsg").textContent = "The end date can't be in the future."; return; }
   if (!(capital > 0) || !(brokerage >= 0) || CHARGE_KEYS.some((k) => !(charges[k] >= 0))) { $("btMsg").textContent = "Capital, brokerage and charge rates must be 0 or more."; return; }
   if (!state.settings || !state.settings.has_token) { $("btMsg").textContent = "Add your Dhan access token under Dhan connection first."; openConn(); return; }
-  const params = JSON.stringify({ from, to, capital, brokerage, charges, near_code: code });
+  const sizing = $("bt_sizing").checked;
+  if (sizing && !(s.sizing && s.sizing.mode === "AUTO")) { $("btMsg").textContent = "Set “Lots per trade” to “Size from capital” in this strategy's settings first (and save)."; return; }
+  const deploy = Number((state.settings && state.settings.deploy_pct) || 100);
+  const params = JSON.stringify({ from, to, capital, brokerage, charges, near_code: code, ...(sizing ? { sizing: true, deploy_pct: deploy } : {}) });
   $("btMsg").textContent = "";
   run($("bt_run"), async () => {
     const btId = must(await db.rpc("start_backtest", { p_strategy: s.id, p_params: JSON.parse(params) }));
@@ -1818,6 +1892,7 @@ function readForm() {
     if (out.exit_next_day && out.product_type === "I") throw new Error("Overnight trades need product type M (carry forward); intraday positions get squared off by the broker.");
   }
   out.risk = readRisk(out);
+  out.sizing = readSizing(out);
   if (out.rules && out.rules.daily && out.intraday) throw new Error("A once-a-day strategy holds positions overnight; set “Square off daily” to No.");
   const sample = { side: "B", qty: "1", exchange: "NSE", symbol: "NIFTY", product: "I", sort: "1", option_type: "CE", strike: "25000", expiry: "2026-10-13" };
   for (const k of ["leg_template_opt", "leg_template_fut"]) {
@@ -1854,7 +1929,8 @@ $("connForm").addEventListener("submit", (e) => {
   if (url && !/^https:\/\//.test(url)) { $("connMsg").textContent = "The webhook URL must start with https://"; return; }
   run(e.submitter, async () => {
     must(await db.rpc("save_portal_settings", { p_client: $("c_client").value.trim(), p_token: tok, p_url: url, p_secret: sec }));
-    await loadAll(); renderConn(true); $("connMsg").textContent = "Saved."; toast("Connection saved. Press Refresh chart to test it.");
+    if (tok) { must(await db.rpc("portal_engine", { p_action: "token", p_strategy: null })); await new Promise((r) => setTimeout(r, 4000)); }
+    await loadAll(); renderConn(true); $("connMsg").textContent = "Saved."; toast(tok ? "Connection saved. The token will now be renewed automatically every day." : "Connection saved. Press Refresh chart to test it.");
   });
 });
 
@@ -1931,6 +2007,160 @@ function posLevels(s) {
   return parts.length ? ` · ${parts.join(" · ")}${p.basis === "PREMIUM" ? " (premium)" : ""}` : "";
 }
 
+/* ---------- position size (strategy form) ---------- */
+const defMarginPct = (seg) => isMcx(seg) ? 10 : 12;
+function sizeText(z) {
+  if (!z || z.mode !== "AUTO") return "Fixed lots";
+  return `Lots from capital: ${z.alloc_pct}% of equity, drawdown budget ${z.dd_pct}%` + (z.dd_per_lot ? ` (1 lot's worst drawdown ${rupees(z.dd_per_lot)} × ${z.dd_mult || 1.5})` : "") + `, margin ${z.margin_pct}%, max ${z.max_lots} lots`;
+}
+function fillSizing(s) {
+  const z = s.sizing || {};
+  $("z_mode").value = z.mode === "AUTO" ? "AUTO" : "FIXED";
+  $("z_alloc").value = String(z.alloc_pct ?? 20); $("z_dd").value = String(z.dd_pct ?? 25);
+  $("z_ddlot").value = z.dd_per_lot ? String(Math.trunc(z.dd_per_lot)) : ""; $("z_mult").value = String(z.dd_mult ?? 1.5);
+  $("z_margin").value = String(z.margin_pct ?? defMarginPct(s.data_segment)); $("z_max").value = String(z.max_lots ?? 10);
+  applySizeVisibility();
+}
+function readSizing(out) {
+  const mode = $("z_mode").value;
+  const num = (id) => Number($(id).value);
+  const z = { mode, alloc_pct: num("z_alloc"), dd_pct: num("z_dd"), dd_per_lot: $("z_ddlot").value.trim() ? Math.trunc(num("z_ddlot")) : null, dd_mult: num("z_mult"), margin_pct: num("z_margin"), max_lots: Math.trunc(num("z_max")) };
+  if (mode !== "AUTO") return { ...z, mode: "FIXED" };
+  if (!(z.alloc_pct > 0 && z.alloc_pct <= 100)) throw new Error("Share of equity must be between 0 and 100%.");
+  if (!(z.dd_pct >= 1 && z.dd_pct <= 100)) throw new Error("Drawdown you accept must be 1–100%.");
+  if (z.dd_per_lot !== null && !(z.dd_per_lot > 0)) throw new Error("Worst drawdown for 1 lot must be above 0, or blank.");
+  if (!(z.dd_mult >= 1 && z.dd_mult <= 5)) throw new Error("Safety multiple must be 1–5.");
+  if (!(z.margin_pct >= 1 && z.margin_pct <= 100)) throw new Error("Margin per lot must be 1–100% of contract value.");
+  if (!(z.max_lots >= 1 && z.max_lots <= 1000)) throw new Error("Maximum lots must be 1–1000.");
+  if (out.qty_mode !== "LOTS" && out.qty_mode !== "UNITS") throw new Error("Pick how quantity is sent.");
+  return z;
+}
+/** Lots the next entry would use, worked out here the same way the engine does (needs a last price). */
+function previewLots(s, z, equity, used, deploy) {
+  const px = Number(s.last_close); if (!(px > 0)) return null;
+  const lot = Number(s.lot_size);
+  const buying = s.trade_type === "OPTIONS" && s.option_side !== "SELL";
+  const mLot = buying ? px * lot * 0.01 : px * lot * z.margin_pct / 100;
+  const alloc = Math.max(0, equity) * z.alloc_pct / 100;
+  let lots = Math.min(z.max_lots, Math.floor(alloc / mLot));
+  if (z.dd_per_lot) lots = Math.min(lots, Math.floor(alloc * z.dd_pct / 100 / (z.dd_per_lot * z.dd_mult)));
+  lots = Math.min(lots, Math.floor(Math.max(0, equity * deploy / 100 - used) / mLot));
+  return { lots: Math.max(0, lots), mLot, alloc, buying };
+}
+function applySizeVisibility() {
+  const auto = $("z_mode").value === "AUTO";
+  document.querySelectorAll(".z-auto").forEach((el) => el.hidden = !auto);
+  const s = cur();
+  if (!auto) { $("sizeHint").textContent = "Every trade uses the “Lots” set under Trade."; return; }
+  let txt = "Before every entry: lots = the smallest of (share of equity ÷ capital one lot needs), (drawdown budget ÷ (1 lot's worst drawdown × safety multiple)), the room left under the capital page's cap, and the maximum. Equity grows with profits and shrinks with losses, so size ramps up and down by itself. If not even 1 lot fits, the entry is skipped and logged.";
+  if (s && cap.status) {
+    const live = !!s.live, eq = Number(cap.status.capital) + Number(live ? cap.status.live_net : cap.status.paper_net);
+    const used = Number(live ? cap.status.live_used : cap.status.paper_used) - (s.position !== "FLAT" ? Number(s.pos_margin || 0) : 0);
+    try {
+      const form = { ...s, trade_type: $("f_trade_type").value, option_side: $("f_option_side").value, lot_size: Number($("f_lot_size").value || s.lot_size) };
+      const pv = previewLots(form, readSizing({ qty_mode: "LOTS" }), eq, used, Number(cap.status.deploy_pct || 100));
+      if (pv) txt += ` Right now (${live ? "live" : "paper"} equity ${rupees(eq)}, last price ${fmtNum(s.last_close)}): ${pv.buying ? "about " : ""}${pv.lots} lot${pv.lots === 1 ? "" : "s"} (${rupees(pv.mLot)} a lot${pv.buying ? ", assuming a premium of 1% of the index; the live premium is used at entry" : ""}).`;
+    } catch { /* incomplete form */ }
+  }
+  $("sizeHint").textContent = txt;
+}
+["z_mode", "z_alloc", "z_dd", "z_ddlot", "z_mult", "z_margin", "z_max"].forEach((id) => $(id).addEventListener("input", applySizeVisibility));
+$("z_mode").addEventListener("change", () => { if ($("z_mode").value === "AUTO" && !cap.status) loadCapStatus().then(applySizeVisibility).catch(() => {}); applySizeVisibility(); });
+$("z_fromBt").addEventListener("click", (e) => run(e.currentTarget, async () => {
+  const s = cur();
+  const rows = must(await db.from("algo_backtests").select("id, params, summary").eq("strategy_id", s.id).in("status", ["done", "partial"]).order("id", { ascending: false }).limit(20));
+  const r = rows.find((x) => x.summary && x.summary.max_dd > 0 && !(x.params && x.params.sizing));
+  if (!r) { toast("No finished fixed-lot backtest with a drawdown yet. Run one on the Backtest tab first."); return; }
+  const lots = Number((r.params.strategy && r.params.strategy.lots) || s.lots || 1);
+  $("z_ddlot").value = String(Math.trunc(r.summary.max_dd / lots)); formDirty = true; applySizeVisibility();
+  toast(`Worst drawdown from backtest #${r.id} (${r.params.from} → ${r.params.to}): ${rupees(r.summary.max_dd)} for ${lots} lot(s). Save the strategy to keep it.`);
+}));
+
+/* ---------- capital page ---------- */
+const cap = { open: false, mode: "LIVE", status: null };
+async function loadCapStatus() { cap.status = must(await db.rpc("capital_status")); return cap.status; }
+function openCap() {
+  closeLab(); cap.open = true;
+  $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true; $("capPane").hidden = false;
+  document.querySelectorAll("#stratList .strat, #archList .strat").forEach((b) => b.setAttribute("aria-current", "false"));
+  $("openCap").classList.add("primary");
+  loadCap().catch((e) => toast(errorText(e)));
+}
+function closeCap() { if (!cap.open) return; cap.open = false; $("capPane").hidden = true; $("openCap").classList.remove("primary"); }
+async function loadCap() {
+  const [st, trades] = await Promise.all([
+    loadCapStatus(),
+    db.from("algo_trades").select("id, strategy_id, mode, exit_at, contract, lots, entry_px, exit_px, costs, net, exit_why").eq("mode", cap.mode).order("exit_at", { ascending: false }).limit(200).then(must),
+  ]);
+  if (!$("cap_capital").matches(":focus")) { $("cap_capital").value = String(Math.trunc(st.capital ?? 0)); $("cap_since").value = st.since || ""; $("cap_deploy").value = String(st.deploy_pct ?? 60); }
+  renderCap(st, trades);
+}
+function renderCap(st, trades) {
+  const live = cap.mode === "LIVE";
+  const net = Number(live ? st.live_net : st.paper_net), equity = Number(st.capital) + net, used = Number(live ? st.live_used : st.paper_used);
+  const capAmt = equity * Number(st.deploy_pct) / 100, f = st.funds || {};
+  const tile = (label, v, cls, sub) => `<div class="stat"><span class="label">${esc(label)}</span><span class="v ${cls || ""}">${esc(v)}</span>${sub ? `<span class="hint">${esc(sub)}</span>` : ""}</div>`;
+  $("cap_stats").innerHTML = `<div class="stats">
+    ${tile("Trading capital", rupees(st.capital), "", st.since ? `P&L counted from ${st.since}` : "P&L counted from the start")}
+    ${tile(`Realised P&L (${live ? "live" : "paper"})`, rupees(net), net > 0 ? "up" : net < 0 ? "down" : "")}
+    ${tile("Equity", rupees(equity), "", "capital + realised P&L")}
+    ${tile("Capital deployed now", rupees(used), "", equity > 0 ? `${(used / equity * 100).toFixed(1)}% of equity` : "")}
+    ${tile("Free under the cap", rupees(Math.max(0, capAmt - used)), "", `cap ${st.deploy_pct}% = ${rupees(capAmt)}`)}
+    ${tile("Dhan account", f.available != null ? rupees(f.available) : "–", "", st.funds_error ? st.funds_error : f.available != null ? `available · margin used ${rupees(f.utilized)} · ${istText(st.funds_at)}` : "press Refresh Dhan funds")}
+  </div>
+  ${f.available != null && Number(st.capital) > Number(f.available) + Number(f.utilized || 0) + Number(f.collateral || 0) && live ? `<div class="banner warn" style="margin-top:10px">Your trading capital (${rupees(st.capital)}) is more than the funds in your Dhan account (${rupees(Number(f.available) + Number(f.utilized || 0))}). Sizing works from the capital you set here, so orders could be rejected for margin. Add funds or lower the capital.</div>` : ""}`;
+  const names = new Map(state.strategies.map((x) => [x.id, x.name]));
+  const byStrat = new Map(); for (const t of trades) byStrat.set(t.strategy_id, (byStrat.get(t.strategy_id) || 0) + Number(t.net));
+  const rows = state.strategies.filter((x) => !x.archived && (!!x.live === live));
+  $("cap_body").innerHTML = rows.length ? "" : `<tr><td colspan="7" class="hint">No ${live ? "live" : "paper"} strategies.</td></tr>`;
+  for (const x of rows) {
+    const z = x.sizing && x.sizing.mode === "AUTO" ? x.sizing : null;
+    let next = z ? "–" : `${x.lots} (fixed)`;
+    if (z) {
+      const pv = previewLots(x, { ...z, dd_mult: z.dd_mult || 1.5, margin_pct: z.margin_pct || defMarginPct(x.data_segment) }, equity, used - (x.position !== "FLAT" ? Number(x.pos_margin || 0) : 0), Number(st.deploy_pct));
+      next = pv ? `${pv.buying ? "≈" : ""}${pv.lots}` : "needs a price";
+    }
+    const pos = x.position === "FLAT" ? "Flat" : `${x.position === "LONG" ? "Long" : "Short"}${x.pos_lots ? ` · ${x.pos_lots} lot${x.pos_lots === 1 ? "" : "s"}` : ""}`;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td></td><td>${x.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>'}</td><td></td><td class="n"></td><td class="hint"></td><td class="n"></td><td class="n"></td>`;
+    tr.children[0].textContent = x.name; tr.children[2].textContent = pos;
+    tr.children[3].textContent = x.position !== "FLAT" ? (x.pos_margin ? rupees(x.pos_margin) : "not recorded") : "–";
+    tr.children[4].textContent = z ? `${z.alloc_pct}% of equity, max ${z.max_lots}` : "Fixed lots";
+    tr.children[5].textContent = next;
+    const pn = byStrat.get(x.id) || 0; tr.children[6].textContent = rupees(pn); tr.children[6].className = "n " + (pn > 0 ? "pos-num" : pn < 0 ? "neg-num" : "");
+    $("cap_body").append(tr);
+  }
+  const tb = $("cap_trades"); tb.innerHTML = trades.length ? "" : `<tr><td colspan="9" class="hint">No closed ${live ? "live" : "paper"} trades recorded yet. Trades are recorded from now on, as strategies exit positions.</td></tr>`;
+  for (const t of trades) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="when"></td><td></td><td></td><td class="n"></td><td class="n"></td><td class="n"></td><td class="n"></td><td class="n"></td><td class="hint"></td>`;
+    tr.children[0].textContent = istText(t.exit_at); tr.children[1].textContent = names.get(t.strategy_id) || "(deleted)"; tr.children[2].textContent = t.contract || "";
+    tr.children[3].textContent = t.lots ?? "–"; tr.children[4].textContent = fmtNum(t.entry_px); tr.children[5].textContent = fmtNum(t.exit_px);
+    tr.children[6].textContent = rupees(t.costs); tr.children[7].textContent = rupees(t.net); tr.children[7].className = "n " + (t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : "");
+    tr.children[8].textContent = t.exit_why || "";
+    tb.append(tr);
+  }
+}
+$("openCap").addEventListener("click", () => cap.open ? null : openCap());
+$("cap_mode").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+  cap.mode = b.dataset.m; $("cap_mode").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+  loadCap().catch((e) => toast(errorText(e)));
+}));
+$("cap_funds").addEventListener("click", (e) => run(e.currentTarget, async () => {
+  must(await db.rpc("portal_engine", { p_action: "funds", p_strategy: null }));
+  await new Promise((r) => setTimeout(r, 4000)); await loadCap(); toast("Dhan funds refreshed.");
+}));
+$("capForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const c = Number($("cap_capital").value), d = Number($("cap_deploy").value), since = $("cap_since").value || null;
+  if (!(c >= 0)) { $("cap_msg").textContent = "Capital must be 0 or more."; return; }
+  if (!(d >= 1 && d <= 100)) { $("cap_msg").textContent = "The cap must be between 1 and 100%."; return; }
+  run(e.submitter, async () => {
+    must(await db.rpc("save_capital", { p_capital: c, p_since: since, p_deploy_pct: d }));
+    $("cap_msg").textContent = "Saved. Sizing uses this from the next entry."; await loadAll(); await loadCap();
+  });
+});
+
 /* ---------- strategy lab ---------- */
 const lab = { open: false, settings: null, runs: [], rows: [], view: "FUT", asset: "ALL", period: "30", stopf: "ANY", only: true, sort: "score", poll: null, sel: null };
 const LAB_IND = { ST: "Supertrend", HA: "Heikin Ashi", RSI: "RSI", EMA: "EMA", SMA: "SMA", MACD: "MACD", VWAP: "VWAP", BB: "Bollinger", ADX: "ADX", ATR: "ATR", PDHL: "Prev-day H/L", ORB: "Opening range" };
@@ -1946,6 +2176,7 @@ function condText(c) {
 function setText(set) { return set && set.conds && set.conds.length ? set.conds.map(condText).join(set.mode === "ANY" ? " OR " : " AND ") : "—"; }
 function labMetricsFor(r) { return lab.view === "FUT" ? r.metrics : lab.view === "BUY" ? r.ob && r.ob.metrics : r.os && r.os.metrics; }
 function openLab() {
+  closeCap();
   lab.open = true;
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true; $("labPane").hidden = false;
   document.querySelectorAll("#stratList .strat, #archList .strat").forEach((b) => b.setAttribute("aria-current", "false"));
@@ -2061,11 +2292,13 @@ async function openLabDetail(id) {
     ["Buy when", setText(c.rules.long)], ["Sell when", setText(c.rules.short)],
     ["Exit a long when", setText(c.rules.exitLong) === "—" ? "Opposite signal, or when the Buy rules stop being true (if there are no Sell rules)" : setText(c.rules.exitLong)],
     ["Exit a short when", setText(c.rules.exitShort) === "—" ? "Opposite signal, or when the Sell rules stop being true (if there are no Buy rules)" : setText(c.rules.exitShort)],
+    ["Candles", c.rules.candles === "HA" ? "Indicators read Heikin Ashi candles (prices, VWAP, previous-day and opening-range levels and every fill use real prices)" : "Normal candles"],
     ["Stop loss & target", riskText(c.risk)],
     ["Quantity", `1 lot · ${isMcxA ? "P&L multiplier" : "lot size"} ${c.lot_size}`],
     ["Charges", `Brokerage ₹20 per order (futures: lower of ₹20 and 0.03%), STT, exchange, SEBI, GST and stamp duty at current ${isMcxA ? "MCX" : c.exchange} rates; net P&L in whole rupees`],
     ["Test period", `${run.from_day} to ${run.to_day} · ranked on trades exiting before ${run.split_day}; the last 3 months are the check`],
     ["Options (when priced)", `ATM strike (gap ${c.strike_step}), ${c.expiry_flag === "MONTH" ? "monthly" : "weekly"} expiry, next expiry on expiry day; Dhan expired-options data, 5-minute`],
+    ["How it was made", c.lab_note ? c.lab_note : r.champion ? "Re-test of an earlier winner on the latest year" : "New random strategy"],
     ["Tested", `Run #${r.run_id} on ${istText(run.created_at)}${r.champion ? " · re-test of an earlier winner" : ""} · lab strategy #${r.id}`],
   ];
   const draw = () => {
@@ -2090,7 +2323,7 @@ async function openLabDetail(id) {
       <dl class="kv">${kv.map(([k, val]) => `<dt>${esc(k)}</dt><dd>${esc(val)}</dd>`).join("")}<dt>This version</dt><dd>${esc(v.label)}${v.key !== "FUT" ? ` · stops: ${esc(riskText(v.risk))}` : ""}</dd>
         ${v.skipped && Object.keys(v.skipped).length ? `<dt>Skipped trades</dt><dd>${esc(Object.entries(v.skipped).map(([k2, n]) => `${k2} (${n})`).join("; "))}</dd>` : ""}</dl>
       <h3 style="font-size:15px;margin:16px 0 6px">Trades ${v.trades.length ? `(${v.trades.length})` : ""}</h3>
-      ${v.trades.length ? `<div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Entry</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">In</th><th class="n">Out</th><th class="n">Net</th><th>Exit reason</th></tr></thead><tbody>${v.trades.map((t) => `<tr><td class="when">${esc(t.entry)}</td><td class="when">${esc(t.exit)}</td><td>${t.side === "LONG" ? "Long" : "Short"}</td><td>${esc(t.contract)}</td><td class="n">${fmtNum(t.entry_px)}</td><td class="n">${fmtNum(t.exit_px)}</td><td class="n ${t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : ""}">${rupees(t.net)}</td><td>${esc(t.exit_why)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="hint">Trade lists are kept for strategies that passed.</p>'}`;
+      ${v.trades.length ? `<div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Entry</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">In</th><th class="n">Out</th><th class="n">Net</th><th>Exit reason</th></tr></thead><tbody>${v.trades.map((t) => `<tr><td class="when">${esc(t.entry)}</td><td class="when">${esc(t.exit)}</td><td>${t.side === "LONG" ? "Long" : "Short"}</td><td>${esc(t.contract)}</td><td class="n">${fmtNum(t.entry_px)}</td><td class="n">${fmtNum(t.exit_px)}</td><td class="n ${t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : ""}">${rupees(t.net)}</td><td>${esc(t.exit_why)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="hint">No trades in this period with these settings (trade lists are kept from 8 Oct 2026 for every strategy tested; earlier ones only for those that passed).</p>'}`;
     box.querySelector("h2").textContent = r.label;
     box.querySelectorAll("#ld_vers button").forEach((b) => b.addEventListener("click", () => { pickI = Number(b.dataset.i); draw(); }));
     $("ld_close").addEventListener("click", () => { box.hidden = true; lab.sel = null; renderLabTable(); });
@@ -2123,10 +2356,12 @@ async function promoteLab(r, v) {
   const row = Object.fromEntries(keys.filter((k) => k in c).map((k) => [k, c[k]]));
   if (v.side) Object.assign(row, { trade_type: "OPTIONS", option_side: v.side, risk: v.risk || null, strike_offset: 0 });
   row.name = `Lab #${r.id} · ${v.key === "FUT" ? "Futures" : v.side === "SELL" ? "Option writing" : "Option buying"} · ${r.label}`.slice(0, 80);
+  // Lots stay fixed until you choose to size from capital; the tested worst drawdown for 1 lot is filled in for that.
+  row.sizing = { mode: "FIXED", alloc_pct: 20, dd_pct: 25, dd_per_lot: Math.trunc((v.metrics && v.metrics.full && v.metrics.full.max_dd) || 0) || null, dd_mult: 1.5, margin_pct: c.data_segment === "MCX_COMM" ? 10 : 12, max_lots: 10 };
   row.active = false; row.live = false;
   const created = must(await db.from("algo_strategies").insert(row).select("id").single());
   must(await db.from("lab_results").update({ promoted_id: created.id }).eq("id", r.id));
-  closeLab(); selected = created.id; formDirty = false; await loadAll(); showTab("set");
+  closeLab(); closeCap(); selected = created.id; formDirty = false; await loadAll(); showTab("set");
   toast("Saved as a new strategy, paused and in paper mode. Check the lot size, symbols and order format before using it.");
 }
 function renderLabSettings() {

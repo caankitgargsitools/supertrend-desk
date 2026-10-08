@@ -70,56 +70,76 @@ export function mirror(c: Cond): Cond {
 }
 
 type Tpl = (r: R) => Omit<Cond, "tf">;
+// Parameter ranges the generator draws from (wide on purpose: the walk-forward check weeds out lucky settings).
+const ST_ATR = [7, 10, 12, 14, 20], ST_FAC = [1.5, 2, 2.5, 3, 3.5, 4];
+const EMA_LEN = [9, 13, 20, 34, 50, 100, 200], EMA_PAIRS = [[5, 13], [9, 21], [13, 34], [20, 50], [50, 100], [50, 200]];
+const RSI_LEN = [7, 9, 14, 21], BB_MULT = [1.5, 2, 2.5], ADX_LEN = [10, 14, 20];
+const st = (r: R) => ({ atr: pick(r, ST_ATR), factor: pick(r, ST_FAC) });
 const STATE: [Tpl, boolean][] = [ // [template, intraday only]
-  [(r) => ({ ind: "ST", p: { atr: pick(r, [7, 10, 14]), factor: pick(r, [2, 2.5, 3]) }, op: "up" }), false],
+  [(r) => ({ ind: "ST", p: st(r), op: "up" }), false],
   [() => ({ ind: "HA", op: "green" }), false],
-  [(r) => ({ ind: "EMA", p: { len: pick(r, [20, 50, 100, 200]) }, op: "price_above" }), false],
-  [(r) => { const [a, b] = pick(r, [[9, 21], [20, 50], [50, 200]]); return { ind: "EMA", p: { len: a, len2: b }, op: "fast_above_slow" }; }, false],
-  [(r) => ({ ind: "SMA", p: { len: pick(r, [20, 50, 200]) }, op: "price_above" }), false],
-  [(r) => ({ ind: "MACD", p: { fast: 12, slow: 26, sig: 9 }, op: pick(r, ["above_signal", "hist_pos", "above_zero"]) }), false],
-  [() => ({ ind: "BB", p: { len: 20, mult: 2 }, op: "price_above_mid" }), false],
-  [() => ({ ind: "ADX", p: { len: 14 }, op: "plus_above_minus" }), false],
+  [(r) => ({ ind: "EMA", p: { len: pick(r, EMA_LEN) }, op: "price_above" }), false],
+  [(r) => { const [a, b] = pick(r, EMA_PAIRS); return { ind: "EMA", p: { len: a, len2: b }, op: "fast_above_slow" }; }, false],
+  [(r) => ({ ind: "SMA", p: { len: pick(r, [20, 50, 100, 200]) }, op: "price_above" }), false],
+  [(r) => ({ ind: "MACD", p: pick(r, [{ fast: 12, slow: 26, sig: 9 }, { fast: 8, slow: 21, sig: 5 }, { fast: 5, slow: 35, sig: 5 }]), op: pick(r, ["above_signal", "hist_pos", "above_zero"]) }), false],
+  [(r) => ({ ind: "BB", p: { len: pick(r, [20, 30]), mult: pick(r, BB_MULT) }, op: "price_above_mid" }), false],
+  [(r) => ({ ind: "ADX", p: { len: pick(r, ADX_LEN) }, op: "plus_above_minus" }), false],
+  [(r) => ({ ind: "RSI", p: { len: pick(r, RSI_LEN) }, op: "gt", v: pick(r, [50, 55, 60]) }), false],
   [() => ({ ind: "VWAP", op: "price_above" }), true],
   [() => ({ ind: "PDHL", op: "above_pdh" }), true],
 ];
 const EVENT: [Tpl, boolean][] = [
-  [(r) => ({ ind: "ST", p: { atr: pick(r, [7, 10, 14]), factor: pick(r, [2, 2.5, 3]) }, op: "turns_up" }), false],
+  [(r) => ({ ind: "ST", p: st(r), op: "turns_up" }), false],
   [() => ({ ind: "HA", op: "turns_green" }), false],
-  [(r) => ({ ind: "EMA", p: { len: pick(r, [20, 50]) }, op: "price_cross_above" }), false],
-  [(r) => { const [a, b] = pick(r, [[9, 21], [20, 50]]); return { ind: "EMA", p: { len: a, len2: b }, op: "fast_cross_above" }; }, false],
-  [() => ({ ind: "MACD", p: { fast: 12, slow: 26, sig: 9 }, op: "cross_above_signal" }), false],
-  [(r) => ({ ind: "RSI", p: { len: 14 }, op: "cross_above", v: pick(r, [50, 55, 60]) }), false],
-  [() => ({ ind: "BB", p: { len: 20, mult: 2 }, op: "cross_above_upper" }), false],
-  [(r) => ({ ind: "ORB", p: { mins: pick(r, [15, 30]) }, op: "cross_above_orh" }), true],
+  [(r) => ({ ind: "EMA", p: { len: pick(r, [9, 13, 20, 34, 50]) }, op: "price_cross_above" }), false],
+  [(r) => { const [a, b] = pick(r, EMA_PAIRS.slice(0, 4)); return { ind: "EMA", p: { len: a, len2: b }, op: "fast_cross_above" }; }, false],
+  [(r) => ({ ind: "MACD", p: pick(r, [{ fast: 12, slow: 26, sig: 9 }, { fast: 8, slow: 21, sig: 5 }]), op: "cross_above_signal" }), false],
+  [(r) => ({ ind: "RSI", p: { len: pick(r, RSI_LEN) }, op: "cross_above", v: pick(r, [50, 55, 60, 65]) }), false],
+  [(r) => ({ ind: "BB", p: { len: 20, mult: pick(r, BB_MULT) }, op: "cross_above_upper" }), false],
+  [(r) => ({ ind: "ORB", p: { mins: pick(r, [15, 30, 45, 60]) }, op: "cross_above_orh" }), true],
   [() => ({ ind: "PDHL", op: "cross_above_pdh" }), true],
   [() => ({ ind: "VWAP", op: "price_cross_above" }), true],
 ];
 const FILTER: Tpl[] = [
-  (r) => ({ ind: "RSI", p: { len: 14 }, op: "gt", v: pick(r, [50, 55, 60]) }),
-  (r) => ({ ind: "ADX", p: { len: 14 }, op: "gt", v: pick(r, [20, 25]) }),
-  () => ({ ind: "RSI", p: { len: 14 }, op: "lt", v: 75 }),
+  (r) => ({ ind: "RSI", p: { len: pick(r, RSI_LEN) }, op: "gt", v: pick(r, [50, 55, 60]) }),
+  (r) => ({ ind: "ADX", p: { len: pick(r, ADX_LEN) }, op: "gt", v: pick(r, [18, 20, 25, 30]) }),
+  (r) => ({ ind: "RSI", p: { len: 14 }, op: "lt", v: pick(r, [70, 75, 80]) }),
 ];
 
 export type LabConfig = Record<string, any>;
 
+/** Stop loss / target / trailing stop / daily loss limit for a lab strategy (about 65% get some). */
+function randomRisk(r: R, daily: boolean, intraday: boolean, capital: number): Risk | null {
+  if (r() < 0.35) return null;
+  const useAtr = r() < 0.5, type = useAtr ? "ATR" as const : "PCT" as const;
+  const sl = useAtr ? pick(r, daily ? [1, 1.5, 2, 3] : [0.75, 1, 1.5, 2, 3]) : pick(r, daily ? [1, 1.5, 2, 3, 5] : [0.2, 0.3, 0.5, 0.75, 1, 1.5]);
+  const risk: Risk = { basis: "UNDERLYING", atr_len: pick(r, [10, 14, 20]), sl: { type, value: sl }, tgt: null, trail: null, max_day_loss: null };
+  if (r() < 0.45) risk.tgt = { type, value: +(sl * pick(r, [1, 1.5, 2, 3, 4])).toFixed(2) };
+  if (r() < 0.35) { risk.trail = { type, value: +(sl * pick(r, [0.75, 1, 1.5])).toFixed(2) }; if (r() < 0.5) risk.sl = null; }
+  if (intraday && r() < 0.25) risk.max_day_loss = Math.round(capital * pick(r, [0.01, 0.02]));
+  return risk;
+}
+
 /** One random strategy for an asset. Index strategies are intraday-candle based (85%) or once-a-day; commodities once-a-day. */
-export function generate(assetKey: string, seed: number): LabConfig {
+export function generate(assetKey: string, seed: number, capital = 500000): LabConfig {
   const a = LAB_ASSETS[assetKey];
   const r = rng(seed);
   const daily = a.commodity || r() < 0.15;
   const okTpl = (xs: [Tpl, boolean][]) => xs.filter(([, intra]) => !(daily && intra)).map(([t]) => t);
-  const tf = daily ? 375 : pick(r, [5, 15, 15, 15, 30, 30, 60, 75]);
-  const higher = daily ? [] : [15, 30, 60, 75].filter((x) => x > tf).map(String).concat(["D"]);
+  const tf = daily ? 375 : pick(r, [5, 10, 15, 15, 25, 30, 30, 45, 60, 75, 125]);
+  const higher = daily ? [] : [15, 25, 30, 60, 75, 125].filter((x) => x > tf && x % 5 === 0 && x !== tf).map(String).concat(["D"]);
   const ctf = (base: boolean) => daily ? "D" : base ? "base" : pick(r, higher);
+  const candles = r() < 0.2 ? "HA" : "NORMAL";
   const style = r() < 0.2 ? "reversion" : "trend";
   const conds: Cond[] = [];
   let exitLong: Cond[] = [];
   if (style === "reversion") {
     // Oversold bounce: buy when RSI recovers from below a low level; take profit when RSI is strong again.
-    conds.push({ ind: "RSI", tf: ctf(true), p: { len: 14 }, op: "cross_above", v: pick(r, [25, 30, 35]) });
-    if (r() < 0.5) conds.push({ ind: "ADX", tf: ctf(true), p: { len: 14 }, op: "lt", v: pick(r, [20, 25, 30]) });
+    const len = pick(r, RSI_LEN);
+    conds.push({ ind: "RSI", tf: ctf(true), p: { len }, op: "cross_above", v: pick(r, [20, 25, 30, 35]) });
+    if (r() < 0.5) conds.push({ ind: "ADX", tf: ctf(true), p: { len: pick(r, ADX_LEN) }, op: "lt", v: pick(r, [20, 25, 30]) });
     if (r() < 0.4) conds.push({ ...pick(r, okTpl(STATE))(r), tf: ctf(false) } as Cond);
-    exitLong = [r() < 0.6 ? { ind: "RSI", tf: ctf(true), p: { len: 14 }, op: "gt", v: pick(r, [55, 60, 70]) } : { ind: "BB", tf: ctf(true), p: { len: 20, mult: 2 }, op: "price_above_mid" }];
+    exitLong = [r() < 0.6 ? { ind: "RSI", tf: ctf(true), p: { len }, op: "gt", v: pick(r, [50, 55, 60, 70]) } : { ind: "BB", tf: ctf(true), p: { len: 20, mult: 2 }, op: "price_above_mid" }];
   } else {
     const event = r() < 0.55;
     const primary = { ...(event ? pick(r, okTpl(EVENT)) : pick(r, okTpl(STATE)))(r), tf: ctf(true) } as Cond;
@@ -129,8 +149,7 @@ export function generate(assetKey: string, seed: number): LabConfig {
       const c = (r() < 0.6 && (daily || higher.length))
         ? { ...pick(r, okTpl(STATE))(r), tf: daily ? "D" : pick(r, higher) } as Cond
         : { ...pick(r, FILTER)(r), tf: ctf(true) } as Cond;
-      if (c.ind === "VWAP" && c.tf === "D") continue;
-      if (c.ind === "ORB" && c.tf === "D") continue;
+      if ((c.ind === "VWAP" || c.ind === "ORB") && c.tf === "D") continue;
       if (conds.some((x) => x.ind === c.ind && x.tf === c.tf)) continue;
       conds.push(c);
     }
@@ -142,11 +161,12 @@ export function generate(assetKey: string, seed: number): LabConfig {
   const direction = dir < 0.6 ? "BOTH" : dir < 0.85 ? "LONG_ONLY" : "SHORT_ONLY";
   // A one-sided strategy whose entry is a one-candle event needs explicit exits (otherwise it would exit a candle later).
   if (direction !== "BOTH" && !exitLong.length) exitLong = [mirror({ ...STATE[0][0](r), tf: ctf(true) } as Cond)];
-  const long = { mode: "ALL" as const, conds };
+  // Heikin Ashi candles make the Heikin Ashi colour condition meaningless; use normal candles there.
+  const hasHA = [...conds, ...exitLong].some((c) => c.ind === "HA");
   const rules: Rules = {
-    long, short: { mode: "ALL", conds: conds.map(mirror) },
+    long: { mode: "ALL", conds }, short: { mode: "ALL", conds: conds.map(mirror) },
     exitLong: { mode: "ANY", conds: exitLong }, exitShort: { mode: "ANY", conds: exitLong.map(mirror) },
-    ...(daily ? { daily: true } : {}),
+    ...(daily ? { daily: true } : {}), ...(candles === "HA" && !hasHA ? { candles: "HA" as const } : {}),
   };
   if (direction === "LONG_ONLY") rules.short = { mode: "ALL", conds: [] };
   if (direction === "SHORT_ONLY") { rules.short = { mode: "ALL", conds: conds.map(mirror) }; rules.long = { mode: "ALL", conds: [] }; }
@@ -155,25 +175,94 @@ export function generate(assetKey: string, seed: number): LabConfig {
     strategy_kind: "RULES", underlying: a.key, data_security_id: a.sec, data_segment: a.seg, data_instrument: a.instr,
     exchange: a.exchange, dhan_symbol: a.key, futures_symbol: a.key + "1!",
     timeframe_min: tf, rules, direction, entry_mode: r() < 0.8 ? "FLIP" : "JOIN",
-    session_start: daily ? "09:15" : intraday ? pick(r, ["09:15", "09:30", "09:45"]) : "09:15",
-    last_entry: daily ? "15:15" : intraday ? pick(r, ["14:30", "15:00"]) : "15:15",
-    square_off: intraday ? "15:15" : "15:20", intraday,
+    session_start: daily ? "09:15" : intraday ? pick(r, ["09:15", "09:20", "09:30", "09:45", "10:15"]) : "09:15",
+    last_entry: daily ? "15:15" : intraday ? pick(r, ["13:30", "14:30", "15:00"]) : "15:15",
+    square_off: intraday ? pick(r, ["15:00", "15:15"]) : "15:20", intraday,
     trade_type: "FUTURES", option_side: "BUY", lots: 1, lot_size: a.lot, qty_mode: "LOTS", product_type: intraday ? "I" : "M",
     strike_step: a.step ?? 1, strike_offset: 0, expiry_weekday: a.wd ?? 4, expiry_flag: a.flag ?? "WEEK", roll_on_expiry: true,
     atr_period: 10, factor: 3, entry_trigger: "CLOSE", buffer_points: 0, after_hours_flip: "FIRST_CLOSE",
   };
+  if (cfg.intraday && cfg.last_entry > cfg.square_off) cfg.last_entry = "14:30";
   if (a.commodity) Object.assign(cfg, { session_start: "09:00", last_entry: "23:00", square_off: "23:15" });
-  // Stop loss / target / trailing stop on the underlying for about 60% of strategies; the rest run without, for comparison.
-  let risk: Risk | null = null;
-  if (r() >= 0.4) {
-    const useAtr = r() < 0.55, type = useAtr ? "ATR" as const : "PCT" as const;
-    const sl = useAtr ? pick(r, daily ? [1.5, 2, 3] : [1, 1.5, 2]) : pick(r, daily ? [1, 2, 3] : [0.3, 0.5, 0.75, 1]);
-    risk = { basis: "UNDERLYING", atr_len: 14, sl: { type, value: sl }, tgt: null, trail: null, max_day_loss: null };
-    if (r() < 0.45) risk.tgt = { type, value: +(sl * pick(r, [1.5, 2, 3])).toFixed(2) };
-    if (r() < 0.35) { risk.trail = { type, value: sl }; if (r() < 0.5) risk.sl = null; }
-  }
-  cfg.risk = risk;
+  cfg.risk = randomRisk(r, daily, intraday, capital);
   validateRules(cfg.rules);
+  return cfg;
+}
+
+/* ---------- variations of winners ---------- */
+const NEAR: Record<string, number[]> = {
+  atr: ST_ATR, factor: ST_FAC, len: [5, 7, 9, 13, 14, 20, 21, 30, 34, 50, 100, 200], len2: [13, 21, 34, 50, 100, 200],
+  mult: BB_MULT, mins: [15, 30, 45, 60], fast: [5, 8, 12], slow: [21, 26, 35], sig: [5, 9],
+};
+/** The next value up or down in a list (never the value itself). */
+const neighbour = (xs: number[], v: number, r: R) => {
+  const s = [...new Set(xs)].sort((a, b) => a - b);
+  const below = s.filter((x) => x < v).at(-1), above = s.find((x) => x > v);
+  const opts = [below, above].filter((x): x is number => x !== undefined);
+  return opts.length ? pick(r, opts) : v;
+};
+/**
+ * A close relative of a winning strategy with one or two settings changed (indicator length, threshold, timeframe,
+ * stop distance, trailing stop, candle type, direction, entry style, session). Returns null if the change isn't valid.
+ */
+export function mutate(parent: LabConfig, seed: number, capital = 500000): LabConfig | null {
+  const r = rng(seed);
+  const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
+  delete cfg.lab_note;
+  const changes: string[] = [];
+  const daily = !!cfg.rules.daily;
+  const sets = (["long", "short", "exitLong", "exitShort"] as const).filter((k) => cfg.rules[k]?.conds?.length);
+  const n = r() < 0.6 ? 1 : 2;
+  for (let step = 0; step < n; step++) {
+    const what = r();
+    if (what < 0.4 && sets.length) {
+      // Change one indicator setting (applied to the matching condition on the other side too, so both stay mirrors).
+      const k = pick(r, sets), i = Math.floor(r() * cfg.rules[k].conds.length), c: Cond = cfg.rules[k].conds[i];
+      const keys = Object.keys(c.p ?? {}).filter((x) => NEAR[x]);
+      const useV = c.v !== undefined && (r() < 0.5 || !keys.length);
+      const same = (x: Cond) => x.ind === c.ind && x.tf === c.tf && JSON.stringify(x.p ?? {}) === JSON.stringify(c.p ?? {});
+      if (useV) {
+        const ov = Number(c.v), nv = ov + (r() < 0.5 ? -5 : 5);
+        for (const s of sets) for (const x of cfg.rules[s].conds as Cond[]) if (same(x) && x.v !== undefined) x.v = x.v === ov ? nv : c.ind === "RSI" && x.v === 100 - ov ? 100 - nv : x.v;
+        changes.push(`${c.ind} level ${ov} → ${nv}`);
+      } else if (keys.length) {
+        const pk = pick(r, keys), old = Number(c.p![pk]), nv = neighbour(NEAR[pk], old, r);
+        if (nv === old) continue;
+        const p0 = JSON.stringify(c.p);
+        for (const s of sets) for (const x of cfg.rules[s].conds as Cond[]) if (x.ind === c.ind && x.tf === c.tf && JSON.stringify(x.p) === p0) x.p = { ...x.p, [pk]: nv };
+        changes.push(`${c.ind} ${pk} ${old} → ${nv}`);
+      }
+    } else if (what < 0.55 && !daily) {
+      const old = cfg.timeframe_min, nv = neighbour([5, 10, 15, 25, 30, 45, 60, 75, 125], old, r);
+      if (nv === old) continue;
+      // Condition timeframes must stay above the decision timeframe.
+      const ok = sets.every((k) => (cfg.rules[k].conds as Cond[]).every((x) => x.tf === "base" || x.tf === "D" || Number(x.tf) > nv));
+      if (ok) { cfg.timeframe_min = nv; changes.push(`decision candles ${old}m → ${nv}m`); }
+    } else if (what < 0.75) {
+      const rk = cfg.risk as Risk | null;
+      if (!rk || (!rk.sl && !rk.trail)) { cfg.risk = randomRisk(r, daily, cfg.intraday, capital) ?? { basis: "UNDERLYING", atr_len: 14, sl: { type: "PCT", value: daily ? 2 : 0.5 } }; changes.push("added a stop loss"); }
+      else if (r() < 0.6) {
+        const q = rk.sl ?? rk.trail!, f = pick(r, [0.67, 0.8, 1.25, 1.5]), old = q.value; q.value = +(q.value * f).toFixed(2);
+        changes.push(`${rk.sl ? "stop loss" : "trailing stop"} ${old} → ${q.value}${q.type === "PCT" ? "%" : q.type === "ATR" ? "×ATR" : " pts"}`);
+      } else if (!rk.trail) { rk.trail = { ...(rk.sl ?? { type: "PCT", value: 0.5 }) }; changes.push("added a trailing stop"); }
+      else if (!rk.tgt) { const q = rk.sl ?? rk.trail; rk.tgt = { type: q.type, value: +(q.value * 2).toFixed(2) }; changes.push("added a target at 2× the stop"); }
+      else { rk.tgt = null; changes.push("removed the target"); }
+    } else if (what < 0.83) {
+      const hasHA = sets.some((k) => (cfg.rules[k].conds as Cond[]).some((x) => x.ind === "HA"));
+      if (!hasHA) { if (cfg.rules.candles === "HA") { delete cfg.rules.candles; changes.push("Heikin Ashi → normal candles"); } else { cfg.rules.candles = "HA"; changes.push("normal → Heikin Ashi candles"); } }
+    } else if (what < 0.9) {
+      cfg.entry_mode = cfg.entry_mode === "JOIN" ? "FLIP" : "JOIN"; changes.push(cfg.entry_mode === "JOIN" ? "enter whenever the rules are true" : "enter only when the rules newly become true");
+    } else if (!daily && cfg.intraday) {
+      const old = cfg.session_start; cfg.session_start = pick(r, ["09:15", "09:20", "09:30", "09:45", "10:15"].filter((x) => x !== old)); changes.push(`first trade from ${old} → ${cfg.session_start}`);
+    } else if (!daily && !LAB_ASSETS[cfg.underlying]?.commodity) {
+      cfg.intraday = !cfg.intraday; cfg.product_type = cfg.intraday ? "I" : "M";
+      if (cfg.intraday) Object.assign(cfg, { last_entry: "14:30", square_off: "15:15" }); else Object.assign(cfg, { last_entry: "15:15", square_off: "15:20" });
+      changes.push(cfg.intraday ? "positional → intraday (square off daily)" : "intraday → positional (carry overnight)");
+    }
+  }
+  if (!changes.length) return null;
+  try { validateRules(cfg.rules); } catch { return null; }
+  cfg.lab_note = `Variation of a winner: ${changes.join("; ")}`;
   return cfg;
 }
 
@@ -181,7 +270,7 @@ export function generate(assetKey: string, seed: number): LabConfig {
 export function labelFor(cfg: LabConfig): string {
   const r = cfg.rules as Rules;
   const set = r.long?.conds.length ? r.long : r.short!;
-  const when = cfg.rules.daily ? "daily" : `${cfg.timeframe_min}m`;
+  const when = (cfg.rules.daily ? "daily" : `${cfg.timeframe_min}m`) + (cfg.rules.candles === "HA" ? " HA candles" : "");
   const rk = cfg.risk ? ` · ${describeRisk(cfg.risk).replace(/ \(on underlying\)/, "")}` : "";
   return `${cfg.underlying} ${when} · ${set.conds.map(describeCond).join(" & ").replace(/ own timeframe/g, "")}${rk}`.slice(0, 240);
 }
@@ -415,16 +504,34 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
     champSeen.add(c.fingerprint);
     rows.push({ run_id: run.id, asset: c.config.underlying, mode: c.config.rules?.daily ? "DAILY" : "INTRADAY", label: labelFor(c.config), fingerprint: c.fingerprint, champion: true, config: c.config, stage: "pending" });
   }
+  const capital = Number(set.capital ?? 500000);
+  let seed = (Number(run.id) * 1000003) >>> 0;
+  // Variations: about a quarter of the night goes to close relatives of the best recent strategies (one or two settings changed).
+  const { data: parents } = await sb.from("lab_results").select("id, fingerprint, config").eq("passed", true)
+    .gte("created_at", new Date(Date.now() - 30 * 86400000).toISOString()).order("score", { ascending: false }).limit(200);
+  const pSeen = new Set<string>(), pool = (parents ?? []).filter((x) => assets.includes(x.config?.underlying) && !pSeen.has(x.fingerprint) && pSeen.add(x.fingerprint)).slice(0, 40);
+  const nVar = pool.length ? Math.round(n * 0.25) : 0;
+  for (let made = 0, tries = 0; made < nVar && tries < nVar * 6; tries++) {
+    seed = (seed + 104729) >>> 0;
+    const parent = pool[made % pool.length];
+    const cfg = mutate(parent.config, seed, capital);
+    if (!cfg) continue;
+    const fp = fingerprint(cfg);
+    if (seen.has(fp)) continue;
+    seen.add(fp); made++;
+    cfg.lab_note = `${cfg.lab_note} (from lab strategy #${parent.id})`;
+    rows.push({ run_id: run.id, asset: cfg.underlying, mode: cfg.rules.daily ? "DAILY" : "INTRADAY", label: labelFor(cfg), fingerprint: fp, champion: false, config: cfg, stage: "pending" });
+  }
   // New strategies, shared between assets (an index gets twice a commodity's share: it has intraday and option variants).
   const w = assets.map((k) => LAB_ASSETS[k].commodity ? 1 : 2), wsum = w.reduce((a, b) => a + b, 0);
-  let seed = (Number(run.id) * 1000003) >>> 0;
+  const nNew = n - nVar;
   assets.forEach((k, i) => {
-    const want = Math.max(1, Math.round((n * w[i]) / wsum));
+    const want = Math.max(1, Math.round((nNew * w[i]) / wsum));
     let made = 0, tries = 0;
     while (made < want && tries < want * 5) {
       tries++; seed = (seed + 7919) >>> 0;
       let cfg: LabConfig;
-      try { cfg = generate(k, seed); } catch { continue; }
+      try { cfg = generate(k, seed, capital); } catch { continue; }
       const fp = fingerprint(cfg);
       if (seen.has(fp)) continue;
       seen.add(fp); made++;
@@ -455,7 +562,7 @@ async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     let fields: Record<string, unknown>;
     try {
       const { metrics, trades } = await screenOne(row.config, data, memo, win, capital);
-      fields = { stage: "screened", passed: metrics.passed, score: metrics.score, metrics, trades: metrics.passed ? slim(trades) : null, error: null };
+      fields = { stage: "screened", passed: metrics.passed, score: metrics.score, metrics, trades: slim(trades), error: null };
     } catch (e) {
       fields = { stage: "error", error: e instanceof Error ? e.message : String(e) };
     }
@@ -482,6 +589,8 @@ function dbStore(sb: SupabaseClient): OptStore {
 }
 
 const MAX_BUSY = 12;
+/** Dhan's answer when a token was replaced (renewed) or has expired. */
+export const TOKEN_ERR = /DH-90[16]|Invalid Token|HTTP 401/i;
 /** Option versions priced for each of the night's best index strategies. */
 function optVariants(cfg: LabConfig) {
   const own = cfg.risk ? `Same stops as tested (${describeRisk(cfg.risk)})` : "No stop loss";
@@ -519,7 +628,11 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
       res = await priceBatch(s, ctx.creds, labParams(a, win.from, win.to, capital), job.plans as Plan[], job.cursor, job.acc, ctx.started + WALL_BUDGET - 10000, async () => {}, store);
     } catch (e) {
       if (e instanceof DhanBusyError) { job.acc.busy = busyBefore + 1; res = { trades: [], next: job.cursor, acc: job.acc }; }
-      else { await sb.from("lab_results").update({ stage: "error", error: e instanceof Error ? e.message : String(e), opt_job: null }).eq("id", row.id); continue; }
+      else if (TOKEN_ERR.test(e instanceof Error ? e.message : String(e))) {
+        // The access token was renewed while this ran: keep the work and carry on with the new token in the next instalment.
+        await sb.from("lab_results").update({ stage: "pricing", opt_job: job }).eq("id", row.id);
+        return true;
+      } else { await sb.from("lab_results").update({ stage: "error", error: e instanceof Error ? e.message : String(e), opt_job: null }).eq("id", row.id); continue; }
     }
     job.trades = job.trades.concat(slim(res.trades)); job.cursor = res.next; job.acc = res.acc;
     if (job.cursor >= job.plans.length) {
@@ -552,10 +665,10 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
   return true;
 }
 
-/** Keep the tables small: failed strategies for 3 days, everything else for 45 days unless starred or turned into a strategy. */
+/** Keep the tables small: strategies that didn't pass for 7 days, everything else for 45 days unless starred or turned into a strategy. */
 async function prune(sb: SupabaseClient) {
   const d = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
-  await sb.from("lab_results").delete().eq("passed", false).eq("starred", false).is("promoted_id", null).lt("created_at", d(3));
+  await sb.from("lab_results").delete().eq("passed", false).eq("starred", false).is("promoted_id", null).lt("created_at", d(7));
   await sb.from("lab_results").delete().eq("starred", false).is("promoted_id", null).lt("created_at", d(45));
   await sb.from("lab_opt_cache").delete().lt("created_at", d(420));
   await sb.from("lab_runs").delete().lt("created_at", d(90));

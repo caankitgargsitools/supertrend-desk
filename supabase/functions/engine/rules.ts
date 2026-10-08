@@ -8,8 +8,19 @@ import { type Bar, type DayBar, heikinAshi, ist, sessionFor, supertrend } from "
 
 export type Cond = { ind: string; tf: string; p?: Record<string, number>; op: string; v?: number };
 export type RuleSet = { mode: "ALL" | "ANY"; conds: Cond[] };
-/** daily: decide once a day at the session open from completed daily candles (all conditions on "D"). */
-export type Rules = { long?: RuleSet; short?: RuleSet; exitLong?: RuleSet; exitShort?: RuleSet; daily?: boolean };
+/**
+ * daily: decide once a day at the session open from completed daily candles (all conditions on "D").
+ * candles: "HA" = indicators read Heikin Ashi candles instead of normal ones (price levels such as VWAP, previous-day
+ * high/low and opening range always use real prices, and orders always fill at real prices).
+ */
+export type Rules = { long?: RuleSet; short?: RuleSet; exitLong?: RuleSet; exitShort?: RuleSet; daily?: boolean; candles?: "NORMAL" | "HA" };
+
+/** Heikin Ashi candles built from normal ones (same times and days). */
+export function haCandles<T extends { o: number; h: number; l: number; c: number }>(bars: T[]): T[] {
+  const { ho, hc } = heikinAshi(bars);
+  return bars.map((b, i) => ({ ...b, o: ho[i], c: hc[i], h: Math.max(b.h, ho[i], hc[i]), l: Math.min(b.l, ho[i], hc[i]) }));
+}
+const REAL_PRICE = new Set(["VWAP", "PDHL", "ORB"]);
 export type Signals = { long: boolean; short: boolean; exitLong: boolean | null; exitShort: boolean | null };
 type Side = "LONG" | "SHORT";
 
@@ -101,18 +112,25 @@ export class RuleBook {
     for (const c of allConds(rules)) this.checks.set(c, this.build(c));
   }
 
-  private frameFor(c: Cond): Frame {
-    if (c.tf === "D") return { bars: this.daily, isDaily: true };
+  private frameFor(c: Cond): Frame & { ha: boolean } {
+    const ha = this.rules.candles === "HA" && !REAL_PRICE.has(c.ind);
+    const conv = <T extends Bar | DayBar>(key: string, bars: T[]): T[] => {
+      if (!ha) return bars;
+      const k = `HAC|${key}|${bars.length}|${bars[0]?.t ?? 0}`;
+      if (!this.memo.has(k)) this.memo.set(k, haCandles(bars));
+      return this.memo.get(k) as T[];
+    };
+    if (c.tf === "D") return { bars: conv("D", this.daily), isDaily: true, ha };
     const tf = c.tf === "base" ? this.baseTf : Number(c.tf);
     const bars = this.frames.get(tf);
     if (!bars) throw new Error(`No ${tf}-minute candles prepared for "${describeCond(c)}".`);
-    return { bars, isDaily: false };
+    return { bars: conv(String(tf), bars), isDaily: false, ha };
   }
 
   private build(c: Cond): { frame: Frame; check: Check } {
     const frame = this.frameFor(c);
     const b = frame.bars as (Bar & DayBar)[];
-    const fk = c.tf === "D" ? "D" : String(c.tf === "base" ? this.baseTf : Number(c.tf));
+    const fk = (frame.ha ? "HA:" : "") + (c.tf === "D" ? "D" : String(c.tf === "base" ? this.baseTf : Number(c.tf)));
     const M = <T>(name: string, fn: () => T): T => {
       const key = `${fk}|${b.length}|${name}`;
       if (!this.memo.has(key)) this.memo.set(key, fn());
@@ -303,6 +321,7 @@ export function validateRules(r: unknown): Rules {
     }
   }
   if (!has(rules.long) && !has(rules.short)) throw new Error("Add at least one Buy or Sell condition.");
+  if (rules.candles !== undefined && rules.candles !== "NORMAL" && rules.candles !== "HA") throw new Error("Candle type must be normal or Heikin Ashi.");
   if (rules.daily) {
     for (const c of allConds(rules)) {
       if (c.tf !== "D") throw new Error("A once-a-day strategy uses daily candles only; set every condition's timeframe to Daily.");

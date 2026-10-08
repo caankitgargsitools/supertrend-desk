@@ -11,6 +11,7 @@ import {
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, type Signals, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, type RiskHit, riskInit, riskScan, type RiskState } from "./risk.ts";
+import { lotsFor, marginPerLot, normaliseSizing } from "./sizing.ts";
 
 const epochAt = (day: string, min: number) => Date.parse(`${day}T00:00:00+05:30`) / 1000 + min * 60;
 
@@ -18,7 +19,8 @@ const epochAt = (day: string, min: number) => Date.parse(`${day}T00:00:00+05:30`
 export type ChargeRates = {
   brk_pct: number; stt_fut: number; stt_opt: number; exch_fut: number; exch_opt: number; sebi: number; gst: number; stamp_fut: number; stamp_opt: number;
 };
-export type BtParams = { from: string; to: string; capital: number; brokerage: number; other_pct?: number; charges?: ChargeRates; near_code: number };
+/** sizing: work out lots per trade from equity with the strategy's sizing settings; deploy_pct: portfolio deployment cap (%). */
+export type BtParams = { from: string; to: string; capital: number; brokerage: number; other_pct?: number; charges?: ChargeRates; near_code: number; sizing?: boolean; deploy_pct?: number };
 export type ChargeBreakdown = { brokerage: number; stt: number; exch: number; sebi: number; gst: number; stamp: number; total: number };
 
 /** Charges for one round trip (one buy and one sell order), the way the broker's calculator works them out. */
@@ -55,6 +57,7 @@ export type Acc = {
   busy?: number; // rounds cut short because Dhan was unavailable
   notes?: string[]; // caveats found while planning (e.g. limited commodity history)
   dayNet?: Record<string, number>; // net ₹ of closed trades per exit day (daily loss limit)
+  lots?: { min: number; max: number; sum: number; n: number }; // lots per trade when sized from capital
 };
 
 /** Saved option series shared between runs (the strategy lab keeps them in the database). */
@@ -473,8 +476,9 @@ export async function priceBatch(
   const dhan = new Dhan(creds.client, creds.token);
   dhan.deadline = deadline + 25000;
   const isOpt = s.trade_type === "OPTIONS";
-  const units = s.lots * s.lot_size;
+  const fixedUnits = s.lots * s.lot_size;
   const step = Number(s.strike_step);
+  const sz = p.sizing ? normaliseSizing(s.sizing, String(s.data_segment)) : null;
 
   const cache = new Map<string, Map<string, (OptBar & { min: number; day: string })[]>>();
   let busyStreak = 0;
@@ -600,6 +604,15 @@ export async function priceBatch(
       outPx = t.spotOut;
     }
     if (inPx == null || outPx == null) { skip("No historical price for that contract and time"); continue; }
+    // Lots from the equity at the time of the trade (grows after profits, shrinks after losses).
+    let units = fixedUnits, lots = Number(s.lots);
+    if (sz) {
+      const sr = lotsFor(sz, acc.equity, marginPerLot(s as any, sz, t.spotIn, isOpt ? inPx : null), 0, Number(p.deploy_pct ?? 100));
+      if (sr.lots < 1) { skip("Not enough capital for 1 lot"); continue; }
+      lots = sr.lots; units = lots * Number(s.lot_size);
+      acc.lots = acc.lots ?? { min: lots, max: lots, sum: 0, n: 0 };
+      acc.lots.min = Math.min(acc.lots.min, lots); acc.lots.max = Math.max(acc.lots.max, lots); acc.lots.sum += lots; acc.lots.n++;
+    }
     // Direction of the money: option buyers and longs gain when price rises; option writers and shorts when it falls.
     const dir = isOpt ? (s.option_side === "SELL" ? -1 : 1) : t.side === "LONG" ? 1 : -1;
     // Buy and sell legs: a long (or an option buy) buys at entry and sells at exit; a short (or an option write) the reverse.
@@ -617,7 +630,7 @@ export async function priceBatch(
     acc.dayNet[t.exitDay] = (acc.dayNet[t.exitDay] ?? 0) + net;
     trades.push({
       entry: `${t.entryDay} ${minToTime(t.entryMin)}`, exit: `${t.exitDay} ${minToTime(t.exitMin)}`, side: t.side, contract,
-      why: t.why, exit_why: t.exitWhy, entry_px: +inPx.toFixed(2), exit_px: +outPx.toFixed(2), units,
+      why: t.why, exit_why: t.exitWhy, entry_px: +inPx.toFixed(2), exit_px: +outPx.toFixed(2), units, lots,
       gross: g, costs: c, net, equity: Math.trunc(acc.equity),
       chg: { brokerage: ch.brokerage, stt: ch.stt, exch: ch.exch, sebi: ch.sebi, gst: ch.gst, stamp: ch.stamp, total: ch.total },
     });
@@ -641,6 +654,7 @@ export function summarize(s: Record<string, any>, p: BtParams, planned: number, 
     skipped: acc.skipped, notes: acc.notes ?? [],
     priced_with: s.trade_type === "OPTIONS" ? "Dhan expired-options data (5-minute)" : isCommodity(String(s.data_segment)) ? "Near-month futures prices" : "Index prices as a futures proxy",
     dhan_calls: acc.calls, last_day_done: acc.lastDone, partial,
+    lots: acc.lots && acc.lots.n ? { min: acc.lots.min, max: acc.lots.max, avg: +(acc.lots.sum / acc.lots.n).toFixed(1) } : null,
     charges: acc.chg ? Object.fromEntries(Object.entries(acc.chg).map(([k, v]) => [k, Math.trunc(v)])) : null,
   };
 }
