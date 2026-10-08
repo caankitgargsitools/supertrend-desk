@@ -2277,7 +2277,7 @@ async function openLabDetail(id) {
   const r = must(await db.from("lab_results").select("*, run:lab_runs(id, from_day, split_day, to_day, created_at, settings)").eq("id", id).single());
   labDetailRow = r;
   const box = $("lab_detail"); box.hidden = false;
-  const c = r.config, run = r.run || {}, a = PRESETS[c.underlying] || {};
+  const c = r.config, labRun = r.run || {}, a = PRESETS[c.underlying] || {};
   const versions = [{ key: "FUT", label: c.data_segment === "MCX_COMM" ? "MCX futures (near month)" : "Index futures (index price as proxy)", side: null, risk: c.risk, metrics: r.metrics, trades: r.trades || [] }];
   for (const [col, side] of [["opt_buy", "BUY"], ["opt_sell", "SELL"]]) for (const v of ((r[col] && r[col].variants) || [])) versions.push({ key: side, label: v.label, side, risk: v.risk, metrics: v.metrics, trades: v.trades || [], skipped: v.skipped });
   let pickI = Math.max(0, versions.findIndex((v) => v.key === lab.view));
@@ -2296,10 +2296,10 @@ async function openLabDetail(id) {
     ["Stop loss & target", riskText(c.risk)],
     ["Quantity", `1 lot · ${isMcxA ? "P&L multiplier" : "lot size"} ${c.lot_size}`],
     ["Charges", `Brokerage ₹20 per order (futures: lower of ₹20 and 0.03%), STT, exchange, SEBI, GST and stamp duty at current ${isMcxA ? "MCX" : c.exchange} rates; net P&L in whole rupees`],
-    ["Test period", `${run.from_day} to ${run.to_day} · ranked on trades exiting before ${run.split_day}; the last 3 months are the check`],
+    ["Test period", `${labRun.from_day} to ${labRun.to_day} · ranked on trades exiting before ${labRun.split_day}; the last 3 months are the check`],
     ["Options (when priced)", `ATM strike (gap ${c.strike_step}), ${c.expiry_flag === "MONTH" ? "monthly" : "weekly"} expiry, next expiry on expiry day; Dhan expired-options data, 5-minute`],
     ["How it was made", c.lab_note ? c.lab_note : r.champion ? "Re-test of an earlier winner on the latest year" : "New random strategy"],
-    ["Tested", `Run #${r.run_id} on ${istText(run.created_at)}${r.champion ? " · re-test of an earlier winner" : ""} · lab strategy #${r.id}`],
+    ["Tested", `Run #${r.run_id} on ${istText(labRun.created_at)}${r.champion ? " · re-test of an earlier winner" : ""} · lab strategy #${r.id}`],
   ];
   const draw = () => {
     const v = versions[pickI], m = v.metrics;
