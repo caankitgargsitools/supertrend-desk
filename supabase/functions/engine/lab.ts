@@ -950,20 +950,19 @@ function buyHold(data: SimData, from: string, to: string, lot: number) {
   const net = Math.trunc((ds[ds.length - 1].c - c0) * lot);
   return { net, max_dd: Math.trunc(dd), ratio: dd > 0 ? +(net / dd).toFixed(2) : null, from: ds[0].day, to: ds[ds.length - 1].day };
 }
-const workOk = (f: PeriodStats, daily: boolean) => f.net > 0 && (f.pf == null || f.pf >= 1.1) && f.n >= (daily ? 5 : 10);
 /** The verdict once every check of a winner is done. */
 export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: string; tf: number | null; result: any }[]) {
   const daily = !!cfg.rules?.daily;
   const self = checks.find((c) => c.kind === "self")?.result ?? null;
   const assets = checks.filter((c) => c.kind === "asset").map((c) => ({ asset: c.asset, ...c.result }));
-  const tfs = checks.filter((c) => c.kind === "tf").map((c) => ({ tf: c.tf, ...c.result }));
+  const tfs = checks.filter((c) => c.kind === "tf" && !c.result?.skip).map((c) => ({ tf: c.tf, ...c.result }));
   const okA = assets.filter((x) => x.ok).length, okT = tfs.filter((x) => x.ok).length;
   const why: string[] = [];
   if (!self || !(self.net > 0)) why.push("lost money on the latest year");
   if (!assets.length) why.push("no other asset to test it on");
   else if (okA < Math.min(2, assets.length)) why.push(`worked on ${okA} of ${assets.length} other assets (needs ${Math.min(2, assets.length)})`);
   if (tfs.length) { const need = tfs.length >= 3 ? 2 : 1; if (okT < need) why.push(`worked on ${okT} of ${tfs.length} other timeframes (needs ${need})`); }
-  else why.push("could not be tested on another timeframe (the lab has no intraday candles for this asset yet)");
+  else why.push("could not be tested on another timeframe yet (not enough 5-minute candles for this asset; MCX history grows every night)");
   const bh = self?.bh ?? null;
   const sRatio = self && self.max_dd > 0 ? self.net / self.max_dd : self?.net > 0 ? 99 : 0;
   let vsBh: number | null = null, riskVsBh: number | null = null;
@@ -1013,9 +1012,21 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
       const t1 = performance.now();
       let result: Record<string, unknown>;
       try {
-        const { metrics } = await screenOne(c.config, data, memo, win, capital, rates);
-        const f = metrics.full;
-        result = { net: f.net, pf: f.pf, max_dd: f.max_dd, n: f.n, win_rate: f.win_rate, test_net: metrics.test.net, ok: workOk(f, !!c.config.rules?.daily) };
+        // Timeframe checks run on 5-minute candles, which for MCX only go back as far as the listed contracts have traded:
+        // they are judged on that stretch (after 10 days of warm-up), with the trade minimum scaled to its length.
+        let w = win, scale = 1;
+        if (c.kind === "tf") {
+          const first = data.raw[0]?.day;
+          const from = first ? addDays(first, 10) : win.to;
+          if (from > win.from) w = { ...win, from, split: from > win.split ? from : win.split };
+          const days = (Date.parse(win.to) - Date.parse(w.from)) / 86400000;
+          if (days < 60) { ups.push(sb.from("lab_checks").update({ status: "done", result: { skip: true, ok: false, error: `only ${Math.max(0, Math.round(days))} days of 5-minute candles so far` } }).eq("id", c.id).then(() => {})); continue; }
+          scale = Math.min(1, days / 365);
+        }
+        const { metrics } = await screenOne(c.config, data, memo, w, capital, rates);
+        const f = metrics.full, daily = !!c.config.rules?.daily;
+        const minN = Math.max(3, Math.round((daily ? 5 : 10) * scale));
+        result = { net: f.net, pf: f.pf, max_dd: f.max_dd, n: f.n, win_rate: f.win_rate, test_net: metrics.test.net, ok: f.net > 0 && (f.pf == null || f.pf >= 1.1) && f.n >= minN, ...(w.from !== win.from ? { from: w.from } : {}) };
         if (c.kind === "self") result.bh = buyHold(data, win.from, win.to, Number(c.config.lot_size));
       } catch (e) { result = { ok: false, error: e instanceof Error ? e.message.slice(0, 160) : String(e) }; }
       cpu += performance.now() - t1;
