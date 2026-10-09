@@ -956,3 +956,33 @@ async function prune(sb: SupabaseClient) {
   await sb.from("lab_opt_cache").delete().lt("created_at", d(420));
   await sb.from("lab_runs").delete().lt("created_at", d(90));
 }
+
+/* ---------- long tests: one backtest cut into 3M … 10Y windows ---------- */
+export const LONG_WINDOWS: [string, number][] = [["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["3Y", 36], ["4Y", 48], ["5Y", 60], ["6Y", 72], ["7Y", 84], ["8Y", 96], ["9Y", 108], ["10Y", 120]];
+const monthsBack = (day: string, m: number) => { const [y, mo, d] = day.split("-").map(Number); const t = new Date(Date.UTC(y, mo - 1 - m, d + 1)); return t.toISOString().slice(0, 10); };
+/**
+ * Results for each window ending on the test's last day. A window is only reported when the test covers it
+ * (its start is on or after the first day tested). Figures are for 1 lot, after charges.
+ */
+export function periodWindows(trades: { exit: string; net: number }[], from: string, to: string, capital: number) {
+  const out: Record<string, unknown> = {};
+  for (const [k, m] of LONG_WINDOWS) {
+    const start = monthsBack(to, m);
+    if (start < addDays(from, -7)) { out[k] = null; continue; }
+    const ts = trades.filter((t) => { const d = String(t.exit).slice(0, 10); return d >= start && d <= to; });
+    let eq = 0, peak = 0, dd = 0, win = 0, gw = 0, gl = 0;
+    const byMonth = new Map<string, number>();
+    for (const t of ts) {
+      const n = Number(t.net) || 0;
+      eq += n; peak = Math.max(peak, eq); dd = Math.max(dd, peak - eq);
+      if (n > 0) { win++; gw += n; } else gl += -n;
+      const mk = String(t.exit).slice(0, 7); byMonth.set(mk, (byMonth.get(mk) ?? 0) + n);
+    }
+    const yrs = m / 12;
+    out[k] = { from: start, n: ts.length, net: Math.trunc(eq), win_rate: ts.length ? +((win / ts.length) * 100).toFixed(1) : 0,
+      pf: gl > 0 ? +(gw / gl).toFixed(2) : null, max_dd: Math.trunc(dd), ret_pct: +((eq / capital) * 100).toFixed(1),
+      ret_yr: +(((eq / capital) * 100) / yrs).toFixed(1), months_pos: [...byMonth.values()].filter((x) => x > 0).length, months: byMonth.size,
+      ratio: dd > 0 ? +(eq / dd).toFixed(2) : null };
+  }
+  return out;
+}

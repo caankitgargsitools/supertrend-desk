@@ -109,7 +109,8 @@ function priceAt<T extends { min: number; o: number; c: number }>(bars: T[] | un
 export function validateParams(p: BtParams) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(p.from) || !/^\d{4}-\d{2}-\d{2}$/.test(p.to) || p.from > p.to) throw new Error("Pick a valid date range.");
   const span = (Date.parse(p.to) - Date.parse(p.from)) / 86400000;
-  if (span > MAX_DAYS) throw new Error("Backtests can cover up to 5 years per run.");
+  // Long tests of once-a-day futures strategies may go back 10 years (daily candles); everything else 5 years.
+  if (span > ((p as any).long ? 3660 : MAX_DAYS)) throw new Error(`Backtests can cover up to ${(p as any).long ? 10 : 5} years per run.`);
 }
 
 export function newAcc(capital: number): Acc {

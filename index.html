@@ -231,12 +231,12 @@ legend { padding: 0; margin-bottom: 4px; }
 .lab-table tbody td { border-bottom: 1px solid var(--line); }
 /* On wide screens the header sticks to the top of the window (under the page bar) as you scroll the page. */
 body.wide .wrap { max-width: 1840px; }
-.lab-table { width: 100%; table-layout: fixed; min-width: 1180px; }
+.lab-table { width: 100%; table-layout: fixed; min-width: 1370px; }
 .lab-table thead tr.t th { text-align: center; vertical-align: middle; }
 .lab-table td.lbl { min-width: 0; max-width: none; overflow-wrap: anywhere; }
 .lab-table td { overflow: hidden; text-overflow: ellipsis; }
 .lab-table td.n { font-size: 12.5px; }
-@media (min-width: 1250px) {
+@media (min-width: 1440px) {
   .labgrid { overflow: visible; max-height: none; }
   .lab-table thead tr.t th { top: var(--barH, 0px); }
   .lab-table thead tr.fl th { top: calc(var(--barH, 0px) + var(--labhead, 40px)); }
@@ -700,7 +700,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
         <div class="actions"><button class="btn primary" id="newFlip2" type="button">+ New strategy</button></div></div>
       <div class="filters">
         <label class="f grow"><span>Search</span><input id="lf_q" type="search" placeholder="Name, asset, owner…" autocomplete="off"></label>
-        <label class="f"><span>Source</span><select id="lf_src"><option value="">All</option><option value="OWN">Built here</option><option value="BOUGHT">Bought</option><option value="MASTER">Marketplace copies</option></select></label>
+        <label class="f"><span>Source</span><select id="lf_src"><option value="">All</option><option value="OWN">Built here</option><option value="BOUGHT">Bought</option><option value="MASTER">Marketplace &amp; lab copies</option></select></label>
         <label class="f"><span>Status</span><select id="lf_act"><option value="">All</option><option value="ACTIVE">Active</option><option value="PAUSED">Paused</option></select></label>
         <label class="f"><span>Mode</span><select id="lf_mode"><option value="">All</option><option value="LIVE">Live</option><option value="PAPER">Paper</option></select></label>
         <label class="f"><span>Asset</span><select id="lf_asset"><option value="">All</option></select></label>
@@ -2888,6 +2888,7 @@ async function loadLab() {
     // Users: results and trades only, from a server view that leaves out every parameter.
     const res = must(await db.rpc("lab_feed", { p_view: lab.view, p_asset: lab.asset, p_period: lab.period, p_only: lab.only, p_request: lab.request || null }));
     lab.settings = null; lab.runs = res.run ? [res.run] : [];
+    lab.long = await db.rpc("lab_long_map").then((x) => x.data || {}).catch(() => ({}));
     lab.rows = (res.rows || []).map((r) => ({ ...r, config: null, label: `Lab #${r.id} · ${(PRESETS[r.asset] && PRESETS[r.asset].name) || r.asset}` }));
     renderLabStatus(); renderLabTable(); $("lab_stop").hidden = true; $("lab_run").hidden = true; loadLabRequests().catch(() => {});
     stopLabPoll();
@@ -2908,6 +2909,7 @@ async function loadLab() {
   if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : "opt_sell", "is", null);
   if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
   lab.rows = must(await q.order("score", { ascending: false }).limit(2000));
+  lab.long = await db.rpc("lab_long_map").then((x) => x.data || {}).catch(() => ({}));
   renderLabStatus(); renderLabTable(); loadLabRequests().catch(() => {});
   stopLabPoll();
   if (lab.open && runs[0] && runs[0].status === "running") lab.poll = setTimeout(() => loadLab().catch(() => {}), 15000);
@@ -2990,7 +2992,19 @@ const LAB_COLS = [
   { k: "months", w: 70, t: "Months +", f: "num", n: true, v: (g) => g.m.pos_months, tip: "Profitable months out of the months traded" },
   { k: "score", w: 64, t: "Score", f: "num", n: true, v: (g) => g.m.score },
   { k: "nights", w: 70, t: "Nights passed", f: "num", n: true, v: (g) => g.passes },
+  { k: "longnet", w: 112, t: "Long test net", f: "num", n: true, v: (g) => { const L = longOf(g.r); return L ? L.net : null; }, tip: "Net profit over the longest period tested in the nightly long test (up to 10 years for daily strategies, 5 years for intraday), 1 lot after charges" },
+  { k: "longpos", w: 74, t: "Long test periods +", f: "num", n: true, v: (g) => { const L = longOf(g.r); return L ? L.pos : null; }, tip: "Of the periods tested (3M, 6M, 1Y … 10Y), how many made money" },
 ];
+/** The latest nightly long test of a lab strategy (futures version): its longest period and how many periods made money. */
+function longOf(r) {
+  const L = lab.long && lab.long[r.fingerprint];
+  if (!L || !L.windows) return null;
+  const ks = Object.keys(L.windows).filter((k) => L.windows[k]);
+  if (!ks.length) return null;
+  const order = ["3M", "6M", "1Y", "2Y", "3Y", "4Y", "5Y", "6Y", "7Y", "8Y", "9Y", "10Y"];
+  const longest = ks.sort((a, b) => order.indexOf(b) - order.indexOf(a))[0];
+  return { key: longest, net: L.windows[longest].net, pos: ks.filter((k) => L.windows[k].net > 0).length, n: ks.length };
+}
 lab.filters = lab.filters || {}; lab.sortKey = lab.sortKey || "score"; lab.sortDir = lab.sortDir || -1;
 /** Number filter: "50" (at least 50), ">50", ">=50", "<0", "<=2", "=10", "10-20" (between), "!0" (not 0); 2l = 2 lakh, 1cr, 5k. */
 function numTest(expr) {
@@ -3061,7 +3075,7 @@ function renderLabTable() {
     tr.innerHTML = `<td class="n">${num}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
       <td style="white-space:nowrap">${esc(labAssetName(r.asset))}</td><td>${esc(labStyle(r))}</td><td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}</td><td class="n">${m.margin_lot ? rupees(m.margin_lot) : "–"}</td>
       <td class="n">${m.ret_margin == null ? "–" : `<span class="${m.ret_margin > 0 ? "pos-num" : m.ret_margin < 0 ? "neg-num" : ""}">${m.ret_margin}%</span>`}</td><td class="n">${pc(m.test.net)}</td>
-      <td class="n">${rupees(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${m.score}</td><td class="n">${g.passes}/${g.nights}</td>`;
+      <td class="n">${rupees(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${m.score}</td><td class="n">${g.passes}/${g.nights}</td>${(() => { const L = longOf(r); return L ? `<td class="n"><span class="hint">${L.key}</span> <span class="${L.net > 0 ? "pos-num" : L.net < 0 ? "neg-num" : ""}">${rupees(L.net)}</span></td><td class="n">${L.pos}/${L.n}</td>` : '<td class="n hint">–</td><td class="n hint">–</td>'; })()}`;
     tr.querySelector(".t").textContent = r.label;
     tr.addEventListener("click", (e) => {
       if (e.target.closest(".famBtn")) { if (lab.openFam.has(f.key)) lab.openFam.delete(f.key); else lab.openFam.add(f.key); renderLabTable(); return; }
@@ -3142,6 +3156,7 @@ async function openLabDetail(id) {
         <div class="stat"><span class="label">Score</span><span class="v">${m.score}</span></div>
       </div>
       ${monthsHTML(m)}
+      <div id="ld_long"></div>
       <h3 style="font-size:15px;margin:16px 0 6px">Results by period</h3>${statsTable(m)}
       <h3 style="font-size:15px;margin:16px 0 6px">Every parameter used</h3>
       <dl class="kv">${kv.map(([k, val]) => `<dt>${esc(k)}</dt><dd>${esc(val)}</dd>`).join("")}<dt>This version</dt><dd>${esc(v.label)}${v.key !== "FUT" ? ` · stops: ${esc(riskText(v.risk))}` : ""}</dd>
@@ -3155,6 +3170,7 @@ async function openLabDetail(id) {
     $("ld_xlsx").addEventListener("click", (e) => run(e.currentTarget, () => downloadLabExcel(r, versions[pickI], kv)));
     $("ld_save").addEventListener("click", (e) => run(e.currentTarget, () => promoteLab(r, versions[pickI])));
     $("ld_var").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: !!(r.config.rules && r.config.rules.daily), title: `Lab #${r.id}` }));
+    renderLongTests(r.id);
     box.scrollIntoView({ block: "start", behavior: "smooth" });
   };
   draw();
@@ -3190,6 +3206,7 @@ async function openLabDetailPublic(id) {
         <div class="stat"><span class="label">Profitable months</span><span class="v">${m.pos_months} of ${m.months_n}</span></div>
       </div>
       ${monthsHTML(m)}
+      <div id="ld_long"></div>
       <h3 style="font-size:15px;margin:16px 0 6px">Results by period</h3>${statsTable(m)}
       <p class="hint">Tested on ${esc(aName)} from ${esc(run0.from_day || "")} to ${esc(run0.to_day || "")}, 1 lot, after brokerage and statutory charges. The strategy's settings stay private.</p>
       <h3 style="font-size:15px;margin:16px 0 6px">Trades ${v.trades.length ? `(${v.trades.length})` : ""}</h3>
@@ -3199,6 +3216,7 @@ async function openLabDetailPublic(id) {
     box.querySelectorAll("#ld_vers button").forEach((b) => b.addEventListener("click", () => { pickI = Number(b.dataset.i); draw(); }));
     $("ld_close").addEventListener("click", () => { box.hidden = true; lab.sel = null; renderLabTable(); });
     $("ld_var").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: r.cfg && r.cfg.data_segment === "MCX_COMM" ? true : null, title: `Lab #${r.id}` }));
+    renderLongTests(r.id);
     $("ld_use").addEventListener("click", () => {
       const f = $("ld_form");
       f.innerHTML = `<div class="ued" style="margin-top:12px"><strong>Add “${esc(v.label)}” to my strategies</strong>
@@ -3279,6 +3297,21 @@ async function loadLabRequests() {
     f.querySelector("button").addEventListener("click", () => { lab.request = null; loadLab().catch((e) => toast(errorText(e))); });
   }
   if (lab.open && rows.some((q) => q.status === "running" || q.status === "pending")) { clearTimeout(loadLabRequests.t); loadLabRequests.t = setTimeout(() => { if (lab.open) loadLabRequests().catch(() => {}); }, 30000); }
+}
+/** Nightly long-test results of a lab strategy: one table of 3M … 10Y per tested version. */
+async function renderLongTests(id) {
+  const box = $("ld_long"); if (!box) return;
+  let rows = [];
+  try { rows = must(await db.rpc("lab_long_results", { p_id: id })) || []; } catch { return; }
+  const order = ["3M", "6M", "1Y", "2Y", "3Y", "4Y", "5Y", "6Y", "7Y", "8Y", "9Y", "10Y"];
+  const vName = (v) => v.version === "FUT" ? "Futures" : v.version === "BUY" ? "Option buying" : "Option writing";
+  if (!rows.length) { box.innerHTML = '<h3 style="font-size:15px;margin:16px 0 6px">Long-term results</h3><p class="hint">Not long-tested yet. Every night the strongest winners are backtested over up to 10 years (daily strategies) or 5 years (intraday and options), and cut into 3M, 6M, 1Y … 10Y periods.</p>'; return; }
+  const cell = (w) => w ? `<td class="n ${w.net > 0 ? "pos-num" : w.net < 0 ? "neg-num" : ""}">${rupees(w.net)}</td><td class="n">${w.n}</td><td class="n">${w.win_rate}</td><td class="n">${w.pf ?? "–"}</td><td class="n">${rupees(w.max_dd)}</td><td class="n">${w.ret_yr}%</td>` : '<td colspan="6" class="hint">beyond the data Dhan has for this version</td>';
+  box.innerHTML = `<h3 style="font-size:15px;margin:16px 0 6px">Long-term results</h3>` + rows.map((v) => {
+    const head = `${v.from || ""} → ${v.to || ""} · ${v.status === "done" ? `tested ${istText(v.at)}` : v.status === "partial" ? "stopped early (periods up to the last day priced)" : v.status === "failed" ? `couldn't run: ${v.error || ""}` : v.status === "running" ? "running now" : "waiting for tonight (runs between midnight and 8 am)"}`;
+    const ws = v.windows || {};
+    return `<p class="hint" style="margin:10px 0 4px"><strong>${esc(vName(v))}</strong> · ${esc(head)}</p>${v.windows ? `<div class="scroll"><table class="mini"><thead><tr><th>Period</th><th class="n">Net</th><th class="n">Trades</th><th class="n">Win %</th><th class="n">PF</th><th class="n">Max DD</th><th class="n">Return / year</th></tr></thead><tbody>${order.map((k) => `<tr><td>${k}</td>${cell(ws[k])}</tr>`).join("")}</tbody></table></div>` : ""}`;
+  }).join("") + '<p class="hint" style="margin:6px 0 0">1 lot per trade, after brokerage and statutory charges; return per year on ₹5,00,000. Each period ends on the last day tested. Futures prices for indices use the index as a proxy.</p>';
 }
 /* Margin per lot for one lab trade, worked out the same way as the lab engine. */
 function labKind(v) { return v.key === "FUT" ? "FUT" : v.side === "SELL" ? "SELL" : "BUY"; }
@@ -3445,7 +3478,7 @@ function listCols() {
     ["owner", "Owner", (s) => ownerName(s.owner_id), "admin"],
     ["asset", "Asset", (s) => assetLabel(s.underlying)],
     ["inst", "Instrument", (s) => instName(s)],
-    ["kind", "Type", (s) => s.is_master ? "Marketplace copy" : s.locked ? "Bought" : hideRules(s) ? "–" : kindName(s)],
+    ["kind", "Type", (s) => s.is_master ? (s.listing_id ? "Marketplace copy" : "Lab copy") : s.locked ? "Bought" : hideRules(s) ? "–" : kindName(s)],
     ["tf", "Timeframe", (s) => hideRules(s) ? "–" : cxStratTf(s) === "D" ? "Daily" : `${cxStratTf(s)} min`],
     ["active", "Status", (s) => s.archived ? "Archived" : s.active ? "Active" : "Paused"],
     ["live", "Mode", (s) => s.live ? "Live" : "Paper"],
@@ -3465,6 +3498,8 @@ function listRows() {
     inst = $("lf_inst").value, owner = isAdmin() ? $("lf_owner").value : "ME", arch = $("lf_arch").checked;
   return state.strategies.filter((s) => {
     if (!!s.archived !== arch) return false;
+    // Private copies the lab and marketplace use behind the scenes appear only under Source → Marketplace copies.
+    if (s.is_master && src !== "MASTER") return false;
     if (owner === "ME" && s.owner_id !== me.user_id) return false;
     if (src && srcOf(s) !== src) return false;
     if (act && (act === "ACTIVE") !== !!s.active) return false;

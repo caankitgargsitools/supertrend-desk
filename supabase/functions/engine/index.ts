@@ -13,7 +13,7 @@ import { dataSecurity, syncMcx } from "./instruments.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
-import { LAB_ASSETS, labNext, labStart, labStep, TOKEN_ERR } from "./lab.ts";
+import { LAB_ASSETS, labNext, labStart, labStep, periodWindows, TOKEN_ERR } from "./lab.ts";
 import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
 import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
@@ -964,6 +964,7 @@ async function runBacktestJob(id: number) {
       }
       const res = await planBacktest(snapshot, creds, params, async (m) => { await setRow({ progress: m }); });
       plans = res.plans; acc = newAcc(Number(params.capital)); acc.calls = res.calls; acc.notes = res.notes; cursor = 0; trades = [];
+      if (params.lab_period) await sb.from("lab_periods").update({ status: "running", updated_at: new Date().toISOString() }).eq("id", params.lab_period);
       params = { ...params, strategy: snapshot, margin_rate: await dhanRate(snapshot).catch(() => null) };
       await setRow({ params, plans, acc, cursor, trades, progress: `Planned ${plans.length} trades. Pricing them now.` });
     }
@@ -990,12 +991,18 @@ async function runBacktestJob(id: number) {
       await chainBacktest(id);
       return;
     }
-    if (cursor < plans!.length && acc.rounds < MAX_ROUNDS) {
+    if (cursor < plans!.length && acc.rounds < (params.lab_period ? MAX_ROUNDS * 4 : MAX_ROUNDS)) {
       await setRow({ acc, cursor, trades, progress: `Priced ${cursor} of ${plans!.length} trades. Continuing…` });
       await chainBacktest(id);
       return;
     }
     const partial = cursor < plans!.length;
+    if (params.lab_period) {
+      // A lab long test: cut the trades into 3M … 10Y windows for the Strategy Lab.
+      // A test that stopped early only covers up to its last finished day.
+      const windows = periodWindows(trades as any, String(params.from), partial && acc.lastDone ? String(acc.lastDone) : String(params.to), Number(params.capital));
+      await sb.from("lab_periods").update({ status: partial ? "partial" : "done", windows, summary: summarize(s, params, plans!.length, trades.length, acc, partial), updated_at: new Date().toISOString() }).eq("id", params.lab_period);
+    }
     await setRow({
       status: partial ? "partial" : "done", acc, cursor, trades, plans: null,
       summary: summarize(s, params, plans!.length, trades.length, acc, partial), finished_at: new Date().toISOString(),
@@ -1012,6 +1019,8 @@ async function runBacktestJob(id: number) {
       return;
     }
     await setRow({ status: "failed", error: msg, finished_at: new Date().toISOString() });
+    const lp = (bt.params as any)?.lab_period;
+    if (lp) await sb.from("lab_periods").update({ status: "failed", error: msg.slice(0, 300), updated_at: new Date().toISOString() }).eq("id", lp);
   }
 }
 
