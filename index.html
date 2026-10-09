@@ -228,27 +228,59 @@ legend { padding: 0; margin-bottom: 4px; }
 .assetpick { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .assetpick label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; cursor: pointer; }
 .assetpick input { accent-color: var(--blue); }
+/* multi-user desk: navigation, full-page tables, marketplace, wallet, admin, declarations */
+.nav { display: flex; flex-wrap: wrap; gap: 6px; }
+.nav .btn[aria-current="page"] { background: var(--blue); border-color: var(--blue); color: var(--on-blue); }
+.wrap { grid-template-columns: minmax(0, 1fr) !important; }
+.wrap > aside.rail { display: none; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; margin: 12px 0; }
+.filters .f { min-width: 120px; }
+.filters .f.grow { flex: 1 1 200px; }
+th.sort { cursor: pointer; user-select: none; }
+th.sort:hover { color: var(--blue); }
+th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="descending"]::after { content: " ▼"; }
+.big-table td { white-space: nowrap; } .big-table td.nm { white-space: normal; min-width: 200px; font-weight: 600; }
+.big-table tr.pick td.nm { color: var(--blue); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.lcard { border: 1px solid var(--line); border-radius: var(--r); padding: 14px; display: grid; gap: 10px; background: var(--panel); align-content: start; }
+.lcard h3 { font-size: 17px; }
+.lcard .price { font: 700 18px var(--font-data); }
+.mini { font-size: 12px; } .mini td, .mini th { padding: 4px 6px; }
+.disclaim { max-width: 1380px; margin: 0 auto 30px; padding: 0 16px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.disclaim .box { border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 6px; }
+.disclaim strong { color: var(--ink); }
+.riskline { background: var(--yellow-soft); color: var(--yellow-ink); border-radius: 8px; padding: 8px 12px; font-size: 12.5px; }
+.terms { display: grid; gap: 10px; } .terms ol { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.subtabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.subtabs .btn[aria-pressed="true"], .nav .btn[aria-current="page"]:hover { background: var(--blue); border-color: var(--blue); color: var(--on-blue); }
+.ued { display: grid; gap: 10px; background: var(--bg); border-radius: var(--r); padding: 12px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
 
 <header class="bar">
-  <div class="brand"><h1><span class="b">CA</span> <span class="r">Ankit</span> <span class="y">Garg</span> <span class="g">Trade Desk</span></h1><small>Dhan · NSE / BSE</small></div>
+  <div class="brand"><h1><span class="b">CA</span> <span class="r">Ankit</span> <span class="y">Garg</span> <span class="g">Trade Desk</span></h1><small>Algo desk · Dhan · NSE / BSE / MCX</small></div>
   <span class="mk"><span class="dot" id="mktDot"></span><span id="mktText">Checking market hours…</span></span>
-  <button class="btn small" id="openLab" type="button">Strategy Lab</button>
-  <button class="btn small" id="openCap" type="button">Capital</button>
-  <button class="btn small" id="openSettings" type="button">Dhan connection</button>
+  <nav class="nav" id="nav" aria-label="Pages" hidden>
+    <button class="btn small" id="nav_strats" type="button">Strategies</button>
+    <button class="btn small" id="nav_market" type="button">Marketplace</button>
+    <button class="btn small" id="openCap" type="button">Capital</button>
+    <button class="btn small" id="nav_wallet" type="button">Wallet</button>
+    <button class="btn small" id="openSettings" type="button">Dhan connection</button>
+    <button class="btn small" id="openLab" type="button" data-admin hidden>Strategy Lab</button>
+    <button class="btn small" id="nav_admin" type="button" data-admin hidden>Admin</button>
+  </nav>
   <span class="mk" id="who" hidden></span><button class="btn small" id="signOut" type="button" hidden>Sign out</button>
 </header>
 
 <div id="gate" class="gate" hidden>
   <div class="card">
     <h2 style="margin-bottom:6px" id="g_title">Sign in</h2>
-    <p class="hint" id="g_hint">CA Ankit Garg Trade Desk is private. Sign in with the owner account.</p>
+    <p class="hint" id="g_hint">Sign in with the login your admin gave you.</p>
     <form id="loginForm" style="margin-top:12px">
       <label class="f"><span>Email</span><input id="g_email" type="email" autocomplete="username" required></label>
-      <label class="f"><span>Password</span><input id="g_pass" type="password" autocomplete="current-password" required minlength="10"></label>
+      <label class="f"><span>Password</span><input id="g_pass" type="password" autocomplete="current-password" required minlength="8"></label>
       <div class="formbar"><button class="btn primary" type="submit" id="g_go">Sign in</button><span class="hint" id="g_msg"></span></div>
     </form>
     <p class="hint" style="margin-top:14px"><a href="#setup" id="g_switch">First time here? Create the owner account</a></p>
@@ -266,7 +298,7 @@ legend { padding: 0; margin-bottom: 4px; }
 
   <main class="pane" id="pane">
     <section class="card" id="connCard" hidden>
-      <div class="head"><h2>Dhan connection</h2><button class="btn small" id="closeSettings" type="button">Close</button></div>
+      <div class="head"><h2>Dhan connection</h2><button class="btn small" id="closeSettings" type="button" hidden>Close</button></div>
       <form id="connForm" style="margin-top:12px">
         <div class="grid">
           <label class="f"><span>Dhan client ID</span><input id="c_client" autocomplete="off"></label>
@@ -285,12 +317,13 @@ legend { padding: 0; margin-bottom: 4px; }
     <div id="stratPane" class="pane" hidden>
       <section class="card">
         <div class="head">
-          <div><span class="label" id="sp_sub"></span><h2 id="sp_name"></h2></div>
+          <div><button class="btn small" id="b_back" type="button" style="margin-bottom:8px">← All strategies</button><br><span class="label" id="sp_sub"></span><h2 id="sp_name"></h2><span class="hint" id="sp_owner"></span></div>
           <div class="actions">
             <button class="btn" id="b_refresh" type="button">Refresh</button>
             <button class="btn" id="b_active" type="button"></button>
             <button class="btn" id="b_live" type="button"></button>
             <button class="btn danger" id="b_flat" type="button">Exit position now</button>
+            <button class="btn" id="b_publish" type="button" data-admin hidden>Publish to marketplace</button>
           </div>
         </div>
         <div id="archBanner" class="banner warn archbar" style="margin-top:12px" hidden>
@@ -299,6 +332,8 @@ legend { padding: 0; margin-bottom: 4px; }
         </div>
         <div id="confirmBox" style="margin-top:12px" hidden></div>
         <div id="errBox" class="banner err" style="margin-top:12px" hidden></div>
+        <div id="lockedBox" style="margin-top:12px" hidden></div>
+        <div id="publishBox" style="margin-top:12px" hidden></div>
         <div class="stats" style="margin-top:14px">
           <div class="stat"><span class="label" id="st_trend_l">Trend</span><span class="v" id="st_trend">–</span></div>
           <div class="stat"><span class="label">Last price</span><span class="v" id="st_close">–</span></div>
@@ -604,8 +639,123 @@ legend { padding: 0; margin-bottom: 4px; }
 
       <section class="card" id="lab_detail" hidden></section>
     </div>
+
+    <section class="card" id="termsPane" hidden>
+      <h2>Before you start</h2>
+      <div class="terms" style="margin-top:10px">
+        <p>Please read and accept these points. They also appear at the bottom of every page.</p>
+        <ol id="termsList"></ol>
+        <label class="showtr"><input type="checkbox" id="terms_ok"> I have read and understood these points and I accept the risks.</label>
+        <div class="formbar"><button class="btn primary" id="terms_go" type="button" disabled>Accept and continue</button><span class="hint" id="terms_msg"></span></div>
+      </div>
+    </section>
+
+    <section class="card" id="listPane" hidden>
+      <div class="head"><h2 id="lp_title">Strategies</h2>
+        <div class="actions"><button class="btn primary" id="newFlip2" type="button">+ New strategy</button></div></div>
+      <div class="filters">
+        <label class="f grow"><span>Search</span><input id="lf_q" type="search" placeholder="Name, asset, owner…" autocomplete="off"></label>
+        <label class="f"><span>Source</span><select id="lf_src"><option value="">All</option><option value="OWN">Built here</option><option value="BOUGHT">Bought</option><option value="MASTER">Marketplace copies</option></select></label>
+        <label class="f"><span>Status</span><select id="lf_act"><option value="">All</option><option value="ACTIVE">Active</option><option value="PAUSED">Paused</option></select></label>
+        <label class="f"><span>Mode</span><select id="lf_mode"><option value="">All</option><option value="LIVE">Live</option><option value="PAPER">Paper</option></select></label>
+        <label class="f"><span>Asset</span><select id="lf_asset"><option value="">All</option></select></label>
+        <label class="f"><span>Instrument</span><select id="lf_inst"><option value="">All</option><option>Futures</option><option>Option buying</option><option>Option writing</option></select></label>
+        <label class="f" id="lf_owner_w" data-admin hidden><span>Owner</span><select id="lf_owner"><option value="ME">Mine</option><option value="">Everyone</option></select></label>
+        <label class="showtr"><input type="checkbox" id="lf_arch"> Archived</label>
+      </div>
+      <div class="scroll"><table class="big-table"><thead id="lp_head"></thead><tbody id="lp_body"></tbody></table></div>
+      <p class="hint" id="lp_foot" style="margin:8px 0 0"></p>
+    </section>
+
+    <section class="card" id="marketPane" hidden>
+      <div class="head"><h2>Marketplace</h2><span class="hint" id="mk_bal"></span></div>
+      <p class="riskline" style="margin-top:10px">Results below are backtests: simulations on past prices with estimated charges and fills. They are not a promise or forecast of future returns. Derivatives can lose more than you expect; 9 out of 10 individual traders in equity F&amp;O made net losses (SEBI study).</p>
+      <div class="filters">
+        <label class="f grow"><span>Search</span><input id="mk_q" type="search" placeholder="Title or asset" autocomplete="off"></label>
+        <label class="f"><span>Results period</span><select id="mk_yrs"><option value="1">1 year</option><option value="2">2 years</option><option value="3" selected>3 years</option><option value="4">4 years</option><option value="5">5 years</option></select></label>
+        <label class="f"><span>Sort by</span><select id="mk_sort"><option value="ret">Return</option><option value="net">Net profit</option><option value="dd">Smallest drawdown</option><option value="win">Win rate</option><option value="price">Price</option><option value="new">Newest</option></select></label>
+      </div>
+      <div class="cards" id="mk_cards"></div>
+      <div id="mk_detail" style="margin-top:16px"></div>
+    </section>
+
+    <section class="card" id="walletPane" hidden>
+      <div class="head"><h2>Wallet</h2></div>
+      <div id="wl_stats" style="margin-top:12px"></div>
+      <div class="grid" style="margin-top:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
+        <div>
+          <h3 style="font-size:16px">Recharge</h3>
+          <div id="wl_payto" class="banner info" style="margin:8px 0"></div>
+          <form id="wl_form" novalidate>
+            <div class="grid">
+              <label class="f"><span>Amount paid (₹)</span><input id="wl_amt" type="number" min="1" step="any" inputmode="decimal"></label>
+              <label class="f"><span>UPI / bank reference (UTR)</span><input id="wl_ref" autocomplete="off"></label>
+              <label class="f wide"><span>Note (optional)</span><input id="wl_note" autocomplete="off"></label>
+            </div>
+            <div class="formbar"><button class="btn primary" type="submit">Send recharge request</button><span class="hint" id="wl_msg"></span></div>
+          </form>
+          <p class="hint">Pay first, then send the reference here. The admin checks the payment and adds it to your wallet.</p>
+          <h3 style="font-size:16px;margin-top:14px">Recharge requests</h3>
+          <div class="scroll"><table class="mini"><thead><tr><th>When</th><th class="n">Amount</th><th>Reference</th><th>Status</th></tr></thead><tbody id="wl_reqs"></tbody></table></div>
+        </div>
+        <div>
+          <h3 style="font-size:16px">Wallet entries</h3>
+          <div class="scroll"><table class="mini"><thead><tr><th>When</th><th>Type</th><th>Details</th><th class="n">Amount</th></tr></thead><tbody id="wl_txns"></tbody></table></div>
+        </div>
+      </div>
+      <h3 style="font-size:16px;margin-top:16px">Daily check with Dhan</h3>
+      <p class="hint">After each market session the desk reads your Dhan positions, matches them with the desk's live trades and uses Dhan's realised profit where they agree. Profit share is worked out on these figures.</p>
+      <div class="scroll"><table class="mini"><thead><tr><th>Day</th><th class="n">Desk net</th><th class="n">Dhan realised (whole account)</th><th class="n">Trades matched</th><th>Note</th></tr></thead><tbody id="wl_days"></tbody></table></div>
+    </section>
+
+    <section class="card" id="adminPane" hidden>
+      <div class="head"><h2>Admin</h2></div>
+      <div class="subtabs" id="ad_tabs" style="margin-top:12px">
+        <button class="btn small" data-t="users" aria-pressed="true" type="button">Users</button>
+        <button class="btn small" data-t="recharges" type="button">Recharge requests</button>
+        <button class="btn small" data-t="billing" type="button">Billing settings</button>
+      </div>
+      <div id="ad_users">
+        <details class="adv-box" id="ad_newbox"><summary>+ Create a user</summary>
+          <form id="ad_new" novalidate style="margin-top:10px">
+            <div class="grid">
+              <label class="f"><span>Email (their login)</span><input id="an_email" type="email" autocomplete="off"></label>
+              <label class="f"><span>Temporary password (8+ characters)</span><input id="an_pass" autocomplete="off"></label>
+              <label class="f"><span>Name</span><input id="an_name" autocomplete="off"></label>
+              <label class="f"><span>Phone</span><input id="an_phone" autocomplete="off"></label>
+              <label class="f"><span>Trial days (blank = default)</span><input id="an_trial" type="number" min="0" step="1"></label>
+              <label class="f"><span>Can build strategies</span><select id="an_build"><option value="true">Yes</option><option value="false">No</option></select></label>
+            </div>
+            <div class="formbar"><button class="btn primary" type="submit">Create user</button><span class="hint" id="an_msg"></span></div>
+          </form>
+        </details>
+        <div class="filters"><label class="f grow"><span>Search</span><input id="au_q" type="search" placeholder="Email, name, phone" autocomplete="off"></label>
+          <label class="f"><span>Status</span><select id="au_st"><option value="">All</option><option value="active">Active</option><option value="blocked">Blocked</option><option value="trial">On trial</option><option value="neg">Wallet below zero</option></select></label></div>
+        <div class="scroll"><table class="big-table"><thead id="au_head"></thead><tbody id="au_body"></tbody></table></div>
+        <div id="au_edit" style="margin-top:12px"></div>
+      </div>
+      <div id="ad_recharges" hidden>
+        <div class="scroll"><table class="big-table"><thead><tr><th>When</th><th>User</th><th class="n">Amount</th><th>Reference</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody id="ar_body"></tbody></table></div>
+      </div>
+      <div id="ad_billing" hidden>
+        <form id="ab_form" novalidate>
+          <div class="grid">
+            <label class="f"><span>Free trial (days) for new users</span><input id="ab_trial" type="number" min="0" step="1"></label>
+            <label class="f"><span>Deployment fee per strategy (₹)</span><input id="ab_fee" type="number" min="0" step="any"></label>
+            <label class="f"><span>Fee charged</span><select id="ab_period"><option value="MONTHLY">Every month while live</option><option value="ONE_TIME">Once per strategy</option></select></label>
+            <label class="f"><span>Profit share (% of net profit)</span><input id="ab_share" type="number" min="0" max="100" step="any"></label>
+            <label class="f"><span>Minimum wallet balance to open trades (₹)</span><input id="ab_min" type="number" min="0" step="any"></label>
+            <label class="f wide"><span>Pay to (UPI ID / bank details shown to users)</span><input id="ab_payto" autocomplete="off"></label>
+            <label class="f wide"><span>Payment note shown to users</span><input id="ab_paynote" autocomplete="off"></label>
+          </div>
+          <div class="formbar"><button class="btn primary" type="submit">Save billing settings</button><span class="hint" id="ab_msg"></span></div>
+        </form>
+        <p class="hint">How billing works: during a trial nothing is charged. After it, going live takes the deployment fee from the wallet. Each evening the desk checks the day's live trades with Dhan and takes the profit share on winning trades from the wallet; losing trades are carried forward and set off against later profits before any share is charged. When the wallet is below the minimum (or below zero), strategies stop opening new trades; exits always go through. Per-user overrides are on each user.</p>
+      </div>
+    </section>
   </main>
 </div>
+<footer class="disclaim" id="disclaim"><div class="box" id="disclaimBox"></div></footer>
 <div class="toast" id="toast" hidden></div>
 
 <script>
@@ -706,7 +856,8 @@ function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 
 function errorText(e) {
   const m = (e && (e.message || e.error_description || e.error)) || String(e);
-  if (/JWT|not allowed|permission denied/i.test(m)) return "Your session has ended or this account isn't the desk owner. Sign in again.";
+  if (/JWT/i.test(m)) return "Your session has ended. Sign in again.";
+  if (/permission denied/i.test(m)) return "Your account isn't allowed to do that.";
   if (/Failed to fetch|NetworkError/i.test(m)) return "Couldn't reach the server. Check your internet connection and try again.";
   return m;
 }
@@ -714,17 +865,16 @@ function must(res) { if (res.error) throw res.error; return res.data; }
 
 async function loadAll() {
   const [settings, strategies] = await Promise.all([
-    db.rpc("portal_status").then(must),
+    db.rpc("broker_status").then(must),
     db.from("algo_strategies").select("*").order("created_at").then(must),
     loadCapStatus().catch(() => null),
+    loadPnl().catch(() => null),
   ]);
   state = { settings, strategies, has_bt: true };
-  if (!selected || !state.strategies.find((s) => s.id === selected)) {
-    const firstLive = state.strategies.find((s) => !s.archived);
-    selected = firstLive ? firstLive.id : null;
-  }
+  if (selected && !state.strategies.find((s) => s.id === selected)) { selected = null; if (page === "strat") page = "list"; }
   renderRail(); renderConn();
-  if (selected) { renderStrategy(); await loadDetail(); } else showEmpty();
+  if (page === "list") renderList();
+  if (page === "strat" && selected) { renderStrategy(); await loadDetail(); } else if (page === "strat") showPage("list");
 }
 
 async function loadDetail() {
@@ -748,7 +898,7 @@ function kindName(s) { return isTimed(s) ? "Timed" : isHA(s) ? "Heikin Ashi" : s
 function biasName(tf) { return tf === "D" ? "Daily" : (Number(tf) % 60 === 0 ? `${Number(tf) / 60}-hour` : `${tf}-minute`); }
 
 function showEmpty() {
-  if (lab.open || cap.open) return;
+  if (lab.open || cap.open || page !== "strat") return;
   $("stratPane").hidden = true; $("emptyPane").hidden = false;
   $("emptyPane").innerHTML = '<div class="empty"><div><h3 style="margin-bottom:6px">No strategies yet</h3><p>Create one with “+ New strategy”, then pick Supertrend, Heikin Ashi, your own conditions or higher-timeframe in its Settings. New strategies start paused and in paper mode, so nothing is sent until you switch them on and go live.</p></div></div>';
 }
@@ -767,6 +917,7 @@ function chipsFor(s) {
 }
 
 function describe(s) {
+  if (s.locked) return `${(PRESETS[s.underlying] && PRESETS[s.underlying].name) || s.underlying} · ${instName(s)} · from the marketplace`;
   const st = `ST(${s.atr_period}, ${Number(s.factor)})`;
   if (isTimed(s)) return `${s.underlying} · ${biasName(s.bias_timeframe)} ${st} · buy ${String(s.entry_time).slice(0, 5)}, sell ${s.exit_next_day ? "next day " : ""}${String(s.exit_time).slice(0, 5)}${s.risk ? " · " + riskText(s.risk, true) : ""}`;
   const n = s.rules ? ["long", "short", "exitLong", "exitShort"].reduce((a, k) => a + ((s.rules[k] && s.rules[k].conds) || []).length, 0) : 0;
@@ -785,11 +936,7 @@ function stratButton(s) {
   const meta = document.createElement("span"); meta.className = "hint mono"; meta.textContent = describe(s);
   const ch = document.createElement("span"); ch.className = "chips"; ch.innerHTML = s.archived ? '<span class="chip">Archived</span>' : chipsFor(s);
   b.append(nm, meta, ch);
-  b.addEventListener("click", async () => {
-    closeLab(); closeCap(); selected = s.id; formDirty = false; closeConfirm(); stopBtPoll(); $("btResult").innerHTML = "";
-    renderRail(); renderStrategy(); $("logBody").innerHTML = "";
-    try { await loadDetail(); } catch (e) { toast(errorText(e)); }
-  });
+  b.addEventListener("click", () => openStrat(s.id));
   return b;
 }
 function renderRail() {
@@ -827,17 +974,18 @@ function renderTokenBox() {
   box.querySelector("span").textContent = (exp ? `Token valid until ${istText(st.token_expires_at)} IST (${hrs}).` : "Token expiry not checked yet.") +
     (st.token_renewed_at ? ` Last renewed ${istText(st.token_renewed_at)}.` : "") + (st.token_note ? ` ${st.token_note}` : "");
   $("tok_renew").addEventListener("click", (e) => run(e.currentTarget, async () => {
-    must(await db.rpc("portal_engine", { p_action: "token_renew", p_strategy: null }));
+    must(await db.rpc("desk_engine", { p_action: "token_renew", p_strategy: null }));
     await new Promise((r) => setTimeout(r, 5000)); await loadAll(); toast(state.settings && /Renewed/.test(state.settings.token_note || "") ? "Token renewed for another 24 hours." : "Renewal didn't go through; see the note under the connection.");
   }));
 }
 
 function renderStrategy() {
-  if (lab.open || cap.open) return;
+  if (lab.open || cap.open || page !== "strat") return;
   const s = cur(); if (!s) return showEmpty();
   $("emptyPane").hidden = true; $("stratPane").hidden = false;
   $("sp_name").textContent = s.name;
   $("sp_sub").textContent = describe(s);
+  renderLockedView(s);
   $("st_trend_l").textContent = isTimed(s) ? `${biasName(s.bias_timeframe)} bias` : "Trend";
   $("b_active").textContent = s.active ? "Pause" : "Activate";
   $("b_active").className = s.active ? "btn" : "btn primary";
@@ -853,8 +1001,11 @@ function renderStrategy() {
   $("st_close").textContent = fmtNum(s.last_close);
   $("st_line").textContent = fmtNum(s.last_supertrend);
   const rulesKind = s.strategy_kind === "RULES";
-  $("st_line").closest(".stat").hidden = rulesKind || s.strategy_kind === "HA";
-  if (rulesKind) {
+  $("st_line").closest(".stat").hidden = rulesKind || s.strategy_kind === "HA" || !!s.locked;
+  if (s.locked) {
+    $("st_trend_l").textContent = "Signal right now";
+    tr.textContent = s.last_trend === 1 ? "▲ Bullish" : s.last_trend === -1 ? "▼ Bearish" : "Neutral";
+  } else if (rulesKind) {
     $("st_trend_l").textContent = "Rules right now";
     tr.textContent = s.last_trend === 1 ? "▲ Buy rules met" : s.last_trend === -1 ? "▼ Sell rules met" : "Neither met";
   }
@@ -872,7 +1023,7 @@ function renderStrategy() {
   }
   $("st_pos").textContent = pos;
   $("st_run").textContent = istText(s.last_run_at);
-  if (!formDirty) fillForm(s);
+  if (!formDirty && !s.locked) fillForm(s);
 }
 
 /* ---------- plain-English summary of the strategy, under the chart ---------- */
@@ -911,6 +1062,11 @@ function riskPlain(r, s) {
 function renderStratSummary(s) {
   const box = $("stratSummary");
   if (!s) { box.hidden = true; return; }
+  if (s.locked) {
+    box.hidden = false;
+    box.innerHTML = `<h3>How this strategy trades</h3><div class="row"><span>Trades</span><div>${esc(instName(s))} on ${esc((PRESETS[s.underlying] && PRESETS[s.underlying].name) || s.underlying)}</div></div><div class="row"><span>Rules</span><div>Kept private by the publisher. You see every signal, order and trade it makes on your account.</div></div>`;
+    return;
+  }
   const asset = (PRESETS[s.underlying] && PRESETS[s.underlying].name) || s.underlying;
   const rows = [];
   const row = (k, html) => rows.push(`<div class="row"><span>${esc(k)}</span><div>${html}</div></div>`);
@@ -1312,9 +1468,9 @@ function cxFromStrategy(s) {
   cx.tf = cxStratTf(s);
   cx.range = tfDefaultRange(cx.tf);
   cx.atr = s.atr_period; cx.fac = Number(s.factor);
-  cx.sig = s.strategy_kind === "HA" ? "HA" : s.strategy_kind === "RULES" ? "NONE" : "ST";
-  cx.rules = s.strategy_kind === "RULES" && s.rules ? s.rules : null;
-  cx.sim = s.strategy_kind === "TIMED" || s.strategy_kind === "RULES" ? null : s;
+  cx.sig = s.locked ? "NONE" : s.strategy_kind === "HA" ? "HA" : s.strategy_kind === "RULES" ? "NONE" : "ST";
+  cx.rules = !s.locked && s.strategy_kind === "RULES" && s.rules ? s.rules : null;
+  cx.sim = s.locked || s.strategy_kind === "TIMED" || s.strategy_kind === "RULES" ? null : s;
   paintCx();
   renderStratSummary(s);
 }
@@ -1633,6 +1789,7 @@ async function fetchBars(from, to, tf) {
 /** Trades to mark for a condition or timed strategy: its latest finished backtest, else the Strategy Lab test it came from. */
 async function loadStratTrades(s) {
   cx.trades = null; cx.tradesId = null; cx.tradesSrc = null; cx.tradesFor = s.id;
+  if (s.locked) return;
   try {
     const bt = must(await db.from("algo_backtests").select("id, params, trades").eq("strategy_id", s.id).in("status", ["done", "partial"]).order("id", { ascending: false }).limit(1));
     if (bt.length && (bt[0].trades || []).length) {
@@ -1914,7 +2071,7 @@ async function watchBacktest(id) {
     catch (e) { $("btResult").innerHTML = ""; const b = document.createElement("div"); b.className = "banner err"; b.textContent = errorText(e); $("btResult").append(b); return; }
     if (!row) return;
     renderBacktest(row);
-    if (row.status === "queued" || row.status === "running") btPoll = setTimeout(tick, 4000);
+    if (row.status === "waiting" || row.status === "queued" || row.status === "running") btPoll = setTimeout(tick, 4000);
     else { $("bt_run").disabled = false; loadDetail().catch(() => {}); }
   };
   await tick();
@@ -2151,7 +2308,7 @@ $("btForm").addEventListener("submit", (e) => {
   const params = JSON.stringify({ from, to, capital, brokerage, charges, near_code: code, ...(sizing ? { sizing: true, deploy_pct: deploy } : {}) });
   $("btMsg").textContent = "";
   run($("bt_run"), async () => {
-    const btId = must(await db.rpc("start_backtest", { p_strategy: s.id, p_params: JSON.parse(params) }));
+    const btId = must(await db.rpc("run_backtest", { p_strategy: s.id, p_params: JSON.parse(params) }));
     $("bt_run").disabled = true;
     const yrs = (Date.parse(to) - Date.parse(from)) / 86400000 / 365;
     toast(yrs > 1 ? `Backtest started. About ${Math.max(2, Math.round(yrs * 1.2))} minutes for this period; the progress shows below.` : "Backtest started. It usually takes under a minute.");
@@ -2186,7 +2343,7 @@ async function setFlag(col, val) {
 
 async function engine(action, waitMs) {
   const s = cur();
-  must(await db.rpc("portal_engine", { p_action: action, p_strategy: s.id }));
+  must(await db.rpc("desk_engine", { p_action: action, p_strategy: s.id }));
   await new Promise((r) => setTimeout(r, waitMs));
   await loadAll();
 }
@@ -2204,10 +2361,13 @@ $("b_active").addEventListener("click", (e) => run(e.currentTarget, async () => 
 }));
 $("b_live").addEventListener("click", () => {
   const s = cur();
-  if (s.live) return run($("b_live"), async () => { await setFlag("live", false); toast("Paper mode. Orders are logged, not sent."); });
+  if (s.live) return run($("b_live"), async () => { must(await db.rpc("set_live", { p_strategy: s.id, p_live: false })); await loadAll(); toast("Paper mode. Orders are logged, not sent."); });
   if (!state.settings || !state.settings.has_url) { toast("Add your order webhook URL under Dhan connection first."); openConn(); return; }
-  askConfirm("<strong>Send real orders to Dhan?</strong><br>From the next signal, this strategy posts orders to your webhook. Check the paper-mode log first and compare one order message with the sample JSON on Dhan's Webhooks page.",
-    "Go live", async () => run($("b_live"), async () => { await setFlag("live", true); toast("Live. Real orders will be sent."); }), true);
+  const bl = (me && me.billing) || {}, fee = Number(bl.deploy_fee || 0);
+  const feeTxt = me && me.role !== "admin" && fee > 0 && !bl.trial_active && !(s.deploy_paid_until && s.deploy_paid_until >= istDate(0))
+    ? `<br>A deployment fee of <strong>${rupees(fee)}</strong>${bl.deploy_fee_period === "ONE_TIME" ? " (once)" : " (for the next month)"} will be taken from your wallet.` : "";
+  askConfirm("<strong>Send real orders to Dhan?</strong><br>From the next signal, this strategy posts orders to your Dhan webhook, on your own account. Check the paper-mode log first. Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + feeTxt,
+    "Go live", async () => run($("b_live"), async () => { must(await db.rpc("set_live", { p_strategy: s.id, p_live: true })); await loadAll(); await refreshMe(); toast("Live. Real orders will be sent."); }), true);
 });
 $("b_flat").addEventListener("click", () => {
   const s = cur();
@@ -2240,7 +2400,7 @@ async function createStrategy(kind) {
   const row = { name: `${nm} ${stamp}`, strategy_kind: kind };
   if (kind === "TIMED") Object.assign(row, { product_type: "M", intraday: false, roll_on_expiry: true });
   const created = must(await db.from("algo_strategies").insert(row).select("id").single());
-  selected = created.id; formDirty = false; await loadAll(); showTab("set");
+  formDirty = false; await loadAll(); openStrat(created.id); showTab("set");
   toast("New strategy created. It starts paused, in paper mode.");
 }
 $("newFlip").addEventListener("click", (e) => run(e.currentTarget, () => createStrategy("FLIP")));
@@ -2341,7 +2501,7 @@ $("stratForm").addEventListener("submit", (e) => {
 });
 
 /* connection form */
-function openConn() { $("connCard").hidden = false; $("connCard").scrollIntoView({ block: "start" }); }
+function openConn() { showPage("conn"); }
 $("openSettings").addEventListener("click", openConn);
 $("closeSettings").addEventListener("click", () => $("connCard").hidden = true);
 $("connForm").addEventListener("submit", (e) => {
@@ -2349,8 +2509,8 @@ $("connForm").addEventListener("submit", (e) => {
   const tok = $("c_token").value.trim(), url = $("c_url").value.trim(), sec = $("c_secret").value.trim();
   if (url && !/^https:\/\//.test(url)) { $("connMsg").textContent = "The webhook URL must start with https://"; return; }
   run(e.submitter, async () => {
-    must(await db.rpc("save_portal_settings", { p_client: $("c_client").value.trim(), p_token: tok, p_url: url, p_secret: sec }));
-    if (tok) { must(await db.rpc("portal_engine", { p_action: "token", p_strategy: null })); await new Promise((r) => setTimeout(r, 4000)); }
+    must(await db.rpc("save_broker", { p_client: $("c_client").value.trim(), p_token: tok, p_url: url, p_secret: sec }));
+    if (tok) await new Promise((r) => setTimeout(r, 4000));
     await loadAll(); renderConn(true); $("connMsg").textContent = "Saved."; toast(tok ? "Connection saved. The token will now be renewed automatically every day." : "Connection saved. Press Refresh chart to test it.");
   });
 });
@@ -2515,7 +2675,7 @@ applyAdv();
 /* ---------- capital page ---------- */
 const cap = { open: false, mode: "LIVE", status: null };
 async function loadCapStatus() {
-  const [st, rates] = await Promise.all([db.rpc("capital_status").then(must), db.from("lab_margins").select("asset, fut_pct, fut_pct_i, sell_pct, sell_pct_i, checked_at").then((r) => r.data || []).catch(() => [])]);
+  const [st, rates] = await Promise.all([db.rpc("my_capital").then(must), db.from("lab_margins").select("asset, fut_pct, fut_pct_i, sell_pct, sell_pct_i, checked_at").then((r) => r.data || []).catch(() => [])]);
   cap.status = st; cap.rates = Object.fromEntries(rates.map((r) => [r.asset, r]));
   return cap.status;
 }
@@ -2528,7 +2688,7 @@ function dhanRateFor(s) {
   return Number(v) > 0 ? Number(v) : null;
 }
 function openCap() {
-  closeLab(); cap.open = true;
+  closeLab(); hideNewPanes(); page = "cap"; markNav("openCap"); cap.open = true;
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true; $("capPane").hidden = false;
   document.querySelectorAll("#stratList .strat, #archList .strat").forEach((b) => b.setAttribute("aria-current", "false"));
   $("openCap").classList.add("primary");
@@ -2538,7 +2698,7 @@ function closeCap() { if (!cap.open) return; cap.open = false; $("capPane").hidd
 async function loadCap() {
   const [st, trades] = await Promise.all([
     loadCapStatus(),
-    db.from("algo_trades").select("id, strategy_id, mode, exit_at, contract, lots, entry_px, exit_px, costs, net, exit_why").eq("mode", cap.mode).order("exit_at", { ascending: false }).limit(200).then(must),
+    db.from("algo_trades").select("id, strategy_id, mode, exit_at, contract, lots, entry_px, exit_px, costs, net, fee, verified, exit_why").eq("mode", cap.mode).eq("user_id", me.user_id).order("exit_at", { ascending: false }).limit(200).then(must),
   ]);
   if (!$("cap_capital").matches(":focus")) { $("cap_capital").value = String(Math.trunc(st.capital ?? 0)); $("cap_since").value = st.since || ""; $("cap_deploy").value = String(st.deploy_pct ?? 60); }
   renderCap(st, trades);
@@ -2557,7 +2717,7 @@ function renderCap(st, trades) {
   ${f.available != null && Number(st.capital) > Number(f.available) + Number(f.utilized || 0) + Number(f.collateral || 0) && live ? `<div class="banner warn" style="margin-top:10px">Your trading capital (${rupees(st.capital)}) is more than the funds in your Dhan account (${rupees(Number(f.available) + Number(f.utilized || 0))}). Sizing works from the capital you set here, so orders could be rejected for margin. Add funds or lower the capital.</div>` : ""}`;
   const names = new Map(state.strategies.map((x) => [x.id, x.name]));
   const byStrat = new Map(); for (const t of trades) byStrat.set(t.strategy_id, (byStrat.get(t.strategy_id) || 0) + Number(t.net));
-  const rows = state.strategies.filter((x) => !x.archived && (!!x.live === live));
+  const rows = myStrats().filter((x) => !x.archived && (!!x.live === live));
   $("cap_body").innerHTML = rows.length ? "" : `<tr><td colspan="7" class="hint">No ${live ? "live" : "paper"} strategies.</td></tr>`;
   for (const x of rows) {
     const z = x.sizing && x.sizing.mode === "AUTO" ? x.sizing : null;
@@ -2597,7 +2757,7 @@ $("cap_mode").querySelectorAll("button").forEach((b) => b.addEventListener("clic
   loadCap().catch((e) => toast(errorText(e)));
 }));
 $("cap_funds").addEventListener("click", (e) => run(e.currentTarget, async () => {
-  must(await db.rpc("portal_engine", { p_action: "funds", p_strategy: null }));
+  must(await db.rpc("desk_engine", { p_action: "funds", p_strategy: null }));
   await new Promise((r) => setTimeout(r, 4000)); await loadCap(); toast("Dhan funds refreshed.");
 }));
 $("capForm").addEventListener("submit", (e) => {
@@ -2606,7 +2766,7 @@ $("capForm").addEventListener("submit", (e) => {
   if (!(c >= 0)) { $("cap_msg").textContent = "Capital must be 0 or more."; return; }
   if (!(d >= 1 && d <= 100)) { $("cap_msg").textContent = "The cap must be between 1 and 100%."; return; }
   run(e.submitter, async () => {
-    must(await db.rpc("save_capital", { p_capital: c, p_since: since, p_deploy_pct: d }));
+    must(await db.rpc("save_my_capital", { p_capital: c, p_since: since, p_deploy_pct: d }));
     $("cap_msg").textContent = "Saved. Sizing uses this from the next entry."; await loadAll(); await loadCap();
   });
 });
@@ -2626,7 +2786,7 @@ function condText(c) {
 function setText(set) { return set && set.conds && set.conds.length ? set.conds.map(condText).join(set.mode === "ANY" ? " OR " : " AND ") : "—"; }
 function labMetricsFor(r) { return lab.view === "FUT" ? r.metrics : lab.view === "BUY" ? r.ob && r.ob.metrics : r.os && r.os.metrics; }
 function openLab() {
-  closeCap();
+  closeCap(); hideNewPanes(); page = "lab"; markNav("openLab");
   lab.open = true;
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true; $("labPane").hidden = false;
   document.querySelectorAll("#stratList .strat, #archList .strat").forEach((b) => b.setAttribute("aria-current", "false"));
@@ -2855,7 +3015,7 @@ async function promoteLab(r, v) {
   row.active = false; row.live = false;
   const created = must(await db.from("algo_strategies").insert(row).select("id").single());
   must(await db.from("lab_results").update({ promoted_id: created.id }).eq("id", r.id));
-  closeLab(); closeCap(); selected = created.id; formDirty = false; await loadAll(); showTab("set");
+  formDirty = false; await loadAll(); openStrat(created.id); showTab("set");
   toast("Saved as a new strategy, paused and in paper mode. Check the lot size, symbols and order format before using it.");
 }
 function renderLabSettings() {
@@ -2901,19 +3061,529 @@ $("lab_view").querySelectorAll("button").forEach((b) => b.addEventListener("clic
   $("lab_sort").addEventListener("change", () => { lab.sort = $("lab_sort").value; renderLabTable(); });
 }
 
+/* ================= multi-user desk: pages, roles, strategies table, marketplace, wallet, admin ================= */
+var page = "list", me = null, pnl = new Map(), adminUsers = [];
+const isAdmin = () => !!me && me.role === "admin";
+const myStrats = () => state.strategies.filter((x) => me && x.owner_id === me.user_id && !x.is_master);
+function instName(s) { return s.trade_type === "OPTIONS" ? (s.option_side === "SELL" ? "Option writing" : "Option buying") : "Futures"; }
+function assetLabel(k) { return (PRESETS[k] && PRESETS[k].name) || k || "–"; }
+const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane"];
+function hideNewPanes() { NEW_PANES.forEach((id) => $(id).hidden = true); }
+function markNav(id) { document.querySelectorAll("#nav .btn").forEach((b) => b.id === id ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")); }
+/** One page at a time: list, strat, market, wallet, admin, conn, cap, lab, terms. */
+function showPage(name) {
+  if (name !== "cap") closeCap();
+  if (name !== "lab") closeLab();
+  if (name !== "strat") { stopBtPoll(); closeConfirm(); }
+  page = name;
+  hideNewPanes();
+  $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true;
+  const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab" }[name];
+  markNav(navId);
+  if (name === "list") { $("listPane").hidden = false; renderList(); }
+  else if (name === "market") { $("marketPane").hidden = false; loadMarket().catch((e) => toast(errorText(e))); }
+  else if (name === "wallet") { $("walletPane").hidden = false; loadWallet().catch((e) => toast(errorText(e))); }
+  else if (name === "admin") { $("adminPane").hidden = false; loadAdmin().catch((e) => toast(errorText(e))); }
+  else if (name === "conn") { $("connCard").hidden = false; renderConn(); }
+  else if (name === "terms") { $("termsPane").hidden = false; }
+  else if (name === "cap") openCap();
+  else if (name === "lab") openLab();
+  else if (name === "strat") { renderStrategy(); }
+  window.scrollTo({ top: 0 });
+}
+async function openStrat(id) {
+  closeLab(); closeCap(); hideNewPanes(); $("connCard").hidden = true; page = "strat"; markNav("nav_strats");
+  selected = id; formDirty = false; closeConfirm(); stopBtPoll(); $("btResult").innerHTML = ""; $("logBody").innerHTML = ""; $("publishBox").hidden = true;
+  renderStrategy(); window.scrollTo({ top: 0 });
+  try { await loadDetail(); } catch (e) { toast(errorText(e)); }
+}
+$("nav_strats").addEventListener("click", () => showPage("list"));
+$("nav_market").addEventListener("click", () => showPage("market"));
+$("nav_wallet").addEventListener("click", () => showPage("wallet"));
+$("nav_admin").addEventListener("click", () => showPage("admin"));
+$("b_back").addEventListener("click", () => showPage("list"));
+$("newFlip2").addEventListener("click", (e) => run(e.currentTarget, () => createStrategy("FLIP")));
+
+/** Closed-trade totals per strategy (live and paper), for the strategies table. */
+async function loadPnl() {
+  const rows = must(await db.from("algo_trades").select("strategy_id, mode, net, exit_at").order("exit_at", { ascending: false }).limit(20000));
+  const m = new Map();
+  for (const t of rows) {
+    const k = t.strategy_id; if (!m.has(k)) m.set(k, { live: 0, paper: 0, n: 0, wins: 0, last: null });
+    const a = m.get(k), net = Number(t.net) || 0;
+    if (t.mode === "LIVE") a.live += net; else a.paper += net;
+    a.n++; if (net > 0) a.wins++; if (!a.last) a.last = t.exit_at;
+  }
+  pnl = m;
+}
+
+/* ---------- strategies: full-page table with sorting and filters ---------- */
+const lsort = { key: "name", dir: 1 };
+function ownerName(id) { if (me && id === me.user_id) return "Me"; const u = adminUsers.find((x) => x.user_id === id); return u ? (u.full_name || u.email) : "–"; }
+function srcOf(s) { return s.is_master ? "MASTER" : s.locked ? "BOUGHT" : "OWN"; }
+function listCols() {
+  const c = [
+    ["name", "Strategy", (s) => s.name],
+    ["owner", "Owner", (s) => ownerName(s.owner_id), "admin"],
+    ["asset", "Asset", (s) => assetLabel(s.underlying)],
+    ["inst", "Instrument", (s) => instName(s)],
+    ["kind", "Type", (s) => s.is_master ? "Marketplace copy" : s.locked ? "Bought" : kindName(s)],
+    ["tf", "Timeframe", (s) => s.locked ? "–" : cxStratTf(s) === "D" ? "Daily" : `${cxStratTf(s)} min`],
+    ["active", "Status", (s) => s.archived ? "Archived" : s.active ? "Active" : "Paused"],
+    ["live", "Mode", (s) => s.live ? "Live" : "Paper"],
+    ["pos", "Position", (s) => s.position === "FLAT" ? "Flat" : `${s.position === "LONG" ? "Long" : "Short"}${s.pos_lots ? ` · ${s.pos_lots} lot${s.pos_lots === 1 ? "" : "s"}` : ""}`],
+    ["size", "Size", (s) => s.sizing && s.sizing.mode === "CAPITAL" ? `${rupees(s.capital)} · max ${s.sizing.max_lots}` : s.sizing && s.sizing.mode === "AUTO" ? `Auto ${s.sizing.alloc_pct}%` : `${s.lots} lot${Number(s.lots) === 1 ? "" : "s"}`],
+    ["livepnl", "Live P&L", (s) => (pnl.get(s.id) || {}).live || 0, "num"],
+    ["paperpnl", "Paper P&L", (s) => (pnl.get(s.id) || {}).paper || 0, "num"],
+    ["trades", "Trades", (s) => (pnl.get(s.id) || {}).n || 0, "int"],
+    ["win", "Win %", (s) => { const a = pnl.get(s.id); return a && a.n ? a.wins / a.n * 100 : null; }, "pct"],
+    ["lasttrade", "Last trade", (s) => (pnl.get(s.id) || {}).last || "", "when"],
+    ["run", "Last checked", (s) => s.last_run_at || "", "when"],
+  ];
+  return c.filter((x) => x[3] !== "admin" || isAdmin());
+}
+function listRows() {
+  const q = $("lf_q").value.trim().toLowerCase(), src = $("lf_src").value, act = $("lf_act").value, mode = $("lf_mode").value, asset = $("lf_asset").value,
+    inst = $("lf_inst").value, owner = isAdmin() ? $("lf_owner").value : "ME", arch = $("lf_arch").checked;
+  return state.strategies.filter((s) => {
+    if (!!s.archived !== arch) return false;
+    if (owner === "ME" && s.owner_id !== me.user_id) return false;
+    if (src && srcOf(s) !== src) return false;
+    if (act && (act === "ACTIVE") !== !!s.active) return false;
+    if (mode && (mode === "LIVE") !== !!s.live) return false;
+    if (asset && s.underlying !== asset) return false;
+    if (inst && instName(s) !== inst) return false;
+    if (q && ![s.name, assetLabel(s.underlying), s.underlying, ownerName(s.owner_id)].join(" ").toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+function renderList() {
+  if (!me) return;
+  const cols = listCols();
+  // asset filter options
+  const sel = $("lf_asset"), keep = sel.value, assets = [...new Set(state.strategies.map((s) => s.underlying))].sort();
+  sel.innerHTML = '<option value="">All</option>' + assets.map((a) => `<option value="${esc(a)}">${esc(assetLabel(a))}</option>`).join("");
+  sel.value = assets.includes(keep) ? keep : "";
+  $("lf_src").querySelector('option[value="MASTER"]').hidden = !isAdmin();
+  $("newFlip2").hidden = !(isAdmin() || me.can_build);
+  $("lp_head").innerHTML = "<tr>" + cols.map(([k, label, , t]) => `<th class="sort${t === "num" || t === "int" || t === "pct" ? " n" : ""}" data-k="${k}" aria-sort="${lsort.key === k ? (lsort.dir > 0 ? "ascending" : "descending") : "none"}" tabindex="0">${esc(label)}</th>`).join("") + "</tr>";
+  $("lp_head").querySelectorAll("th").forEach((th) => {
+    const go = () => { lsort.dir = lsort.key === th.dataset.k ? -lsort.dir : 1; lsort.key = th.dataset.k; renderList(); };
+    th.addEventListener("click", go); th.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  });
+  const col = cols.find((c) => c[0] === lsort.key) || cols[0];
+  const rows = listRows().sort((a, b) => {
+    const x = col[2](a), y = col[2](b);
+    if (x === y) return 0; if (x === null || x === "") return 1; if (y === null || y === "") return -1;
+    return (typeof x === "number" ? x - y : String(x).localeCompare(String(y))) * lsort.dir;
+  });
+  const tb = $("lp_body"); tb.innerHTML = "";
+  if (!rows.length) tb.innerHTML = `<tr><td colspan="${cols.length}" class="hint">${state.strategies.length ? "No strategies match these filters." : (me.can_build || isAdmin()) ? "No strategies yet. Create one with “+ New strategy”, or buy one from the Marketplace." : "No strategies yet. Buy one from the Marketplace."}</td></tr>`;
+  let tl = 0, tp = 0;
+  for (const s of rows) {
+    const tr = document.createElement("tr"); tr.className = "pick"; tr.tabIndex = 0;
+    for (const [k, , f, t] of cols) {
+      const td = document.createElement("td"); const v = f(s);
+      if (k === "name") { td.className = "nm"; td.textContent = v; if (s.last_error) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Error"; td.append(e); } }
+      else if (t === "num") { td.className = "n " + (v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""); td.textContent = rupees(v); }
+      else if (t === "int") { td.className = "n"; td.textContent = String(v); }
+      else if (t === "pct") { td.className = "n"; td.textContent = v === null ? "–" : `${v.toFixed(0)}%`; }
+      else if (t === "when") { td.className = "when"; td.textContent = v ? istText(v) : "–"; }
+      else if (k === "active") td.innerHTML = s.archived ? '<span class="chip">Archived</span>' : s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>';
+      else if (k === "live") td.innerHTML = s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>';
+      else td.textContent = v;
+      tr.append(td);
+    }
+    const a = pnl.get(s.id) || {}; tl += a.live || 0; tp += a.paper || 0;
+    tr.addEventListener("click", () => openStrat(s.id));
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter") openStrat(s.id); });
+    tb.append(tr);
+  }
+  $("lp_foot").textContent = rows.length ? `${rows.length} strateg${rows.length === 1 ? "y" : "ies"} · live P&L ${rupees(tl)} · paper P&L ${rupees(tp)} (closed trades, after estimated charges). Click a column title to sort; click a row to open it.` : "";
+}
+["lf_q", "lf_src", "lf_act", "lf_mode", "lf_asset", "lf_inst", "lf_owner", "lf_arch"].forEach((id) => $(id).addEventListener(id === "lf_q" ? "input" : "change", renderList));
+
+/* ---------- a bought strategy: plain capital / lots window, no rules ---------- */
+function renderLockedView(s) {
+  const box = $("lockedBox"), locked = !!s.locked;
+  $("t_set").hidden = locked; $("t_bt").hidden = locked;
+  if (locked && currentTab !== "log") showTab("log");
+  $("b_publish").hidden = !(isAdmin() && !s.locked && !s.is_master && !s.archived);
+  $("sp_owner").textContent = isAdmin() && me && s.owner_id !== me.user_id ? `Owner: ${ownerName(s.owner_id)}` : s.is_master ? "Marketplace copy: buyers run exactly these settings." : "";
+  if (!locked) { box.hidden = true; box.innerHTML = ""; return; }
+  if (box.dataset.for === s.id && box.contains(document.activeElement)) return;
+  box.dataset.for = s.id; box.hidden = false;
+  const capMode = s.sizing && s.sizing.mode === "CAPITAL";
+  box.innerHTML = `<div class="ued">
+    <div><strong>Bought from the marketplace.</strong> <span class="hint">Its rules stay with the publisher; you see every signal, order and trade on your own Dhan account.</span></div>
+    <form id="lk_form" novalidate><div class="grid">
+      <label class="f"><span>Size the trades by</span><select id="lk_mode"><option value="CAPITAL">Capital I give it</option><option value="FIXED">Fixed number of lots</option></select></label>
+      <label class="f" data-k="cap"><span>Capital for this strategy (₹)</span><input id="lk_cap" type="number" min="0" step="any" inputmode="decimal"></label>
+      <label class="f" data-k="cap"><span>Never more than (lots)</span><input id="lk_max" type="number" min="1" step="1"></label>
+      <label class="f" data-k="fix"><span>Lots per trade</span><input id="lk_lots" type="number" min="1" step="1"></label>
+    </div>
+    <div class="formbar" style="margin-top:10px"><button class="btn primary" type="submit">Save</button><button class="btn small" type="button" id="lk_res">See published results</button><button class="btn small danger" type="button" id="lk_arch">Archive</button><span class="hint" id="lk_msg"></span></div></form>
+    <p class="hint" style="margin:0">With capital: before every entry the desk divides this capital (plus what the strategy has made or lost since) by the margin one lot needs today (Dhan's rates), capped by your maximum and by the deployment limit on the Capital page.</p></div>`;
+  $("lk_mode").value = capMode ? "CAPITAL" : "FIXED";
+  $("lk_cap").value = capMode ? String(Math.trunc(Number(s.capital) || 0)) : ""; $("lk_max").value = String((s.sizing && s.sizing.max_lots) || 10); $("lk_lots").value = String(s.lots || 1);
+  const vis = () => box.querySelectorAll("[data-k]").forEach((el) => el.hidden = (el.dataset.k === "cap") !== ($("lk_mode").value === "CAPITAL"));
+  vis(); $("lk_mode").addEventListener("change", vis);
+  $("lk_res").addEventListener("click", () => { showPage("market"); openListing(s.listing_id).catch((e) => toast(errorText(e))); });
+  $("lk_arch").addEventListener("click", () => {
+    if (s.position !== "FLAT") { toast("Exit the open position before archiving this strategy."); return; }
+    askConfirm(`<strong>Archive “${esc(s.name)}”?</strong><br>It is paused and switched to paper mode. You can restore it later.`, "Archive", async () => run(null, async () => {
+      must(await db.rpc("set_live", { p_strategy: s.id, p_live: false }));
+      must(await db.from("algo_strategies").update({ archived: true, archived_at: new Date().toISOString(), active: false }).eq("id", s.id));
+      await loadAll(); toast("Strategy archived.");
+    }));
+  });
+  $("lk_form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const mode = $("lk_mode").value, c = Number($("lk_cap").value), mx = Math.trunc(Number($("lk_max").value)), lots = Math.trunc(Number($("lk_lots").value));
+    let patch;
+    if (mode === "CAPITAL") { if (!(c > 0)) { $("lk_msg").textContent = "Enter the capital for this strategy."; return; } if (!(mx >= 1)) { $("lk_msg").textContent = "Maximum lots must be 1 or more."; return; }
+      patch = { capital: c, sizing: { mode: "CAPITAL", max_lots: mx } }; }
+    else { if (!(lots >= 1)) { $("lk_msg").textContent = "Lots must be 1 or more."; return; } patch = { lots, sizing: null, capital: null }; }
+    run(e.submitter, async () => { must(await db.from("algo_strategies").update(patch).eq("id", s.id)); box.dataset.for = ""; await loadAll(); toast("Saved. It applies from the next entry."); });
+  });
+}
+
+/* ---------- admin: publish a strategy to the marketplace ---------- */
+$("b_publish").addEventListener("click", () => {
+  const s = cur(); if (!s) return;
+  const box = $("publishBox"); box.hidden = false;
+  box.innerHTML = `<div class="ued"><strong>Publish “${esc(s.name)}” to the marketplace</strong>
+    <div class="grid"><label class="f wide"><span>Title users see</span><input id="pb_title"></label>
+    <label class="f wide"><span>Short description (no rules; what it trades, how often, holding period)</span><input id="pb_sum"></label>
+    <label class="f"><span>Price (₹, one-time)</span><input id="pb_price" type="number" min="0" step="any"></label></div>
+    <p class="hint" style="margin:0">A private copy of today's settings is made for buyers, and 1, 2, 3, 4 and 5-year backtests start on it (they take a while and run two at a time). The listing stays a draft until you publish it on the Marketplace page.</p>
+    <div class="formbar"><button class="btn primary" id="pb_go" type="button">Create listing</button><button class="btn" id="pb_no" type="button">Cancel</button></div></div>`;
+  $("pb_title").value = s.name.replace(/^Lab #\d+ · /, "");
+  $("pb_no").addEventListener("click", () => { box.hidden = true; });
+  $("pb_go").addEventListener("click", (e) => run(e.currentTarget, async () => {
+    must(await db.rpc("publish_strategy", { p_strategy: s.id, p_title: $("pb_title").value.trim(), p_summary: $("pb_sum").value.trim(), p_price: Number($("pb_price").value) || 0 }));
+    box.hidden = true; toast("Listing created as a draft. Its backtests are running."); await loadAll(); showPage("market");
+  }));
+});
+
+/* ---------- marketplace ---------- */
+const mk = { rows: [], open: null, yrs: "1" };
+async function loadMarket() {
+  const [rows] = await Promise.all([db.rpc("market_listings").then(must), refreshMe()]);
+  mk.rows = rows || [];
+  $("mk_bal").textContent = me && me.billing ? `Wallet ${rupees(me.billing.balance)}` : "";
+  renderMarket();
+}
+function per(l, y) { return (l.results || {})[y] || null; }
+const pctTxt = (v) => v === null || v === undefined ? "–" : `${Number(v).toFixed(1)}%`;
+function renderMarket() {
+  const q = $("mk_q").value.trim().toLowerCase(), y = $("mk_yrs").value, sort = $("mk_sort").value;
+  const val = (l) => { const r = per(l, y) || {}; return { ret: Number(r.return_pct ?? -1e9), net: Number(r.net ?? -1e12), dd: -Number(r.max_dd_pct ?? 1e9), win: Number(r.win_rate ?? -1), price: -Number(l.price), new: Date.parse(l.created_at) }[sort]; };
+  const rows = mk.rows.filter((l) => !q || [l.title, l.asset, assetLabel(l.asset), l.instrument, l.summary].join(" ").toLowerCase().includes(q)).sort((a, b) => val(b) - val(a));
+  const box = $("mk_cards"); box.innerHTML = rows.length ? "" : `<p class="hint">${mk.rows.length ? "Nothing matches." : isAdmin() ? "No listings yet. Open a strategy and press “Publish to marketplace”." : "No strategies on offer yet."}</p>`;
+  for (const l of rows) {
+    const r = per(l, y);
+    const c = document.createElement("div"); c.className = "lcard";
+    const yrsRows = ["1", "2", "3", "4", "5"].map((k) => { const p = per(l, k); return `<tr><td>${k}y</td>${p && p.status === "done" || p && p.status === "partial" ? `<td class="n ${Number(p.net) >= 0 ? "pos-num" : "neg-num"}">${rupees(p.net)}</td><td class="n">${pctTxt(p.return_pct)}</td><td class="n">${pctTxt(p.max_dd_pct)}</td><td class="n">${pctTxt(p.win_rate)}</td><td class="n">${p.trades ?? "–"}</td>` : `<td colspan="5" class="hint">${p ? esc(p.status === "failed" ? "Couldn't run" : "Running…") : "–"}</td>`}</tr>`; }).join("");
+    c.innerHTML = `<div class="head"><div><span class="label"></span><h3></h3></div><span class="price"></span></div>
+      <div class="chips"></div><p class="hint" style="margin:0"></p>
+      ${r && r.net != null ? `<div class="stats"><div class="stat"><span class="label">Return (${y}y)</span><span class="v ${Number(r.return_pct) >= 0 ? "up" : "down"}">${pctTxt(r.return_pct)}</span></div><div class="stat"><span class="label">Worst drawdown</span><span class="v">${pctTxt(r.max_dd_pct)}</span></div></div>` : ""}
+      <div class="scroll"><table class="mini"><thead><tr><th>Period</th><th class="n">Net</th><th class="n">Return</th><th class="n">Max DD</th><th class="n">Win</th><th class="n">Trades</th></tr></thead><tbody>${yrsRows}</tbody></table></div>
+      <p class="hint" style="margin:0">On ₹5,00,000 capital, 1 lot per trade, after brokerage and statutory charges.</p>
+      <div class="actions"><button class="btn small" data-a="det" type="button">Details &amp; trades</button>${l.status === "published" ? `<button class="btn small primary" data-a="buy" type="button">${l.owned ? "Add another copy" : Number(l.price) > 0 ? `Buy for ${rupees(l.price)}` : "Add (free)"}</button>` : ""}</div>
+      ${isAdmin() ? `<div class="ued"><div class="grid"><label class="f"><span>Status</span><select data-f="status"><option value="draft">Draft</option><option value="published">Published</option><option value="hidden">Hidden</option></select></label><label class="f"><span>Price (₹)</span><input data-f="price" type="number" min="0" step="any"></label><label class="f wide"><span>Title</span><input data-f="title"></label><label class="f wide"><span>Description</span><input data-f="summary"></label></div><div class="actions"><button class="btn small primary" data-a="save" type="button">Save listing</button><button class="btn small" data-a="rerun" type="button">Re-run results</button><span class="hint">${l.users} user${l.users === 1 ? "" : "s"} running it</span></div></div>` : ""}`;
+    c.querySelector(".label").textContent = `${assetLabel(l.asset)} · ${l.instrument || ""}`;
+    c.querySelector("h3").textContent = l.title;
+    c.querySelector(".price").textContent = Number(l.price) > 0 ? rupees(l.price) : "Free";
+    c.querySelector(".chips").innerHTML = (l.owned ? '<span class="chip green">Owned</span>' : "") + (isAdmin() ? `<span class="chip ${l.status === "published" ? "blue" : "yellow"}">${esc(l.status)}</span>` : "");
+    c.querySelector("p.hint").textContent = l.summary || "";
+    c.querySelector('[data-a="det"]').addEventListener("click", () => openListing(l.id).catch((e) => toast(errorText(e))));
+    const buy = c.querySelector('[data-a="buy"]'); if (buy) buy.addEventListener("click", () => buyForm(l));
+    if (isAdmin()) {
+      const f = (k) => c.querySelector(`[data-f="${k}"]`);
+      f("status").value = l.status; f("price").value = String(Number(l.price)); f("title").value = l.title; f("summary").value = l.summary || "";
+      c.querySelector('[data-a="save"]').addEventListener("click", (e) => run(e.currentTarget, async () => {
+        must(await db.rpc("update_listing", { p_listing: l.id, p_title: f("title").value.trim(), p_summary: f("summary").value.trim(), p_price: Number(f("price").value) || 0, p_status: f("status").value }));
+        toast("Listing saved."); await loadMarket();
+      }));
+      c.querySelector('[data-a="rerun"]').addEventListener("click", (e) => run(e.currentTarget, async () => { must(await db.rpc("rerun_listing", { p_listing: l.id })); toast("Results are being worked out again."); await loadMarket(); }));
+    }
+    box.append(c);
+  }
+}
+["mk_q", "mk_yrs", "mk_sort"].forEach((id) => $(id).addEventListener(id === "mk_q" ? "input" : "change", renderMarket));
+function buyForm(l) {
+  const box = $("mk_detail");
+  box.innerHTML = `<div class="ued"><h3 style="font-size:16px"></h3>
+    <p class="hint" style="margin:0">${l.owned ? "You already own this strategy; another copy is free." : Number(l.price) > 0 ? `Price ${rupees(l.price)}, taken from your wallet (balance ${rupees(me.billing ? me.billing.balance : 0)}).` : "Free."} It is added to your strategies paused and in paper mode, so nothing is sent to Dhan until you switch it on and go live.</p>
+    <div class="grid"><label class="f"><span>Name</span><input id="by_name"></label>
+      <label class="f"><span>Capital to deploy (₹)</span><input id="by_cap" type="number" min="0" step="any" inputmode="decimal" placeholder="blank = fixed lots"></label>
+      <label class="f"><span>Never more than (lots)</span><input id="by_max" type="number" min="1" step="1" value="5"></label>
+      <label class="f"><span>Lots per trade (if no capital)</span><input id="by_lots" type="number" min="1" step="1" value="1"></label></div>
+    <label class="showtr"><input type="checkbox" id="by_ok"> I understand backtest results don't guarantee future returns, derivatives trading can lose money, and this is not investment advice.</label>
+    <div class="formbar"><button class="btn primary" id="by_go" type="button" disabled>Confirm</button><button class="btn" id="by_no" type="button">Cancel</button><span class="hint" id="by_msg"></span></div></div>`;
+  box.querySelector("h3").textContent = `Get “${l.title}”`;
+  $("by_name").value = l.title;
+  $("by_ok").addEventListener("change", () => $("by_go").disabled = !$("by_ok").checked);
+  $("by_no").addEventListener("click", () => box.innerHTML = "");
+  $("by_go").addEventListener("click", (e) => run(e.currentTarget, async () => {
+    const id = must(await db.rpc("buy_listing", { p_listing: l.id, p_name: $("by_name").value.trim(), p_capital: Number($("by_cap").value) || 0, p_lots: Math.trunc(Number($("by_lots").value)) || 1, p_max_lots: Math.trunc(Number($("by_max").value)) || 5 }));
+    toast("Added to your strategies. It starts paused, in paper mode."); box.innerHTML = ""; await loadAll(); await refreshMe(); openStrat(id);
+  }));
+  box.scrollIntoView({ block: "nearest" });
+}
+async function openListing(id) {
+  const r = must(await db.rpc("listing_results", { p_listing: id }));
+  const box = $("mk_detail");
+  const yrs = Object.keys(r.periods || {}).sort();
+  if (!yrs.includes(mk.yrs)) mk.yrs = yrs[0] || "1";
+  const draw = () => {
+    const p = (r.periods || {})[mk.yrs] || {}, sm = p.summary || {};
+    const trades = (p.trades || []).slice().reverse();
+    box.innerHTML = `<div class="card"><div class="head"><div><span class="label"></span><h3 style="font-size:18px"></h3></div><button class="btn small" id="ld_close" type="button">Close</button></div>
+      <div class="seg" style="margin:10px 0" id="ld_yrs">${yrs.map((y) => `<button type="button" data-y="${y}" aria-pressed="${y === mk.yrs}">${y} year${y === "1" ? "" : "s"}</button>`).join("")}</div>
+      ${p.status === "done" || p.status === "partial" ? `<div class="stats">
+        <div class="stat"><span class="label">Net profit</span><span class="v ${Number(sm.net) >= 0 ? "up" : "down"}">${rupees(sm.net)}</span><span class="hint">${esc(p.from || "")} → ${esc(p.to || "")}</span></div>
+        <div class="stat"><span class="label">Return</span><span class="v">${pctTxt(sm.return_pct)}</span><span class="hint">on ${rupees(p.capital)}</span></div>
+        <div class="stat"><span class="label">Worst drawdown</span><span class="v">${rupees(sm.max_dd)}</span><span class="hint">${pctTxt(sm.max_dd_pct)}</span></div>
+        <div class="stat"><span class="label">Trades · win rate</span><span class="v">${sm.trades ?? "–"} · ${pctTxt(sm.win_rate)}</span><span class="hint">profit factor ${sm.profit_factor ?? "–"}</span></div></div>` : `<p class="hint">${esc(p.status === "failed" ? `Couldn't run: ${p.error || ""}` : `Running… ${p.progress || ""}`)}</p>`}
+      <div class="scroll" style="margin-top:12px;max-height:420px;overflow:auto"><table class="mini"><thead><tr><th>Entry</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">Lots</th><th class="n">Net</th><th>Exit reason</th></tr></thead><tbody id="ld_tr"></tbody></table></div>
+      <p class="riskline" style="margin-top:10px">Backtest on past prices with estimated charges and fills; real results differ (slippage, gaps, liquidity, timing). Past performance does not guarantee future returns. Not investment advice.</p></div>`;
+    box.querySelector(".label").textContent = `${assetLabel(r.asset)} · ${r.instrument || ""}`;
+    box.querySelector("h3").textContent = r.title;
+    const tb = $("ld_tr");
+    if (!trades.length) tb.innerHTML = '<tr><td colspan="7" class="hint">No trades.</td></tr>';
+    for (const t of trades.slice(0, 1000)) {
+      const tr = document.createElement("tr");
+      const net = Number(t.net);
+      tr.innerHTML = `<td class="when"></td><td class="when"></td><td></td><td></td><td class="n"></td><td class="n ${net > 0 ? "pos-num" : net < 0 ? "neg-num" : ""}"></td><td class="hint"></td>`;
+      const c = tr.children;
+      c[0].textContent = t.entry_at ? istText(t.entry_at) : (t.entry_day || t.day || ""); c[1].textContent = t.exit_at ? istText(t.exit_at) : (t.exit_day || "");
+      c[2].textContent = t.side || ""; c[3].textContent = t.contract || t.label || ""; c[4].textContent = t.lots ?? "1"; c[5].textContent = rupees(net); c[6].textContent = t.exit_why || "";
+      tb.append(tr);
+    }
+    $("ld_close").addEventListener("click", () => box.innerHTML = "");
+    $("ld_yrs").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { mk.yrs = b.dataset.y; draw(); }));
+  };
+  draw(); box.scrollIntoView({ block: "start" });
+}
+
+/* ---------- wallet ---------- */
+const KIND = { RECHARGE: "Recharge", PROFIT_SHARE: "Profit share", DEPLOY_FEE: "Deployment fee", PURCHASE: "Strategy bought", ADJUST: "Adjustment", REFUND: "Refund" };
+async function refreshMe() { try { me = must(await db.rpc("whoami")); } catch { /* keep the last */ } return me; }
+async function loadWallet() {
+  await refreshMe();
+  const [txns, reqs, days] = await Promise.all([
+    db.from("wallet_txns").select("created_at, amount, kind, note").eq("user_id", me.user_id).order("id", { ascending: false }).limit(300).then(must),
+    db.from("recharge_requests").select("created_at, amount, ref, status, note").eq("user_id", me.user_id).order("id", { ascending: false }).limit(50).then(must),
+    db.from("daily_pnl").select("day, desk_net, dhan_realised, matched, note").eq("user_id", me.user_id).order("day", { ascending: false }).limit(60).then(must),
+  ]);
+  const b = me.billing || {}, e = me.entries || {};
+  const tile = (l, v, cls, sub) => `<div class="stat"><span class="label">${esc(l)}</span><span class="v ${cls || ""}">${esc(v)}</span>${sub ? `<span class="hint">${esc(sub)}</span>` : ""}</div>`;
+  $("wl_stats").innerHTML = (e.ok === false ? `<div class="banner err" style="margin-bottom:10px">New trades are paused: ${esc(e.why || "")} Exits still go through.</div>` : "") + `<div class="stats">
+    ${tile("Balance", rupees(b.balance), Number(b.balance) < 0 ? "down" : "", b.min_balance > 0 ? `minimum ${rupees(b.min_balance)} to open trades` : "")}
+    ${tile("Free trial", b.trial_active ? `till ${b.trial_until}` : b.trial_until ? "ended" : "–", "", b.trial_active ? "nothing is charged during the trial" : "")}
+    ${tile("Profit share", `${Number(b.profit_share_pct || 0)}%`, "", "of net profit on winning live trades")}
+    ${tile("Losses to earn back", rupees(b.loss_carry), "", "set off before any profit share")}
+    ${tile("Deployment fee", Number(b.deploy_fee) > 0 ? rupees(b.deploy_fee) : "None", "", Number(b.deploy_fee) > 0 ? (b.deploy_fee_period === "ONE_TIME" ? "once per strategy" : "per strategy, per month live") : "")}
+  </div>`;
+  $("wl_payto").innerHTML = b.pay_to ? `Pay to: <strong></strong>${b.pay_note ? `<br><span></span>` : ""}` : "The admin hasn't added payment details yet. Ask them how to pay.";
+  if (b.pay_to) { $("wl_payto").querySelector("strong").textContent = b.pay_to; const sp = $("wl_payto").querySelector("span"); if (sp) sp.textContent = b.pay_note; }
+  const fill = (id, rows, empty, cells) => { const tb = $(id); tb.innerHTML = rows.length ? "" : `<tr><td colspan="5" class="hint">${empty}</td></tr>`; for (const r of rows) { const tr = document.createElement("tr"); cells(r).forEach(([t, cls]) => { const td = document.createElement("td"); td.className = cls || ""; td.textContent = t; tr.append(td); }); tb.append(tr); } };
+  fill("wl_txns", txns, "No entries yet.", (t) => [[istText(t.created_at), "when"], [KIND[t.kind] || t.kind], [t.note || "", "hint"], [rupees(t.amount), "n " + (t.amount > 0 ? "pos-num" : "neg-num")]]);
+  fill("wl_reqs", reqs, "No requests yet.", (r) => [[istText(r.created_at), "when"], [rupees(r.amount), "n"], [r.ref || ""], [r.status === "PENDING" ? "Waiting for the admin" : r.status === "APPROVED" ? "Added" : `Rejected${r.note ? ": " + r.note : ""}`]]);
+  fill("wl_days", days, "No checks yet. They run after each market session on days with live trades.", (d) => [[d.day, "when"], [rupees(d.desk_net), "n"], [d.dhan_realised == null ? "–" : rupees(d.dhan_realised), "n"], [String(d.matched ?? 0), "n"], [d.note || "", "hint"]]);
+}
+$("wl_form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const amt = Number($("wl_amt").value), ref = $("wl_ref").value.trim();
+  if (!(amt > 0)) { $("wl_msg").textContent = "Enter the amount you paid."; return; }
+  if (!ref) { $("wl_msg").textContent = "Enter the payment reference (UTR)."; return; }
+  run(e.submitter, async () => {
+    must(await db.rpc("request_recharge", { p_amount: amt, p_ref: ref, p_note: $("wl_note").value.trim() || null }));
+    ["wl_amt", "wl_ref", "wl_note"].forEach((id) => $(id).value = ""); $("wl_msg").textContent = "Sent. It shows in your balance once the admin confirms the payment.";
+    await loadWallet();
+  });
+});
+
+/* ---------- admin ---------- */
+const ad = { tab: "users", sort: { key: "created_at", dir: -1 }, edit: null };
+async function loadAdminUsers() { if (isAdmin()) adminUsers = must(await db.rpc("admin_users")) || []; return adminUsers; }
+async function loadAdmin() {
+  await loadAdminUsers();
+  $("ad_tabs").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.t === ad.tab ? "true" : "false"));
+  $("ad_users").hidden = ad.tab !== "users"; $("ad_recharges").hidden = ad.tab !== "recharges"; $("ad_billing").hidden = ad.tab !== "billing";
+  if (ad.tab === "users") renderUsers();
+  if (ad.tab === "recharges") await loadRecharges();
+  if (ad.tab === "billing") await loadBilling();
+}
+$("ad_tabs").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { ad.tab = b.dataset.t; loadAdmin().catch((e) => toast(errorText(e))); }));
+const today0 = () => istDate(0);
+function renderUsers() {
+  const cols = [["email", "Login"], ["full_name", "Name"], ["phone", "Phone"], ["status", "Status"], ["trial_until", "Trial till"], ["balance", "Wallet", "num"], ["strategies", "Strategies", "int"],
+    ["live", "Live", "int"], ["live_net", "Live P&L", "num"], ["fees_paid", "Fees paid", "num"], ["loss_carry", "Loss carried", "num"], ["broker_ok", "Dhan"], ["pending", "Recharges waiting", "int"], ["created_at", "Joined", "when"]];
+  $("au_head").innerHTML = "<tr>" + cols.map(([k, l, t]) => `<th class="sort${t === "num" || t === "int" ? " n" : ""}" data-k="${k}" aria-sort="${ad.sort.key === k ? (ad.sort.dir > 0 ? "ascending" : "descending") : "none"}" tabindex="0">${esc(l)}</th>`).join("") + "<th></th></tr>";
+  $("au_head").querySelectorAll("th.sort").forEach((th) => th.addEventListener("click", () => { ad.sort.dir = ad.sort.key === th.dataset.k ? -ad.sort.dir : 1; ad.sort.key = th.dataset.k; renderUsers(); }));
+  const q = $("au_q").value.trim().toLowerCase(), st = $("au_st").value;
+  const rows = adminUsers.filter((u) => (!q || [u.email, u.full_name, u.phone].join(" ").toLowerCase().includes(q))
+    && (!st || (st === "trial" ? u.trial_until && u.trial_until >= today0() : st === "neg" ? Number(u.balance) < 0 : u.status === st)))
+    .sort((a, b) => { const x = a[ad.sort.key], y = b[ad.sort.key]; if (x === y) return 0; if (x == null) return 1; if (y == null) return -1; return (typeof x === "number" || !isNaN(Number(x)) && typeof x !== "boolean" && ad.sort.key !== "phone" ? Number(x) - Number(y) : String(x).localeCompare(String(y))) * ad.sort.dir; });
+  const tb = $("au_body"); tb.innerHTML = rows.length ? "" : `<tr><td colspan="${cols.length + 1}" class="hint">No users.</td></tr>`;
+  for (const u of rows) {
+    const tr = document.createElement("tr");
+    for (const [k, , t] of cols) {
+      const td = document.createElement("td"); const v = u[k];
+      if (t === "num") { td.className = "n " + (Number(v) > 0 ? "pos-num" : Number(v) < 0 ? "neg-num" : ""); td.textContent = rupees(v); }
+      else if (t === "int") { td.className = "n"; td.textContent = String(v ?? 0); }
+      else if (t === "when") { td.className = "when"; td.textContent = istText(v); }
+      else if (k === "status") td.innerHTML = `${u.role === "admin" ? '<span class="chip blue">Admin</span> ' : ""}<span class="chip ${v === "active" ? "green" : "red"}">${esc(v)}</span>`;
+      else if (k === "broker_ok") td.textContent = v ? "Connected" : "Not set";
+      else if (k === "trial_until") td.textContent = v ? `${v}${v >= today0() ? "" : " (ended)"}` : "–";
+      else td.textContent = v ?? "";
+      tr.append(td);
+    }
+    const td = document.createElement("td"); const b = document.createElement("button"); b.className = "btn small"; b.type = "button"; b.textContent = "Manage";
+    b.addEventListener("click", () => editUser(u)); td.append(b); tr.append(td);
+    tb.append(tr);
+  }
+}
+["au_q", "au_st"].forEach((id) => $(id).addEventListener(id === "au_q" ? "input" : "change", renderUsers));
+function editUser(u) {
+  const box = $("au_edit");
+  box.innerHTML = `<div class="ued"><h3 style="font-size:16px"></h3>
+    <div class="grid">
+      <label class="f"><span>Name</span><input data-f="full_name"></label><label class="f"><span>Phone</span><input data-f="phone"></label>
+      <label class="f"><span>Status</span><select data-f="status"><option value="active">Active</option><option value="blocked">Blocked (no new trades, can't sign in to trade)</option></select></label>
+      <label class="f"><span>Role</span><select data-f="role"><option value="user">User</option><option value="admin">Admin</option></select></label>
+      <label class="f"><span>Trial till (blank = no trial)</span><input data-f="trial_until" type="date"></label>
+      <label class="f"><span>Profit share % (blank = default)</span><input data-f="profit_share_pct" type="number" min="0" max="100" step="any"></label>
+      <label class="f"><span>Deployment fee ₹ (blank = default)</span><input data-f="deploy_fee" type="number" min="0" step="any"></label>
+      <label class="f"><span>Can build strategies</span><select data-f="can_build"><option value="true">Yes</option><option value="false">No</option></select></label>
+      <label class="f wide"><span>Admin note</span><input data-f="note"></label>
+    </div>
+    <div class="formbar"><button class="btn primary" id="ue_save" type="button">Save user</button><button class="btn" id="ue_close" type="button">Close</button></div>
+    <h4>Wallet</h4>
+    <div class="grid"><label class="f"><span>Amount ₹ (negative to deduct)</span><input id="uw_amt" type="number" step="any"></label>
+      <label class="f"><span>Type</span><select id="uw_kind"><option value="RECHARGE">Recharge received</option><option value="ADJUST">Adjustment</option><option value="REFUND">Refund</option></select></label>
+      <label class="f wide"><span>Note</span><input id="uw_note"></label></div>
+    <div class="formbar"><button class="btn" id="uw_go" type="button">Add wallet entry</button></div>
+    <h4>Login</h4>
+    <div class="grid"><label class="f"><span>New password (8+ characters)</span><input id="up_pass" autocomplete="off"></label></div>
+    <div class="formbar"><button class="btn" id="up_go" type="button">Set password</button><button class="btn danger" id="ud_go" type="button">Delete user</button><span class="hint">Delete only works for users with no trades or wallet entries; block the others.</span></div></div>`;
+  box.querySelector("h3").textContent = `${u.full_name || u.email} · ${u.email}`;
+  const f = (k) => box.querySelector(`[data-f="${k}"]`);
+  for (const k of ["full_name", "phone", "status", "role", "trial_until", "note"]) f(k).value = u[k] ?? "";
+  f("profit_share_pct").value = u.profit_share_pct ?? ""; f("deploy_fee").value = u.deploy_fee ?? ""; f("can_build").value = String(u.can_build !== false);
+  $("ue_close").addEventListener("click", () => box.innerHTML = "");
+  $("ue_save").addEventListener("click", (e) => run(e.currentTarget, async () => {
+    const p = { full_name: f("full_name").value.trim(), phone: f("phone").value.trim(), status: f("status").value, role: f("role").value, trial_until: f("trial_until").value,
+      profit_share_pct: f("profit_share_pct").value, deploy_fee: f("deploy_fee").value, can_build: f("can_build").value === "true", note: f("note").value };
+    must(await db.rpc("admin_set_user", { p_user: u.user_id, p }));
+    toast("User saved."); await loadAdmin();
+  }));
+  $("uw_go").addEventListener("click", (e) => run(e.currentTarget, async () => {
+    const a = Number($("uw_amt").value); if (!a) throw new Error("Enter an amount.");
+    must(await db.rpc("admin_wallet", { p_user: u.user_id, p_amount: a, p_kind: $("uw_kind").value, p_note: $("uw_note").value.trim() || null }));
+    toast("Wallet updated."); await loadAdmin();
+  }));
+  const fn = adminFn;
+  $("up_go").addEventListener("click", (e) => run(e.currentTarget, async () => { await fn({ action: "reset_password", user_id: u.user_id, password: $("up_pass").value }); $("up_pass").value = ""; toast("Password set. Share it with the user privately."); }));
+  $("ud_go").addEventListener("click", () => askAdmin(`Delete ${u.email}?`, async () => { await fn({ action: "delete", user_id: u.user_id }); box.innerHTML = ""; toast("User deleted."); await loadAdmin(); }));
+  box.scrollIntoView({ block: "nearest" });
+}
+function askAdmin(q, fn) {
+  const box = document.createElement("div"); box.className = "confirm"; box.style.marginTop = "10px";
+  box.innerHTML = `<div></div><div class="actions"><button class="btn go" type="button">Yes</button><button class="btn" type="button">Cancel</button></div>`;
+  box.firstChild.textContent = q; const [yes, no] = box.querySelectorAll("button");
+  yes.addEventListener("click", (e) => run(e.currentTarget, async () => { await fn(); box.remove(); })); no.addEventListener("click", () => box.remove());
+  $("au_edit").append(box);
+}
+async function adminFn(body) {
+  const { data: { session } } = await db.auth.getSession();
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/admin-users`, { method: "POST", headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || "Request failed."); return j;
+}
+$("ad_new").addEventListener("submit", (e) => {
+  e.preventDefault();
+  run(e.submitter, async () => {
+    const j = await adminFn({ action: "create", email: $("an_email").value.trim(), password: $("an_pass").value, full_name: $("an_name").value.trim(), phone: $("an_phone").value.trim(),
+      trial_days: $("an_trial").value, can_build: $("an_build").value === "true" });
+    $("an_msg").textContent = `Created. Trial ${j.trial_until ? "till " + j.trial_until : "none"}. Share the login and temporary password with the user privately.`;
+    ["an_email", "an_pass", "an_name", "an_phone", "an_trial"].forEach((id) => $(id).value = "");
+    await loadAdmin();
+  });
+});
+async function loadRecharges() {
+  const rows = must(await db.from("recharge_requests").select("id, user_id, created_at, amount, ref, note, status").order("id", { ascending: false }).limit(200));
+  const tb = $("ar_body"); tb.innerHTML = rows.length ? "" : '<tr><td colspan="7" class="hint">No recharge requests.</td></tr>';
+  rows.sort((a, b) => (a.status === "PENDING" ? 0 : 1) - (b.status === "PENDING" ? 0 : 1));
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="when"></td><td></td><td class="n"></td><td class="mono"></td><td class="hint"></td><td></td><td></td>`;
+    const c = tr.children; c[0].textContent = istText(r.created_at); c[1].textContent = ownerName(r.user_id); c[2].textContent = rupees(r.amount); c[3].textContent = r.ref || ""; c[4].textContent = r.note || "";
+    c[5].innerHTML = `<span class="chip ${r.status === "PENDING" ? "yellow" : r.status === "APPROVED" ? "green" : "red"}">${esc(r.status)}</span>`;
+    if (r.status === "PENDING") {
+      const ok = document.createElement("button"); ok.className = "btn small primary"; ok.type = "button"; ok.textContent = "Payment received: add";
+      const no = document.createElement("button"); no.className = "btn small"; no.type = "button"; no.textContent = "Reject";
+      ok.addEventListener("click", (e) => run(e.currentTarget, async () => { must(await db.rpc("decide_recharge", { p_id: r.id, p_approve: true, p_note: null })); toast("Added to the wallet."); await loadAdmin(); }));
+      no.addEventListener("click", (e) => run(e.currentTarget, async () => { must(await db.rpc("decide_recharge", { p_id: r.id, p_approve: false, p_note: "Payment not found" })); toast("Rejected."); await loadAdmin(); }));
+      c[6].append(ok, " ", no);
+    }
+    tb.append(tr);
+  }
+}
+async function loadBilling() {
+  const b = must(await db.from("billing_settings").select("*").maybeSingle()) || {};
+  $("ab_trial").value = b.trial_days ?? 14; $("ab_fee").value = b.deploy_fee ?? 0; $("ab_period").value = b.deploy_fee_period || "MONTHLY";
+  $("ab_share").value = b.profit_share_pct ?? 20; $("ab_min").value = b.min_balance ?? 0; $("ab_payto").value = b.pay_to || ""; $("ab_paynote").value = b.pay_note || "";
+}
+$("ab_form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const p = { trial_days: Math.trunc(Number($("ab_trial").value)), deploy_fee: Number($("ab_fee").value), deploy_fee_period: $("ab_period").value, profit_share_pct: Number($("ab_share").value),
+    min_balance: Number($("ab_min").value), pay_to: $("ab_payto").value.trim(), pay_note: $("ab_paynote").value.trim() };
+  if ([p.trial_days, p.deploy_fee, p.profit_share_pct, p.min_balance].some((x) => !(x >= 0)) || p.profit_share_pct > 100) { $("ab_msg").textContent = "Use numbers of 0 or more (profit share up to 100%)."; return; }
+  run(e.submitter, async () => { must(await db.rpc("save_billing", { p })); $("ab_msg").textContent = "Saved."; toast("Billing settings saved."); });
+});
+
+/* ---------- declarations: footer on every page, and accepted once at first sign-in ---------- */
+const DECLARATIONS = [
+  ["Risk in derivatives", "Futures and options are leveraged and high-risk. You can lose more than you expect, quickly. As per SEBI's study, 9 out of 10 individual traders in equity futures & options made net losses. Trade only with money you can afford to lose."],
+  ["Not investment advice", "Nothing on this desk is investment advice, a research recommendation or a solicitation to buy or sell any security or derivative. Strategies are tools; you decide whether and how much to trade, and you are responsible for the orders placed on your account."],
+  ["Backtests and past results", "Backtests are simulations on historical prices with estimated charges and assumed fills. They don't include every real-world cost (slippage, gaps, liquidity, delays, rejections). Past or backtested performance does not guarantee future returns."],
+  ["Your own broker account", "Orders go to your own Dhan account through your own API token and webhook. Your funds stay with your broker. Broker, exchange and SEBI rules on algorithmic trading by retail investors apply to you; check your broker's terms for algo / API orders."],
+  ["Technology risk", "Automated orders can fail, be delayed or be duplicated because of internet, broker, exchange or software problems, and a position may stay open. Watch your positions in Dhan and use the exit button or Dhan directly when needed."],
+  ["Fees", "Fees (deployment fee, strategy price, profit share) are as shown on your Wallet page. Profit share is worked out on closed live trades, with losses carried forward and set off against later profits."],
+];
+function renderDeclarations() {
+  $("disclaimBox").innerHTML = DECLARATIONS.map(([h, t]) => `<p style="margin:0"><strong>${esc(h)}.</strong> ${esc(t)}</p>`).join("");
+  $("termsList").innerHTML = DECLARATIONS.map(([h, t]) => `<li><strong>${esc(h)}.</strong> ${esc(t)}</li>`).join("");
+}
+renderDeclarations();
+$("terms_ok").addEventListener("change", () => $("terms_go").disabled = !$("terms_ok").checked);
+$("terms_go").addEventListener("click", (e) => run(e.currentTarget, async () => {
+  must(await db.rpc("accept_terms"));
+  const { data: { session } } = await db.auth.getSession(); await enterDesk(session);
+}));
+function applyRole() {
+  document.querySelectorAll("[data-admin]").forEach((el) => el.hidden = !isAdmin());
+  $("newFlip").hidden = !(isAdmin() || (me && me.can_build));
+  $("lp_title").textContent = isAdmin() ? "Strategies" : "My strategies";
+}
+
 /* boot */
 $("bt_to").value = istDate(-1); $("bt_from").value = istDate(-91);
 paintMarket(); setInterval(paintMarket, 30000);
 let setupMode = false, timer = null;
 function showLogin(msg) {
-  $("app").hidden = true; $("gate").hidden = false; $("who").hidden = true; $("signOut").hidden = true; $("openSettings").hidden = true;
+  $("app").hidden = true; $("gate").hidden = false; $("who").hidden = true; $("signOut").hidden = true; $("nav").hidden = true; me = null;
   if (msg) $("g_msg").textContent = msg;
 }
 function paintGate() {
   $("g_title").textContent = setupMode ? "Create the owner account" : "Sign in";
-  $("g_hint").textContent = setupMode ? "One-time setup. Use the invited owner email and choose a password of at least 10 characters." : "CA Ankit Garg Trade Desk is private. Sign in with the owner account.";
+  $("g_hint").textContent = setupMode ? "One-time setup. Use the invited owner email and choose a password of at least 10 characters." : "Sign in with the login your admin gave you.";
   $("g_go").textContent = setupMode ? "Create account" : "Sign in";
   $("g_switch").textContent = setupMode ? "Already set up? Sign in" : "First time here? Create the owner account";
+  $("g_switch").parentElement.hidden = !setupMode;
   $("g_pass").autocomplete = setupMode ? "new-password" : "current-password";
 }
 $("g_switch").addEventListener("click", (e) => { e.preventDefault(); setupMode = !setupMode; $("g_msg").textContent = ""; paintGate(); });
@@ -2936,8 +3606,16 @@ $("loginForm").addEventListener("submit", async (e) => {
 $("signOut").addEventListener("click", async () => { await db.auth.signOut(); });
 
 async function enterDesk(session) {
-  $("gate").hidden = true; $("app").hidden = false; $("openSettings").hidden = false;
+  $("gate").hidden = true; $("app").hidden = false;
   $("who").hidden = false; $("who").textContent = session.user.email; $("signOut").hidden = false;
+  try { me = must(await db.rpc("whoami")); }
+  catch (e) { await db.auth.signOut(); showLogin(errorText(e)); return; }
+  if (me.status === "blocked") { await db.auth.signOut(); showLogin("This account is blocked. Contact the admin."); return; }
+  applyRole();
+  if (isAdmin()) await loadAdminUsers().catch(() => null);
+  if (!me.terms_accepted) { $("nav").hidden = true; showPage("terms"); return; }
+  $("nav").hidden = false; page = "list";
+  showPage("list");
   try { await loadAll(); }
   catch (e) {
     $("emptyPane").hidden = false; $("emptyPane").innerHTML = "";

@@ -66,7 +66,8 @@ async function saveChart(s: Strategy, bars: ChartBar[], st: number[], trend: num
   const from = Math.max(0, bars.length - CHART_BARS);
   const chart = bars.slice(from).map((b, k) => {
     const i = from + k;
-    return { t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, st: isNaN(st[i]) ? null : +st[i].toFixed(2), tr: trend[i] };
+    // A bought strategy's chart carries no indicator line (it would give away its settings).
+    return { t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, st: s.locked || isNaN(st[i]) ? null : +st[i].toFixed(2), tr: trend[i] };
   });
   await sb.from("algo_chart").upsert({ strategy_id: s.id, bars: chart, updated_at: new Date().toISOString() });
 }
@@ -438,7 +439,7 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
   const tNow = trend[n - 1], tPrev = trend[n - 2];
   const stNow = isNaN(st[n - 1]) ? undefined : +st[n - 1].toFixed(2);
   const update: Record<string, unknown> = {
-    last_trend: tNow, last_close: last.c, last_supertrend: stNow ?? null, last_run_at: new Date().toISOString(), last_error: null,
+    last_trend: tNow, last_close: last.c, last_supertrend: s.locked ? null : stNow ?? null, last_run_at: new Date().toISOString(), last_error: null,
   };
   const candle = { t: last.t, trend: tNow, c: last.c, st: stNow };
   if (action === "refresh") { await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
@@ -709,7 +710,7 @@ async function processTimed(s: Strategy, set: Settings, action: string) {
   const tNow = trend[n - 1];
   const stNow = isNaN(st[n - 1]) ? undefined : +st[n - 1].toFixed(2);
   const update: Record<string, unknown> = {
-    last_trend: tNow, last_close: spot ?? bars[n - 1].c, last_supertrend: stNow ?? null, last_run_at: new Date().toISOString(), last_error: null,
+    last_trend: tNow, last_close: spot ?? bars[n - 1].c, last_supertrend: s.locked ? null : stNow ?? null, last_run_at: new Date().toISOString(), last_error: null,
   };
   const candle = { t: bars[n - 1].t, trend: tNow, c: spot ?? bars[n - 1].c, st: stNow };
   if (action === "refresh") { await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
