@@ -235,7 +235,7 @@ legend { padding: 0; margin-bottom: 4px; }
 /* Lab grid: the table sizes each column to its content (numbers never cut off) and scrolls inside its own box,
    both ways, with the title and filter rows fixed at the top of the box. It can never spill out of the page. */
 body.wide .wrap { max-width: 1840px; }
-.labgrid { overflow: auto !important; max-height: calc(100vh - var(--barH, 56px) - 24px) !important; overscroll-behavior: contain; }
+.labgrid { overflow: auto !important; max-height: calc(100vh - var(--barH, 56px) - 12px) !important; }
 .lab-table { table-layout: auto; width: max-content; min-width: 100%; }
 .lab-table thead tr.t th { top: 0 !important; text-align: center; vertical-align: middle; white-space: normal; line-height: 1.2; }
 .lab-table thead tr.fl th { top: var(--labhead, 40px) !important; }
@@ -3206,6 +3206,22 @@ function labPassFilters(g) {
   }
   return true;
 }
+/*
+ * One scroll for the reader: rolling the wheel down over the table first moves the page until the table sits right
+ * under the top bar, then scrolls the table, then the rest of the page; rolling up does the same in reverse.
+ */
+(function labWheel() {
+  const g = $("lab_grid"); if (!g) return;
+  g.addEventListener("wheel", (e) => {
+    if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; // zoom or sideways: leave it to the browser
+    const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * innerHeight : e.deltaY;
+    const bar = $("lab_grid").getBoundingClientRect().top - (document.querySelector("header.bar")?.offsetHeight || 0);
+    const atTop = g.scrollTop <= 0, atEnd = g.scrollTop + g.clientHeight >= g.scrollHeight - 1;
+    if (dy > 0 && bar > 4) { e.preventDefault(); window.scrollBy(0, Math.min(dy, bar)); return; }
+    if (dy < 0 && bar < -4) { e.preventDefault(); window.scrollBy(0, Math.max(dy, bar)); return; } // page past the table: bring it back first
+    if ((dy < 0 && atTop) || (dy > 0 && atEnd)) { e.preventDefault(); window.scrollBy(0, dy); }
+  }, { passive: false });
+})();
 function fitLabGrid() {
   const g = $("lab_grid"), t = g && g.querySelector("table"); if (!t) return;
   // Keeps the sticky Strategy column right after the # column.
