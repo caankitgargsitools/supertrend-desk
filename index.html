@@ -930,8 +930,10 @@ function chipsFor(s) {
   return c.join("");
 }
 
+/** Rules and indicator settings are hidden for bought strategies, and for users who aren't allowed to build. */
+function hideRules(s) { return !!s && (!!s.locked || (typeof me !== "undefined" && !!me && me.role !== "admin" && !me.can_build)); }
 function describe(s) {
-  if (s.locked) return `${(PRESETS[s.underlying] && PRESETS[s.underlying].name) || s.underlying} · ${instName(s)} · from the marketplace`;
+  if (hideRules(s)) return `${(PRESETS[s.underlying] && PRESETS[s.underlying].name) || s.underlying} · ${instName(s)}${s.locked ? " · from the marketplace" : ""}`;
   const st = `ST(${s.atr_period}, ${Number(s.factor)})`;
   if (isTimed(s)) return `${s.underlying} · ${biasName(s.bias_timeframe)} ${st} · buy ${String(s.entry_time).slice(0, 5)}, sell ${s.exit_next_day ? "next day " : ""}${String(s.exit_time).slice(0, 5)}${s.risk ? " · " + riskText(s.risk, true) : ""}`;
   const n = s.rules ? ["long", "short", "exitLong", "exitShort"].reduce((a, k) => a + ((s.rules[k] && s.rules[k].conds) || []).length, 0) : 0;
@@ -1015,8 +1017,8 @@ function renderStrategy() {
   $("st_close").textContent = fmtNum(s.last_close);
   $("st_line").textContent = fmtNum(s.last_supertrend);
   const rulesKind = s.strategy_kind === "RULES";
-  $("st_line").closest(".stat").hidden = rulesKind || s.strategy_kind === "HA" || !!s.locked;
-  if (s.locked) {
+  $("st_line").closest(".stat").hidden = rulesKind || s.strategy_kind === "HA" || hideRules(s);
+  if (hideRules(s)) {
     $("st_trend_l").textContent = "Signal right now";
     tr.textContent = s.last_trend === 1 ? "▲ Bullish" : s.last_trend === -1 ? "▼ Bearish" : "Neutral";
   } else if (rulesKind) {
@@ -1079,12 +1081,8 @@ function riskPlain(r, s) {
 }
 function renderStratSummary(s) {
   const box = $("stratSummary");
-  if (!s) { box.hidden = true; return; }
-  if (s.locked) {
-    box.hidden = false;
-    box.innerHTML = `<h3>How this strategy trades</h3><div class="row"><span>Trades</span><div>${esc(instName(s))} on ${esc((PRESETS[s.underlying] && PRESETS[s.underlying].name) || s.underlying)}</div></div><div class="row"><span>Rules</span><div>Kept private by the publisher. You see every signal, order and trade it makes on your account.</div></div>`;
-    return;
-  }
+  // The rules summary is shown to the admin only.
+  if (!s || s.locked || !isAdmin()) { box.hidden = true; box.innerHTML = ""; return; }
   const asset = (PRESETS[s.underlying] && PRESETS[s.underlying].name) || s.underlying;
   const rows = [];
   const row = (k, html) => rows.push(`<div class="row"><span>${esc(k)}</span><div>${html}</div></div>`);
@@ -1486,9 +1484,10 @@ function cxFromStrategy(s) {
   cx.tf = cxStratTf(s);
   cx.range = tfDefaultRange(cx.tf);
   cx.atr = s.atr_period; cx.fac = Number(s.factor);
-  cx.sig = s.locked ? "NONE" : s.strategy_kind === "HA" ? "HA" : s.strategy_kind === "RULES" ? "NONE" : "ST";
-  cx.rules = !s.locked && s.strategy_kind === "RULES" && s.rules ? s.rules : null;
-  cx.sim = s.locked || s.strategy_kind === "TIMED" || s.strategy_kind === "RULES" ? null : s;
+  const hr = hideRules(s);
+  cx.sig = hr ? "NONE" : s.strategy_kind === "HA" ? "HA" : s.strategy_kind === "RULES" ? "NONE" : "ST";
+  cx.rules = !hr && s.strategy_kind === "RULES" && s.rules ? s.rules : null;
+  cx.sim = hr || s.strategy_kind === "TIMED" || s.strategy_kind === "RULES" ? null : s;
   paintCx();
   renderStratSummary(s);
 }
@@ -3179,8 +3178,8 @@ function listCols() {
     ["owner", "Owner", (s) => ownerName(s.owner_id), "admin"],
     ["asset", "Asset", (s) => assetLabel(s.underlying)],
     ["inst", "Instrument", (s) => instName(s)],
-    ["kind", "Type", (s) => s.is_master ? "Marketplace copy" : s.locked ? "Bought" : kindName(s)],
-    ["tf", "Timeframe", (s) => s.locked ? "–" : cxStratTf(s) === "D" ? "Daily" : `${cxStratTf(s)} min`],
+    ["kind", "Type", (s) => s.is_master ? "Marketplace copy" : s.locked ? "Bought" : hideRules(s) ? "–" : kindName(s)],
+    ["tf", "Timeframe", (s) => hideRules(s) ? "–" : cxStratTf(s) === "D" ? "Daily" : `${cxStratTf(s)} min`],
     ["active", "Status", (s) => s.archived ? "Archived" : s.active ? "Active" : "Paused"],
     ["live", "Mode", (s) => s.live ? "Live" : "Paper"],
     ["pos", "Position", (s) => s.position === "FLAT" ? "Flat" : `${s.position === "LONG" ? "Long" : "Short"}${s.pos_lots ? ` · ${s.pos_lots} lot${s.pos_lots === 1 ? "" : "s"}` : ""}${s.pos_upnl != null ? ` · ${Number(s.pos_upnl) >= 0 ? "+" : ""}${rupees(s.pos_upnl)} open` : ""}`],
@@ -3258,8 +3257,11 @@ function renderList() {
 /* ---------- a bought strategy: plain capital / lots window, no rules ---------- */
 function renderLockedView(s) {
   const box = $("lockedBox"), locked = !!s.locked;
-  $("t_set").hidden = locked; $("t_bt").hidden = locked;
-  if (locked && currentTab !== "log") showTab("log");
+  // Users see results, signals and trades only. Rules and settings are for the admin (and users allowed to build).
+  const noRules = locked || !(isAdmin() || (me && me.can_build));
+  $("t_set").hidden = noRules; $("t_bt").hidden = noRules;
+  if (noRules && currentTab !== "log") showTab("log");
+  document.querySelector("details.chartmore").hidden = !isAdmin() && (locked || !(me && me.can_build));
   $("b_publish").hidden = !(isAdmin() && !s.locked && !s.is_master && !s.archived);
   $("sp_owner").textContent = isAdmin() && me && s.owner_id !== me.user_id ? `Owner: ${ownerName(s.owner_id)}` : s.is_master ? "Marketplace copy: buyers run exactly these settings." : "";
   if (!locked) { box.hidden = true; box.innerHTML = ""; return; }
