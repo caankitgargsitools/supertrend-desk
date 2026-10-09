@@ -62,7 +62,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
 .dot.on { background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
 
-#menuBtn, .mob-only { display: none; }
+#menuBtn, .mob-only, .labmtools, .labcards { display: none; }
 /* ---------- phones ---------- */
 @media (max-width: 760px) {
   .bar { gap: 6px 10px; padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top)); }
@@ -91,6 +91,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .head { flex-wrap: wrap; gap: 8px; }
   .head .actions { width: 100%; }
   #confirmBox .confirm { width: 100%; }
+  /* Lab results as cards on phones: no sideways scrolling. */
+  #lab_grid { display: none; }
+  .labmtools { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 140px) auto; gap: 6px; margin-top: 8px; }
+  .labmtools input, .labmtools select { width: 100%; min-width: 0; }
+  .labcards { display: grid; gap: 8px; margin-top: 8px; }
+  .lcd { border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; background: var(--panel); cursor: pointer; }
+  .lcd.sel { border-color: var(--blue); background: var(--blue-soft); }
+  .lcd .tt { font-weight: 700; font-size: 13.5px; line-height: 1.3; overflow-wrap: anywhere; }
+  .lcd .tt .no { color: var(--muted); font-weight: 600; margin-right: 4px; }
+  .lcd .sub { color: var(--muted); font-size: 12px; margin: 2px 0 6px; }
+  .lcd .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 6px; }
+  .lcd .mg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 10px; }
+  .lcd .mg div { min-width: 0; }
+  .lcd .mg .k { display: block; font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+  .lcd .mg b { font: 600 13px var(--font-ui); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .lcd .fam { margin-top: 6px; }
   .seg { display: grid; grid-template-columns: 1fr 1fr; border-radius: 10px; width: 100%; }
   .seg button { padding: 10px 6px; }
   .seg button + button { border-left: 0; }
@@ -729,6 +745,12 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
         </div>
         <div id="lab_reqfilter" class="banner info" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center" hidden></div>
         <p class="hint" id="lab_count" style="margin:10px 0 0"></p>
+        <div id="lab_mtools" class="labmtools">
+          <input id="lab_msearch" type="search" placeholder="Search strategies…" autocomplete="off" aria-label="Search strategies">
+          <select id="lab_msort" aria-label="Sort by"></select>
+          <button class="btn small" id="lab_mdir" type="button" aria-label="Sort direction">▼</button>
+        </div>
+        <div id="lab_cards" class="labcards"></div>
         <div class="labgrid" id="lab_grid">
           <table class="lab-table">
             <thead id="lab_head"></thead>
@@ -3324,7 +3346,7 @@ function renderLabTable() {
   lab.openFam = lab.openFam || new Set();
   const nStrat = fams.reduce((a, f) => a + f.members.length, 0);
   const nf = Object.values(lab.filters).filter(Boolean).length;
-  $("lab_count").textContent = fams.length ? `${fams.length} groups of similar strategies (${nStrat} strategies)${nf ? `, ${nf} column filter${nf === 1 ? "" : "s"} on` : ""}${fams.length > 150 ? "; showing the first 150 groups" : ""}. Click a column title to sort; type in the boxes under the titles to filter (numbers: 50 = at least 50, >50, <0, 10-20).` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
+  $("lab_count").textContent = fams.length ? `${fams.length} groups of similar strategies (${nStrat} strategies)${nf ? `, ${nf} column filter${nf === 1 ? "" : "s"} on` : ""}${fams.length > 150 ? "; showing the first 150 groups" : ""}.${labPhone() ? " Tap a card to open it." : " Click a column title to sort; type in the boxes under the titles to filter (numbers: 50 = at least 50, >50, <0, 10-20)."}` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
   const pc = (v) => `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}" title="${rupees(v)}">${rupeesShort(v)}</span>`;
   const rs = (v) => v == null ? "–" : `<span title="${rupees(v)}">${rupeesShort(v)}</span>`;
   const rowFor = (g, num, f, sub) => {
@@ -3348,10 +3370,57 @@ function renderLabTable() {
     });
     return tr;
   };
+  if (labPhone()) { renderLabCards(fams, pc, rs); return; }
+  $("lab_cards").innerHTML = "";
   fams.slice(0, 150).forEach((f, i) => {
     body.append(rowFor(f.best, i + 1, f, false));
     if (lab.openFam.has(f.key)) f.members.slice(1).forEach((g, j) => body.append(rowFor(g, `${i + 1}.${j + 2}`, f, true)));
   });
+}
+function labPhone() { return matchMedia("(max-width: 760px)").matches; }
+matchMedia("(max-width: 760px)").addEventListener("change", () => { if (lab.open) renderLabTable(); });
+/** Phones: one card per strategy (the same figures as the table), sorted and searched from the bar above. */
+function renderLabCards(fams, pc, rs) {
+  $("lab_body").innerHTML = "";
+  const sortSel = $("lab_msort");
+  if (!sortSel.options.length) {
+    sortSel.innerHTML = LAB_COLS.filter((c) => c.v && c.k !== "name").map((c) => `<option value="${c.k}">Sort: ${esc(c.t)}</option>`).join("");
+    sortSel.addEventListener("change", () => { lab.sortKey = sortSel.value; renderLabTable(); });
+    $("lab_mdir").addEventListener("click", () => { lab.sortDir = -(lab.sortDir || -1); renderLabTable(); });
+    let t = null;
+    $("lab_msearch").addEventListener("input", () => { lab.filters.name = $("lab_msearch").value.trim(); clearTimeout(t); t = setTimeout(renderLabTable, 200); });
+  }
+  sortSel.value = lab.sortKey || "score";
+  $("lab_mdir").textContent = (lab.sortDir || -1) > 0 ? "▲" : "▼";
+  if (document.activeElement !== $("lab_msearch")) $("lab_msearch").value = lab.filters.name || "";
+  const box = $("lab_cards"); box.innerHTML = "";
+  const card = (g, num, f, sub) => {
+    const m = g.m, r = g.r, x = robOf(r);
+    const el = document.createElement("div"); el.className = "lcd" + (lab.sel === r.id ? " sel" : ""); el.tabIndex = 0;
+    const status = labPassed(r, m) ? '<span class="chip green">Passed</span>' : labChecking(r, m) ? '<span class="chip blue">Being checked</span>' : m.passed && robDone(r) ? '<span class="chip red">Failed tougher test</span>' : '<span class="chip red">Not passed</span>';
+    const cell = (k, v) => `<div><span class="k">${k}</span><b>${v}</b></div>`;
+    const ratio = (ok, n) => n == null ? "–" : `<span class="${n && ok >= Math.min(2, n) ? "pos-num" : "neg-num"}">${ok ?? 0}/${n}</span>`;
+    const done = x && x.status === "done";
+    el.innerHTML = `<div class="tt"><span class="no">${num}</span><span class="nm"></span></div>
+      <div class="sub">${esc(labAssetName(r.asset))} · ${esc(labStyle(r))}${g.passes ? ` · passed ${g.passes} of ${g.nights} run${g.nights === 1 ? "" : "s"}` : ""}</div>
+      <div class="chips">${status}${g.rechecking ? '<span class="chip blue">Re-checking today</span>' : ""}${r.champion ? '<span class="chip green">Re-tested</span>' : ""}${r.starred ? '<span class="chip yellow">★</span>' : ""}</div>
+      <div class="mg">${cell("Net (1 yr)", pc(m.full.net))}${cell("Win %", m.full.win_rate)}${cell("Trades", m.full.n)}
+        ${cell("Max DD", rs(m.full.max_dd))}${cell("PF", m.full.pf ?? "–")}${cell("Months +", `${m.pos_months}/${m.months_n}`)}
+        ${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Score", m.score)}
+        ${done ? cell("Assets +", ratio(x.assets_ok, x.assets_n)) + cell("Timeframes +", x.tfs_n ? ratio(x.tfs_ok, x.tfs_n) : "n/a") + cell("Years +", x.years_n == null ? "–" : `<span class="${x.years_n >= 3 && x.years_ok === x.years_n ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span>`) : ""}</div>
+      ${!sub && f.members.length > 1 ? `<button type="button" class="btn small fam">${lab.openFam.has(f.key) ? "Hide similar" : `+${f.members.length - 1} similar`}</button>` : ""}`;
+    el.querySelector(".nm").textContent = r.label;
+    el.addEventListener("click", (e) => {
+      if (e.target.closest(".fam")) { if (lab.openFam.has(f.key)) lab.openFam.delete(f.key); else lab.openFam.add(f.key); renderLabTable(); return; }
+      openLabDetail(r.id).catch((er) => toast(errorText(er)));
+    });
+    return el;
+  };
+  fams.slice(0, 100).forEach((f, i) => {
+    box.append(card(f.best, i + 1, f, false));
+    if (lab.openFam.has(f.key)) f.members.slice(1).forEach((g, j) => box.append(card(g, `${i + 1}.${j + 2}`, f, true)));
+  });
+  if (fams.length > 100) { const p = document.createElement("p"); p.className = "hint"; p.textContent = `Showing the first 100 of ${fams.length}; search or sort to find others.`; box.append(p); }
 }
 function monthsHTML(m) {
   const max = Math.max(1, ...m.months.map((x) => Math.abs(x.net)));
