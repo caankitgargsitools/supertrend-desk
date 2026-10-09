@@ -2343,7 +2343,16 @@ function renderBacktest(r) {
     tip.textContent = "Check one trade before trusting the numbers: open that option on Dhan or TradingView for the entry date and compare the premium. If the prices look like the following week's contract, switch “Dhan code for nearest expiry” to 0 and run again.";
     box.append(tip);
   } else {
-    const p = document.createElement("p"); p.className = "hint"; p.textContent = "No trades were taken in this period with these settings."; box.append(p);
+    // Say why: every signal skipped (usually not enough capital for one lot) or no signal at all.
+    const sm = r.summary || {}, sk = sm.skipped || {}, nSk = Object.values(sk).reduce((x, y) => x + Number(y), 0);
+    const d = document.createElement("div"); d.className = nSk ? "banner warn" : "banner info";
+    if (nSk) {
+      const st = (r.params && r.params.strategy) || cur() || {}, z = st.sizing || {};
+      const cap = Number(r.params && r.params.capital) || 0, rate = Number(r.params && r.params.margin_rate) || 0;
+      const capTxt = sk["Not enough capital for 1 lot"] ? ` With automatic lots, each trade may use ${z.alloc_pct ?? 20}% of the capital (${rupees(cap * (z.alloc_pct ?? 20) / 100)}), and must fit the drawdown budget (${z.dd_pct ?? 25}% of that, against ₹${Math.trunc(z.dd_per_lot || 0).toLocaleString("en-IN")} worst drawdown per lot × ${z.dd_mult ?? 1.5})${rate ? `; one lot needs about ${(rate * 100).toFixed(1)}% of the contract value as margin` : ""}. Raise the capital or the share per strategy (Strategy settings → Position size), or untick “Use automatic lots” to test 1 lot per trade.` : "";
+      d.textContent = `The strategy gave ${sm.planned ?? nSk} signals, but none became a trade: ${Object.entries(sk).map(([k, n]) => `${k} (${n})`).join("; ")}.${capTxt}`;
+    } else d.textContent = "The strategy's rules never gave a signal in this period with these settings.";
+    box.append(d);
   }
 }
 
