@@ -79,3 +79,11 @@ end $$;
 
 -- Hourly token check; renews when under 4 hours are left (or at 08:xx IST).
 select cron.schedule('dhan-token-check', '7 * * * *', $$select public.engine_call('token')$$);
+
+-- Margin rates from Dhan's margin calculator, per Strategy Lab asset (refreshed at the start of each lab run).
+create table if not exists public.lab_margins (
+  asset text primary key, price numeric, fut_pct numeric, fut_pct_i numeric, sell_pct numeric, sell_pct_i numeric,
+  detail jsonb, error text, checked_at timestamptz default now()
+);
+alter table public.lab_margins enable row level security;
+create policy lab_margins_owner_read on public.lab_margins for select using (is_owner());

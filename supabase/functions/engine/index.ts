@@ -13,7 +13,8 @@ import { dataSecurity, syncMcx } from "./instruments.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
-import { labStart, labStep, TOKEN_ERR } from "./lab.ts";
+import { LAB_ASSETS, labStart, labStep, TOKEN_ERR } from "./lab.ts";
+import { refreshMargins } from "./margins.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -889,6 +890,13 @@ Deno.serve(async (req) => {
 
   if (action === "token" || action === "token_renew") return Response.json({ action, ...(await tokenCheck(action === "token_renew")) });
   if (action === "funds") return Response.json({ action, ...(await refreshFunds()) });
+  if (action === "margins") {
+    const { data: set } = await sb.from("portal_settings").select("dhan_client_id, dhan_access_token").single();
+    const { data: ls } = await sb.from("lab_settings").select("assets").eq("id", 1).maybeSingle();
+    const keys: string[] = (ls?.assets ?? Object.keys(LAB_ASSETS)).filter((k: string) => LAB_ASSETS[k]);
+    const n = await refreshMargins(sb, { client: set?.dhan_client_id ?? "", token: set?.dhan_access_token ?? "" }, keys.map((k) => LAB_ASSETS[k]));
+    return Response.json({ action, priced: n, of: keys.length });
+  }
 
   if (!["tick", "refresh", "flatten", "sync_instruments"].includes(action)) return Response.json({ error: `Unknown action ${action}` }, { status: 400 });
   const nowIst = ist(Date.now() / 1000);

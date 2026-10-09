@@ -12,6 +12,7 @@ import { addDays, type DayBar, ist, sessionFor } from "./logic.ts";
 import { describeCond, type Cond, type Rules, validateRules } from "./rules.ts";
 import { dataSecurity } from "./instruments.ts";
 import { describeRisk, type Risk } from "./risk.ts";
+import { loadMarginRates, type MarginRate, refreshMargins } from "./margins.ts";
 
 /* ---------- assets ---------- */
 export type LabAsset = {
@@ -301,7 +302,7 @@ function stats(ts: T[]): PeriodStats {
 export type LabMetrics = {
   full: PeriodStats; train: PeriodStats; test: PeriodStats; months: { m: string; net: number; n: number }[];
   pos_months: number; months_n: number; train_pos_months: number; train_months_n: number; score: number; passed: boolean; why: string[];
-  margin_lot?: number | null; ret_margin?: number | null;
+  margin_lot?: number | null; ret_margin?: number | null; margin_max?: number | null; margin_pct?: number | null; margin_src?: string;
 };
 /** Walk-forward scoring: score from the training months only; "passed" also needs a profitable, untouched test period. */
 export function labMetrics(trades: T[], from: string, split: string, to: string, daily: boolean): LabMetrics {
@@ -389,28 +390,49 @@ export function labParams(a: LabAsset, from: string, to: string, capital: number
   return { from, to, capital, brokerage: 20, charges: chargeRates(a), near_code: 1 };
 }
 /** Futures backtest of a lab strategy on cached candles (no network calls). */
-export async function screenOne(cfg: LabConfig, data: SimData, memo: Map<string, unknown>, win: { from: string; split: string; to: string }, capital: number) {
+export async function screenOne(cfg: LabConfig, data: SimData, memo: Map<string, unknown>, win: { from: string; split: string; to: string }, capital: number, rates: Record<string, MarginRate> = {}) {
   const a = LAB_ASSETS[cfg.underlying];
   const plans = simulateRules(cfg, data, win.from, win.to, memo);
   const { trades } = await priceBatch(cfg, { client: "-", token: "-" }, labParams(a, win.from, win.to, capital), plans, 0, newAcc(capital), Infinity, async () => {});
   const base = labMetrics(trades as T[], win.from, win.split, win.to, !!cfg.rules.daily);
-  // Futures margin from the average price at entry (or, with no trades, the last close).
-  const px = trades.length ? avg(trades.map((t) => Number(t.entry_px))) : (data.daily.at(-1)?.c ?? 0);
-  const metrics = withMargin(base, labMargin(cfg, "FUT", px));
+  // Margin for every trade at its own entry price; with no trades, at the last close.
+  const metrics = withTradeMargins(base, cfg, "FUT", trades, rates, data.daily.at(-1)?.c ?? 0);
   return { metrics, trades };
 }
 
 /**
- * Money one lot ties up, for comparing profit with margin: futures and option writing at exchange margin
- * (about 12% of contract value for index F&O, 10% for MCX), option buying at the average premium paid.
+ * Margin rate (share of contract value) for a lab strategy: Dhan's margin calculator figure for the asset when the lab
+ * has checked it (intraday or carry-forward, as the strategy trades), else about 12% for index F&O and 10% for MCX.
  */
-export function labMargin(cfg: LabConfig, kind: "FUT" | "BUY" | "SELL", avgPx: number): number {
-  const pct = cfg.data_segment === "MCX_COMM" ? 0.10 : 0.12;
-  return Math.trunc(kind === "BUY" ? avgPx * Number(cfg.lot_size) : avgPx * Number(cfg.lot_size) * pct);
+export function marginRate(cfg: LabConfig, kind: "FUT" | "SELL", rates: Record<string, MarginRate>): { pct: number; src: string } {
+  const r = rates[cfg.underlying];
+  const v = r ? (kind === "SELL" ? (cfg.intraday ? r.sellI ?? r.sell : r.sell ?? r.sellI) : (cfg.intraday ? r.futI ?? r.fut : r.fut ?? r.futI)) : null;
+  if (v) return { pct: v, src: "Dhan" };
+  return { pct: cfg.data_segment === "MCX_COMM" ? 0.10 : 0.12, src: "estimate" };
 }
-/** Adds margin per lot and the year's net profit as a % of it. */
-export function withMargin(m: LabMetrics, marginLot: number): LabMetrics {
-  return { ...m, margin_lot: marginLot || null, ret_margin: marginLot > 0 ? +((m.full.net / marginLot) * 100).toFixed(1) : null };
+/** Strike from a priced option trade's contract text ("NIFTY 24500 CE"). */
+const strikeOf = (t: Record<string, unknown>) => { const m = / (\d+(?:\.\d+)?) (?:CE|PE)\b/.exec(String(t.contract ?? "")); return m ? Number(m[1]) : 0; };
+/**
+ * Money one lot tied up in one trade, at the price of that trade's entry:
+ *  futures – entry price × lot × margin rate; option writing – strike × lot × writing margin rate; option buying – premium paid × lot.
+ */
+export function tradeMargin(cfg: LabConfig, kind: "FUT" | "BUY" | "SELL", t: Record<string, unknown>, pct: number): number {
+  const lot = Number(cfg.lot_size), px = Number(t.entry_px);
+  if (kind === "BUY") return Math.trunc(px * lot);
+  if (kind === "SELL") return Math.trunc((strikeOf(t) || Number(t.spot_in) || 0) * lot * pct);
+  return Math.trunc(px * lot * pct);
+}
+/**
+ * Stamps each trade with its margin and adds to the metrics: the average margin per lot over the trades (the capital
+ * the strategy typically needs), the largest, and the year's net profit as a % of the average.
+ */
+export function withTradeMargins(m: LabMetrics, cfg: LabConfig, kind: "FUT" | "BUY" | "SELL", trades: Record<string, unknown>[], rates: Record<string, MarginRate>, fallbackPx: number): LabMetrics {
+  const { pct, src } = kind === "BUY" ? { pct: 1, src: "premium" } : marginRate(cfg, kind, rates);
+  const ms: number[] = [];
+  for (const t of trades) { const v = tradeMargin(cfg, kind, t, pct); t.margin = v; if (v > 0) ms.push(v); }
+  const avgM = ms.length ? Math.trunc(avg(ms)) : Math.trunc(kind === "BUY" ? 0 : fallbackPx * Number(cfg.lot_size) * pct);
+  return { ...m, margin_lot: avgM || null, margin_max: ms.length ? Math.max(...ms) : avgM || null, margin_pct: kind === "BUY" ? null : +pct.toFixed(5), margin_src: src,
+    ret_margin: avgM > 0 ? +((m.full.net / avgM) * 100).toFixed(1) : null };
 }
 const avg = (xs: number[]) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
 
@@ -459,6 +481,12 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
 
     if (run.phase === "data") {
       let i = Number(run.cursor ?? 0);
+      if (i === 0 && !counts.margins_checked) {
+        // Today's margin rates from Dhan's margin calculator (used for each trade's margin and the return on margin).
+        await patch({ progress: "Checking margin rates with Dhan" });
+        const n = await refreshMargins(sb, ctx.creds, assets.map((k) => LAB_ASSETS[k]));
+        counts.margins_checked = n || -1; await patch({ counts });
+      }
       while (i < assets.length && Date.now() - ctx.started < WALL_BUDGET - 20000) {
         await patch({ progress: `Updating candles: ${LAB_ASSETS[assets[i]].name} (${i + 1} of ${assets.length})` });
         await refreshAsset(sb, ctx.creds, assets[i], win.to);
@@ -573,13 +601,14 @@ async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
   const data = await loadAsset(sb, asset);
   cpu += Math.min(250, performance.now() - t0);
   const memo = new Map<string, unknown>();
+  const rates = await loadMarginRates(sb);
   const updates: Promise<unknown>[] = [];
   for (const row of pend.filter((p) => p.asset === asset)) {
     if (cpu > CPU_BUDGET || Date.now() - ctx.started > WALL_BUDGET) break;
     const t1 = performance.now();
     let fields: Record<string, unknown>;
     try {
-      const { metrics, trades } = await screenOne(row.config, data, memo, win, capital);
+      const { metrics, trades } = await screenOne(row.config, data, memo, win, capital, rates);
       fields = { stage: "screened", passed: metrics.passed, score: metrics.score, metrics, trades: slim(trades), error: null };
     } catch (e) {
       fields = { stage: "error", error: e instanceof Error ? e.message : String(e) };
@@ -655,8 +684,8 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
     job.trades = job.trades.concat(slim(res.trades)); job.cursor = res.next; job.acc = res.acc;
     if (job.cursor >= job.plans.length) {
       // Option buying ties up the premium; writing ties up margin on the index's contract value.
-      const avgPx = vr.side === "BUY" ? avg(job.trades.map((t: any) => Number(t.entry_px))) : avg((job.plans as Plan[]).map((pl) => Number(pl.spotIn)));
-      const metrics = withMargin(labMetrics(job.trades, win.from, win.split, win.to, !!row.config.rules?.daily), labMargin(row.config, vr.side === "BUY" ? "BUY" : "SELL", avgPx));
+      const fallback = avg((job.plans as Plan[]).map((pl) => Number(pl.spotIn)));
+      const metrics = withTradeMargins(labMetrics(job.trades, win.from, win.split, win.to, !!row.config.rules?.daily), row.config, vr.side === "BUY" ? "BUY" : "SELL", job.trades, await loadMarginRates(sb), fallback);
       // Results with many trades that couldn't be priced aren't trustworthy.
       const unpriced = Object.values(job.acc.skipped ?? {}).reduce((a: number, b) => a + Number(b), 0);
       if (unpriced > job.plans.length * 0.2) { metrics.passed = false; metrics.why.push(`${unpriced} of ${job.plans.length} trades couldn't be priced with real option data`); }

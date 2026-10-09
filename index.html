@@ -358,7 +358,7 @@ legend { padding: 0; margin-bottom: 4px; }
           </table>
         </div>
 
-        <form id="stratForm" hidden>
+        <form novalidate id="stratForm" hidden>
           <div class="formtop"><span class="hint">Only the main settings are shown. Expert details (data IDs, order format, contract rules) are under advanced.</span><label class="advtoggle"><input type="checkbox" data-adv> Show advanced settings</label></div>
           <fieldset><legend class="label">Strategy type</legend>
             <div class="grid">
@@ -446,9 +446,9 @@ legend { padding: 0; margin-bottom: 4px; }
           <fieldset id="sizeSet"><legend class="label">Position size</legend>
             <div class="grid">
               <label class="f wide"><span>How many lots</span><select id="z_mode"><option value="FIXED">Always the number of lots above</option><option value="AUTO">Automatic, from my capital (more after profits, fewer after losses)</option></select></label>
-              <label class="f z-auto"><span>Use up to (% of my capital)</span><input id="z_alloc" type="number" min="0.1" max="100" step="0.5"></label>
+              <label class="f z-auto"><span>Use up to (% of my capital)</span><input id="z_alloc" type="number" min="0.1" max="100" step="any"></label>
               <label class="f z-auto adv"><span>Accept a drawdown of (% of that share)</span><input id="z_dd" type="number" min="1" max="100" step="1"></label>
-              <div class="f z-auto adv"><span>Worst drawdown for 1 lot (₹)</span><div class="pair"><input id="z_ddlot" type="number" min="0" step="100" placeholder="from a backtest"><button class="btn small" id="z_fromBt" type="button">Use backtest</button></div></div>
+              <div class="f z-auto adv"><span>Worst drawdown for 1 lot (₹)</span><div class="pair"><input id="z_ddlot" type="number" min="0" step="any" placeholder="from a backtest"><button class="btn small" id="z_fromBt" type="button">Use backtest</button></div></div>
               <label class="f z-auto adv"><span>Safety multiple on that drawdown</span><input id="z_mult" type="number" min="1" max="5" step="0.1"></label>
               <label class="f z-auto adv"><span>Margin per lot (% of contract value)</span><input id="z_margin" type="number" min="1" max="100" step="0.5"></label>
               <label class="f z-auto"><span>Never more than (lots)</span><input id="z_max" type="number" min="1" max="1000" step="1"></label>
@@ -482,7 +482,7 @@ legend { padding: 0; margin-bottom: 4px; }
         </form>
 
         <div id="btView" class="btwrap" hidden>
-          <form id="btForm">
+          <form novalidate id="btForm">
             <div class="chartopts" style="margin:0 0 10px">
               <span class="hint">Quick period:</span>
               <span class="seg" id="bt_quick"><button type="button" data-days="92">3M</button><button type="button" data-days="184">6M</button><button type="button" data-days="366">1Y</button><button type="button" data-days="731">2Y</button><button type="button" data-days="1096">3Y</button><button type="button" data-days="1826">5Y</button></span>
@@ -490,7 +490,7 @@ legend { padding: 0; margin-bottom: 4px; }
             <div class="grid">
               <label class="f"><span>From</span><input id="bt_from" type="date"></label>
               <label class="f"><span>To</span><input id="bt_to" type="date"></label>
-              <label class="f"><span>Capital (₹)</span><input id="bt_capital" type="number" min="1000" step="1000" value="500000"></label>
+              <label class="f"><span>Capital (₹)</span><input id="bt_capital" type="number" min="1000" step="any" value="500000"></label>
               <label class="f adv"><span>Brokerage per order (₹, max)</span><input id="bt_brokerage" type="number" min="0" step="1" value="20"></label>
               <label class="f adv"><span>Dhan code for nearest expiry</span><select id="bt_code"><option value="1">1 (Dhan's examples)</option><option value="0">0 (Dhan's annexure)</option></select></label>
             </div>
@@ -534,7 +534,7 @@ legend { padding: 0; margin-bottom: 4px; }
           </div>
         </div>
         <div id="cap_stats" style="margin-top:12px"></div>
-        <form id="capForm" style="margin-top:14px">
+        <form novalidate id="capForm" style="margin-top:14px">
           <div class="grid">
             <label class="f"><span>My trading capital (₹)</span><input id="cap_capital" type="number" min="0" step="1000"></label>
             <label class="f"><span>Never use more than (% of capital at once)</span><input id="cap_deploy" type="number" min="1" max="100" step="1"></label>
@@ -594,11 +594,11 @@ legend { padding: 0; margin-bottom: 4px; }
         <p class="hint" id="lab_count" style="margin:10px 0 0"></p>
         <div class="scroll" style="margin-top:8px">
           <table class="lab-table">
-            <thead><tr><th>#</th><th>Strategy</th><th class="n">Trades</th><th class="n">Win %</th><th class="n">Net (1 yr)</th><th class="n">Margin / lot</th><th class="n">Return on margin</th><th class="n">Last 3 mo</th><th class="n">Max DD</th><th class="n">PF</th><th class="n">Months +</th><th class="n">Score</th><th class="n">Nights</th></tr></thead>
+            <thead><tr><th>#</th><th>Strategy</th><th class="n">Trades</th><th class="n">Win %</th><th class="n">Net (1 yr)</th><th class="n" title="Average over the trades of the margin one lot needed at each trade's entry price">Avg margin / lot</th><th class="n">Return on margin</th><th class="n">Last 3 mo</th><th class="n">Max DD</th><th class="n">PF</th><th class="n">Months +</th><th class="n">Score</th><th class="n">Nights</th></tr></thead>
             <tbody id="lab_body"></tbody>
           </table>
         </div>
-        <p class="hint" style="margin:8px 0 0">Score = net profit of the first 9 months ÷ the worst drawdown in them × the share of those months that made money. Figures are for 1 lot after brokerage and statutory charges, in whole rupees. Margin / lot = money one lot ties up: about 12% of contract value for index futures and option writing, 10% for MCX, the average premium paid for option buying. Return on margin = the year's net ÷ margin. Similar strategies (same asset, same indicators and conditions, only settings such as lengths, levels, timeframe, stops or session differ) are grouped into one line showing the best of them; open “similar” to see the rest. Nights = how many runs tested this exact strategy (it passed in how many).</p>
+        <p class="hint" style="margin:8px 0 0">Score = net profit of the first 9 months ÷ the worst drawdown in them × the share of those months that made money. Figures are for 1 lot after brokerage and statutory charges, in whole rupees. Avg margin / lot = for each trade, the margin one lot needed at that trade's entry price (futures: price × lot × Dhan's margin rate; option writing: strike × lot × Dhan's writing margin rate; option buying: premium paid × lot), averaged over the trades. Margin rates come from Dhan's margin calculator, checked each night. Return on margin = the year's net ÷ that average. Similar strategies (same asset, same indicators and conditions, only settings such as lengths, levels, timeframe, stops or session differ) are grouped into one line showing the best of them; open “similar” to see the rest. Nights = how many runs tested this exact strategy (it passed in how many).</p>
       </section>
 
       <section class="card" id="lab_detail" hidden></section>
@@ -2325,7 +2325,7 @@ function readForm() {
 $("stratForm").addEventListener("submit", (e) => {
   e.preventDefault();
   if (needsUpgrade()) { $("formMsg").textContent = "Install the update (top of the page) before saving settings."; return; }
-  let v; try { v = readForm(); } catch (err) { $("formMsg").textContent = err.message; return; }
+  let v; try { v = readForm(); } catch (err) { $("formMsg").textContent = err.message; toast(err.message); return; }
   const s = cur();
   if (s.position !== "FLAT" && (v.strategy_kind !== s.strategy_kind || v.trade_type !== s.trade_type)) { $("formMsg").textContent = "Exit the open position before changing the strategy type or instrument."; return; }
   const patch = { ...v };
@@ -2759,6 +2759,8 @@ async function openLabDetail(id) {
   const draw = () => {
     const v = versions[pickI], m = v.metrics;
     labDetailTrades = v.trades;
+    const mk = labKind(v), tm = (t) => t.margin ?? labTradeMargin(r.config, mk, t, m.margin_pct);
+    const mMax = m.margin_max ?? (v.trades.length ? Math.max(...v.trades.map(tm)) : null);
     box.innerHTML = `<div class="head"><div><span class="label">Lab strategy #${r.id}</span><h2 style="font-size:18px"></h2></div>
       <div class="actions"><button class="btn small" id="ld_star" type="button">${r.starred ? "★ Starred" : "☆ Star (keep)"}</button><button class="btn small" id="ld_xlsx" type="button">Download Excel</button><button class="btn primary small" id="ld_save" type="button">Save as strategy</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
       <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.key === "FUT" ? "Futures" : x.label)}</button>`).join("")}</div>
@@ -2769,8 +2771,9 @@ async function openLabDetail(id) {
         <div class="stat"><span class="label">Trades · win rate</span><span class="v">${m.full.n} · ${m.full.win_rate}%</span></div>
         <div class="stat"><span class="label">Profit factor</span><span class="v">${m.full.pf ?? "–"}</span></div>
         <div class="stat"><span class="label">Max drawdown</span><span class="v">${rupees(m.full.max_dd)}</span></div>
-        <div class="stat"><span class="label">Margin / lot</span><span class="v">${m.margin_lot ? rupees(m.margin_lot) : "–"}</span></div>
-        <div class="stat"><span class="label">Return on margin</span><span class="v ${m.ret_margin > 0 ? "up" : m.ret_margin < 0 ? "down" : ""}">${m.ret_margin == null ? "–" : m.ret_margin + "%"}</span></div>
+        <div class="stat"><span class="label">Avg margin / lot</span><span class="v">${m.margin_lot ? rupees(m.margin_lot) : "–"}</span><span class="hint">${esc(marginNote(m, mk))}</span></div>
+        <div class="stat"><span class="label">Highest margin / lot</span><span class="v">${mMax ? rupees(mMax) : "–"}</span></div>
+        <div class="stat"><span class="label">Return on avg margin</span><span class="v ${m.ret_margin > 0 ? "up" : m.ret_margin < 0 ? "down" : ""}">${m.ret_margin == null ? "–" : m.ret_margin + "%"}</span></div>
         <div class="stat"><span class="label">Profitable months</span><span class="v">${m.pos_months} of ${m.months_n}</span></div>
         <div class="stat"><span class="label">Score</span><span class="v">${m.score}</span></div>
       </div>
@@ -2780,7 +2783,7 @@ async function openLabDetail(id) {
       <dl class="kv">${kv.map(([k, val]) => `<dt>${esc(k)}</dt><dd>${esc(val)}</dd>`).join("")}<dt>This version</dt><dd>${esc(v.label)}${v.key !== "FUT" ? ` · stops: ${esc(riskText(v.risk))}` : ""}</dd>
         ${v.skipped && Object.keys(v.skipped).length ? `<dt>Skipped trades</dt><dd>${esc(Object.entries(v.skipped).map(([k2, n]) => `${k2} (${n})`).join("; "))}</dd>` : ""}</dl>
       <h3 style="font-size:15px;margin:16px 0 6px">Trades ${v.trades.length ? `(${v.trades.length})` : ""}</h3>
-      ${v.trades.length ? `<div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Entry</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">In</th><th class="n">Out</th><th class="n">Net</th><th>Exit reason</th></tr></thead><tbody>${v.trades.map((t) => `<tr><td class="when">${esc(t.entry)}</td><td class="when">${esc(t.exit)}</td><td>${t.side === "LONG" ? "Long" : "Short"}</td><td>${esc(t.contract)}</td><td class="n">${fmtNum(t.entry_px)}</td><td class="n">${fmtNum(t.exit_px)}</td><td class="n ${t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : ""}">${rupees(t.net)}</td><td>${esc(t.exit_why)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="hint">No trades in this period with these settings (trade lists are kept from 8 Oct 2026 for every strategy tested; earlier ones only for those that passed).</p>'}`;
+      ${v.trades.length ? `<div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Entry</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">In</th><th class="n">Out</th><th class="n">Margin (1 lot)</th><th class="n">Net</th><th>Exit reason</th></tr></thead><tbody>${v.trades.map((t) => `<tr><td class="when">${esc(t.entry)}</td><td class="when">${esc(t.exit)}</td><td>${t.side === "LONG" ? "Long" : "Short"}</td><td>${esc(t.contract)}</td><td class="n">${fmtNum(t.entry_px)}</td><td class="n">${fmtNum(t.exit_px)}</td><td class="n">${rupees(tm(t))}</td><td class="n ${t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : ""}">${rupees(t.net)}</td><td>${esc(t.exit_why)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="hint">No trades in this period with these settings (trade lists are kept from 8 Oct 2026 for every strategy tested; earlier ones only for those that passed).</p>'}`;
     box.querySelector("h2").textContent = r.label;
     box.querySelectorAll("#ld_vers button").forEach((b) => b.addEventListener("click", () => { pickI = Number(b.dataset.i); draw(); }));
     $("ld_close").addEventListener("click", () => { box.hidden = true; lab.sel = null; renderLabTable(); });
@@ -2791,11 +2794,25 @@ async function openLabDetail(id) {
   };
   draw();
 }
+/* Margin per lot for one lab trade, worked out the same way as the lab engine. */
+function labKind(v) { return v.key === "FUT" ? "FUT" : v.side === "SELL" ? "SELL" : "BUY"; }
+function labTradeMargin(cfg, kind, t, pct) {
+  const lot = Number(cfg.lot_size), px = Number(t.entry_px);
+  if (kind === "BUY") return Math.trunc(px * lot);
+  const p = Number(pct) || (cfg.data_segment === "MCX_COMM" ? 0.10 : 0.12);
+  if (kind === "SELL") { const m = / (\d+(?:\.\d+)?) (?:CE|PE)\b/.exec(t.contract || ""); return Math.trunc((m ? Number(m[1]) : 0) * lot * p); }
+  return Math.trunc(px * lot * p);
+}
+function marginNote(m, kind) {
+  if (kind === "BUY") return "premium paid × lot, at each trade";
+  const pct = m.margin_pct ? (m.margin_pct * 100).toFixed(1) + "%" : "≈12%";
+  return `${kind === "SELL" ? "strike" : "price"} × lot × ${pct} at each trade${m.margin_src === "Dhan" ? " (Dhan's rate)" : m.margin_src === "estimate" ? " (estimate)" : ""}`;
+}
 async function downloadLabExcel(r, v, kv) {
   await loadScript("vendor/xlsx.mini.min.js");
   const m = v.metrics, wb = XLSX.utils.book_new();
   const p = (name, x) => [[name], ["Trades", x.n], ["Win rate (%)", x.win_rate], ["Net (Rs)", x.net], ["Gross (Rs)", x.gross], ["Charges (Rs)", x.costs], ["Profit factor", x.pf ?? "–"], ["Max drawdown (Rs)", x.max_dd], [] ];
-  const sum = XLSX.utils.aoa_to_sheet([["CA Ankit Garg Trade Desk · Strategy Lab #" + r.id], [r.label], [], ...kv, ["This version", v.label], ["Stops in this version", riskText(v.risk)], ["Passed", m.passed ? "Yes" : "No: " + m.why.join("; ")], ["Score", m.score], ["Margin per lot (Rs)", m.margin_lot ?? "–"], ["Return on margin (%)", m.ret_margin ?? "–"], [],
+  const sum = XLSX.utils.aoa_to_sheet([["CA Ankit Garg Trade Desk · Strategy Lab #" + r.id], [r.label], [], ...kv, ["This version", v.label], ["Stops in this version", riskText(v.risk)], ["Passed", m.passed ? "Yes" : "No: " + m.why.join("; ")], ["Score", m.score], ["Average margin per lot (Rs)", m.margin_lot ?? "–"], ["Highest margin per lot (Rs)", m.margin_max ?? "–"], ["Margin basis", marginNote(m, labKind(v))], ["Return on average margin (%)", m.ret_margin ?? "–"], [],
     ...p("Whole year", m.full), ...p("First 9 months (ranked)", m.train), ...p("Last 3 months (check)", m.test), ["Month", "Net (Rs)", "Trades"], ...m.months.map((x) => [x.m, x.net, x.n])]);
   sum["!cols"] = [{ wch: 26 }, { wch: 90 }];
   XLSX.utils.book_append_sheet(wb, sum, "Summary");
