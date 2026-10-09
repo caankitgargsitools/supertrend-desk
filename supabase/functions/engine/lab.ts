@@ -493,8 +493,8 @@ export async function refreshAsset(sb: SupabaseClient, creds: { client: string; 
   const sec = (await dataSecurity(sb, creds, a.seg, a.sec, today)).sec;
   const daily = await dhan.daily(sec, a.seg, a.instr, addDays(today, -1100), addDays(today, 1));
   await sb.from("lab_candles").upsert({ asset: key, kind: "D", from_day: daily[0]?.day ?? today, to_day: daily.at(-1)?.day ?? today, bars: toCol(daily, false), updated_at: new Date().toISOString() });
-  if (a.commodity) return;
   const want = addDays(today, -(YEAR_DAYS + WARM_DAYS));
+  if (a.commodity) return refreshMcxIntraday(sb, dhan, a, today, want);
   const { data: cached } = await sb.from("lab_candles").select("from_day, to_day, bars").eq("asset", key).eq("kind", "I5").maybeSingle();
   const map = new Map<number, { t: number; o: number; h: number; l: number; c: number }>();
   let start = want;
@@ -509,6 +509,59 @@ export async function refreshAsset(sb: SupabaseClient, creds: { client: string; 
   const lo = Date.parse(`${want}T00:00:00+05:30`) / 1000;
   const rows = [...map.values()].filter((r) => r.t >= lo).sort((x, y) => x.t - y.t);
   await sb.from("lab_candles").upsert({ asset: key, kind: "I5", from_day: ist(rows[0]?.t ?? lo).date, to_day: ist(rows.at(-1)?.t ?? lo).date, bars: toCol(rows, false), updated_at: new Date().toISOString() });
+}
+
+/**
+ * 5-minute candles for an MCX commodity. Dhan serves intraday candles only for contracts that are still listed, so the
+ * first download stitches the listed contracts (each day from the nearest-expiring contract that traded properly that
+ * day, as far back as it was listed); after that every night adds the near-month contract's new days, so the history
+ * grows into a true near-month series and is kept after contracts expire.
+ */
+async function refreshMcxIntraday(sb: SupabaseClient, dhan: Dhan, a: LabAsset, today: string, want: string) {
+  const { data: cached } = await sb.from("lab_candles").select("from_day, to_day, bars").eq("asset", a.key).eq("kind", "I5").maybeSingle();
+  const map = new Map<number, { t: number; o: number; h: number; l: number; c: number }>();
+  let start = want;
+  if (cached) { for (const r of fromCol(cached.bars)) map.set(r.t, r); start = addDays(cached.to_day, -3); }
+  const { data: cons } = await sb.from("mcx_contracts").select("sec_id, expiry").eq("underlying", a.sec).gt("expiry", start).order("expiry").limit(cached ? 2 : 3);
+  if (!cons?.length) return;
+  // Each contract's candles by day.
+  const per: { expiry: string; days: Map<string, { t: number; o: number; h: number; l: number; c: number }[]> }[] = [];
+  let firstErr: unknown = null, got = 0;
+  for (const c of cons) {
+    const days = new Map<string, { t: number; o: number; h: number; l: number; c: number }[]>();
+    const end = c.expiry < today ? c.expiry : today;
+    for (let s = start; s <= end; s = addDays(s, 86)) {
+      const z = addDays(s, 85) < end ? addDays(s, 85) : end;
+      try {
+        for (const r of await dhan.intraday(c.sec_id, a.seg, a.instr, 5, `${s} 09:00:00`, `${z} 23:59:00`)) {
+          const d = ist(r.t).date, arr = days.get(d);
+          if (arr) arr.push(r); else days.set(d, [r]);
+          got++;
+        }
+      } catch (e) {
+        if (e instanceof DhanBusyError || /token|401|DH-901|DH-902/i.test(String(e))) throw e;
+        firstErr ??= e; // no candles for a range before the contract was listed
+      }
+    }
+    per.push({ expiry: c.expiry, days });
+  }
+  if (!got && firstErr && !cached) throw firstErr;
+  // For every day: the nearest contract (not expiring that day) that traded at least 40% of the busiest contract's candles.
+  const allDays = new Set(per.flatMap((p) => [...p.days.keys()]));
+  for (const d of allDays) {
+    const live = per.filter((p) => p.expiry > d && p.days.has(d));
+    if (!live.length) continue;
+    const most = Math.max(...live.map((p) => p.days.get(d)!.length));
+    const use = live.find((p) => p.days.get(d)!.length >= most * 0.4)!;
+    // Replace that day's candles (a day is never mixed from two contracts).
+    const lo = Date.parse(`${d}T00:00:00+05:30`) / 1000, hi = lo + 86400;
+    for (const t of [...map.keys()]) if (t >= lo && t < hi) map.delete(t);
+    for (const r of use.days.get(d)!) map.set(r.t, r);
+  }
+  const lo = Date.parse(`${want}T00:00:00+05:30`) / 1000;
+  const rows = [...map.values()].filter((r) => r.t >= lo).sort((x, y) => x.t - y.t);
+  if (!rows.length) return;
+  await sb.from("lab_candles").upsert({ asset: a.key, kind: "I5", from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, false), updated_at: new Date().toISOString() });
 }
 
 /** Cached candles in the shape the simulator wants. */
