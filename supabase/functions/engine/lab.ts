@@ -653,7 +653,8 @@ const strikeOf = (t: Record<string, unknown>) => { const m = / (\d+(?:\.\d+)?) (
  * Money one lot tied up in one trade, at the price of that trade's entry:
  *  futures – entry price × lot × margin rate; option writing – strike × lot × writing margin rate; option buying – premium paid × lot.
  */
-export function tradeMargin(cfg: LabConfig, kind: "FUT" | "BUY" | "SELL", t: Record<string, unknown>, pct: number): number {
+export function tradeMargin(cfg: LabConfig, kind: "FUT" | "BUY" | "SELL" | "SPREAD", t: Record<string, unknown>, pct: number): number {
+  if (kind === "SPREAD") return Math.trunc(Number(t.margin) || 0); // worked out from the legs when the trade was priced
   const lot = Number(cfg.lot_size), px = Number(t.entry_px);
   if (kind === "BUY") return Math.trunc(px * lot);
   if (kind === "SELL") return Math.trunc((strikeOf(t) || Number(t.spot_in) || 0) * lot * pct);
@@ -663,12 +664,12 @@ export function tradeMargin(cfg: LabConfig, kind: "FUT" | "BUY" | "SELL", t: Rec
  * Stamps each trade with its margin and adds to the metrics: the average margin per lot over the trades (the capital
  * the strategy typically needs), the largest, and the year's net profit as a % of the average.
  */
-export function withTradeMargins(m: LabMetrics, cfg: LabConfig, kind: "FUT" | "BUY" | "SELL", trades: Record<string, unknown>[], rates: Record<string, MarginRate>, fallbackPx: number): LabMetrics {
-  const { pct, src } = kind === "BUY" ? { pct: 1, src: "premium" } : marginRate(cfg, kind, rates);
+export function withTradeMargins(m: LabMetrics, cfg: LabConfig, kind: "FUT" | "BUY" | "SELL" | "SPREAD", trades: Record<string, unknown>[], rates: Record<string, MarginRate>, fallbackPx: number): LabMetrics {
+  const { pct, src } = kind === "BUY" ? { pct: 1, src: "premium" } : kind === "SPREAD" ? { pct: 0, src: "legs" } : marginRate(cfg, kind, rates);
   const ms: number[] = [];
   for (const t of trades) { const v = tradeMargin(cfg, kind, t, pct); t.margin = v; if (v > 0) ms.push(v); }
   const avgM = ms.length ? Math.trunc(avg(ms)) : Math.trunc(kind === "BUY" ? 0 : fallbackPx * Number(cfg.lot_size) * pct);
-  return { ...m, margin_lot: avgM || null, margin_max: ms.length ? Math.max(...ms) : avgM || null, margin_pct: kind === "BUY" ? null : +pct.toFixed(5), margin_src: src,
+  return { ...m, margin_lot: avgM || null, margin_max: ms.length ? Math.max(...ms) : avgM || null, margin_pct: kind === "BUY" || kind === "SPREAD" ? null : +pct.toFixed(5), margin_src: src,
     ret_margin: avgM > 0 ? +((m.full.net / avgM) * 100).toFixed(1) : null };
 }
 const avg = (xs: number[]) => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
@@ -1257,14 +1258,18 @@ function optVariants(cfg: LabConfig) {
     { side: "BUY", label: "Buy options · premium stop 30%, target 60%", risk: { basis: "PREMIUM", sl: { type: "PCT", value: 30 }, tgt: { type: "PCT", value: 60 } } },
     { side: "SELL", label: `Write options · ${own}`, risk: cfg.risk ?? null },
     { side: "SELL", label: "Write options · premium stop 50%, target 50%", risk: { basis: "PREMIUM", sl: { type: "PCT", value: 50 }, tgt: { type: "PCT", value: 50 } } },
-  ];
+    // Multi-leg versions: the signal decides the direction; the structure caps the risk.
+    { side: "SPREAD", label: `Debit spread (bull call / bear put, 2 strikes wide) · ${own}`, risk: cfg.risk ?? null, structure: { preset: "BULL_CALL", w: 2 } },
+    { side: "SPREAD", label: `Credit spread (bull put / bear call, 2 strikes wide) · ${own}`, risk: cfg.risk ?? null, structure: { preset: "BULL_PUT", w: 2 } },
+    { side: "SPREAD", label: `Futures + protective option 2 strikes out · ${own}`, risk: cfg.risk ?? null, structure: { preset: "FUT_HEDGED", d: 2 } },
+  ] as { side: "BUY" | "SELL" | "SPREAD"; label: string; risk: any; structure?: Record<string, unknown> }[];
 }
 async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: string; to: string }, patch: (f: Record<string, unknown>) => unknown): Promise<boolean> {
   const { sb } = ctx;
   const capital = Number(run.settings?.capital ?? 500000);
   const store = dbStore(sb);
   while (Date.now() - ctx.started < WALL_BUDGET - 15000) {
-    const { data: rows } = await sb.from("lab_results").select("id, asset, config, opt_job, opt_buy, opt_sell, label").eq("run_id", run.id).in("stage", ["pricing", "opt_queue"])
+    const { data: rows } = await sb.from("lab_results").select("id, asset, config, opt_job, opt_buy, opt_sell, opt_struct, label").eq("run_id", run.id).in("stage", ["pricing", "opt_queue"])
       .order("stage", { ascending: false }).order("score", { ascending: false }).limit(1);
     const row = rows?.[0];
     if (!row) return false;
@@ -1272,7 +1277,7 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
     const job = row.opt_job ?? { v: 0 };
     const variants = optVariants(row.config);
     const vr = variants[job.v];
-    const s = { ...row.config, trade_type: "OPTIONS", option_side: vr.side, risk: vr.risk, strike_offset: 0, strike_step: a.step, expiry_flag: a.flag, expiry_weekday: a.wd, roll_on_expiry: true };
+    const s = { ...row.config, trade_type: "OPTIONS", option_side: vr.side === "SELL" ? "SELL" : "BUY", structure: vr.structure ?? null, risk: vr.risk, strike_offset: 0, strike_step: a.step, expiry_flag: a.flag, expiry_weekday: a.wd, roll_on_expiry: true };
     if (!job.plans) {
       const data = await loadAsset(sb, row.asset);
       job.plans = simulateRules(s, data, win.from, win.to);
@@ -1296,12 +1301,12 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
     if (job.cursor >= job.plans.length) {
       // Option buying ties up the premium; writing ties up margin on the index's contract value.
       const fallback = avg((job.plans as Plan[]).map((pl) => Number(pl.spotIn)));
-      const metrics = withTradeMargins(labMetrics(job.trades, win.from, win.split, win.to, !!row.config.rules?.daily), row.config, vr.side === "BUY" ? "BUY" : "SELL", job.trades, await loadMarginRates(sb), fallback);
+      const metrics = withTradeMargins(labMetrics(job.trades, win.from, win.split, win.to, !!row.config.rules?.daily), row.config, vr.side, job.trades, await loadMarginRates(sb), fallback);
       // Results with many trades that couldn't be priced aren't trustworthy.
       const unpriced = Object.values(job.acc.skipped ?? {}).reduce((a: number, b) => a + Number(b), 0);
       if (unpriced > job.plans.length * 0.2) { metrics.passed = false; metrics.why.push(`${unpriced} of ${job.plans.length} trades couldn't be priced with real option data`); }
-      const out = { label: vr.label, risk: vr.risk, metrics, trades: job.trades, skipped: job.acc.skipped, planned: job.plans.length };
-      const col = vr.side === "BUY" ? "opt_buy" : "opt_sell";
+      const out = { label: vr.label, risk: vr.risk, structure: vr.structure ?? null, metrics, trades: job.trades, skipped: job.acc.skipped, planned: job.plans.length };
+      const col = vr.side === "BUY" ? "opt_buy" : vr.side === "SELL" ? "opt_sell" : "opt_struct";
       const list = [...((row as any)[col]?.variants ?? []), out];
       // The headline for each side is its best-scoring version; every version is kept.
       const best = list.reduce((x: any, y: any) => (y.metrics.score > x.metrics.score ? y : x));

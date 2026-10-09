@@ -502,10 +502,17 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
           </fieldset>
           <fieldset id="optSet"><legend class="label">Option contract</legend>
             <div class="grid">
-              <label class="f"><span>Buy or write</span><select id="f_option_side"><option value="BUY">Buy options (bullish → CE, bearish → PE)</option><option value="SELL">Write options (bullish → sell PE, bearish → sell CE)</option></select></label>
+              <label class="f wide"><span>What to trade on a signal</span><select id="f_structure"></select></label>
+              <label class="f st-w" hidden><span>Spread width (strikes)</span><input id="f_st_w" type="number" min="1" max="10" step="1" value="2"></label>
+              <label class="f st-d" hidden><span>Distance from the money (strikes)</span><input id="f_st_d" type="number" min="0" max="10" step="1" value="2"></label>
+            </div>
+            <div id="stCustom" hidden></div>
+            <p class="hint" id="stHint" hidden></p>
+            <div class="grid">
+              <label class="f st-single"><span>Buy or write</span><select id="f_option_side"><option value="BUY">Buy options (bullish → CE, bearish → PE)</option><option value="SELL">Write options (bullish → sell PE, bearish → sell CE)</option></select></label>
               <label class="f"><span>Expiry series</span><select id="f_expiry_flag"><option value="WEEK">Weekly</option><option value="MONTH">Monthly (last expiry weekday of the month)</option></select></label>
               <label class="f adv"><span>Strike gap</span><input id="f_strike_step" type="number" min="1" step="1"></label>
-              <label class="f"><span>Strike (0 = at the money, 1 = one strike out of the money)</span><input id="f_strike_offset" type="number" step="1"></label>
+              <label class="f st-single"><span>Strike (0 = at the money, 1 = one strike out of the money)</span><input id="f_strike_offset" type="number" step="1"></label>
               <label class="f adv"><span>Expiry weekday</span><select id="f_expiry_weekday"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option></select></label>
               <label class="f adv"><span>On expiry day</span><select id="f_roll_on_expiry"><option value="true">Use the next expiry</option><option value="false">Use today's expiry</option></select></label>
               <label class="f adv"><span>Expiry override (holiday weeks)</span><input id="f_expiry_override" type="date"></label>
@@ -670,7 +677,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
       <section class="card">
         <div class="labbar">
           <div class="f"><span>Results as</span><div class="seg" id="lab_view" role="group" aria-label="Instrument">
-            <button type="button" data-v="FUT" aria-pressed="true">Futures</button><button type="button" data-v="BUY" aria-pressed="false">Option buying</button><button type="button" data-v="SELL" aria-pressed="false">Option writing</button></div></div>
+            <button type="button" data-v="FUT" aria-pressed="true">Futures</button><button type="button" data-v="BUY" aria-pressed="false">Option buying</button><button type="button" data-v="SELL" aria-pressed="false">Option writing</button><button type="button" data-v="SPREAD" aria-pressed="false">Spreads &amp; hedges</button></div></div>
           <label class="f"><span>Asset</span><select id="lab_asset"><option value="ALL">All assets</option></select></label>
           <label class="f"><span>From</span><select id="lab_period"><option value="run">Latest run only</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option></select></label>
           <label class="f"><span>Stop loss</span><select id="lab_stopf"><option value="ANY">With or without</option><option value="WITH">With stop / target</option><option value="WITHOUT">Without</option></select></label>
@@ -1153,7 +1160,11 @@ function renderStratSummary(s) {
   // What it trades and how much.
   const opt = s.trade_type === "OPTIONS", off = Number(s.strike_offset) || 0;
   const strike = off === 0 ? "at-the-money" : off > 0 ? `${off} strike${off > 1 ? "s" : ""} out of the money` : `${-off} strike${off < -1 ? "s" : ""} in the money`;
-  const what = opt
+  const stx = opt && s.structure && (STRUCTS[s.structure.preset] || s.structure.preset === "CUSTOM") ? s.structure : null;
+  const stLegs = stx ? structLegs(stx.preset === "CUSTOM" ? "CUSTOM" : stx.preset, Number(stx.w ?? 2), Number(stx.d ?? 2)).map((l) => legWord(l, false)) : null;
+  if (stx && stx.preset === "CUSTOM") stLegs.splice(0, stLegs.length, ...(stx.legs || []).map((l) => legWord(l, false)));
+  const what = stx ? `${stx.preset === "CUSTOM" ? "Custom multi-leg" : STRUCTS[stx.preset].name} on ${asset} options: ${stLegs.join(" · ")} (on a Buy signal; mirrored on a Sell signal) · ${s.expiry_flag === "MONTH" ? "monthly" : "weekly"} expiry`
+    : opt
     ? (s.option_side === "SELL" ? `Writes (sells) ${asset} options, ${strike}: a put when bullish, a call when bearish` : `Buys ${asset} options, ${strike}: a call (CE) when bullish, a put (PE) when bearish`) + ` · ${s.expiry_flag === "MONTH" ? "monthly" : "weekly"} expiry`
     : `${asset} futures${s.direction === "BOTH" ? ", long and short" : ""}`;
   row("Trades", esc(what));
@@ -1354,6 +1365,7 @@ function fillForm(s) {
   ruleState.daily = $("f_rules_daily").value === "true";
   fillRisk(s.risk);
   fillSizing(s);
+  fillStructure(s.structure);
   applyKindVisibility();
   $("formMsg").textContent = "";
 }
@@ -2588,6 +2600,8 @@ function readForm() {
     if (out.exit_next_day && out.trade_type === "OPTIONS" && !out.roll_on_expiry) throw new Error("For overnight option trades, set “On expiry day” to use next week's expiry; today's contract expires before your exit.");
     if (out.exit_next_day && out.product_type === "I") throw new Error("Overnight trades need product type M (carry forward); intraday positions get squared off by the broker.");
   }
+  out.structure = readStructure(out);
+  if (out.structure && out.strategy_kind === "TIMED" && out.exit_next_day && out.structure.legs && out.structure.legs.some((l) => l.x === 1)) { /* next-expiry legs are fine overnight */ }
   out.risk = readRisk(out);
   out.sizing = readSizing(out);
   if (out.rules && out.rules.daily && out.intraday) throw new Error("A once-a-day strategy holds positions overnight; set “Square off daily” to No.");
@@ -2604,7 +2618,7 @@ $("stratForm").addEventListener("submit", (e) => {
   if (needsUpgrade()) { $("formMsg").textContent = "Install the update (top of the page) before saving settings."; return; }
   let v; try { v = readForm(); } catch (err) { $("formMsg").textContent = err.message; toast(err.message); return; }
   const s = cur();
-  if (s.position !== "FLAT" && (v.strategy_kind !== s.strategy_kind || v.trade_type !== s.trade_type)) { $("formMsg").textContent = "Exit the open position before changing the strategy type or instrument."; return; }
+  if (s.position !== "FLAT" && (v.strategy_kind !== s.strategy_kind || v.trade_type !== s.trade_type || JSON.stringify(v.structure || null) !== JSON.stringify(s.structure || null))) { $("formMsg").textContent = "Exit the open position before changing the strategy type, instrument or option structure."; return; }
   const patch = { ...v };
   if (v.strategy_kind !== s.strategy_kind) Object.assign(patch, { last_candle_ts: null, last_entry_day: null });
   // Any change to the signal or order rules cancels an armed breakout order; the next candle close re-arms it.
@@ -2646,9 +2660,90 @@ function riskText(r, short) {
   if (r.max_day_loss) parts.push(`max loss ${rupees(r.max_day_loss)}/day`);
   return parts.join(short ? ", " : " · ");
 }
+/* ---------- multi-leg structures (mirror of the engine's structures.ts) ---------- */
+const STRUCTS = {
+  BULL_CALL: { name: "Bull call / bear put spread (debit)", group: "Vertical spreads", w: true, legs: (w) => [{ opt: "CE", act: "B", k: 0 }, { opt: "CE", act: "S", k: w }], note: "Buy the at-the-money option and sell one further out. Capped loss and capped profit; cheaper than buying the option alone. A Sell signal mirrors it into a bear put spread." },
+  BULL_PUT: { name: "Bull put / bear call spread (credit)", group: "Vertical spreads", w: true, legs: (w) => [{ opt: "PE", act: "S", k: 0 }, { opt: "PE", act: "B", k: -w }], note: "Sell the at-the-money option and buy one further out as protection. Collects premium; loss capped at the width minus the premium. A Sell signal mirrors it into a bear call spread." },
+  LONG_STRADDLE: { name: "Long straddle", group: "Straddles & strangles", neutral: true, legs: () => [{ opt: "CE", act: "B", k: 0 }, { opt: "PE", act: "B", k: 0 }], note: "Buy the at-the-money call and put. Gains from a big move either way." },
+  SHORT_STRADDLE: { name: "Short straddle", group: "Straddles & strangles", neutral: true, legs: () => [{ opt: "CE", act: "S", k: 0 }, { opt: "PE", act: "S", k: 0 }], note: "Sell the at-the-money call and put. Gains when the market stays still; unlimited risk both ways." },
+  LONG_STRANGLE: { name: "Long strangle", group: "Straddles & strangles", neutral: true, d: true, legs: (_w, d) => [{ opt: "CE", act: "B", k: d }, { opt: "PE", act: "B", k: -d }], note: "Buy an out-of-the-money call and put. Cheaper than a straddle; needs a bigger move." },
+  SHORT_STRANGLE: { name: "Short strangle", group: "Straddles & strangles", neutral: true, d: true, legs: (_w, d) => [{ opt: "CE", act: "S", k: d }, { opt: "PE", act: "S", k: -d }], note: "Sell an out-of-the-money call and put. Gains in a range; unlimited risk outside it." },
+  IRON_CONDOR: { name: "Iron condor", group: "Iron condor & butterfly", neutral: true, w: true, d: true, legs: (w, d) => [{ opt: "CE", act: "S", k: d }, { opt: "CE", act: "B", k: d + w }, { opt: "PE", act: "S", k: -d }, { opt: "PE", act: "B", k: -d - w }], note: "A short strangle with protection bought further out on both sides. Gains in a range; loss capped." },
+  IRON_FLY: { name: "Iron butterfly", group: "Iron condor & butterfly", neutral: true, w: true, legs: (w) => [{ opt: "CE", act: "S", k: 0 }, { opt: "PE", act: "S", k: 0 }, { opt: "CE", act: "B", k: w }, { opt: "PE", act: "B", k: -w }], note: "A short straddle with protection on both sides. Gains if the market stays near the strike; loss capped." },
+  CALENDAR: { name: "Calendar spread", group: "Calendar", d: true, legs: (_w, d) => [{ opt: "CE", act: "S", k: d, x: 0 }, { opt: "CE", act: "B", k: d, x: 1 }], note: "Sell this expiry and buy the next expiry at the same strike (calls on a Buy signal, puts on a Sell signal). Gains from the faster time decay of the near option." },
+  FUT_HEDGED: { name: "Futures + protective option", group: "Futures + options", d: true, legs: (_w, d) => [{ opt: "FUT", act: "B", k: 0 }, { opt: "PE", act: "B", k: -d }], note: "Futures in the signal's direction with an option bought against it (a put under a long, a call over a short). Loss capped near the strike." },
+  FUT_COVERED: { name: "Futures + covered option", group: "Futures + options", d: true, legs: (_w, d) => [{ opt: "FUT", act: "B", k: 0 }, { opt: "CE", act: "S", k: d }], note: "Futures in the signal's direction with an option sold beyond it for extra income. Profit capped at the strike." },
+};
+let stCustomLegs = [{ opt: "CE", act: "B", k: 0, x: 0, q: 1 }, { opt: "CE", act: "S", k: 2, x: 0, q: 1 }];
+(function initStructSelect() {
+  const groups = {};
+  for (const [k, v] of Object.entries(STRUCTS)) (groups[v.group] = groups[v.group] || []).push(`<option value="${k}">${esc(v.name)}</option>`);
+  $("f_structure").innerHTML = `<option value="">A single option (buy or write, set below)</option>` +
+    Object.entries(groups).map(([g, o]) => `<optgroup label="${esc(g)}">${o.join("")}</optgroup>`).join("") + `<optgroup label="Your own"><option value="CUSTOM">Custom multi-leg (up to 6 legs)</option></optgroup>`;
+})();
+function structLegs(preset, w, d) { return preset === "CUSTOM" ? stCustomLegs : STRUCTS[preset] ? STRUCTS[preset].legs(w, d) : []; }
+function legWord(l, mirror) {
+  const L = mirror ? (l.opt === "FUT" ? { ...l, act: l.act === "B" ? "S" : "B" } : { ...l, opt: l.opt === "CE" ? "PE" : "CE", k: -l.k }) : l;
+  const k = L.opt === "FUT" ? "futures" : `${L.k === 0 ? "ATM" : L.k > 0 ? `ATM+${L.k}` : `ATM−${-L.k}`} ${L.opt}${L.x === 1 ? " (next expiry)" : ""}`;
+  return `${L.act === "B" ? "Buy" : "Sell"}${(L.q || 1) > 1 ? ` ${L.q}×` : ""} ${k}`;
+}
+function renderStructUI() {
+  const v = $("f_structure").value, p = STRUCTS[v], custom = v === "CUSTOM", multi = !!v;
+  document.querySelectorAll("#optSet .st-single").forEach((el) => el.hidden = multi);
+  document.querySelector("#optSet .st-w").hidden = !(p && p.w);
+  document.querySelector("#optSet .st-d").hidden = !(p && p.d);
+  $("stCustom").hidden = !custom;
+  if (custom) {
+    $("stCustom").innerHTML = `<div class="scroll"><table class="mini"><thead><tr><th>Leg</th><th>Instrument</th><th>Buy / sell</th><th>Strike (steps from ATM, + = higher)</th><th>Expiry</th><th>Lots ×</th><th></th></tr></thead><tbody>${stCustomLegs.map((l, i) => `<tr data-i="${i}"><td>${i + 1}</td>
+      <td><select data-k="opt"><option value="CE"${l.opt === "CE" ? " selected" : ""}>Call (CE)</option><option value="PE"${l.opt === "PE" ? " selected" : ""}>Put (PE)</option><option value="FUT"${l.opt === "FUT" ? " selected" : ""}>Futures</option></select></td>
+      <td><select data-k="act"><option value="B"${l.act === "B" ? " selected" : ""}>Buy</option><option value="S"${l.act === "S" ? " selected" : ""}>Sell</option></select></td>
+      <td><input data-k="k" type="number" step="1" min="-10" max="10" value="${l.k}" ${l.opt === "FUT" ? "disabled" : ""}></td>
+      <td><select data-k="x" ${l.opt === "FUT" ? "disabled" : ""}><option value="0"${!l.x ? " selected" : ""}>This expiry</option><option value="1"${l.x === 1 ? " selected" : ""}>Next expiry</option></select></td>
+      <td><input data-k="q" type="number" min="1" max="10" step="1" value="${l.q || 1}"></td>
+      <td><button type="button" class="btn small" data-del="${i}" ${stCustomLegs.length <= 1 ? "disabled" : ""}>Remove</button></td></tr>`).join("")}</tbody></table></div>
+      <button type="button" class="btn small" id="stAdd" ${stCustomLegs.length >= 6 ? "disabled" : ""} style="margin-top:6px">Add a leg</button>`;
+    $("stCustom").querySelectorAll("[data-k]").forEach((el) => el.addEventListener("change", () => {
+      const i = Number(el.closest("tr").dataset.i), k = el.dataset.k;
+      stCustomLegs[i][k] = k === "k" || k === "q" || k === "x" ? Math.trunc(Number(el.value) || 0) : el.value;
+      if (k === "q") stCustomLegs[i].q = Math.max(1, Math.min(10, stCustomLegs[i].q));
+      if (k === "k") stCustomLegs[i].k = Math.max(-10, Math.min(10, stCustomLegs[i].k));
+      renderStructUI();
+    }));
+    $("stCustom").querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => { stCustomLegs.splice(Number(b.dataset.del), 1); renderStructUI(); }));
+    const add = $("stAdd"); if (add) add.addEventListener("click", () => { stCustomLegs.push({ opt: "PE", act: "B", k: 0, x: 0, q: 1 }); renderStructUI(); });
+  }
+  const w = Math.max(1, Math.trunc(Number($("f_st_w").value) || 2)), d = Math.max(0, Math.trunc(Number($("f_st_d").value) || 0));
+  const legs = structLegs(v, w, d);
+  $("stHint").hidden = !multi;
+  if (multi) {
+    const neutral = p && p.neutral;
+    $("stHint").innerHTML = `${p ? esc(p.note) + "<br>" : ""}<strong>On a Buy signal:</strong> ${esc(legs.map((l) => legWord(l, false)).join(" · "))}` +
+      (neutral ? "" : `<br><strong>On a Sell signal (mirrored):</strong> ${esc(legs.map((l) => legWord(l, true)).join(" · "))}`) +
+      `<br>Strikes are counted in strike gaps from the at-the-money strike when the trade opens. All legs go to Dhan in one order and close together; stops and targets are on the index price.${neutral ? " For a neutral structure, set Direction to “Up-trend only” so the rules decide when to open it." : ""}`;
+  }
+  // Premium stops are for single options only.
+  const prem = $("r_basis").querySelector('option[value="PREMIUM"]');
+  if (multi) { prem.disabled = true; if ($("r_basis").value === "PREMIUM") $("r_basis").value = "UNDERLYING"; }
+}
+function readStructure(out) {
+  const v = $("f_structure").value;
+  if (!v || out.trade_type !== "OPTIONS") return null;
+  if (v === "CUSTOM") {
+    if (!stCustomLegs.length) throw new Error("Add at least one leg.");
+    return { preset: "CUSTOM", legs: stCustomLegs.slice(0, 6).map((l) => ({ opt: l.opt, act: l.act, k: l.opt === "FUT" ? 0 : Math.trunc(Number(l.k) || 0), x: l.opt === "FUT" ? 0 : (l.x === 1 ? 1 : 0), q: Math.max(1, Math.trunc(Number(l.q) || 1)) })) };
+  }
+  return { preset: v, w: Math.max(1, Math.min(10, Math.trunc(Number($("f_st_w").value) || 2))), d: Math.max(0, Math.min(10, Math.trunc(Number($("f_st_d").value) || 0))) };
+}
+function fillStructure(st) {
+  $("f_structure").value = st && (STRUCTS[st.preset] || st.preset === "CUSTOM") ? st.preset : "";
+  $("f_st_w").value = st && st.w != null ? st.w : 2; $("f_st_d").value = st && st.d != null ? st.d : 2;
+  if (st && st.preset === "CUSTOM" && Array.isArray(st.legs)) stCustomLegs = st.legs.map((l) => ({ ...l }));
+  renderStructUI();
+}
+["f_structure", "f_st_w", "f_st_d"].forEach((id) => $(id).addEventListener(id === "f_structure" ? "change" : "input", renderStructUI));
 function applyRiskVisibility() {
   const opt = $("f_trade_type").value === "OPTIONS", timed = $("f_kind").value === "TIMED";
-  $("r_basis").querySelector('option[value="PREMIUM"]').disabled = !opt;
+  $("r_basis").querySelector('option[value="PREMIUM"]').disabled = !opt || !!$("f_structure").value;
   if (!opt && $("r_basis").value === "PREMIUM") $("r_basis").value = "UNDERLYING";
   const premium = $("r_basis").value === "PREMIUM";
   for (const k of ["sl", "tgt", "trail"]) {
@@ -2918,7 +3013,7 @@ const robDone = (r) => { const x = robOf(r); return !!x && x.status === "done"; 
 function labPassed(r, m) { return !!(m && m.passed) && r.passed === true; }
 function labChecking(r, m) { const x = robOf(r); return !!(m && m.passed) && r.basic_passed && !!x && x.status !== "done"; }
 const ratioTxt = (v) => v == null ? "–" : `${v}×`;
-function labMetricsFor(r) { return lab.view === "FUT" ? r.metrics : lab.view === "BUY" ? r.ob && r.ob.metrics : r.os && r.os.metrics; }
+function labMetricsFor(r) { return lab.view === "FUT" ? r.metrics : lab.view === "BUY" ? r.ob && r.ob.metrics : lab.view === "SPREAD" ? r.osp && r.osp.metrics : r.os && r.os.metrics; }
 function openLab() {
   closeCap(); hideNewPanes(); page = "lab"; markNav("openLab"); document.body.classList.add("wide");
   lab.open = true;
@@ -2946,14 +3041,14 @@ async function loadLab() {
     db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at").order("id", { ascending: false }).limit(8).then(must),
   ]);
   lab.settings = settings; lab.runs = runs;
-  let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, ob:opt_buy->summary, os:opt_sell->summary")
+  let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary")
     .in("stage", ["screened", "opt_queue", "pricing", "priced"]);
   if (lab.request) q = q.eq("request_id", lab.request);
   else if (lab.period === "run") q = q.eq("run_id", runs[0] ? runs[0].id : -1);
   else q = q.gte("created_at", new Date(Date.now() - Number(lab.period) * 86400000).toISOString());
   // "Passed only" also lists first-round winners still waiting for the tougher test (marked "Being checked").
   if (lab.only && lab.view === "FUT") q = q.or("passed.eq.true,and(basic_passed.eq.true,robust_status.is.null),and(basic_passed.eq.true,robust_status.eq.queued)");
-  if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : "opt_sell", "is", null);
+  if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : lab.view === "SPREAD" ? "opt_struct" : "opt_sell", "is", null);
   if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
   lab.rows = must(await q.order("score", { ascending: false }).limit(2000)).map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
   lab.long = await db.rpc("lab_long_map").then((x) => x.data || {}).catch(() => ({}));
@@ -3161,7 +3256,7 @@ function renderLabTable() {
       c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.champion ? '<span class="chip green">Re-tested</span>' : "",
       r.starred ? '<span class="chip yellow">★</span>' : "", r.promoted_id ? '<span class="chip green">Saved as strategy</span>' : "",
       labPassed(r, m) ? '<span class="chip green">Passed</span>' : labChecking(r, m) ? '<span class="chip blue">Being checked</span>' : m.passed && robDone(r) ? '<span class="chip red">Failed tougher test</span>' : '<span class="chip red">Not passed</span>'].join("");
-    const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : r.os) : null;
+    const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : lab.view === "SPREAD" ? r.osp : r.os) : null;
     const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} similar</button>` : "";
     tr.innerHTML = `<td class="n">${num}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
       <td style="white-space:nowrap">${esc(labAssetName(r.asset))}</td><td>${esc(labStyle(r))}</td><td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}</td><td class="n">${m.margin_lot ? rs(m.margin_lot) : "–"}</td>
@@ -3200,7 +3295,7 @@ async function openLabDetail(id) {
   const box = $("lab_detail"); box.hidden = false;
   const c = r.config, labRun = r.run || {}, a = PRESETS[c.underlying] || {};
   const versions = [{ key: "FUT", label: c.data_segment === "MCX_COMM" ? "MCX futures (near month)" : "Index futures (index price as proxy)", side: null, risk: c.risk, metrics: r.metrics, trades: r.trades || [] }];
-  for (const [col, side] of [["opt_buy", "BUY"], ["opt_sell", "SELL"]]) for (const v of ((r[col] && r[col].variants) || [])) versions.push({ key: side, label: v.label, side, risk: v.risk, metrics: v.metrics, trades: v.trades || [], skipped: v.skipped });
+  for (const [col, side] of [["opt_buy", "BUY"], ["opt_sell", "SELL"], ["opt_struct", "SPREAD"]]) for (const v of ((r[col] && r[col].variants) || [])) versions.push({ key: side, label: v.label, side, risk: v.risk, structure: v.structure || null, metrics: v.metrics, trades: v.trades || [], skipped: v.skipped });
   // Open on the version the table row shows: the best-scoring one of the chosen side.
   const sideVs = versions.map((v, i) => [v, i]).filter(([v]) => v.key === lab.view);
   let pickI = sideVs.length ? sideVs.reduce((a, b) => ((b[0].metrics && b[0].metrics.score) > (a[0].metrics && a[0].metrics.score) ? b : a))[1] : 0;
@@ -3405,8 +3500,9 @@ async function renderLongTests(id) {
   }).join("") + '<p class="hint" style="margin:6px 0 0">1 lot per trade, after brokerage and statutory charges, in rupees. Each period ends on the last day tested. Rupee profits grow with the asset&rsquo;s price, so older years of an asset that has risen a lot (like gold) show smaller rupee figures for the same moves. Futures prices for indices use the index as a proxy.</p>';
 }
 /* Margin per lot for one lab trade, worked out the same way as the lab engine. */
-function labKind(v) { return v.key === "FUT" ? "FUT" : v.side === "SELL" ? "SELL" : "BUY"; }
+function labKind(v) { return v.key === "FUT" ? "FUT" : v.side === "SELL" ? "SELL" : v.side === "SPREAD" ? "SPREAD" : "BUY"; }
 function labTradeMargin(cfg, kind, t, pct) {
+  if (kind === "SPREAD") return Math.trunc(Number(t.margin) || 0);
   const lot = Number(cfg.lot_size), px = Number(t.entry_px);
   if (kind === "BUY") return Math.trunc(px * lot);
   const p = Number(pct) || (cfg.data_segment === "MCX_COMM" ? 0.10 : 0.12);
@@ -3415,6 +3511,7 @@ function labTradeMargin(cfg, kind, t, pct) {
 }
 function marginNote(m, kind) {
   if (kind === "BUY") return "premium paid × lot, at each trade";
+  if (kind === "SPREAD") return "from the legs at each trade: premium paid on bought options, spread width on covered sold ones, writing margin on uncovered ones, futures margin";
   const pct = m.margin_pct ? (m.margin_pct * 100).toFixed(1) + "%" : "≈12%";
   return `${kind === "SELL" ? "strike" : "price"} × lot × ${pct} at each trade${m.margin_src === "Dhan" ? " (Dhan's rate)" : m.margin_src === "estimate" ? " (estimate)" : ""}`;
 }
@@ -3438,8 +3535,8 @@ async function promoteLab(r, v) {
     "session_start", "last_entry", "square_off", "intraday", "trade_type", "option_side", "lots", "lot_size", "qty_mode", "product_type", "strike_step", "strike_offset", "expiry_weekday", "expiry_flag",
     "roll_on_expiry", "atr_period", "factor", "entry_trigger", "buffer_points", "after_hours_flip", "risk"];
   const row = Object.fromEntries(keys.filter((k) => k in c).map((k) => [k, c[k]]));
-  if (v.side) Object.assign(row, { trade_type: "OPTIONS", option_side: v.side, risk: v.risk || null, strike_offset: 0 });
-  row.name = `Lab #${r.id} · ${v.key === "FUT" ? "Futures" : v.side === "SELL" ? "Option writing" : "Option buying"} · ${r.label}`.slice(0, 80);
+  if (v.side) Object.assign(row, { trade_type: "OPTIONS", option_side: v.side === "SELL" ? "SELL" : "BUY", risk: v.risk || null, strike_offset: 0, structure: v.side === "SPREAD" ? v.structure || null : null });
+  row.name = `Lab #${r.id} · ${v.key === "FUT" ? "Futures" : v.side === "SELL" ? "Option writing" : v.side === "SPREAD" ? (v.structure && STRUCTS[v.structure.preset] ? STRUCTS[v.structure.preset].name : "Spread") : "Option buying"} · ${r.label}`.slice(0, 80);
   // Lots stay fixed until you choose to size from capital; the tested worst drawdown for 1 lot is filled in for that.
   row.sizing = { mode: "FIXED", alloc_pct: 20, dd_pct: 25, dd_per_lot: Math.trunc((v.metrics && v.metrics.full && v.metrics.full.max_dd) || 0) || null, dd_mult: 1.5, margin_pct: c.data_segment === "MCX_COMM" ? 10 : 12, max_lots: 10 };
   row.active = false; row.live = false;

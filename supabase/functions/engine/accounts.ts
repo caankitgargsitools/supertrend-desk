@@ -35,7 +35,7 @@ export const LOGIC_FIELDS = [
   "session_start", "last_entry", "square_off", "intraday", "after_hours_flip", "bias_timeframe", "bias_source", "entry_time", "exit_time",
   "exit_next_day", "trade_type", "option_side", "strike_offset", "strike_step", "expiry_flag", "expiry_weekday", "roll_on_expiry", "expiry_override",
   "underlying", "data_security_id", "data_segment", "data_instrument", "exchange", "dhan_symbol", "futures_symbol", "lot_size", "product_type",
-  "leg_template_fut", "leg_template_opt", "asset_class",
+  "leg_template_fut", "leg_template_opt", "asset_class", "structure",
 ];
 
 /** Merges each bought strategy with its master's rules. Strategies whose master is gone are returned with _missing set. */

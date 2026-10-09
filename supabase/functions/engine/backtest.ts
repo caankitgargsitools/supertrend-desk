@@ -3,6 +3,7 @@
 //   1. planBacktest  – downloads index candles once and decides every trade (entry/exit times, strike)
 //   2. priceBatch    – prices as many planned trades as fit in one invocation; the engine chains the rest
 //   3. summarize     – totals once every trade is priced
+import { legsFor, legSign, legText, structMargin, structName, structOf } from "./structures.ts";
 import { Dhan, DhanBusyError, type OptBar } from "./dhan.ts";
 import {
   addDays, aggregate, type Bar, type DayBar, isCommodity, isLastWeekdayOfMonth, ist, minToTime, partialDay, type Raw,
@@ -21,7 +22,7 @@ export type ChargeRates = {
 };
 /** sizing: work out lots per trade from equity with the strategy's sizing settings; deploy_pct: portfolio deployment cap (%). */
 /** margin_rate: Dhan's margin rate (share of contract value) for this asset when the run started; used for lots from capital. */
-export type BtParams = { from: string; to: string; capital: number; brokerage: number; other_pct?: number; charges?: ChargeRates; near_code: number; sizing?: boolean; deploy_pct?: number; margin_rate?: number | null };
+export type BtParams = { from: string; to: string; capital: number; brokerage: number; other_pct?: number; charges?: ChargeRates; near_code: number; sizing?: boolean; deploy_pct?: number; margin_rate?: number | null; sell_rate?: number | null };
 export type ChargeBreakdown = { brokerage: number; stt: number; exch: number; sebi: number; gst: number; stamp: number; total: number };
 
 /** Charges for one round trip (one buy and one sell order), the way the broker's calculator works them out. */
@@ -132,7 +133,8 @@ export async function planBacktest(
   const seg = String(s.data_segment);
   const notes: string[] = [];
   const rules = kind === "RULES" ? validateRules(s.rules) : null;
-  const risk = normaliseRisk(s.risk, isOpt);
+  // Multi-leg structures take their stops on the index / futures price (premium stops are single-option only).
+  const risk = normaliseRisk(s.risk, isOpt && !structOf(s));
   const levels = hasLevels(risk) && risk!.basis === "UNDERLYING";
   const ruleTfs = rules ? ruleTimeframes(rules, s.timeframe_min) : null;
   const needsMinute = kind !== "TIMED" && (s.timeframe_min % 5 !== 0 || (ruleTfs?.intraday ?? []).some((tf) => tf % 5 !== 0));
@@ -378,7 +380,7 @@ export function simulateRules(s: Record<string, any>, data: SimData, from: strin
   let prev = null as Signals | null;
   const cache = memo ?? new Map<string, unknown>();
   const M = <T>(key: string, fn: () => T): T => { if (!cache.has(key)) cache.set(key, fn()); return cache.get(key) as T; };
-  const risk = normaliseRisk(s.risk, isOpt);
+  const risk = normaliseRisk(s.risk, isOpt && !structOf(s));
   const levels = hasLevels(risk) && risk!.basis === "UNDERLYING";
   const atrLen = risk?.atr_len ?? 14;
 
@@ -561,12 +563,13 @@ export async function priceBatch(
   const isExpiry = (d: string) => monthly ? isLastWeekdayOfMonth(d, Number(s.expiry_weekday)) : weekdayOf(d) === Number(s.expiry_weekday);
   const expiriesBetween = (a: string, b: string) => { let n = 0; for (let d = a; d < b; d = addDays(d, 1)) if (isExpiry(d)) n++; return n; };
   const skip = (why: string) => { acc.skipped[why] = (acc.skipped[why] ?? 0) + 1; };
-  const risk = normaliseRisk(s.risk, isOpt);
-  const premiumLevels = isOpt && hasLevels(risk) && risk!.basis === "PREMIUM";
+  const risk = normaliseRisk(s.risk, isOpt && !structOf(s));
+  const premiumLevels = isOpt && !structOf(s) && hasLevels(risk) && risk!.basis === "PREMIUM";
   const maxDayLoss = risk?.max_day_loss ?? null;
   acc.dayNet = acc.dayNet ?? {};
 
   const trades: Record<string, unknown>[] = [];
+  const struct = structOf(s);
   let i = start;
   for (; i < plans.length; i++) {
     if (Date.now() > deadline) break;
@@ -574,6 +577,68 @@ export async function priceBatch(
     if ((i - start) % 10 === 0) await progress(`Pricing trade ${i + 1} of ${plans.length}`);
     // Daily loss limit: once the day's closed trades have lost the limit, no new trades that day.
     if (maxDayLoss && (acc.dayNet[t.entryDay] ?? 0) <= -maxDayLoss) { skip("Daily loss limit reached"); continue; }
+    if (struct) {
+      // Multi-leg: every leg priced at the same entry and exit times; P&L and charges are the sum of the legs.
+      const baseMin = s.strategy_kind !== "TIMED" && s.timeframe_min % 5 !== 0 ? 1 : 5;
+      const inMin = t.fillIn != null ? t.entryMin + baseMin : t.entryMin, outMin = t.fillOut != null ? t.exitMin + baseMin : t.exitMin;
+      const inCode = p.near_code + (s.roll_on_expiry && isExpiry(t.entryDay) ? 1 : 0);
+      const gone = expiriesBetween(t.entryDay, t.exitDay);
+      const legs = legsFor(struct, t.side, t.spotIn, step);
+      if (legs.some((l) => l.opt !== "FUT" && inCode + (l.x ?? 0) - gone < p.near_code)) { skip("Contract expired before the exit (turn on next-week expiry)"); continue; }
+      const priced: (typeof legs[number] & { px: number; out: number })[] = [];
+      let bad = false;
+      try {
+        for (const l of legs) {
+          if (l.opt === "FUT") { priced.push({ ...l, px: t.spotIn, out: t.spotOut ?? t.spotIn }); continue; }
+          const a = await optPrice(t.entryDay, inMin, t.spotIn, l.opt, l.strike!, inCode + (l.x ?? 0));
+          const b = a == null ? null : await optPrice(t.exitDay, outMin, t.spotOut ?? t.spotIn, l.opt, l.strike!, inCode + (l.x ?? 0) - gone);
+          if (a == null || b == null) { bad = true; break; }
+          priced.push({ ...l, px: a, out: b });
+        }
+      } catch (e) {
+        if (e instanceof DhanBusyError) { acc.busy = (acc.busy ?? 0) + 1; break; }
+        throw e;
+      }
+      if (bad) { skip("No historical price for a leg at that time"); continue; }
+      const lot = Number(s.lot_size);
+      const mLot = structMargin(priced, t.spotIn, lot, Number(p.margin_rate) > 0 ? Number(p.margin_rate) : 0.12, Number(p.sell_rate) > 0 ? Number(p.sell_rate) : 0.12);
+      let lots = Number(s.lots);
+      if (sz) {
+        const sr = lotsFor(sz, acc.equity, mLot, 0, Number(p.deploy_pct ?? 100));
+        if (sr.lots < 1) { skip("Not enough capital for 1 lot"); continue; }
+        lots = sr.lots;
+        acc.lots = acc.lots ?? { min: lots, max: lots, sum: 0, n: 0 };
+        acc.lots.min = Math.min(acc.lots.min, lots); acc.lots.max = Math.max(acc.lots.max, lots); acc.lots.sum += lots; acc.lots.n++;
+      }
+      const units = lots * lot;
+      let exact = 0;
+      const ch = { brokerage: 0, stt: 0, exch: 0, sebi: 0, gst: 0, stamp: 0, total: 0 };
+      for (const l of priced) {
+        const u = units * (l.q ?? 1), sg = legSign(l);
+        exact += (l.out - l.px) * sg * u;
+        const c1 = tradeCharges(p, l.opt !== "FUT", (sg === 1 ? l.px : l.out) * u, (sg === 1 ? l.out : l.px) * u);
+        for (const k of ["brokerage", "stt", "exch", "sebi", "gst", "stamp", "total"] as const) ch[k] += c1[k];
+      }
+      // Net premium of the position per unit (paid when positive, received when negative), at entry and exit.
+      const netIn = priced.reduce((a2, l) => a2 + legSign(l) * l.px * (l.q ?? 1), 0), netOut = priced.reduce((a2, l) => a2 + legSign(l) * l.out * (l.q ?? 1), 0);
+      const g = Math.trunc(exact), c = Math.trunc(ch.total), net = Math.trunc(exact - ch.total);
+      acc.chg = acc.chg ?? { brokerage: 0, stt: 0, exch: 0, sebi: 0, gst: 0, stamp: 0 };
+      for (const k of ["brokerage", "stt", "exch", "sebi", "gst", "stamp"] as const) acc.chg[k] += ch[k];
+      acc.gross += g; acc.costs += c; acc.equity += net;
+      if (net > 0) { acc.wins++; acc.grossWin += net; } else acc.grossLoss += -net;
+      acc.peak = Math.max(acc.peak, acc.equity); acc.maxDd = Math.max(acc.maxDd, acc.peak - acc.equity);
+      acc.lastDone = t.exitDay;
+      acc.dayNet[t.exitDay] = (acc.dayNet[t.exitDay] ?? 0) + net;
+      trades.push({
+        entry: `${t.entryDay} ${minToTime(t.entryMin)}`, exit: `${t.exitDay} ${minToTime(t.exitMin)}`, side: t.side,
+        contract: `${structName(struct)}: ${priced.map((l) => legText(l, s.dhan_symbol)).join(" · ")}`,
+        legs: priced.map((l) => ({ opt: l.opt, act: l.act, strike: l.strike, x: l.x ?? 0, q: l.q ?? 1, in: +l.px.toFixed(2), out: +l.out.toFixed(2) })),
+        why: t.why, exit_why: t.exitWhy, entry_px: +netIn.toFixed(2), exit_px: +netOut.toFixed(2), units, lots, margin: Math.trunc(mLot),
+        spot_in: t.spotIn, gross: g, costs: c, net, equity: Math.trunc(acc.equity),
+        chg: { brokerage: ch.brokerage, stt: ch.stt, exch: ch.exch, sebi: ch.sebi, gst: ch.gst, stamp: ch.stamp, total: ch.total },
+      });
+      continue;
+    }
     let inPx: number | null = null, outPx: number | null = null, contract = "";
     // Breakout fills are stamped with the base candle in which the trigger traded; price the option at that candle's end.
     const baseMin = s.strategy_kind !== "TIMED" && s.timeframe_min % 5 !== 0 ? 1 : 5;
@@ -655,7 +720,7 @@ export function summarize(s: Record<string, any>, p: BtParams, planned: number, 
     profit_factor: acc.grossLoss > 0 ? +(acc.grossWin / acc.grossLoss).toFixed(2) : null,
     avg_net: n ? Math.trunc(net / n) : 0,
     skipped: acc.skipped, notes: acc.notes ?? [],
-    priced_with: s.trade_type === "OPTIONS" ? "Dhan expired-options data (5-minute)" : isCommodity(String(s.data_segment)) ? "Near-month futures prices" : "Index prices as a futures proxy",
+    priced_with: structOf(s) ? `Dhan expired-options data (5-minute), every leg of the ${structName(structOf(s)!)}` : s.trade_type === "OPTIONS" ? "Dhan expired-options data (5-minute)" : isCommodity(String(s.data_segment)) ? "Near-month futures prices" : "Index prices as a futures proxy",
     dhan_calls: acc.calls, last_day_done: acc.lastDone, partial,
     lots: acc.lots && acc.lots.n ? { min: acc.lots.min, max: acc.lots.max, avg: +(acc.lots.sum / acc.lots.n).toFixed(1) } : null,
     charges: acc.chg ? Object.fromEntries(Object.entries(acc.chg).map(([k, v]) => [k, Math.trunc(v)])) : null,

@@ -17,6 +17,7 @@ import { LAB_ASSETS, labNext, labStart, labStep, periodWindows, TOKEN_ERR } from
 import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
 import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
+import { legsFor, legSign, structMargin, structName, structOf } from "./structures.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -47,7 +48,7 @@ function warmDays(tf: number, atr: number, seg = "IDX_I", bars = WARM_BARS) {
   const dayMins = isCommodity(seg) ? 860 : 375;
   return Math.min(400, Math.max(5, Math.ceil(((Math.max(bars, atr * 10) * tf) / dayMins) * 1.5) + 4));
 }
-const FLAT_STATE = { position: "FLAT", pos_option_type: null, pos_option_side: null, pos_strike: null, pos_expiry: null, pos_qty: null, pos_entry_date: null, pos_risk: null,
+const FLAT_STATE = { position: "FLAT", pos_legs: null, pos_option_type: null, pos_option_side: null, pos_strike: null, pos_expiry: null, pos_qty: null, pos_entry_date: null, pos_risk: null,
   pos_entry_px: null, pos_entry_prem: null, pos_lots: null, pos_margin: null, pos_ltp: null, pos_ltp_at: null, pos_upnl: null };
 const NO_PENDING = { pending_target: null, pending_trigger: null, pending_from: null, pending_to: null };
 const hhmm = (sec: number) => fmtIst(sec, true).slice(11, 16);
@@ -115,7 +116,59 @@ function qtyOf(s: Strategy): number {
   return s.qty_mode === "LOTS" ? s.lots : s.lots * s.lot_size;
 }
 
-function exitLeg(s: Strategy, sort: number) {
+/* ---------- multi-leg structures (spreads, straddles, condors, calendars, futures + option) ---------- */
+type MLeg = { opt: "CE" | "PE" | "FUT"; act: "B" | "S"; strike: number | null; expiry: string | null; q: number; qty: number; x?: number; px?: number | null };
+const isMulti = (s: Strategy) => !!structOf(s);
+const asArr = <T>(x: T | T[]): T[] => Array.isArray(x) ? x : [x];
+/** The expiry after a given one (for the far leg of a calendar spread). */
+function expiryAfter(s: Strategy, exp: string): string {
+  const t = ist(Date.parse(`${exp}T12:00:00+05:30`) / 1000 + 86400);
+  return s.expiry_flag === "MONTH" ? nextMonthlyExpiry(t, Number(s.expiry_weekday), false) : nextExpiry(t, Number(s.expiry_weekday), false);
+}
+/** Orders for the legs: opening buys first (the margin benefit of a hedge needs it), closing buy-backs first. */
+function orderLegs(s: Strategy, legs: MLeg[], closing: boolean, sort0: number) {
+  const first = closing ? "S" : "B";
+  return [...legs].sort((a, b) => (a.act === first ? 0 : 1) - (b.act === first ? 0 : 1)).map((l, i) => {
+    const side = closing ? (l.act === "B" ? "S" : "B") : l.act;
+    return l.opt === "FUT"
+      ? fillTemplate(s.leg_template_fut, { side, qty: l.qty, exchange: s.exchange, product: s.product_type, sort: sort0 + i, symbol: s.futures_symbol })
+      : fillTemplate(s.leg_template_opt, { side, qty: l.qty, exchange: s.exchange, product: s.product_type, sort: sort0 + i, symbol: s.dhan_symbol, option_type: l.opt, strike: l.strike ?? "", expiry: l.expiry ?? "" });
+  });
+}
+const mlegText = (s: Strategy, l: MLeg) => `${l.act === "B" ? "Buy" : "Sell"} ${l.opt === "FUT" ? `${s.futures_symbol}` : `${s.dhan_symbol} ${l.strike} ${l.opt} (${l.expiry})`}`;
+function multiEntry(s: Strategy, want: Pos, close: number, sort: number, lots: number) {
+  const st = structOf(s)!, today = ist(Date.now() / 1000);
+  const exp0 = s.expiry_override && s.expiry_override >= today.date ? s.expiry_override
+    : s.expiry_flag === "MONTH" ? nextMonthlyExpiry(today, s.expiry_weekday, s.roll_on_expiry) : nextExpiry(today, s.expiry_weekday, s.roll_on_expiry);
+  const exp1 = expiryAfter(s, exp0);
+  const qty = s.qty_mode === "LOTS" ? lots : lots * Number(s.lot_size);
+  const legs: MLeg[] = legsFor(st, want as "LONG" | "SHORT", close, Number(s.strike_step)).map((l) => ({
+    opt: l.opt, act: l.act, strike: l.strike, expiry: l.opt === "FUT" ? null : l.x === 1 ? exp1 : exp0, q: l.q ?? 1, qty: qty * (l.q ?? 1), x: l.x ?? 0,
+  }));
+  return {
+    leg: orderLegs(s, legs, false, sort),
+    state: { pos_option_type: null, pos_option_side: "MULTI", pos_strike: null, pos_expiry: exp0, pos_qty: qty, pos_legs: legs, pos_entry_date: today.date, _px: close } as Record<string, any>,
+    label: `${structName(st)}: ${legs.map((l) => mlegText(s, l)).join(" · ")} x ${qty}`,
+  };
+}
+/** Prices of the open legs now (option premiums; a futures leg at the index / futures price). Null if any is missing. */
+async function multiPx(dhan: Dhan, s: Strategy, legs: MLeg[]): Promise<number[] | null> {
+  const out: number[] = [];
+  for (const l of legs) {
+    let px: number | null = null;
+    try {
+      px = l.opt === "FUT" ? await dhan.ltp(s.data_segment, String(s.data_security_id)) : await dhan.premium(s.data_security_id, s.data_segment, String(l.expiry), Number(l.strike), l.opt);
+    } catch { px = null; }
+    if (!(Number(px) > 0)) return null;
+    out.push(Number(px));
+  }
+  return out;
+}
+/** Net premium of the structure per unit of quantity: paid (+) or received (−). */
+const netPrem = (legs: MLeg[], px: number[]) => legs.reduce((a, l, i) => a + legSign(l) * (l.q ?? 1) * px[i], 0);
+
+function exitLeg(s: Strategy, sort: number): Record<string, unknown> | Record<string, unknown>[] {
+  if (isMulti(s) && Array.isArray(s.pos_legs)) return orderLegs(s, s.pos_legs as MLeg[], true, sort);
   const opt = s.trade_type === "OPTIONS";
   return fillTemplate(opt ? s.leg_template_opt : s.leg_template_fut, {
     // An option bought is sold to close; an option written is bought back.
@@ -126,7 +179,8 @@ function exitLeg(s: Strategy, sort: number) {
   });
 }
 
-function entryLeg(s: Strategy, want: Pos, close: number, sort: number, lots = Number(s.lots)) {
+function entryLeg(s: Strategy, want: Pos, close: number, sort: number, lots = Number(s.lots)): { leg: Record<string, unknown> | Record<string, unknown>[]; state: Record<string, any>; label: string } {
+  if (isMulti(s)) return multiEntry(s, want, close, sort, lots);
   const opt = s.trade_type === "OPTIONS";
   const qty = s.qty_mode === "LOTS" ? lots : lots * Number(s.lot_size);
   const today = ist(Date.now() / 1000);
@@ -157,6 +211,7 @@ function entryLeg(s: Strategy, want: Pos, close: number, sort: number, lots = Nu
 }
 
 function exitLabel(s: Strategy): string {
+  if (isMulti(s) && Array.isArray(s.pos_legs)) return `Close ${structName(structOf(s)!)}: ${(s.pos_legs as MLeg[]).map((l) => mlegText(s, { ...l, act: l.act === "B" ? "S" : "B" })).join(" · ")} x ${s.pos_qty}`;
   if (s.trade_type === "OPTIONS") return `${s.pos_option_side === "SELL" ? "Buy back" : "Sell"} ${s.dhan_symbol} ${s.pos_strike} ${s.pos_option_type} (${s.pos_expiry}) x ${s.pos_qty}`;
   return `${s.position === "LONG" ? "Sell" : "Buy"} ${s.futures_symbol} x ${s.pos_qty} to close ${String(s.position).toLowerCase()}`;
 }
@@ -165,7 +220,7 @@ type Candle = { t?: number; trend?: number; c?: number; st?: number };
 
 /* ---------- stop loss, target, trailing stop, daily loss limit (live) ---------- */
 type PosRisk = Partial<RiskState> & { basis: string; entry?: number; entryPrem?: number | null };
-const riskOf = (s: Strategy) => normaliseRisk(s.risk, s.trade_type === "OPTIONS");
+const riskOf = (s: Strategy) => normaliseRisk(s.risk, s.trade_type === "OPTIONS" && !isMulti(s));
 const unitsOf = (s: Strategy) => s.qty_mode === "LOTS" ? Number(s.pos_qty) * Number(s.lot_size) : Number(s.pos_qty);
 const lotsOf = (s: Strategy) => s.qty_mode === "LOTS" ? Number(s.pos_qty) : Math.round(Number(s.pos_qty) / Number(s.lot_size));
 const todayIst = () => ist(Date.now() / 1000).date;
@@ -183,7 +238,7 @@ async function armRisk(s: Strategy, set: Settings, st: Record<string, any>, px: 
   if (!r) return;
   const pr: PosRisk = { basis: r.basis, entry: px };
   const opt = s.trade_type === "OPTIONS";
-  if (opt) pr.entryPrem = st.pos_entry_prem ?? ((r.basis === "PREMIUM" || r.max_day_loss) ? await premiumOf(dhanFor(set), s, st) : null);
+  if (opt && !isMulti(s)) pr.entryPrem = st.pos_entry_prem ?? ((r.basis === "PREMIUM" || r.max_day_loss) ? await premiumOf(dhanFor(set), s, st) : null);
   if (hasLevels(r)) {
     const premium = r.basis === "PREMIUM";
     const dir = premium ? (st.pos_option_side === "SELL" ? -1 : 1) : (st.position === "LONG" ? 1 : -1);
@@ -216,7 +271,7 @@ async function capitalState(set: Settings, live: boolean, excludeId: string) {
  * writing, intraday or carry-forward. Null for option buying (that needs the premium) or when no check is stored.
  */
 async function dhanRate(s: Strategy): Promise<number | null> {
-  if (s.trade_type === "OPTIONS" && s.option_side !== "SELL") return null;
+  if (isMulti(s) || (s.trade_type === "OPTIONS" && s.option_side !== "SELL")) return null;
   const r = (await loadMarginRates(sb))[String(s.underlying)];
   if (!r) return null;
   const intraday = s.product_type === "I" || !!s.intraday;
@@ -227,14 +282,29 @@ async function dhanRate(s: Strategy): Promise<number | null> {
  * strategy sizes from capital, works out the lots and rewrites the entry order. Returns false if the entry is skipped.
  */
 async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknown>[], newState: Record<string, any>, entryPx: number, notes: string[]): Promise<boolean> {
-  const opt = s.trade_type === "OPTIONS";
-  const premium = opt ? await premiumOf(dhanFor(set), s, newState) : null;
+  const opt = s.trade_type === "OPTIONS", multi = isMulti(s);
+  // A structure: every leg's price now; the margin for 1 lot from the legs (bought premium, spread widths, futures).
+  const nLegs = multi ? (newState.pos_legs as MLeg[] ?? []).length : 1;
+  let mpx: number[] | null = null;
+  if (multi) {
+    mpx = await multiPx(dhanFor(set), s, newState.pos_legs as MLeg[]);
+    if (mpx) newState.pos_legs = (newState.pos_legs as MLeg[]).map((l, i) => ({ ...l, px: +mpx![i].toFixed(2) }));
+    else notes.push("Couldn't read every leg's price; the ledger will show this trade without P&L.");
+  }
+  const premium = multi ? (mpx ? +netPrem(newState.pos_legs as MLeg[], mpx).toFixed(2) : null) : opt ? await premiumOf(dhanFor(set), s, newState) : null;
   // Margin per lot at today's Dhan rate (falls back to the strategy's own margin % when Dhan's isn't known).
   const rate = await dhanRate(s).catch(() => null);
   const sz0 = normaliseSizing(s.sizing, String(s.data_segment));
   const sz = sz0 && rate ? { ...sz0, margin_pct: rate * 100 } : sz0;
   let lots = Number(s.lots);
-  const mLot = marginPerLot(s as any, sz ?? (rate ? { margin_pct: rate * 100 } as any : null), entryPx, premium);
+  let mLot = marginPerLot(s as any, sz ?? (rate ? { margin_pct: rate * 100 } as any : null), entryPx, premium);
+  if (multi) {
+    const mr = (await loadMarginRates(sb))[String(s.underlying)];
+    const intra = s.product_type === "I" || !!s.intraday;
+    const fr = (intra ? mr?.futI ?? mr?.fut : mr?.fut ?? mr?.futI) ?? 0.12, sr = (intra ? mr?.sellI ?? mr?.sell : mr?.sell ?? mr?.sellI) ?? 0.12;
+    const per = (newState.pos_legs as MLeg[]).map((l, i) => ({ opt: l.opt, act: l.act, k: 0, x: (l.x ?? 0) as 0 | 1, q: l.q, strike: l.strike, px: mpx ? mpx[i] : 0 }));
+    mLot = structMargin(per, entryPx, Number(s.lot_size), fr, sr);
+  }
   if ((sz || capMode) && rate) notes.push(`Margin ${(rate * 100).toFixed(1)}% of contract value (Dhan, today)`);
   const capMode = s.sizing?.mode === "CAPITAL" && Number(s.capital) > 0;
   if (capMode) {
@@ -252,9 +322,9 @@ async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknow
     const why = `capital ₹${r0(eq)} ÷ ₹${r0(mLot)} a lot → ${byCap}${byRoom < byCap ? `; account deployment cap → ${byRoom}` : ""}${max < Math.min(byCap, byRoom) ? `; max ${max}` : ""} ⇒ ${n} lot${n === 1 ? "" : "s"}`;
     if (n < 1) { notes.push(`Entry skipped: not enough capital for 1 lot (${why}).`); return false; }
     lots = n;
-    const e = entryLeg(s, newState.position, entryPx, legs.length, lots);
-    legs[legs.length - 1] = e.leg;
-    Object.assign(newState, e.state);
+    const e = entryLeg(s, newState.position, entryPx, legs.length - nLegs + 1, lots);
+    legs.splice(legs.length - nLegs, nLegs, ...asArr(e.leg));
+    Object.assign(newState, e.state, multi && mpx ? { pos_legs: (e.state.pos_legs as MLeg[]).map((l, i) => ({ ...l, px: +mpx![i].toFixed(2) })) } : {});
     const last = notes.length - 1;
     if (last >= 0) notes[last] = notes[last].replace(/ x \d+$/, ` x ${e.state.pos_qty}`);
     notes.push(`Size: ${why}`);
@@ -263,9 +333,9 @@ async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknow
     const res = lotsFor(sz, cs.equity, mLot, cs.used, Number(set.deploy_pct ?? 100));
     if (res.lots < 1) { notes.push(`Entry skipped: not enough capital for 1 lot (${res.why}).`); return false; }
     lots = res.lots;
-    const e = entryLeg(s, newState.position, entryPx, legs.length, lots);
-    legs[legs.length - 1] = e.leg;
-    Object.assign(newState, e.state);
+    const e = entryLeg(s, newState.position, entryPx, legs.length - nLegs + 1, lots);
+    legs.splice(legs.length - nLegs, nLegs, ...asArr(e.leg));
+    Object.assign(newState, e.state, multi && mpx ? { pos_legs: (e.state.pos_legs as MLeg[]).map((l, i) => ({ ...l, px: +mpx![i].toFixed(2) })) } : {});
     const last = notes.length - 1;
     if (last >= 0) notes[last] = notes[last].replace(/ x \d+$/, ` x ${e.state.pos_qty}`);
     notes.push(`Size: ${res.why}`);
@@ -279,6 +349,7 @@ async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknow
  */
 async function bookPnl(s: Strategy, set: Settings, update: Record<string, unknown>, exitPx: number | undefined, why: string, exitPrem?: number | null): Promise<number | null> {
   if (s.position === "FLAT") return null;
+  if (isMulti(s) && Array.isArray(s.pos_legs)) return bookMulti(s, set, update, why);
   const r = riskOf(s), pr = (s.pos_risk ?? {}) as PosRisk;
   const opt = s.trade_type === "OPTIONS";
   const inPx = opt ? Number(s.pos_entry_prem ?? pr.entryPrem ?? 0) : Number(s.pos_entry_px ?? pr.entry ?? 0);
@@ -305,8 +376,35 @@ async function bookPnl(s: Strategy, set: Settings, update: Record<string, unknow
   }
   return outPx;
 }
+/** A structure closed: each leg's price now against its entry, charges per leg, booked as one trade. Returns the net premium. */
+async function bookMulti(s: Strategy, set: Settings, update: Record<string, unknown>, why: string): Promise<number | null> {
+  const legs = s.pos_legs as MLeg[];
+  const px = await multiPx(dhanFor(set), s, legs);
+  if (!px || legs.some((l) => !(Number(l.px) > 0))) return px ? +netPrem(legs, px).toFixed(2) : null;
+  const units = unitsOf(s);
+  let gross = 0, costs = 0;
+  for (let i = 0; i < legs.length; i++) {
+    const l = legs[i], u = units * (l.q ?? 1), sg = legSign(l), a = Number(l.px), b = px[i];
+    gross += (b - a) * sg * u;
+    costs += tradeCharges({ from: "", to: "", capital: 0, brokerage: 20, charges: ratesFor(s), near_code: 1 }, l.opt !== "FUT", (sg === 1 ? a : b) * u, (sg === 1 ? b : a) * u).total;
+  }
+  const net = Math.trunc(gross - costs), inNet = netPrem(legs, legs.map((l) => Number(l.px))), outNet = netPrem(legs, px);
+  await sb.from("algo_trades").insert({
+    strategy_id: s.id, user_id: s.owner_id ?? null, broker_ref: brokerRef(s), mode: s.live ? "LIVE" : "PAPER", entry_day: s.pos_entry_date ?? null, exit_at: new Date().toISOString(), side: s.position,
+    contract: `${structName(structOf(s)!)}: ${legs.map((l) => mlegText(s, l)).join(" · ")}`.slice(0, 300), lots: lotsOf(s), units,
+    entry_px: +inNet.toFixed(2), exit_px: +outNet.toFixed(2), gross: Math.trunc(gross), costs: Math.trunc(costs), net, exit_why: why.slice(0, 200),
+  });
+  const r = riskOf(s);
+  if (r?.max_day_loss) {
+    const today = todayIst();
+    const base = String(s.day_pnl_date) === today ? Number(s.day_pnl) || 0 : 0;
+    update.day_pnl = Math.trunc(base + net); update.day_pnl_date = today;
+  }
+  return +outNet.toFixed(2);
+}
 /** Key used to match a desk trade with the broker's position: OPT|symbol|strike|CE/PE|expiry or FUT|symbol. */
 function brokerRef(s: Strategy): string {
+  if (isMulti(s) && Array.isArray(s.pos_legs)) return `MULTI|${s.dhan_symbol}|${(s.pos_legs as MLeg[]).map((l) => `${l.act}${l.opt}${l.strike ?? ""}@${l.expiry ?? ""}`).join(",")}`.slice(0, 200);
   return s.trade_type === "OPTIONS" ? `OPT|${s.dhan_symbol}|${s.pos_strike}|${s.pos_option_type}|${s.pos_expiry}` : `FUT|${s.futures_symbol}`;
 }
 /** Checks an open position against its stop / target every minute. Returns the strategy as it stands afterwards. */
@@ -337,7 +435,7 @@ async function liveRisk(s: Strategy, set: Settings): Promise<Strategy> {
   }
   const event = /Target/.test(hit.why) ? "TARGET" : /Trailing/.test(hit.why) ? "TRAIL_STOP" : "STOP_LOSS";
   const under = pr.basis === "PREMIUM" ? undefined : hit.px;
-  const ok = await sendOrders(s, set, event, [exitLeg(s, 1)], `${hit.why}${pr.basis === "PREMIUM" ? " (premium)" : ""}: ${exitLabel(s)}`, { t: hit.t, c: under });
+  const ok = await sendOrders(s, set, event, asArr(exitLeg(s, 1)), `${hit.why}${pr.basis === "PREMIUM" ? " (premium)" : ""}: ${exitLabel(s)}`, { t: hit.t, c: under });
   if (!ok) {
     update.last_error = "Stop-loss exit failed to send, so the strategy was paused. Close the position in Dhan.";
     update.active = false;
@@ -401,6 +499,10 @@ type Fill = { leg: "Entry" | "Exit"; side: "BUY" | "SELL"; ref: string; qty: num
 function fillOf(st: Strategy, leg: "Entry" | "Exit", px: number | null | undefined): Fill {
   const opt = st.trade_type === "OPTIONS";
   const buyEntry = opt ? st.pos_option_side !== "SELL" : st.position === "LONG";
+  if (isMulti(st)) {
+    const lots = st.qty_mode === "LOTS" ? Number(st.pos_qty) : Math.round(Number(st.pos_qty) / Number(st.lot_size));
+    return { leg, side: leg === "Entry" ? "BUY" : "SELL", ref: brokerRef(st), qty: st.qty_mode === "LOTS" ? lots * Number(st.lot_size) : Number(st.pos_qty), px: px != null && Number.isFinite(Number(px)) ? +Number(px).toFixed(2) : null, basis: "net premium (all legs)" };
+  }
   const buy = leg === "Entry" ? buyEntry : !buyEntry;
   const lots = st.qty_mode === "LOTS" ? Number(st.pos_qty) : Math.round(Number(st.pos_qty) / Number(st.lot_size));
   return { leg, side: buy ? "BUY" : "SELL", ref: brokerRef(st), qty: st.exchange === "MCX" ? lots : (st.qty_mode === "LOTS" ? Number(st.pos_qty) * Number(st.lot_size) : Number(st.pos_qty)),
@@ -414,6 +516,15 @@ async function markPrice(s: Strategy, set: Settings): Promise<Strategy> {
   if (s.position === "FLAT") return s;
   if (s.pos_ltp_at && Date.now() - Date.parse(s.pos_ltp_at) < 50000) return s;
   const opt = s.trade_type === "OPTIONS";
+  if (isMulti(s) && Array.isArray(s.pos_legs)) {
+    const legs = s.pos_legs as MLeg[], mp = await multiPx(dhanFor(set), s, legs);
+    if (!mp) return s;
+    const units = unitsOf(s);
+    const upnl = legs.every((l) => Number(l.px) > 0) ? Math.trunc(legs.reduce((a, l, i) => a + (mp[i] - Number(l.px)) * legSign(l) * units * (l.q ?? 1), 0)) : null;
+    const upd = { pos_ltp: +netPrem(legs, mp).toFixed(2), pos_ltp_at: new Date().toISOString(), pos_upnl: upnl };
+    await sb.from("algo_strategies").update(upd).eq("id", s.id);
+    return { ...s, ...upd };
+  }
   let px: number | null = null;
   try { px = opt ? await premiumOf(dhanFor(set), s, s) : await dhanFor(set).ltp(s.data_segment, String(s.data_security_id)); } catch { px = null; }
   if (!(Number(px) > 0)) return s;
@@ -477,7 +588,7 @@ async function logSignal(s: Strategy, event: string, description: string, candle
 
 async function flatten(s: Strategy, set: Settings, update: Record<string, unknown>, candle: Candle) {
   if (s.position === "FLAT") return;
-  const ok = await sendOrders(s, set, "FLATTEN", [exitLeg(s, 1)], `Manual exit: ${exitLabel(s)}`, candle);
+  const ok = await sendOrders(s, set, "FLATTEN", asArr(exitLeg(s, 1)), `Manual exit: ${exitLabel(s)}`, candle);
   if (ok) { const out = await bookPnl(s, set, update, candle.c, "Manual exit"); await saveFills([fillOf(s, "Exit", out)]); Object.assign(update, FLAT_STATE); }
   else Object.assign(update, { last_error: "Exit order failed to send. Check the log and close the position in Dhan.", active: false });
 }
@@ -547,7 +658,7 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
   if (s.intraday && now.min >= sqOff) {
     if (s.pending_target) pendingPatch = NO_PENDING;
     if (position !== "FLAT") {
-      legs.push(exitLeg(s, 1));
+      legs.push(...asArr(exitLeg(s, 1)));
       notes.push(`Square-off: ${exitLabel(s)}`);
       event = "SQUARE_OFF";
       newState = FLAT_STATE;
@@ -586,13 +697,13 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
       }
       if (hit) {
         if (position !== "FLAT" && position !== pd.target) {
-          legs.push(exitLeg(s, legs.length + 1));
+          legs.push(...asArr(exitLeg(s, legs.length + 1)));
           notes.push(`${sigName} breakout ${up ? "above" : "below"} ${pd.trig}: ${exitLabel(s)}`);
           event = "EXIT"; position = "FLAT"; newState = FLAT_STATE;
         }
         if (pd.target !== "FLAT" && position === "FLAT" && !halted) {
           const e = entryLeg(s, pd.target, pd.trig, legs.length + 1);
-          legs.push(e.leg);
+          legs.push(...asArr(e.leg));
           notes.push(`${sigName} breakout ${up ? "above" : "below"} ${pd.trig}: ${e.label}`);
           event = event === "EXIT" ? "REVERSE" : "ENTRY";
           newState = { position: pd.target, ...e.state };
@@ -630,7 +741,7 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
       } else {
         let reversing = false;
         if (position !== "FLAT" && position !== desired) {
-          legs.push(exitLeg(s, legs.length + 1));
+          legs.push(...asArr(exitLeg(s, legs.length + 1)));
           const why = flipped ? "turned" : atOpen ? "turned after hours, so reversing at the open:" : "turned after hours; first candle close confirms, reversing:";
           notes.push(`${sigName} ${why} ${tNow === 1 ? "up" : "down"}: ${exitLabel(s)}`);
           event = "EXIT";
@@ -640,7 +751,7 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
         }
         if (desired !== "FLAT" && position === "FLAT" && !halted && (s.entry_mode === "JOIN" || flipped || reversing)) {
           const e = entryLeg(s, desired, last.c, legs.length + 1);
-          legs.push(e.leg);
+          legs.push(...asArr(e.leg));
           notes.push(`${flipped ? `${sigName} flipped` : reversing ? "Reversing" : "Joining trend"} ${tNow === 1 ? "up" : "down"}: ${e.label}`);
           event = event === "EXIT" ? "REVERSE" : "ENTRY";
           newState = { position: desired, ...e.state };
@@ -714,10 +825,10 @@ async function processRulesDaily(s: Strategy, set: Settings, action: string) {
     const dirOk = (side: Pos) => s.direction === "BOTH" || (side === "LONG" ? s.direction === "LONG_ONLY" : s.direction === "SHORT_ONLY");
     const d = decide(position === "FLAT" ? "FLAT" : position, sig, prev, { join: s.entry_mode === "JOIN", longOk: dirOk("LONG"), shortOk: dirOk("SHORT"), sets: ruleSets(rules) });
     const label = (k: "long" | "short") => rules[k]!.conds.map(describeCond).join(rules[k]!.mode === "ANY" ? " or " : " & ");
-    if (d.exit && position !== "FLAT") { legs.push(exitLeg(s, 1)); notes.push(`${d.why}: ${exitLabel(s)}`); event = "EXIT"; position = "FLAT"; newState = FLAT_STATE; }
+    if (d.exit && position !== "FLAT") { legs.push(...asArr(exitLeg(s, 1))); notes.push(`${d.why}: ${exitLabel(s)}`); event = "EXIT"; position = "FLAT"; newState = FLAT_STATE; }
     if (d.enter && position === "FLAT" && canEnter(s)) {
       const e = entryLeg(s, d.enter, spot, legs.length + 1);
-      legs.push(e.leg); notes.push(`${d.enter === "LONG" ? "Buy" : "Sell"} rules met on yesterday's daily candle (${label(d.enter === "LONG" ? "long" : "short")}): ${e.label}`);
+      legs.push(...asArr(e.leg)); notes.push(`${d.enter === "LONG" ? "Buy" : "Sell"} rules met on yesterday's daily candle (${label(d.enter === "LONG" ? "long" : "short")}): ${e.label}`);
       event = event === "EXIT" ? "REVERSE" : "ENTRY"; newState = { position: d.enter, ...e.state };
     }
   }
@@ -755,7 +866,7 @@ async function processRules(s: Strategy, set: Settings, action: string) {
 
   if (s.intraday && now.min >= sqOff) {
     if (position !== "FLAT") {
-      legs.push(exitLeg(s, 1)); notes.push(`Square-off: ${exitLabel(s)}`); event = "SQUARE_OFF"; newState = FLAT_STATE;
+      legs.push(...asArr(exitLeg(s, 1))); notes.push(`Square-off: ${exitLabel(s)}`); event = "SQUARE_OFF"; newState = FLAT_STATE;
     }
   } else if (last.t !== s.last_candle_ts) {
     const fresh = last.day === now.date && nowSec - last.endT <= Math.max(600, s.timeframe_min * 120);
@@ -766,12 +877,12 @@ async function processRules(s: Strategy, set: Settings, action: string) {
       const dirOk = (side: Pos) => s.direction === "BOTH" || (side === "LONG" ? s.direction === "LONG_ONLY" : s.direction === "SHORT_ONLY");
       const d = decide(position === "FLAT" ? "FLAT" : position, sig, prev, { join: s.entry_mode === "JOIN", longOk: dirOk("LONG"), shortOk: dirOk("SHORT"), sets: ruleSets(rules) });
       if (d.exit && position !== "FLAT") {
-        legs.push(exitLeg(s, legs.length + 1)); notes.push(`${d.why}: ${exitLabel(s)}`);
+        legs.push(...asArr(exitLeg(s, legs.length + 1))); notes.push(`${d.why}: ${exitLabel(s)}`);
         event = "EXIT"; position = "FLAT"; newState = FLAT_STATE;
       }
       if (d.enter && position === "FLAT" && canEnter(s)) {
         const e = entryLeg(s, d.enter, last.c, legs.length + 1);
-        legs.push(e.leg); notes.push(`${d.enter === "LONG" ? "Buy" : "Sell"} rules met (${label(d.enter === "LONG" ? "long" : "short")}): ${e.label}`);
+        legs.push(...asArr(e.leg)); notes.push(`${d.enter === "LONG" ? "Buy" : "Sell"} rules met (${label(d.enter === "LONG" ? "long" : "short")}): ${e.label}`);
         event = event === "EXIT" ? "REVERSE" : "ENTRY";
         newState = { position: d.enter, ...e.state };
       }
@@ -809,7 +920,7 @@ async function processTimed(s: Strategy, set: Settings, action: string) {
     const entered = s.pos_entry_date ? String(s.pos_entry_date) : null;
     const due = s.exit_next_day ? (entered !== null && now.date > entered && now.min >= exitMin) : now.min >= exitMin;
     if (due) {
-      legs.push(exitLeg(s, 1));
+      legs.push(...asArr(exitLeg(s, 1)));
       notes.push(`Timed exit: ${exitLabel(s)}`);
       event = "EXIT";
       position = "FLAT";
@@ -826,7 +937,7 @@ async function processTimed(s: Strategy, set: Settings, action: string) {
       if (!legs.length) { event = "INFO"; notes.push(`${label}; your direction setting skips today's trade.`); }
     } else {
       const e = entryLeg(s, desired, spot, legs.length + 1);
-      legs.push(e.leg);
+      legs.push(...asArr(e.leg));
       notes.push(`${label}: ${e.label}`);
       event = event === "EXIT" ? "REVERSE" : "ENTRY";
       newState = { position: desired, ...e.state };
@@ -957,7 +1068,7 @@ async function runBacktestJob(id: number) {
       const snapshot = { ...s };
       for (const k of ["position", "pos_option_type", "pos_strike", "pos_expiry", "pos_qty", "pos_entry_date", "last_candle_ts", "last_trend",
         "last_close", "last_supertrend", "last_run_at", "last_error", "last_entry_day", "leg_template_fut", "leg_template_opt", "pos_risk", "day_pnl",
-        "day_pnl_date", "pos_option_side", "pos_entry_px", "pos_entry_prem", "pos_lots", "pos_margin"]) delete snapshot[k];
+        "day_pnl_date", "pos_option_side", "pos_entry_px", "pos_entry_prem", "pos_lots", "pos_margin", "pos_legs"]) delete snapshot[k];
       if (isCommodity(String(snapshot.data_segment))) {
         const r = await dataSecurity(sb, creds, String(snapshot.data_segment), String(snapshot.data_security_id), ist(Date.now() / 1000).date);
         snapshot.data_sec_resolved = r.sec;
@@ -965,7 +1076,12 @@ async function runBacktestJob(id: number) {
       const res = await planBacktest(snapshot, creds, params, async (m) => { await setRow({ progress: m }); });
       plans = res.plans; acc = newAcc(Number(params.capital)); acc.calls = res.calls; acc.notes = res.notes; cursor = 0; trades = [];
       if (params.lab_period) await sb.from("lab_periods").update({ status: "running", updated_at: new Date().toISOString() }).eq("id", params.lab_period);
-      params = { ...params, strategy: snapshot, margin_rate: await dhanRate(snapshot).catch(() => null) };
+      // Structures: futures and option-writing margin rates for the legs (Dhan's figures from the morning check).
+      const mr = isMulti(snapshot) ? (await loadMarginRates(sb).catch(() => ({} as Record<string, any>)))[String(snapshot.underlying)] : null;
+      const intra = snapshot.product_type === "I" || !!snapshot.intraday;
+      params = { ...params, strategy: snapshot,
+        margin_rate: mr ? ((intra ? mr.futI ?? mr.fut : mr.fut ?? mr.futI) ?? null) : await dhanRate(snapshot).catch(() => null),
+        sell_rate: mr ? ((intra ? mr.sellI ?? mr.sell : mr.sell ?? mr.sellI) ?? null) : null };
       await setRow({ params, plans, acc, cursor, trades, progress: `Planned ${plans.length} trades. Pricing them now.` });
     }
 
