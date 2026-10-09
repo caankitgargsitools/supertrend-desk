@@ -14,7 +14,7 @@ import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules
 import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
 import { LAB_ASSETS, labStart, labStep, TOKEN_ERR } from "./lab.ts";
-import { refreshMargins } from "./margins.ts";
+import { loadMarginRates, refreshMargins } from "./margins.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -212,15 +212,30 @@ async function capitalState(set: Settings, live: boolean, excludeId: string) {
   return { equity: Number(set.capital ?? 0) + Number(net ?? 0), used };
 }
 /**
+ * Today's margin rate for a strategy's asset from Dhan's margin calculator (checked every morning): futures or option
+ * writing, intraday or carry-forward. Null for option buying (that needs the premium) or when no check is stored.
+ */
+async function dhanRate(s: Strategy): Promise<number | null> {
+  if (s.trade_type === "OPTIONS" && s.option_side !== "SELL") return null;
+  const r = (await loadMarginRates(sb))[String(s.underlying)];
+  if (!r) return null;
+  const intraday = s.product_type === "I" || !!s.intraday;
+  return s.trade_type === "OPTIONS" ? (intraday ? r.sellI ?? r.sell : r.sell ?? r.sellI) : (intraday ? r.futI ?? r.fut : r.fut ?? r.futI);
+}
+/**
  * Before an entry: reads the option premium (for the ledger, premium stops and option-buying margin) and, when the
  * strategy sizes from capital, works out the lots and rewrites the entry order. Returns false if the entry is skipped.
  */
 async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknown>[], newState: Record<string, any>, entryPx: number, notes: string[]): Promise<boolean> {
   const opt = s.trade_type === "OPTIONS";
   const premium = opt ? await premiumOf(dhanFor(set), s, newState) : null;
-  const sz = normaliseSizing(s.sizing, String(s.data_segment));
+  // Margin per lot at today's Dhan rate (falls back to the strategy's own margin % when Dhan's isn't known).
+  const rate = await dhanRate(s).catch(() => null);
+  const sz0 = normaliseSizing(s.sizing, String(s.data_segment));
+  const sz = sz0 && rate ? { ...sz0, margin_pct: rate * 100 } : sz0;
   let lots = Number(s.lots);
-  const mLot = marginPerLot(s as any, sz, entryPx, premium);
+  const mLot = marginPerLot(s as any, sz ?? (rate ? { margin_pct: rate * 100 } as any : null), entryPx, premium);
+  if (sz && rate) notes.push(`Margin ${(rate * 100).toFixed(1)}% of contract value (Dhan, today)`);
   if (sz) {
     const cs = await capitalState(set, !!s.live, s.id);
     const res = lotsFor(sz, cs.equity, mLot, cs.used, Number(set.deploy_pct ?? 100));
@@ -813,7 +828,7 @@ async function runBacktestJob(id: number) {
       }
       const res = await planBacktest(snapshot, creds, params, async (m) => { await setRow({ progress: m }); });
       plans = res.plans; acc = newAcc(Number(params.capital)); acc.calls = res.calls; acc.notes = res.notes; cursor = 0; trades = [];
-      params = { ...params, strategy: snapshot };
+      params = { ...params, strategy: snapshot, margin_rate: await dhanRate(snapshot).catch(() => null) };
       await setRow({ params, plans, acc, cursor, trades, progress: `Planned ${plans.length} trades. Pricing them now.` });
     }
 
@@ -893,7 +908,9 @@ Deno.serve(async (req) => {
   if (action === "margins") {
     const { data: set } = await sb.from("portal_settings").select("dhan_client_id, dhan_access_token").single();
     const { data: ls } = await sb.from("lab_settings").select("assets").eq("id", 1).maybeSingle();
-    const keys: string[] = (ls?.assets ?? Object.keys(LAB_ASSETS)).filter((k: string) => LAB_ASSETS[k]);
+    // The lab's assets plus every asset a strategy trades, checked each morning before the market opens.
+    const { data: strats } = await sb.from("algo_strategies").select("underlying").eq("archived", false);
+    const keys: string[] = [...new Set([...(ls?.assets ?? []), ...(strats ?? []).map((x) => String(x.underlying))])].filter((k: string) => LAB_ASSETS[k]);
     const n = await refreshMargins(sb, { client: set?.dhan_client_id ?? "", token: set?.dhan_access_token ?? "" }, keys.map((k) => LAB_ASSETS[k]));
     return Response.json({ action, priced: n, of: keys.length });
   }

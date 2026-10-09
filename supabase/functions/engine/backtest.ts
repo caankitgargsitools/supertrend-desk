@@ -20,7 +20,8 @@ export type ChargeRates = {
   brk_pct: number; stt_fut: number; stt_opt: number; exch_fut: number; exch_opt: number; sebi: number; gst: number; stamp_fut: number; stamp_opt: number;
 };
 /** sizing: work out lots per trade from equity with the strategy's sizing settings; deploy_pct: portfolio deployment cap (%). */
-export type BtParams = { from: string; to: string; capital: number; brokerage: number; other_pct?: number; charges?: ChargeRates; near_code: number; sizing?: boolean; deploy_pct?: number };
+/** margin_rate: Dhan's margin rate (share of contract value) for this asset when the run started; used for lots from capital. */
+export type BtParams = { from: string; to: string; capital: number; brokerage: number; other_pct?: number; charges?: ChargeRates; near_code: number; sizing?: boolean; deploy_pct?: number; margin_rate?: number | null };
 export type ChargeBreakdown = { brokerage: number; stt: number; exch: number; sebi: number; gst: number; stamp: number; total: number };
 
 /** Charges for one round trip (one buy and one sell order), the way the broker's calculator works them out. */
@@ -478,7 +479,8 @@ export async function priceBatch(
   const isOpt = s.trade_type === "OPTIONS";
   const fixedUnits = s.lots * s.lot_size;
   const step = Number(s.strike_step);
-  const sz = p.sizing ? normaliseSizing(s.sizing, String(s.data_segment)) : null;
+  const sz0 = p.sizing ? normaliseSizing(s.sizing, String(s.data_segment)) : null;
+  const sz = sz0 && Number(p.margin_rate) > 0 ? { ...sz0, margin_pct: Number(p.margin_rate) * 100 } : sz0;
 
   const cache = new Map<string, Map<string, (OptBar & { min: number; day: string })[]>>();
   let busyStreak = 0;

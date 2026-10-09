@@ -450,7 +450,7 @@ legend { padding: 0; margin-bottom: 4px; }
               <label class="f z-auto adv"><span>Accept a drawdown of (% of that share)</span><input id="z_dd" type="number" min="1" max="100" step="1"></label>
               <div class="f z-auto adv"><span>Worst drawdown for 1 lot (₹)</span><div class="pair"><input id="z_ddlot" type="number" min="0" step="any" placeholder="from a backtest"><button class="btn small" id="z_fromBt" type="button">Use backtest</button></div></div>
               <label class="f z-auto adv"><span>Safety multiple on that drawdown</span><input id="z_mult" type="number" min="1" max="5" step="0.1"></label>
-              <label class="f z-auto adv"><span>Margin per lot (% of contract value)</span><input id="z_margin" type="number" min="1" max="100" step="0.5"></label>
+              <label class="f z-auto adv"><span>Margin % if Dhan's daily rate isn't available</span><input id="z_margin" type="number" min="1" max="100" step="any"></label>
               <label class="f z-auto"><span>Never more than (lots)</span><input id="z_max" type="number" min="1" max="1000" step="1"></label>
             </div>
             <p class="hint" id="sizeHint"></p>
@@ -547,6 +547,7 @@ legend { padding: 0; margin-bottom: 4px; }
       <section class="card">
         <h3 style="font-size:15px;margin:0 0 8px">Strategies</h3>
         <div class="scroll"><table><thead><tr><th>Strategy</th><th>Status</th><th>Position</th><th class="n">Money in use</th><th>Lots</th><th class="n">Next trade (lots)</th><th class="n">Profit / loss</th></tr></thead><tbody id="cap_body"></tbody></table></div>
+        <p class="hint" id="cap_rates" style="margin:8px 0 0"></p>
         <p class="hint adv" style="margin:8px 0 0">Capital held: margin for futures and option writing (contract value × margin %), premium paid for option buying, estimated at entry. “Next entry” uses the last price; option buying is sized at entry from the live premium.</p>
       </section>
       <section class="card">
@@ -2458,6 +2459,7 @@ function readSizing(out) {
 /** Lots the next entry would use, worked out here the same way the engine does (needs a last price). */
 function previewLots(s, z, equity, used, deploy) {
   const px = Number(s.last_close); if (!(px > 0)) return null;
+  const dr = dhanRateFor(s); if (dr) z = { ...z, margin_pct: dr * 100 };
   const lot = Number(s.lot_size);
   const buying = s.trade_type === "OPTIONS" && s.option_side !== "SELL";
   const mLot = buying ? px * lot * 0.01 : px * lot * z.margin_pct / 100;
@@ -2481,6 +2483,8 @@ function applySizeVisibility() {
     try {
       const form = { ...s, trade_type: $("f_trade_type").value, option_side: $("f_option_side").value, lot_size: Number($("f_lot_size").value || s.lot_size) };
       const pv = previewLots(form, readSizing({ qty_mode: "LOTS" }), eq, used, Number(cap.status.deploy_pct || 100));
+      const dr = dhanRateFor(form);
+      txt += dr ? ` Margin used: Dhan's rate today, ${(dr * 100).toFixed(1)}% of contract value (checked every morning).` : form.trade_type === "OPTIONS" && form.option_side !== "SELL" ? " Margin used: the premium paid." : "";
       if (pv) txt += ` Right now (${live ? "live" : "paper"} equity ${rupees(eq)}, last price ${fmtNum(s.last_close)}): ${pv.buying ? "about " : ""}${pv.lots} lot${pv.lots === 1 ? "" : "s"} (${rupees(pv.mLot)} a lot${pv.buying ? ", assuming a premium of 1% of the index; the live premium is used at entry" : ""}).`;
     } catch { /* incomplete form */ }
   }
@@ -2510,7 +2514,19 @@ applyAdv();
 
 /* ---------- capital page ---------- */
 const cap = { open: false, mode: "LIVE", status: null };
-async function loadCapStatus() { cap.status = must(await db.rpc("capital_status")); return cap.status; }
+async function loadCapStatus() {
+  const [st, rates] = await Promise.all([db.rpc("capital_status").then(must), db.from("lab_margins").select("asset, fut_pct, fut_pct_i, sell_pct, sell_pct_i, checked_at").then((r) => r.data || []).catch(() => [])]);
+  cap.status = st; cap.rates = Object.fromEntries(rates.map((r) => [r.asset, r]));
+  return cap.status;
+}
+/** Today's Dhan margin rate for a strategy (futures or option writing), as checked every morning; null if unknown or option buying. */
+function dhanRateFor(s) {
+  const r = cap.rates && cap.rates[s.underlying];
+  if (!r || (s.trade_type === "OPTIONS" && s.option_side !== "SELL")) return null;
+  const intra = s.product_type === "I" || s.intraday === true || s.intraday === "true";
+  const v = s.trade_type === "OPTIONS" ? (intra ? r.sell_pct_i ?? r.sell_pct : r.sell_pct ?? r.sell_pct_i) : (intra ? r.fut_pct_i ?? r.fut_pct : r.fut_pct ?? r.fut_pct_i);
+  return Number(v) > 0 ? Number(v) : null;
+}
 function openCap() {
   closeLab(); cap.open = true;
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true; $("capPane").hidden = false;
@@ -2560,6 +2576,10 @@ function renderCap(st, trades) {
     const pn = byStrat.get(x.id) || 0; tr.children[6].textContent = rupees(pn); tr.children[6].className = "n " + (pn > 0 ? "pos-num" : pn < 0 ? "neg-num" : "");
     $("cap_body").append(tr);
   }
+  const rs = Object.values(cap.rates || {}).filter((r) => Number(r.fut_pct) > 0);
+  $("cap_rates").textContent = rs.length ? `Margin rates from Dhan, checked every morning before the market opens (last ${istText(rs.map((r) => r.checked_at).sort().at(-1))}): ` +
+    rs.map((r) => `${(PRESETS[r.asset] && PRESETS[r.asset].name) || r.asset} ${(r.fut_pct * 100).toFixed(1)}%${Number(r.sell_pct) > 0 ? ` (writing ${(r.sell_pct * 100).toFixed(1)}%)` : ""}`).join(" · ") +
+    ". Every strategy sizes its lots and records its margin with these." : "";
   const tb = $("cap_trades"); tb.innerHTML = trades.length ? "" : `<tr><td colspan="9" class="hint">No closed ${live ? "live" : "paper"} trades recorded yet. Trades are recorded from now on, as strategies exit positions.</td></tr>`;
   for (const t of trades) {
     const tr = document.createElement("tr");
