@@ -643,6 +643,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
             <label class="f"><span>New strategies per run</span><input id="ls_per_night" type="number" min="10" max="1000" step="10"></label>
             <label class="f"><span>Best ones priced with real options</span><input id="ls_top" type="number" min="0" max="60" step="1"></label>
             <label class="f"><span>Capital for return % (₹)</span><input id="ls_capital" type="number" min="10000" step="10000"></label>
+            <label class="f"><span>Winners long-tested each night (00:30 IST)</span><input id="ls_long" type="number" min="0" max="40" step="1"></label>
           </div>
           <div class="f"><span>Assets to research</span><div class="assetpick" id="ls_assets"></div></div>
           <p class="hint">Indices are tested on 5-minute candles (and once-a-day); commodities on daily candles, because Dhan keeps intraday history only for the current MCX contract. Mini contracts move like their big contracts, so testing both mostly repeats work.</p>
@@ -3359,7 +3360,7 @@ async function promoteLab(r, v) {
 }
 function renderLabSettings() {
   const s = lab.settings || {};
-  $("ls_enabled").value = s.enabled === false ? "false" : "true"; $("ls_per_night").value = s.per_night ?? 300; $("ls_top").value = s.top_options ?? 20; $("ls_capital").value = s.capital ?? 500000;
+  $("ls_enabled").value = s.enabled === false ? "false" : "true"; $("ls_per_night").value = s.per_night ?? 300; $("ls_top").value = s.top_options ?? 20; $("ls_capital").value = s.capital ?? 500000; $("ls_long").value = s.long_per_night ?? 10;
   const box = $("ls_assets"); box.innerHTML = "";
   for (const [k, p] of Object.entries(PRESETS)) {
     const l = document.createElement("label"); const i = document.createElement("input"); i.type = "checkbox"; i.value = k; i.checked = (s.assets || []).includes(k);
@@ -3377,7 +3378,7 @@ $("labSetForm").addEventListener("submit", (e) => {
   if (!(top >= 0 && top <= 60)) { $("ls_msg").textContent = "Option pricing count must be 0–60."; return; }
   if (!(cap >= 10000)) { $("ls_msg").textContent = "Capital must be at least ₹10,000."; return; }
   run(e.submitter, async () => {
-    must(await db.from("lab_settings").update({ enabled: $("ls_enabled").value === "true", per_night: Math.trunc(per), top_options: Math.trunc(top), capital: cap, assets, updated_at: new Date().toISOString() }).eq("id", 1));
+    must(await db.from("lab_settings").update({ enabled: $("ls_enabled").value === "true", per_night: Math.trunc(per), top_options: Math.trunc(top), capital: cap, assets, long_per_night: Math.max(0, Math.min(40, Math.trunc(Number($("ls_long").value) || 0))), updated_at: new Date().toISOString() }).eq("id", 1));
     $("ls_msg").textContent = "Saved. Changes apply from the next run."; await loadLab();
   });
 });
