@@ -253,6 +253,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 .terms { display: grid; gap: 10px; } .terms ol { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
 .subtabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .subtabs .btn[aria-pressed="true"], .nav .btn[aria-current="page"]:hover { background: var(--blue); border-color: var(--blue); color: var(--on-blue); }
+.fillcell { white-space: nowrap; font-size: 12.5px; } .fillcell .fill + .fill { margin-top: 4px; }
 .ued { display: grid; gap: 10px; background: var(--bg); border-radius: var(--r); padding: 12px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -388,7 +389,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 
         <div id="logView" class="scroll">
           <table>
-            <thead><tr><th>When (IST)</th><th>Event</th><th>Mode</th><th>Status</th><th>Details</th></tr></thead>
+            <thead><tr><th>When (IST)</th><th>Event</th><th>Mode</th><th>Status</th><th>Price</th><th>Details</th></tr></thead>
             <tbody id="logBody"></tbody>
           </table>
         </div>
@@ -726,8 +727,9 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
               <label class="f"><span>Trial days (blank = default)</span><input id="an_trial" type="number" min="0" step="1"></label>
               <label class="f"><span>Can build strategies</span><select id="an_build"><option value="true">Yes</option><option value="false">No</option></select></label>
             </div>
-            <div class="formbar"><button class="btn primary" type="submit">Create user</button><span class="hint" id="an_msg"></span></div>
+            <div class="formbar"><button class="btn primary" type="submit">Create user</button><button class="btn small" id="an_gen" type="button">Suggest a password</button><span class="hint" id="an_msg"></span></div>
           </form>
+          <div id="an_copy" style="margin-top:10px"></div>
         </details>
         <div class="filters"><label class="f grow"><span>Search</span><input id="au_q" type="search" placeholder="Email, name, phone" autocomplete="off"></label>
           <label class="f"><span>Status</span><select id="au_st"><option value="">All</option><option value="active">Active</option><option value="blocked">Blocked</option><option value="trial">On trial</option><option value="neg">Wallet below zero</option></select></label></div>
@@ -881,7 +883,7 @@ async function loadDetail() {
   const id = selected; if (!id) return;
   if (chartFor !== id) { chartFor = id; cxFromStrategy(cur()); loadChart(); fillCharges((cur() || {}).exchange); }
   const [signals, bts] = await Promise.all([
-    db.from("algo_signals").select("id, created_at, event, description, mode, status, payload, response").eq("strategy_id", id).order("id", { ascending: false }).limit(60).then(must),
+    db.from("algo_signals").select("id, created_at, event, description, mode, status, payload, response, fills").eq("strategy_id", id).order("id", { ascending: false }).limit(60).then(must),
     db.from("algo_backtests").select("id, created_at, status, params, summary").eq("strategy_id", id).order("id", { ascending: false }).limit(12).then(must),
   ]);
   if (id !== selected) return;
@@ -1016,6 +1018,10 @@ function renderStrategy() {
     const up = s.pending_target === "LONG" || (s.pending_target === "FLAT" && s.position === "SHORT");
     const till = new Date((Number(s.pending_to) + 19800) * 1000).toISOString().slice(11, 16);
     pos += ` · ${s.pending_target === "FLAT" ? "exit" : s.pending_target === "LONG" ? "buy" : "sell"} ${up ? "above" : "below"} ${fmtNum(Number(s.pending_trigger))} till ${till}`;
+  }
+  if (s.position !== "FLAT" && s.pos_ltp != null) {
+    const entry = s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px;
+    pos += ` · ${entry ? `in ₹${fmtNum(entry)}, ` : ""}now ₹${fmtNum(s.pos_ltp)}${s.pos_upnl != null ? ` (${Number(s.pos_upnl) >= 0 ? "+" : ""}${rupees(s.pos_upnl)} open)` : ""}`;
   }
   pos += posLevels(s);
   if (s.risk && s.risk.max_day_loss && String(s.day_pnl_date) === istDate(0)) {
@@ -2018,16 +2024,17 @@ const EVENT_NAMES = { ENTRY: "Entry", EXIT: "Exit", REVERSE: "Reverse", SQUARE_O
 const EVENT_COLOR = { ENTRY: "green", EXIT: "red", REVERSE: "blue", SQUARE_OFF: "yellow", FLATTEN: "red", INFO: "" };
 function renderLog(rows) {
   const tb = $("logBody"); tb.innerHTML = "";
-  if (!rows.length) { tb.innerHTML = '<tr><td colspan="5" class="hint">No signals yet. When the strategy triggers, each order appears here with the exact message sent to Dhan.</td></tr>'; return; }
+  if (!rows.length) { tb.innerHTML = '<tr><td colspan="6" class="hint">No signals yet. When the strategy triggers, each order appears here with the exact message sent to Dhan.</td></tr>'; return; }
   for (const r of rows) {
     const tr = document.createElement("tr");
     const statusChip = r.status === "SENT" ? "green" : r.status === "FAILED" ? "red" : "";
-    tr.innerHTML = `<td class="when"></td><td><span class="chip ${EVENT_COLOR[r.event] || ""}"></span></td><td><span class="chip ${r.mode === "LIVE" ? "red" : "yellow"}"></span></td><td><span class="chip ${statusChip}"></span></td><td></td>`;
+    tr.innerHTML = `<td class="when"></td><td><span class="chip ${EVENT_COLOR[r.event] || ""}"></span></td><td><span class="chip ${r.mode === "LIVE" ? "red" : "yellow"}"></span></td><td><span class="chip ${statusChip}"></span></td><td class="fillcell"></td><td></td>`;
     tr.children[0].textContent = istText(r.created_at);
     tr.children[1].firstChild.textContent = EVENT_NAMES[r.event] || r.event;
     tr.children[2].firstChild.textContent = r.mode;
     tr.children[3].firstChild.textContent = r.status === "LOGGED" ? "Logged" : r.status === "SENT" ? "Sent" : "Failed";
-    const d = tr.children[4];
+    renderFills(tr.children[4], r);
+    const d = tr.children[5];
     const p = document.createElement("div"); p.textContent = r.description || ""; d.append(p);
     if (r.payload || r.response) {
       const det = document.createElement("details"); det.className = "payload";
@@ -2037,6 +2044,26 @@ function renderLog(rows) {
       det.append(sm, pre); d.append(det);
     }
     tb.append(tr);
+  }
+}
+/** Price on each order leg: the market price when sent (paper), and Dhan's actual fill price (live). */
+function renderFills(td, r) {
+  const fills = Array.isArray(r.fills) ? r.fills : [];
+  if (!fills.length) { td.innerHTML = '<span class="hint">–</span>'; return; }
+  const what = (f) => f.basis === "premium" ? "premium" : f.basis === "index" ? "index price" : "futures price";
+  for (const f of fills) {
+    const div = document.createElement("div"); div.className = "fill";
+    const head = document.createElement("strong"); head.textContent = `${f.leg} ${f.side === "BUY" ? "buy" : "sell"} `;
+    div.append(head);
+    const age = Date.now() - Date.parse(r.created_at);
+    if (r.mode === "LIVE") {
+      if (f.broker_px != null) { div.append(document.createTextNode(`₹${fmtNum(f.broker_px)}`)); const h = document.createElement("span"); h.className = "hint"; h.textContent = ` filled on Dhan${f.broker_qty ? ` (${f.broker_qty})` : ""}${f.px != null ? ` · market ₹${fmtNum(f.px)} when sent` : ""}`; div.append(h); }
+      else { div.append(document.createTextNode(f.px != null ? `≈ ₹${fmtNum(f.px)}` : "–")); const h = document.createElement("span"); h.className = "hint"; h.textContent = r.status !== "SENT" ? " (not sent)" : age < 35 * 60000 ? " · waiting for Dhan's fill" : " · fill not found in Dhan's trade book; check Dhan"; div.append(h); }
+    } else {
+      div.append(document.createTextNode(f.px != null ? `₹${fmtNum(f.px)}` : "–"));
+      const h = document.createElement("span"); h.className = "hint"; h.textContent = ` ${what(f)} at that moment (paper)`; div.append(h);
+    }
+    td.append(div);
   }
 }
 function maskSecret(p) { const c = JSON.parse(JSON.stringify(p)); if (c.secret) c.secret = "••••"; return c; }
@@ -3131,7 +3158,7 @@ function listCols() {
     ["tf", "Timeframe", (s) => s.locked ? "–" : cxStratTf(s) === "D" ? "Daily" : `${cxStratTf(s)} min`],
     ["active", "Status", (s) => s.archived ? "Archived" : s.active ? "Active" : "Paused"],
     ["live", "Mode", (s) => s.live ? "Live" : "Paper"],
-    ["pos", "Position", (s) => s.position === "FLAT" ? "Flat" : `${s.position === "LONG" ? "Long" : "Short"}${s.pos_lots ? ` · ${s.pos_lots} lot${s.pos_lots === 1 ? "" : "s"}` : ""}`],
+    ["pos", "Position", (s) => s.position === "FLAT" ? "Flat" : `${s.position === "LONG" ? "Long" : "Short"}${s.pos_lots ? ` · ${s.pos_lots} lot${s.pos_lots === 1 ? "" : "s"}` : ""}${s.pos_upnl != null ? ` · ${Number(s.pos_upnl) >= 0 ? "+" : ""}${rupees(s.pos_upnl)} open` : ""}`],
     ["size", "Size", (s) => s.sizing && s.sizing.mode === "CAPITAL" ? `${rupees(s.capital)} · max ${s.sizing.max_lots}` : s.sizing && s.sizing.mode === "AUTO" ? `Auto ${s.sizing.alloc_pct}%` : `${s.lots} lot${Number(s.lots) === 1 ? "" : "s"}`],
     ["livepnl", "Live P&L", (s) => (pnl.get(s.id) || {}).live || 0, "num"],
     ["paperpnl", "Paper P&L", (s) => (pnl.get(s.id) || {}).paper || 0, "num"],
@@ -3468,7 +3495,7 @@ function editUser(u) {
       <label class="f wide"><span>Note</span><input id="uw_note"></label></div>
     <div class="formbar"><button class="btn" id="uw_go" type="button">Add wallet entry</button></div>
     <h4>Login</h4>
-    <div class="grid"><label class="f"><span>New password (8+ characters)</span><input id="up_pass" autocomplete="off"></label></div>
+    <div class="grid"><label class="f"><span>New password (8+ characters)</span><input id="up_pass" autocomplete="off"></label><button class="btn small" id="up_gen" type="button" style="align-self:end">Suggest</button></div>
     <div class="formbar"><button class="btn" id="up_go" type="button">Set password</button><button class="btn danger" id="ud_go" type="button">Delete user</button><span class="hint">Delete only works for users with no trades or wallet entries; block the others.</span></div></div>`;
   box.querySelector("h3").textContent = `${u.full_name || u.email} · ${u.email}`;
   const f = (k) => box.querySelector(`[data-f="${k}"]`);
@@ -3487,7 +3514,12 @@ function editUser(u) {
     toast("Wallet updated."); await loadAdmin();
   }));
   const fn = adminFn;
-  $("up_go").addEventListener("click", (e) => run(e.currentTarget, async () => { await fn({ action: "reset_password", user_id: u.user_id, password: $("up_pass").value }); $("up_pass").value = ""; toast("Password set. Share it with the user privately."); }));
+  $("up_gen").addEventListener("click", () => { $("up_pass").value = genPassword(); });
+  $("up_go").addEventListener("click", (e) => run(e.currentTarget, async () => {
+    const pw = $("up_pass").value; await fn({ action: "reset_password", user_id: u.user_id, password: pw }); $("up_pass").value = "";
+    const cb = document.createElement("div"); cb.style.marginTop = "10px"; $("au_edit").querySelector(".ued").append(cb);
+    showLoginBox(cb, loginText(u.email, pw, u.full_name, u.trial_until && u.trial_until >= today0() ? u.trial_until : null)); toast("Password set.");
+  }));
   $("ud_go").addEventListener("click", () => askAdmin(`Delete ${u.email}?`, async () => { await fn({ action: "delete", user_id: u.user_id }); box.innerHTML = ""; toast("User deleted."); await loadAdmin(); }));
   box.scrollIntoView({ block: "nearest" });
 }
@@ -3503,12 +3535,55 @@ async function adminFn(body) {
   const r = await fetch(`${SUPABASE_URL}/functions/v1/admin-users`, { method: "POST", headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || "Request failed."); return j;
 }
+/** The text to send a new user: where to sign in, their login, and what to do first. */
+function loginText(email, password, name, trial) {
+  return [
+    `Hello${name ? " " + name : ""},`,
+    "",
+    "Your account on CA Ankit Garg Trade Desk is ready.",
+    "",
+    `Sign in: ${location.origin}${location.pathname}`,
+    `Login (email): ${email}`,
+    `Temporary password: ${password}`,
+    trial ? `Free trial till: ${trial}` : null,
+    "",
+    "First steps:",
+    "1. Sign in and accept the risk declarations.",
+    "2. Open “Dhan connection” and add your Dhan client ID, access token, and order webhook URL and secret.",
+    "3. Set your trading capital on the “Capital” page.",
+    "4. Pick a strategy (Marketplace or Strategies). It starts paused and in paper mode; go live only when you are ready.",
+    "",
+    "Please keep this password private.",
+    "Derivatives trading involves risk of loss. Backtest results do not guarantee future returns. This is not investment advice.",
+  ].filter((x) => x !== null).join("\n");
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; }
+  catch { const ta = document.createElement("textarea"); ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.append(ta); ta.select(); let ok = false; try { ok = document.execCommand("copy"); } catch {} ta.remove(); return ok; }
+}
+/** A box with the login details, a Copy button and a WhatsApp share link. */
+function showLoginBox(box, text) {
+  box.innerHTML = `<div class="ued"><strong>Login details to send</strong><pre style="max-width:none;margin:0"></pre>
+    <div class="actions"><button class="btn primary small" type="button" data-c>Copy user login details</button><a class="btn small" target="_blank" rel="noopener" data-w>Send on WhatsApp</a><button class="btn small" type="button" data-x>Done</button></div>
+    <p class="hint" style="margin:0">The password is shown only now. Send it privately; the user can change it later.</p></div>`;
+  box.querySelector("pre").textContent = text;
+  box.querySelector("[data-w]").href = "https://wa.me/?text=" + encodeURIComponent(text);
+  box.querySelector("[data-c]").addEventListener("click", async (e) => { const btn = e.currentTarget; const ok = await copyText(text); btn.textContent = ok ? "Copied ✓" : "Select and copy the text above"; toast(ok ? "Login details copied." : "Couldn't copy automatically; select the text and copy it."); });
+  box.querySelector("[data-x]").addEventListener("click", () => box.innerHTML = "");
+}
+function genPassword() {
+  const a = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789", r = new Uint32Array(10); crypto.getRandomValues(r);
+  return [...r].map((x) => a[x % a.length]).join("") + "@" + (r[0] % 90 + 10);
+}
+$("an_gen").addEventListener("click", () => { $("an_pass").value = genPassword(); });
 $("ad_new").addEventListener("submit", (e) => {
   e.preventDefault();
   run(e.submitter, async () => {
-    const j = await adminFn({ action: "create", email: $("an_email").value.trim(), password: $("an_pass").value, full_name: $("an_name").value.trim(), phone: $("an_phone").value.trim(),
+    const email = $("an_email").value.trim(), password = $("an_pass").value, name = $("an_name").value.trim();
+    const j = await adminFn({ action: "create", email, password, full_name: name, phone: $("an_phone").value.trim(),
       trial_days: $("an_trial").value, can_build: $("an_build").value === "true" });
-    $("an_msg").textContent = `Created. Trial ${j.trial_until ? "till " + j.trial_until : "none"}. Share the login and temporary password with the user privately.`;
+    $("an_msg").textContent = `Created. Trial ${j.trial_until ? "till " + j.trial_until : "none"}.`;
+    showLoginBox($("an_copy"), loginText(email, password, name, j.trial_until));
     ["an_email", "an_pass", "an_name", "an_phone", "an_trial"].forEach((id) => $(id).value = "");
     await loadAdmin();
   });

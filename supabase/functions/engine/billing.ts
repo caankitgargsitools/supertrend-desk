@@ -10,7 +10,7 @@ type Pos = Record<string, any>;
 const num = (x: unknown) => Number(x) || 0;
 
 /** Does a Dhan position belong to a desk trade's contract key (OPT|sym|strike|CE|expiry or FUT|sym)? */
-function matches(ref: string, p: Pos): boolean {
+export function matches(ref: string, p: Pos): boolean {
   const [kind, sym, strike, typ, exp] = ref.split("|");
   const ts = String(p.tradingSymbol ?? "").toUpperCase();
   if (kind === "OPT") {
@@ -19,7 +19,7 @@ function matches(ref: string, p: Pos): boolean {
     return pt === typ && Math.abs(num(p.drvStrikePrice) - num(strike)) < 0.01 && String(p.drvExpiryDate ?? "").slice(0, 10) === exp
       && ts.startsWith(String(sym).toUpperCase());
   }
-  const fs = String(sym).toUpperCase();
+  const fs = String(sym).toUpperCase().replace(/\d*!$/, "");
   const ot = String(p.drvOptionType ?? "").toUpperCase();
   return (ts === fs || (ts.startsWith(fs.split(/[-\s]/)[0]) && /FUT/.test(ts))) && !/^(CALL|PUT|CE|PE)/.test(ot);
 }

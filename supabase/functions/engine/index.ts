@@ -16,7 +16,7 @@ import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./
 import { LAB_ASSETS, labStart, labStep, TOKEN_ERR } from "./lab.ts";
 import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
-import { billingDay, syncUser } from "./billing.ts";
+import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -48,7 +48,7 @@ function warmDays(tf: number, atr: number, seg = "IDX_I", bars = WARM_BARS) {
   return Math.min(400, Math.max(5, Math.ceil(((Math.max(bars, atr * 10) * tf) / dayMins) * 1.5) + 4));
 }
 const FLAT_STATE = { position: "FLAT", pos_option_type: null, pos_option_side: null, pos_strike: null, pos_expiry: null, pos_qty: null, pos_entry_date: null, pos_risk: null,
-  pos_entry_px: null, pos_entry_prem: null, pos_lots: null, pos_margin: null };
+  pos_entry_px: null, pos_entry_prem: null, pos_lots: null, pos_margin: null, pos_ltp: null, pos_ltp_at: null, pos_upnl: null };
 const NO_PENDING = { pending_target: null, pending_trigger: null, pending_from: null, pending_to: null };
 const hhmm = (sec: number) => fmtIst(sec, true).slice(11, 16);
 
@@ -277,15 +277,15 @@ async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknow
  * Records the position being closed in the trade ledger (estimated from the index / futures price or the option's
  * premium, with charges at current rates) and adds it to today's total for the daily loss limit.
  */
-async function bookPnl(s: Strategy, set: Settings, update: Record<string, unknown>, exitPx: number | undefined, why: string, exitPrem?: number | null) {
-  if (s.position === "FLAT") return;
+async function bookPnl(s: Strategy, set: Settings, update: Record<string, unknown>, exitPx: number | undefined, why: string, exitPrem?: number | null): Promise<number | null> {
+  if (s.position === "FLAT") return null;
   const r = riskOf(s), pr = (s.pos_risk ?? {}) as PosRisk;
   const opt = s.trade_type === "OPTIONS";
   const inPx = opt ? Number(s.pos_entry_prem ?? pr.entryPrem ?? 0) : Number(s.pos_entry_px ?? pr.entry ?? 0);
   let outPx: number | null = null;
   if (opt) outPx = exitPrem ?? (inPx ? await premiumOf(dhanFor(set), s, s) : null);
   else outPx = exitPx ?? null;
-  if (!(inPx > 0) || !(Number(outPx) > 0)) return;
+  if (!(inPx > 0) || !(Number(outPx) > 0)) return Number(outPx) > 0 ? outPx : null;
   const units = unitsOf(s);
   const dir = opt ? (s.pos_option_side === "SELL" ? -1 : 1) : (s.position === "LONG" ? 1 : -1);
   const gross = (outPx! - inPx) * dir * units;
@@ -303,6 +303,7 @@ async function bookPnl(s: Strategy, set: Settings, update: Record<string, unknow
     const base = String(s.day_pnl_date) === today ? Number(s.day_pnl) || 0 : 0;
     update.day_pnl = Math.trunc(base + net); update.day_pnl_date = today;
   }
+  return outPx;
 }
 /** Key used to match a desk trade with the broker's position: OPT|symbol|strike|CE/PE|expiry or FUT|symbol. */
 function brokerRef(s: Strategy): string {
@@ -343,7 +344,8 @@ async function liveRisk(s: Strategy, set: Settings): Promise<Strategy> {
     await sb.from("algo_strategies").update(update).eq("id", s.id);
     return { ...s, ...update };
   }
-  await bookPnl(s, set, update, under, hit.why, pr.basis === "PREMIUM" ? hit.px : undefined);
+  const out = await bookPnl(s, set, update, under, hit.why, pr.basis === "PREMIUM" ? hit.px : undefined);
+  await saveFills([fillOf(s, "Exit", out ?? (s.trade_type === "OPTIONS" ? null : hit.px))]);
   Object.assign(update, FLAT_STATE);
   await sb.from("algo_strategies").update(update).eq("id", s.id);
   return { ...s, ...update };
@@ -392,19 +394,91 @@ function plainLog(event: string, description: string): string {
   const lead: Record<string, string> = { ENTRY: "Entry signal", EXIT: "Exit signal", REVERSE: "Reversal signal", SQUARE_OFF: "Square-off", INFO: "Update" };
   return [lead[event] ?? event, ...keep].join(" | ").slice(0, 1000);
 }
+/* ---------- prices on orders: market price when sent (paper), Dhan's fill price (live) ---------- */
+let lastSignalId: number | null = null;
+type Fill = { leg: "Entry" | "Exit"; side: "BUY" | "SELL"; ref: string; qty: number; px: number | null; basis: string; broker_px?: number; broker_qty?: number; broker_ids?: string[]; broker_at?: string };
+/** One leg of an order with the price it went at. st: the strategy with the position's fields (entry: the new position). */
+function fillOf(st: Strategy, leg: "Entry" | "Exit", px: number | null | undefined): Fill {
+  const opt = st.trade_type === "OPTIONS";
+  const buyEntry = opt ? st.pos_option_side !== "SELL" : st.position === "LONG";
+  const buy = leg === "Entry" ? buyEntry : !buyEntry;
+  const lots = st.qty_mode === "LOTS" ? Number(st.pos_qty) : Math.round(Number(st.pos_qty) / Number(st.lot_size));
+  return { leg, side: buy ? "BUY" : "SELL", ref: brokerRef(st), qty: st.exchange === "MCX" ? lots : (st.qty_mode === "LOTS" ? Number(st.pos_qty) * Number(st.lot_size) : Number(st.pos_qty)),
+    px: px != null && Number(px) > 0 ? +Number(px).toFixed(2) : null, basis: opt ? "premium" : isCommodity(String(st.data_segment)) ? "futures" : "index" };
+}
+async function saveFills(fills: Fill[]) {
+  if (lastSignalId && fills.length) await sb.from("algo_signals").update({ fills }).eq("id", lastSignalId);
+}
+/** Price of the open position now (option premium, or the futures / index price) and its unrealised P&L. */
+async function markPrice(s: Strategy, set: Settings): Promise<Strategy> {
+  if (s.position === "FLAT") return s;
+  if (s.pos_ltp_at && Date.now() - Date.parse(s.pos_ltp_at) < 50000) return s;
+  const opt = s.trade_type === "OPTIONS";
+  let px: number | null = null;
+  try { px = opt ? await premiumOf(dhanFor(set), s, s) : await dhanFor(set).ltp(s.data_segment, String(s.data_security_id)); } catch { px = null; }
+  if (!(Number(px) > 0)) return s;
+  const pr = (s.pos_risk ?? {}) as PosRisk;
+  const inPx = opt ? Number(s.pos_entry_prem ?? pr.entryPrem ?? 0) : Number(s.pos_entry_px ?? pr.entry ?? 0);
+  const dir = opt ? (s.pos_option_side === "SELL" ? -1 : 1) : (s.position === "LONG" ? 1 : -1);
+  const upd = { pos_ltp: +Number(px).toFixed(2), pos_ltp_at: new Date().toISOString(), pos_upnl: inPx > 0 ? Math.trunc((Number(px) - inPx) * dir * unitsOf(s)) : null };
+  await sb.from("algo_strategies").update(upd).eq("id", s.id);
+  return { ...s, ...upd };
+}
+/**
+ * Live orders: reads the account's Dhan trade book and writes the actual fill price on each order leg still waiting
+ * for one (same contract, same side, traded within 30 minutes of the order, quantity complete).
+ */
+async function brokerFills(set: Settings, strategyIds: string[]) {
+  if (!strategyIds.length || !set.dhan_access_token) return;
+  const since = new Date(Date.now() - 6 * 3600000).toISOString();
+  const { data: sigs } = await sb.from("algo_signals").select("id, created_at, fills").in("strategy_id", strategyIds).eq("mode", "LIVE").eq("status", "SENT")
+    .not("fills", "is", null).gte("created_at", since).order("id");
+  const open = (sigs ?? []).filter((g) => (g.fills as Fill[]).some((f) => f.broker_px == null && Date.now() - Date.parse(g.created_at) < 35 * 60000));
+  if (!open.length) return;
+  const r = await fetch("https://api.dhan.co/v2/trades", { headers: { "access-token": set.dhan_access_token, "client-id": set.dhan_client_id ?? "", Accept: "application/json" }, signal: AbortSignal.timeout(15000) });
+  const book = await r.json().catch(() => null);
+  if (!r.ok || !Array.isArray(book)) return;
+  const used = new Set<string>((sigs ?? []).flatMap((g) => (g.fills as Fill[]).flatMap((f) => f.broker_ids ?? [])));
+  const tOf = (x: any) => Date.parse(String(x.exchangeTime || x.createTime || x.updateTime).replace(" ", "T") + "+05:30");
+  const trades = book.filter((x: any) => Number(x.tradedQuantity) > 0).sort((a: any, b: any) => tOf(a) - tOf(b));
+  for (const g of open) {
+    const fills = g.fills as Fill[];
+    const at = Date.parse(g.created_at);
+    let changed = false;
+    for (const f of fills) {
+      if (f.broker_px != null) continue;
+      const pick: any[] = []; let q = 0;
+      for (const x of trades) {
+        const id = String(x.exchangeTradeId ?? x.orderId + ":" + tOf(x));
+        if (used.has(id) || String(x.transactionType).toUpperCase() !== f.side || !matchesRef(f.ref, x)) continue;
+        const t = tOf(x); if (!(t >= at - 60000 && t <= at + 30 * 60000)) continue;
+        pick.push({ id, x }); q += Number(x.tradedQuantity);
+        if (q >= f.qty) break;
+      }
+      if (q < f.qty || !pick.length) continue;
+      const val = pick.reduce((a, p) => a + Number(p.x.tradedPrice) * Number(p.x.tradedQuantity), 0);
+      f.broker_px = +(val / q).toFixed(2); f.broker_qty = q; f.broker_ids = pick.map((p) => p.id);
+      f.broker_at = new Date(tOf(pick[pick.length - 1].x)).toISOString();
+      pick.forEach((p) => used.add(p.id)); changed = true;
+    }
+    if (changed) await sb.from("algo_signals").update({ fills }).eq("id", g.id);
+  }
+}
 async function logSignal(s: Strategy, event: string, description: string, candle: Candle, status = "LOGGED", payload: unknown = null, response: string | null = null) {
   if (s.locked) { description = plainLog(event, description); candle = { t: candle.t, c: candle.c }; }
-  await sb.from("algo_signals").insert({
+  lastSignalId = null;
+  const { data: ins } = await sb.from("algo_signals").insert({
     strategy_id: s.id, event, description, mode: s.live ? "LIVE" : "PAPER", status, payload, response,
     candle_time: candle.t ? new Date(candle.t * 1000).toISOString() : null,
     trend: candle.trend ?? null, close: candle.c ?? null, supertrend: candle.st ?? null,
-  });
+  }).select("id").single();
+  lastSignalId = ins?.id ?? null;
 }
 
 async function flatten(s: Strategy, set: Settings, update: Record<string, unknown>, candle: Candle) {
   if (s.position === "FLAT") return;
   const ok = await sendOrders(s, set, "FLATTEN", [exitLeg(s, 1)], `Manual exit: ${exitLabel(s)}`, candle);
-  if (ok) { await bookPnl(s, set, update, candle.c, "Manual exit"); Object.assign(update, FLAT_STATE); }
+  if (ok) { const out = await bookPnl(s, set, update, candle.c, "Manual exit"); await saveFills([fillOf(s, "Exit", out)]); Object.assign(update, FLAT_STATE); }
   else Object.assign(update, { last_error: "Exit order failed to send. Check the log and close the position in Dhan.", active: false });
 }
 
@@ -422,7 +496,14 @@ async function finish(s: Strategy, set: Settings, update: Record<string, unknown
       newState = { ...FLAT_STATE }; event = "EXIT";
     } else if (entering) await armRisk(s, set, newState, entryPx!, atrNow, notes);
     const ok = await sendOrders(s, set, event, legs, notes.join(" | "), candle);
-    if (ok && exiting) await bookPnl(s, set, update, candle.c, notes[0] ?? event);
+    const fills: Fill[] = [];
+    if (ok && exiting) fills.push(fillOf(s, "Exit", await bookPnl(s, set, update, candle.c, notes[0] ?? event)));
+    if (ok && entering && newState.position !== "FLAT") {
+      const st = { ...s, ...newState };
+      fills.push(fillOf(st, "Entry", s.trade_type === "OPTIONS" ? (newState.pos_entry_prem as number | null) : entryPx));
+      Object.assign(newState, { pos_ltp: null, pos_ltp_at: null, pos_upnl: null });
+    }
+    if (ok) await saveFills(fills);
     if (ok) Object.assign(update, newState);
     else Object.assign(update, { last_error: "Order failed to send, so the strategy was paused. Check the log and your Dhan positions.", active: false });
   } else if (event === "INFO") {
@@ -997,6 +1078,7 @@ Deno.serve(async (req) => {
   const accounts = new Map<string, Account | null>();
   const gates = new Map<string, unknown>();
   const fundsDone = new Set<string>();
+  const liveIds = new Map<string, string[]>();
   const results: Record<string, string> = {};
   for (const row of strategies) {
     let s = row;
@@ -1019,6 +1101,8 @@ Deno.serve(async (req) => {
       // New trades need the account in good standing; exits always go through.
       s = { ...s, _block: await entryGate(sb, s, gates).catch(() => null) };
       if (action === "tick") s = await liveRisk(s, set);
+      if (action === "tick" || action === "refresh") s = await markPrice(s, set).catch(() => s);
+      if (s.live && action === "tick") liveIds.set(set.user_id, [...(liveIds.get(set.user_id) ?? []), s.id]);
       if (s.strategy_kind === "TIMED") await processTimed(s, set, action);
       else if (s.strategy_kind === "RULES") await processRules(s, set, action);
       else await processFlip(s, set, action);
@@ -1029,5 +1113,7 @@ Deno.serve(async (req) => {
       await sb.from("algo_strategies").update({ last_error: msg, last_run_at: new Date().toISOString() }).eq("id", s.id);
     }
   }
+  // Actual fill prices from each account's Dhan trade book for recent live orders.
+  for (const [u, ids] of liveIds) { try { await brokerFills(accounts.get(`${u}|DHAN`)!, ids); } catch (e) { console.error("fills", e); } }
   return Response.json({ action, results });
 });
