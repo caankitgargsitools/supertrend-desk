@@ -15,6 +15,8 @@ import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
 import { LAB_ASSETS, labStart, labStep, TOKEN_ERR } from "./lab.ts";
 import { loadMarginRates, refreshMargins } from "./margins.ts";
+import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
+import { billingDay, syncUser } from "./billing.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -23,10 +25,7 @@ const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
 });
 
 type Strategy = Record<string, any>;
-type Settings = {
-  dhan_client_id: string | null; dhan_access_token: string | null; webhook_url: string | null; webhook_secret: string | null;
-  capital?: number | null; capital_since?: string | null; deploy_pct?: number | null;
-};
+type Settings = Account;
 type Pos = "FLAT" | "LONG" | "SHORT";
 type ChartBar = { t: number; o: number; h: number; l: number; c: number };
 
@@ -206,8 +205,8 @@ function ratesFor(s: Strategy): ChargeRates {
 }
 /** Equity (starting capital + realised P&L of this mode's closed trades) and the margin other open positions hold. */
 async function capitalState(set: Settings, live: boolean, excludeId: string) {
-  const { data: net } = await sb.rpc("ledger_net", { p_mode: live ? "LIVE" : "PAPER", p_since: set.capital_since ?? null });
-  const { data: open } = await sb.from("algo_strategies").select("id, pos_margin").neq("position", "FLAT").eq("live", live).neq("id", excludeId);
+  const { data: net } = await sb.rpc("ledger_net_user", { p_user: set.user_id, p_mode: live ? "LIVE" : "PAPER", p_since: set.capital_since ?? null });
+  const { data: open } = await sb.from("algo_strategies").select("id, pos_margin").eq("owner_id", set.user_id).neq("position", "FLAT").eq("live", live).neq("id", excludeId);
   const used = (open ?? []).reduce((a, x) => a + (Number(x.pos_margin) || 0), 0);
   return { equity: Number(set.capital ?? 0) + Number(net ?? 0), used };
 }
@@ -235,8 +234,30 @@ async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknow
   const sz = sz0 && rate ? { ...sz0, margin_pct: rate * 100 } : sz0;
   let lots = Number(s.lots);
   const mLot = marginPerLot(s as any, sz ?? (rate ? { margin_pct: rate * 100 } as any : null), entryPx, premium);
-  if (sz && rate) notes.push(`Margin ${(rate * 100).toFixed(1)}% of contract value (Dhan, today)`);
-  if (sz) {
+  if ((sz || capMode) && rate) notes.push(`Margin ${(rate * 100).toFixed(1)}% of contract value (Dhan, today)`);
+  const capMode = s.sizing?.mode === "CAPITAL" && Number(s.capital) > 0;
+  if (capMode) {
+    // A bought strategy: the capital the user gave it, plus what it has made or lost since, decides the lots.
+    const { data: own } = await sb.from("algo_trades").select("net").eq("strategy_id", s.id).eq("mode", s.live ? "LIVE" : "PAPER");
+    const eq = Number(s.capital) + (own ?? []).reduce((a, x) => a + (Number(x.net) || 0), 0);
+    const cs = await capitalState(set, !!s.live, s.id);
+    const max = Math.max(1, Math.trunc(Number(s.sizing.max_lots) || 1000));
+    const byCap = mLot > 0 ? Math.floor(Math.max(0, eq) / mLot) : max;
+    const acctEq = Number(set.capital ?? 0) > 0 ? cs.equity : null;
+    const room = acctEq == null ? Infinity : acctEq * Number(set.deploy_pct ?? 100) / 100 - cs.used;
+    const byRoom = mLot > 0 && room !== Infinity ? Math.floor(Math.max(0, room) / mLot) : max;
+    const n = Math.max(0, Math.min(max, byCap, byRoom));
+    const r0 = (x: number) => Math.trunc(x).toLocaleString("en-IN");
+    const why = `capital ₹${r0(eq)} ÷ ₹${r0(mLot)} a lot → ${byCap}${byRoom < byCap ? `; account deployment cap → ${byRoom}` : ""}${max < Math.min(byCap, byRoom) ? `; max ${max}` : ""} ⇒ ${n} lot${n === 1 ? "" : "s"}`;
+    if (n < 1) { notes.push(`Entry skipped: not enough capital for 1 lot (${why}).`); return false; }
+    lots = n;
+    const e = entryLeg(s, newState.position, entryPx, legs.length, lots);
+    legs[legs.length - 1] = e.leg;
+    Object.assign(newState, e.state);
+    const last = notes.length - 1;
+    if (last >= 0) notes[last] = notes[last].replace(/ x \d+$/, ` x ${e.state.pos_qty}`);
+    notes.push(`Size: ${why}`);
+  } else if (sz) {
     const cs = await capitalState(set, !!s.live, s.id);
     const res = lotsFor(sz, cs.equity, mLot, cs.used, Number(set.deploy_pct ?? 100));
     if (res.lots < 1) { notes.push(`Entry skipped: not enough capital for 1 lot (${res.why}).`); return false; }
@@ -273,7 +294,7 @@ async function bookPnl(s: Strategy, set: Settings, update: Record<string, unknow
   const contract = opt ? `${s.pos_option_side === "SELL" ? "Sell " : ""}${s.dhan_symbol} ${s.pos_strike} ${s.pos_option_type} (${s.pos_expiry})` : `${s.futures_symbol} ${s.position === "LONG" ? "long" : "short"}`;
   const entryAt = s.pos_entry_date ? `${s.pos_entry_date}` : null;
   await sb.from("algo_trades").insert({
-    strategy_id: s.id, mode: s.live ? "LIVE" : "PAPER", entry_day: entryAt, exit_at: new Date().toISOString(), side: s.position, contract,
+    strategy_id: s.id, user_id: s.owner_id ?? null, broker_ref: brokerRef(s), mode: s.live ? "LIVE" : "PAPER", entry_day: entryAt, exit_at: new Date().toISOString(), side: s.position, contract,
     lots: lotsOf(s), units, entry_px: +inPx.toFixed(2), exit_px: +outPx!.toFixed(2), gross: Math.trunc(gross), costs: Math.trunc(costs), net, exit_why: why.slice(0, 200),
   });
   if (r?.max_day_loss) {
@@ -281,6 +302,10 @@ async function bookPnl(s: Strategy, set: Settings, update: Record<string, unknow
     const base = String(s.day_pnl_date) === today ? Number(s.day_pnl) || 0 : 0;
     update.day_pnl = Math.trunc(base + net); update.day_pnl_date = today;
   }
+}
+/** Key used to match a desk trade with the broker's position: OPT|symbol|strike|CE/PE|expiry or FUT|symbol. */
+function brokerRef(s: Strategy): string {
+  return s.trade_type === "OPTIONS" ? `OPT|${s.dhan_symbol}|${s.pos_strike}|${s.pos_option_type}|${s.pos_expiry}` : `FUT|${s.futures_symbol}`;
 }
 /** Checks an open position against its stop / target every minute. Returns the strategy as it stands afterwards. */
 async function liveRisk(s: Strategy, set: Settings): Promise<Strategy> {
@@ -350,7 +375,24 @@ async function sendOrders(s: Strategy, set: Settings, event: string, legs: Recor
   return status !== "FAILED";
 }
 
+/**
+ * A bought strategy's log must not give away its rules: keep the orders, sizing and stop levels, drop the condition
+ * text that explains why the signal fired.
+ */
+function plainLog(event: string, description: string): string {
+  const keep: string[] = [];
+  for (const raw of description.split(" | ")) {
+    const n = raw.trim();
+    const order = n.match(/((?:Buy back|Buy|Sell) .+? x \d+(?: to close \w+)?)$/);
+    if (/^(Size:|Margin |Entry skipped|Levels:|Premium |Stop not set|Manual exit)/.test(n)) keep.push(n);
+    else if (/^(Stop loss|Target|Trailing)/i.test(n)) keep.push(n.replace(/:.*$/, "") + (order ? `: ${order[1]}` : ""));
+    else if (order) keep.push(order[1]);
+  }
+  const lead: Record<string, string> = { ENTRY: "Entry signal", EXIT: "Exit signal", REVERSE: "Reversal signal", SQUARE_OFF: "Square-off", INFO: "Update" };
+  return [lead[event] ?? event, ...keep].join(" | ").slice(0, 1000);
+}
 async function logSignal(s: Strategy, event: string, description: string, candle: Candle, status = "LOGGED", payload: unknown = null, response: string | null = null) {
+  if (s.locked) { description = plainLog(event, description); candle = { t: candle.t, c: candle.c }; }
   await sb.from("algo_signals").insert({
     strategy_id: s.id, event, description, mode: s.live ? "LIVE" : "PAPER", status, payload, response,
     candle_time: candle.t ? new Date(candle.t * 1000).toISOString() : null,
@@ -371,7 +413,8 @@ async function finish(s: Strategy, set: Settings, update: Record<string, unknown
     delete newState._px;
     const entering = (newState.position === "LONG" || newState.position === "SHORT") && entryPx !== undefined;
     const exiting = s.position !== "FLAT" && ["EXIT", "REVERSE", "SQUARE_OFF"].includes(event);
-    if (entering && !(await sizeEntry(s, set, legs, newState, entryPx!, notes))) {
+    if (entering && s._block) notes.push(`Entry skipped: ${s._block}`);
+    if (entering && (s._block || !(await sizeEntry(s, set, legs, newState, entryPx!, notes)))) {
       // Not enough capital: drop the entry; an exit in the same signal still goes out.
       legs.pop();
       if (!legs.length) { await logSignal(s, "INFO", notes.join(" | "), candle); await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
@@ -723,11 +766,20 @@ function jwtExp(tok: string | null): number | null {
  * Dhan tokens last 24 hours. Dhan's RenewToken call swaps a still-valid token for a fresh 24-hour one, so this runs
  * every hour and renews when under 4 hours are left (or each morning at 08:xx IST, before the market opens).
  */
-async function tokenCheck(force: boolean) {
-  const { data: set } = await sb.from("portal_settings").select("dhan_client_id, dhan_access_token").single();
-  const tok = set?.dhan_access_token ?? "", client = set?.dhan_client_id ?? "";
+async function tokenCheck(force: boolean, userId?: string) {
+  // Every connected account (or one), each with its own token.
+  let q = sb.from("broker_accounts").select("id, user_id, client_id, access_token").eq("broker", "DHAN").not("access_token", "is", null);
+  if (userId) q = q.eq("user_id", userId);
+  const { data: rows } = await q;
+  const out: Record<string, unknown> = {};
+  for (const r of rows ?? []) out[r.user_id] = await tokenCheckOne(force, r).catch((e) => ({ renewed: false, reason: String(e) }));
+  const mine = userId ? out[userId] as Record<string, unknown> | undefined : undefined;
+  return userId ? (mine ?? { renewed: false, reason: "no token" }) : { accounts: Object.keys(out).length, results: out };
+}
+async function tokenCheckOne(force: boolean, set: { id: number; client_id: string | null; access_token: string | null }) {
+  const tok = set?.access_token ?? "", client = set?.client_id ?? "";
   const now = Date.now() / 1000, note = (t: string, extra: Record<string, unknown> = {}) =>
-    sb.from("portal_settings").update({ token_note: t, token_checked_at: new Date().toISOString(), ...extra }).eq("id", true);
+    sb.from("broker_accounts").update({ token_note: t, token_checked_at: new Date().toISOString(), ...extra }).eq("id", set.id);
   if (!tok || !client) { await note("No token saved."); return { renewed: false, reason: "no token" }; }
   const exp = jwtExp(tok);
   const expIso = exp ? new Date(exp * 1000).toISOString() : null;
@@ -744,10 +796,10 @@ async function tokenCheck(force: boolean) {
       return { renewed: false, reason: `HTTP ${r.status}` };
     }
     const fexp = jwtExp(fresh) ?? (j.expiryTime ? Date.parse(j.expiryTime) / 1000 : null);
-    await sb.from("portal_settings").update({
-      dhan_access_token: fresh, token_expires_at: fexp ? new Date(fexp * 1000).toISOString() : null, token_renewed_at: new Date().toISOString(),
+    await sb.from("broker_accounts").update({
+      access_token: fresh, token_expires_at: fexp ? new Date(fexp * 1000).toISOString() : null, token_renewed_at: new Date().toISOString(),
       token_checked_at: new Date().toISOString(), token_note: "Renewed automatically.",
-    }).eq("id", true);
+    }).eq("id", set.id);
     return { renewed: true };
   } catch (e) {
     await note(`Renewal failed (${e instanceof Error ? e.message : String(e)}). Retrying next hour.`, { token_expires_at: expIso });
@@ -755,18 +807,18 @@ async function tokenCheck(force: boolean) {
   }
 }
 /** Funds in the Dhan account (available balance, margin in use), shown next to the desk's own capital figures. */
-async function refreshFunds() {
-  const { data: set } = await sb.from("portal_settings").select("dhan_client_id, dhan_access_token").single();
-  if (!set?.dhan_access_token) return { ok: false };
-  const r = await fetch("https://api.dhan.co/v2/fundlimit", { headers: { "access-token": set.dhan_access_token, "client-id": set.dhan_client_id ?? "", Accept: "application/json" }, signal: AbortSignal.timeout(15000) });
+async function refreshFunds(userId: string) {
+  const { data: set } = await sb.from("broker_accounts").select("id, client_id, access_token").eq("user_id", userId).eq("broker", "DHAN").maybeSingle();
+  if (!set?.access_token) return { ok: false };
+  const r = await fetch("https://api.dhan.co/v2/fundlimit", { headers: { "access-token": set.access_token, "client-id": set.client_id ?? "", Accept: "application/json" }, signal: AbortSignal.timeout(15000) });
   const j = await r.json().catch(() => null);
-  if (!r.ok || !j) { await sb.from("portal_settings").update({ funds_error: `Dhan funds request failed (HTTP ${r.status}).`, funds_at: new Date().toISOString() }).eq("id", true); return { ok: false }; }
+  if (!r.ok || !j) { await sb.from("broker_accounts").update({ funds_error: `Dhan funds request failed (HTTP ${r.status}).`, funds_at: new Date().toISOString() }).eq("id", set.id); return { ok: false }; }
   const pickN = (...k: string[]) => { for (const x of k) if (j[x] !== undefined && j[x] !== null) return Number(j[x]); return null; };
   const funds = {
     available: pickN("availabelBalance", "availableBalance"), sod: pickN("sodLimit"), collateral: pickN("collateralAmount"),
     utilized: pickN("utilizedAmount"), withdrawable: pickN("withdrawableBalance"), receivable: pickN("receiveableAmount", "receivableAmount"),
   };
-  await sb.from("portal_settings").update({ funds, funds_at: new Date().toISOString(), funds_error: null }).eq("id", true);
+  await sb.from("broker_accounts").update({ funds, funds_at: new Date().toISOString(), funds_error: null }).eq("id", set.id);
   return { ok: true };
 }
 
@@ -785,8 +837,7 @@ async function chainBacktest(id: number) {
 
 /** Strategy lab: run one instalment, then hand over to a fresh invocation if there is more to do. */
 async function labLoop() {
-  const { data: set } = await sb.from("portal_settings").select("dhan_client_id, dhan_access_token").single();
-  const creds = { client: set?.dhan_client_id ?? "", token: set?.dhan_access_token ?? "" };
+  const creds = credsOf(await adminAccount(sb));
   const chain = async () => {
     const { data: sec } = await sb.from("engine_secret").select("secret").single();
     await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/engine`, {
@@ -804,8 +855,9 @@ async function runBacktestJob(id: number) {
   if (bt.status === "queued" && bt.plans) await sb.from("algo_backtests").update({ status: "running", error: null, progress: "Resuming" }).eq("id", id);
   const setRow = (fields: Record<string, unknown>) => sb.from("algo_backtests").update(fields).eq("id", id);
   try {
-    const { data: set } = await sb.from("portal_settings").select("*").single();
-    const creds = { client: set?.dhan_client_id ?? "", token: set?.dhan_access_token ?? "" };
+    // The strategy owner's Dhan account (the admin's for marketplace results, or when the owner has none).
+    const own = bt.user_id ? await accountFor(sb, bt.user_id) : null;
+    const creds = credsOf(own?.dhan_access_token ? own : await adminAccount(sb));
     let params = bt.params;
     let plans: Plan[] | null = bt.plans;
     let acc: Acc = bt.acc ?? newAcc(Number(params.capital));
@@ -884,13 +936,14 @@ Deno.serve(async (req) => {
   const { data: sec } = await sb.from("engine_secret").select("secret").single();
   if (!secret || !sec || secret !== sec.secret) return new Response("Forbidden", { status: 403 });
 
-  let body: { action?: string; strategy_id?: string; backtest_id?: number } = {};
+  let body: { action?: string; strategy_id?: string; backtest_id?: number; user_id?: string } = {};
   try { body = await req.json(); } catch { /* empty body */ }
   const action = body.action ?? "tick";
 
   if (action === "backtest") {
     if (!body.backtest_id) return Response.json({ error: "backtest_id missing" }, { status: 400 });
-    EdgeRuntime.waitUntil(runBacktestJob(Number(body.backtest_id)));
+    // When a run ends, the next waiting backtest (queued by users or the marketplace) starts.
+    EdgeRuntime.waitUntil(runBacktestJob(Number(body.backtest_id)).finally(async () => { await sb.rpc("kick_backtests"); }));
     return Response.json({ accepted: true });
   }
 
@@ -903,15 +956,24 @@ Deno.serve(async (req) => {
     return Response.json({ action, accepted: true });
   }
 
-  if (action === "token" || action === "token_renew") return Response.json({ action, ...(await tokenCheck(action === "token_renew")) });
-  if (action === "funds") return Response.json({ action, ...(await refreshFunds()) });
+  if (action === "token" || action === "token_renew") return Response.json({ action, ...(await tokenCheck(action === "token_renew", body.user_id)) });
+  if (action === "funds") {
+    if (body.user_id) return Response.json({ action, ...(await refreshFunds(body.user_id)) });
+    const admin = await adminAccount(sb);
+    return Response.json({ action, ...(admin ? await refreshFunds(admin.user_id) : { ok: false }) });
+  }
+  if (action === "sync") {
+    if (!body.user_id) return Response.json({ error: "user_id missing" }, { status: 400 });
+    return Response.json({ action, ...(await syncUser(sb, body.user_id, false)) });
+  }
+  if (action === "billing_day") return Response.json({ action, ...(await billingDay(sb)) });
   if (action === "margins") {
-    const { data: set } = await sb.from("portal_settings").select("dhan_client_id, dhan_access_token").single();
+    const admin = await adminAccount(sb);
     const { data: ls } = await sb.from("lab_settings").select("assets").eq("id", 1).maybeSingle();
     // The lab's assets plus every asset a strategy trades, checked each morning before the market opens.
     const { data: strats } = await sb.from("algo_strategies").select("underlying").eq("archived", false);
     const keys: string[] = [...new Set([...(ls?.assets ?? []), ...(strats ?? []).map((x) => String(x.underlying))])].filter((k: string) => LAB_ASSETS[k]);
-    const n = await refreshMargins(sb, { client: set?.dhan_client_id ?? "", token: set?.dhan_access_token ?? "" }, keys.map((k) => LAB_ASSETS[k]));
+    const n = await refreshMargins(sb, credsOf(admin), keys.map((k) => LAB_ASSETS[k]));
     return Response.json({ action, priced: n, of: keys.length });
   }
 
@@ -919,33 +981,46 @@ Deno.serve(async (req) => {
   const nowIst = ist(Date.now() / 1000);
   if (action === "tick" && (nowIst.wd === 0 || nowIst.wd === 6)) return Response.json({ skipped: "weekend" });
 
-  const { data: set } = await sb.from("portal_settings").select("*").single();
-  // Dhan funds, every 10 minutes while the market ticks run.
-  if (action === "tick" && (!set?.funds_at || Date.now() - Date.parse(set.funds_at) > 600000)) await refreshFunds().catch(() => {});
   if (action === "sync_instruments") {
-    const n = await syncMcx(sb, set?.dhan_client_id ?? "", set?.dhan_access_token ?? "");
+    const c = credsOf(await adminAccount(sb));
+    const n = await syncMcx(sb, c.client, c.token);
     return Response.json({ action, contracts: n });
   }
   let q = sb.from("algo_strategies").select("*");
-  q = body.strategy_id ? q.eq("id", body.strategy_id) : q.eq("active", true);
-  const { data: strategies, error } = await q;
+  q = body.strategy_id ? q.eq("id", body.strategy_id) : q.eq("active", true).eq("is_master", false);
+  const { data: rows0, error } = await q;
   if (error) return Response.json({ error: error.message }, { status: 500 });
+  // Bought strategies run on their publisher's rules.
+  const strategies = await withMasters(sb, rows0 ?? []);
 
+  const accounts = new Map<string, Account | null>();
+  const gates = new Map<string, unknown>();
+  const fundsDone = new Set<string>();
   const results: Record<string, string> = {};
-  for (const row of strategies ?? []) {
+  for (const row of strategies) {
     let s = row;
     try {
       // Each market has its own hours (NSE/BSE 09:15–15:30, MCX 09:00–23:30/23:55); ticks outside them are skipped.
       const sess = sessionFor(s.data_segment, nowIst.date);
       if (action === "tick" && (nowIst.min < sess.open || nowIst.min > sess.close + 5)) continue;
+      if (String(s.broker ?? "DHAN") !== "DHAN") throw new Error(`${s.broker} isn't supported yet.`);
+      if (!s.owner_id) throw new Error("This strategy has no owner.");
+      const set = await accountFor(sb, s.owner_id, "DHAN", accounts);
+      if (!set?.dhan_access_token) throw new Error("Connect your Dhan account (client ID and access token) to run this strategy.");
+      // Dhan funds, every 10 minutes while the market ticks run.
+      if (action === "tick" && !fundsDone.has(set.user_id) && (!set.funds_at || Date.now() - Date.parse(set.funds_at) > 600000)) {
+        fundsDone.add(set.user_id); await refreshFunds(set.user_id).catch(() => {});
+      }
       if (isCommodity(String(s.data_segment))) {
-        const r = await dataSecurity(sb, { client: set?.dhan_client_id ?? "", token: set?.dhan_access_token ?? "" }, s.data_segment, String(s.data_security_id), nowIst.date);
+        const r = await dataSecurity(sb, credsOf(set), s.data_segment, String(s.data_security_id), nowIst.date);
         s = { ...s, data_security_id: r.sec };
       }
-      if (action === "tick") s = await liveRisk(s, set as Settings);
-      if (s.strategy_kind === "TIMED") await processTimed(s, set as Settings, action);
-      else if (s.strategy_kind === "RULES") await processRules(s, set as Settings, action);
-      else await processFlip(s, set as Settings, action);
+      // New trades need the account in good standing; exits always go through.
+      s = { ...s, _block: await entryGate(sb, s, gates).catch(() => null) };
+      if (action === "tick") s = await liveRisk(s, set);
+      if (s.strategy_kind === "TIMED") await processTimed(s, set, action);
+      else if (s.strategy_kind === "RULES") await processRules(s, set, action);
+      else await processFlip(s, set, action);
       results[s.id] = "ok";
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
