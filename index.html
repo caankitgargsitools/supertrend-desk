@@ -231,7 +231,7 @@ legend { padding: 0; margin-bottom: 4px; }
 .lab-table tbody td { border-bottom: 1px solid var(--line); }
 /* On wide screens the header sticks to the top of the window (under the page bar) as you scroll the page. */
 body.wide .wrap { max-width: 1840px; }
-.lab-table { width: 100%; table-layout: fixed; min-width: 1370px; }
+.lab-table { width: 100%; table-layout: fixed; min-width: 1610px; }
 .lab-table thead tr.t th { text-align: center; vertical-align: middle; }
 .lab-table td.lbl { min-width: 0; max-width: none; overflow-wrap: anywhere; }
 .lab-table td { overflow: hidden; text-overflow: ellipsis; }
@@ -668,7 +668,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
             <tbody id="lab_body"></tbody>
           </table>
         </div>
-        <p class="hint" style="margin:8px 0 0">Score = net profit of the first 9 months ÷ the worst drawdown in them × the share of those months that made money. Figures are for 1 lot after brokerage and statutory charges, in whole rupees. Avg margin / lot = for each trade, the margin one lot needed at that trade's entry price (futures: price × lot × Dhan's margin rate; option writing: strike × lot × Dhan's writing margin rate; option buying: premium paid × lot), averaged over the trades. Margin rates come from Dhan's margin calculator, checked each night. Return on margin = the year's net ÷ that average. Similar strategies (same asset, same indicators and conditions, only settings such as lengths, levels, timeframe, stops or session differ) are grouped into one line showing the best of them; open “similar” to see the rest. Nights = how many runs tested this exact strategy (it passed in how many).</p>
+        <p class="hint" style="margin:8px 0 0">Score = net profit of the first 9 months ÷ the worst drawdown in them × the share of those months that made money. Figures are for 1 lot after brokerage and statutory charges, in whole rupees. Avg margin / lot = for each trade, the margin one lot needed at that trade's entry price (futures: price × lot × Dhan's margin rate; option writing: strike × lot × Dhan's writing margin rate; option buying: premium paid × lot), averaged over the trades. Margin rates come from Dhan's margin calculator, checked each night. Return on margin = the year's net ÷ that average. Similar strategies (same asset, same indicators and conditions, only settings such as lengths, levels, timeframe, stops or session differ) are grouped into one line showing the best of them; open “similar” to see the rest. Nights = how many runs tested this exact strategy (it passed in how many).<br><strong>Passed</strong> needs two rounds. Round 1: profitable in the ranked 9 months and in the 3 months after. Round 2 (the tougher test, on the latest year): the same rules must work on at least 2 other assets (same family first) and on other candle timeframes (at least 2 of them, or 1 when fewer than 3 could be tried; once-a-day commodity strategies need 3 other assets instead), and its profit ÷ worst fall must be at least that of buying and holding 1 lot for the year. “Works” = makes money with a profit factor of 1.1 or more and enough trades. Every earlier result has been put through round 2 as well.</p>
       </section>
 
       <section class="card" id="lab_detail" hidden></section>
@@ -750,7 +750,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
         </div>
       </div>
       <h3 style="font-size:16px;margin-top:16px">Daily check with Dhan</h3>
-      <p class="hint">After each market session the desk reads your Dhan positions, matches them with the desk's live trades and uses Dhan's realised profit where they agree. Profit share is worked out on these figures.</p>
+      <p class="hint">After each market session the desk reads your Dhan positions, matches them with the desk's live trades and uses Dhan's realised profit where they agree, so your P&amp;L here matches your broker.</p>
       <div class="scroll"><table class="mini"><thead><tr><th>Day</th><th class="n">Desk net</th><th class="n">Dhan realised (whole account)</th><th class="n">Trades matched</th><th>Note</th></tr></thead><tbody id="wl_days"></tbody></table></div>
     </section>
 
@@ -790,14 +790,14 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
             <label class="f"><span>Free trial (days) for new users</span><input id="ab_trial" type="number" min="0" step="1"></label>
             <label class="f"><span>Deployment fee per strategy (₹)</span><input id="ab_fee" type="number" min="0" step="any"></label>
             <label class="f"><span>Fee charged</span><select id="ab_period"><option value="MONTHLY">Every month while live</option><option value="ONE_TIME">Once per strategy</option></select></label>
-            <label class="f"><span>Profit share (% of net profit)</span><input id="ab_share" type="number" min="0" max="100" step="any"></label>
+            <input id="ab_share" type="hidden" value="0">
             <label class="f"><span>Minimum wallet balance to open trades (₹)</span><input id="ab_min" type="number" min="0" step="any"></label>
             <label class="f wide"><span>Pay to (UPI ID / bank details shown to users)</span><input id="ab_payto" autocomplete="off"></label>
             <label class="f wide"><span>Payment note shown to users</span><input id="ab_paynote" autocomplete="off"></label>
           </div>
           <div class="formbar"><button class="btn primary" type="submit">Save billing settings</button><span class="hint" id="ab_msg"></span></div>
         </form>
-        <p class="hint">How billing works: during a trial nothing is charged. After it, going live takes the deployment fee from the wallet. Each evening the desk checks the day's live trades with Dhan and takes the profit share on winning trades from the wallet; losing trades are carried forward and set off against later profits before any share is charged. When the wallet is below the minimum (or below zero), strategies stop opening new trades; exits always go through. Per-user overrides are on each user.</p>
+        <p class="hint">How billing works: during a trial nothing is charged. After it, going live takes the deployment fee from the wallet. No share of profits is taken. Each evening the desk checks the day's live trades with Dhan so the P&amp;L matches the broker. When the wallet is below the minimum (or below zero), strategies stop opening new trades; exits always go through. Per-user overrides are on each user.</p>
       </div>
     </section>
   </main>
@@ -2873,6 +2873,21 @@ function condText(c) {
   return `${def.name}${params} on ${tf} ${op}${c.v !== undefined && VALUE_OPS.has(c.op) ? " " + c.v : ""}`;
 }
 function setText(set) { return set && set.conds && set.conds.length ? set.conds.map(condText).join(set.mode === "ANY" ? " OR " : " AND ") : "—"; }
+/** The tougher test of a lab strategy, the same shape for the admin (full detail) and for users (counts only). */
+function robOf(r) {
+  const x = r.robust;
+  if (!r.basic_passed && !(x && x.status)) return null;
+  if (!x) return { status: "waiting" };
+  if (x.assets && typeof x.assets === "object") return { status: x.status || (x.checked_at ? "done" : "waiting"), passed: x.passed, assets_ok: x.assets.ok, assets_n: x.assets.n, tfs_ok: x.tfs.ok, tfs_n: x.tfs.n,
+    vs_bh: x.vs_bh, risk_vs_bh: x.risk_vs_bh, bh_net: x.bh && x.bh.net, bh_dd: x.bh && x.bh.max_dd, bh_ratio: x.bh && x.bh.ratio, net: x.self && x.self.net, max_dd: x.self && x.self.max_dd, why: x.why || [], daily: x.daily,
+    assetList: x.assets.list, tfList: x.tfs.list };
+  return { ...x, status: x.status || "waiting", why: x.why || [] };
+}
+/** Passed = the walk-forward pass and the tougher test (other assets, other timeframes, buy & hold). */
+const robDone = (r) => { const x = robOf(r); return !!x && x.status === "done"; };
+function labPassed(r, m) { return !!(m && m.passed) && r.passed === true; }
+function labChecking(r, m) { const x = robOf(r); return !!(m && m.passed) && r.basic_passed && !!x && x.status !== "done"; }
+const ratioTxt = (v) => v == null ? "–" : `${v}×`;
 function labMetricsFor(r) { return lab.view === "FUT" ? r.metrics : lab.view === "BUY" ? r.ob && r.ob.metrics : r.os && r.os.metrics; }
 function openLab() {
   closeCap(); hideNewPanes(); page = "lab"; markNav("openLab"); document.body.classList.add("wide");
@@ -2901,15 +2916,16 @@ async function loadLab() {
     db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at").order("id", { ascending: false }).limit(8).then(must),
   ]);
   lab.settings = settings; lab.runs = runs;
-  let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, score, metrics, starred, promoted_id, ob:opt_buy->summary, os:opt_sell->summary")
+  let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, ob:opt_buy->summary, os:opt_sell->summary")
     .in("stage", ["screened", "opt_queue", "pricing", "priced"]);
   if (lab.request) q = q.eq("request_id", lab.request);
   else if (lab.period === "run") q = q.eq("run_id", runs[0] ? runs[0].id : -1);
   else q = q.gte("created_at", new Date(Date.now() - Number(lab.period) * 86400000).toISOString());
-  if (lab.only && lab.view === "FUT") q = q.eq("passed", true);
+  // "Passed only" also lists first-round winners still waiting for the tougher test (marked "Being checked").
+  if (lab.only && lab.view === "FUT") q = q.or("passed.eq.true,and(basic_passed.eq.true,robust_status.is.null),and(basic_passed.eq.true,robust_status.eq.queued)");
   if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : "opt_sell", "is", null);
   if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
-  lab.rows = must(await q.order("score", { ascending: false }).limit(2000));
+  lab.rows = must(await q.order("score", { ascending: false }).limit(2000)).map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
   lab.long = await db.rpc("lab_long_map").then((x) => x.data || {}).catch(() => ({}));
   renderLabStatus(); renderLabTable(); loadLabRequests().catch(() => {});
   stopLabPoll();
@@ -2922,7 +2938,7 @@ function renderLabStatus() {
   if (!r) { box.innerHTML = '<div class="banner info">No runs yet. The first one starts at 16:05 IST, or press “Run now”.</div>'; return; }
   const c = r.counts || {};
   const chip = r.status === "running" ? '<span class="chip blue">Running</span>' : r.status === "done" ? '<span class="chip green">Finished</span>' : r.status === "failed" ? '<span class="chip red">Failed</span>' : '<span class="chip">Stopped</span>';
-  const phases = { data: "1 of 4 · updating candles", generate: "2 of 4 · writing strategies", screen: "3 of 4 · backtesting", options: "4 of 4 · real option prices", done: "done" };
+  const phases = { data: "1 of 5 · updating candles", generate: "2 of 5 · writing strategies", screen: "3 of 5 · backtesting", robust: r.trigger === "robust" ? "re-check · other assets, timeframes, buy & hold" : "4 of 5 · other assets, timeframes, buy & hold", options: "5 of 5 · real option prices", done: "done" };
   box.innerHTML = `<div class="stats">
     <div class="stat"><span class="label">Latest run</span><span class="v" style="font-size:14px">#${r.id} ${chip}</span></div>
     <div class="stat"><span class="label">Started</span><span class="v" style="font-size:14px">${esc(istText(r.created_at))}</span></div>
@@ -2934,18 +2950,48 @@ function renderLabStatus() {
   <p class="hint" style="margin:8px 0 0">${r.status === "running" ? `Step ${esc(phases[r.phase] || r.phase)}: ${esc(r.progress || "")}` : esc(r.progress || "")}</p>
   ${r.error ? `<div class="banner err" style="margin-top:8px">${esc(r.error)}</div>` : ""}`;
 }
+function robCells(r) {
+  const x = robOf(r);
+  if (!x) return '<td class="n hint">–</td><td class="n hint">–</td><td class="n hint">–</td>';
+  if (x.status !== "done") return '<td class="n hint" colspan="3" style="text-align:center">being checked</td>';
+  const c = (ok, n) => `<td class="n"><span class="${n && ok >= Math.min(2, n) ? "pos-num" : "neg-num"}">${ok ?? 0}/${n ?? 0}</span></td>`;
+  return `${c(x.assets_ok, x.assets_n)}${x.tfs_n ? c(x.tfs_ok, x.tfs_n) : '<td class="n hint" title="Not testable on other timeframes">n/a</td>'}<td class="n"><span class="${x.risk_vs_bh == null || x.risk_vs_bh >= 1 ? "pos-num" : "neg-num"}">${ratioTxt(x.risk_vs_bh)}</span></td>`;
+}
+/** The tougher test as a panel for the lab detail. Users see counts; the admin also sees each asset and timeframe. */
+function robustHTML(r, m, admin) {
+  const x = robOf(r);
+  if (!m.passed) return `<div class="banner warn" style="margin-top:12px">Not passed: ${esc((m.why || []).join("; "))}.</div>`;
+  if (!x || x.status !== "done") return '<div class="banner info" style="margin-top:12px">Passed the first round (profitable in the ranked 9 months and in the 3 months after). Now being checked on other assets, other timeframes and against buy &amp; hold; it counts as passed only after that.</div>';
+  const pc = (v) => v == null ? "–" : `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${rupees(v)}</span>`;
+  const head = x.passed ? '<div class="banner ok" style="margin-top:12px">Passed: profitable in the ranked 9 months and the 3 months after, works on other assets and other timeframes, and beats buy &amp; hold for the risk taken.</div>'
+    : `<div class="banner warn" style="margin-top:12px">Failed the tougher test: ${esc(x.why.join("; "))}.</div>`;
+  const list = (rows, kind) => rows && rows.length ? `<table class="mini" style="margin-top:6px"><thead><tr><th>${kind}</th><th class="n">Trades</th><th class="n">Net</th><th class="n">PF</th><th class="n">Max DD</th><th>Works?</th></tr></thead><tbody>${rows.map((y) => `<tr><td>${esc(kind === "Asset" ? labAssetName(y.asset) : y.tf + " min")}</td><td class="n">${y.n ?? "–"}</td><td class="n">${pc(y.net)}</td><td class="n">${y.pf ?? "–"}</td><td class="n">${y.max_dd == null ? "–" : rupees(y.max_dd)}</td><td>${y.ok ? '<span class="chip green">Yes</span>' : `<span class="chip red">No</span>${y.error ? ` <span class="hint">${esc(y.error)}</span>` : ""}`}</td></tr>`).join("")}</tbody></table>` : "";
+  return `${head}
+    <h3 style="font-size:15px;margin:16px 0 6px">Tougher test (latest year, 1 lot)</h3>
+    <div class="stats">
+      <div class="stat"><span class="label">Other assets that work</span><span class="v">${x.assets_ok ?? 0} of ${x.assets_n ?? 0}</span><span class="hint">needs ${Math.min(2, x.assets_n || 0)}</span></div>
+      <div class="stat"><span class="label">Other timeframes that work</span><span class="v">${x.tfs_n ? `${x.tfs_ok} of ${x.tfs_n}` : "n/a"}</span><span class="hint">${x.tfs_n ? `needs ${x.tfs_n >= 3 ? 2 : 1}` : "once-a-day commodity: needs 3 other assets instead"}</span></div>
+      <div class="stat"><span class="label">Strategy net · worst fall</span><span class="v">${pc(x.net)}</span><span class="hint">max DD ${x.max_dd == null ? "–" : rupees(x.max_dd)}</span></div>
+      <div class="stat"><span class="label">Buy &amp; hold 1 lot · worst fall</span><span class="v">${pc(x.bh_net)}</span><span class="hint">max DD ${x.bh_dd == null ? "–" : rupees(x.bh_dd)}</span></div>
+      <div class="stat"><span class="label">Profit vs buy &amp; hold</span><span class="v">${ratioTxt(x.vs_bh)}</span><span class="hint">${x.vs_bh == null ? (x.bh_net != null && x.bh_net <= 0 ? "buy &amp; hold lost money" : "") : "strategy net ÷ buy &amp; hold net"}</span></div>
+      <div class="stat"><span class="label">Risk-adjusted vs buy &amp; hold</span><span class="v ${x.risk_vs_bh == null || x.risk_vs_bh >= 1 ? "up" : "down"}">${ratioTxt(x.risk_vs_bh)}</span><span class="hint">(net ÷ max DD) ÷ buy &amp; hold's; 1× or more needed</span></div>
+    </div>
+    <p class="hint" style="margin:6px 0 0">A check “works” when it makes money with a profit factor of 1.1 or more and enough trades (5 for once-a-day, 10 for intraday).</p>
+    ${admin ? list(x.assetList, "Asset") + list(x.tfList, "Timeframe") : ""}`;
+}
 function labGroup() {
   // One line per strategy (same rules and stops), showing its latest result and how often it passed.
   const by = new Map();
   for (const r of lab.rows) {
     const m = labMetricsFor(r); if (!m) continue;
-    if (lab.view !== "FUT" && lab.only && !m.passed) continue;
+    if (lab.view !== "FUT" && lab.only && !labPassed(r, m)) continue;
     const risk = r.config ? r.config.risk : r.has_risk;
     if (lab.stopf === "WITH" && !risk && lab.view === "FUT") continue;
     if (lab.stopf === "WITHOUT" && risk && lab.view === "FUT") continue;
     const g = by.get(r.fingerprint);
-    if (!g) by.set(r.fingerprint, { r, m, nights: 1, passes: m.passed ? 1 : 0 });
-    else { g.nights++; if (m.passed) g.passes++; if (r.run_id > g.r.run_id) { g.r = r; g.m = m; } }
+    const ok = labPassed(r, m);
+    if (!g) by.set(r.fingerprint, { r, m, nights: 1, passes: ok ? 1 : 0 });
+    else { g.nights++; if (ok) g.passes++; if (r.run_id > g.r.run_id) { g.r = r; g.m = m; } }
   }
   // Column filters apply to every strategy; sorting follows the column picked in the header.
   for (const [k, g] of [...by]) if (!labPassFilters(g)) by.delete(k);
@@ -2992,6 +3038,9 @@ const LAB_COLS = [
   { k: "pf", w: 54, t: "PF", f: "num", n: true, v: (g) => g.m.full.pf ?? null },
   { k: "months", w: 70, t: "Months +", f: "num", n: true, v: (g) => g.m.pos_months, tip: "Profitable months out of the months traded" },
   { k: "score", w: 64, t: "Score", f: "num", n: true, v: (g) => g.m.score },
+  { k: "oassets", w: 76, t: "Other assets +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.assets_ok : null; }, tip: "Of the other assets the same rules were tried on (same family first: indices for index strategies, commodities for commodity ones), how many made money with a profit factor of 1.1 or more" },
+  { k: "otfs", w: 82, t: "Other timeframes +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.tfs_ok : null; }, tip: "Of the other candle timeframes tried on the same asset, how many made money with a profit factor of 1.1 or more" },
+  { k: "vsbh", w: 84, t: "vs Buy & Hold", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.risk_vs_bh ?? null : null; }, tip: "Strategy's profit ÷ worst fall, divided by the same for holding 1 lot for the year. Above 1× = better than buy & hold for the risk taken" },
   { k: "nights", w: 70, t: "Nights passed", f: "num", n: true, v: (g) => g.passes },
   { k: "longnet", w: 112, t: "Long test net", f: "num", n: true, v: (g) => { const L = longOf(g.r); return L ? L.net : null; }, tip: "Net profit over the longest period tested in the nightly long test (up to 10 years for daily strategies, 5 years for intraday), 1 lot after charges" },
   { k: "longpos", w: 74, t: "Long test periods +", f: "num", n: true, v: (g) => { const L = longOf(g.r); return L ? L.pos : null; }, tip: "Of the periods tested (3M, 6M, 1Y … 10Y), how many made money" },
@@ -3070,13 +3119,13 @@ function renderLabTable() {
       c.rules && c.rules.candles === "HA" ? '<span class="chip">HA candles</span>' : "",
       c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.champion ? '<span class="chip green">Re-tested</span>' : "",
       r.starred ? '<span class="chip yellow">★</span>' : "", r.promoted_id ? '<span class="chip green">Saved as strategy</span>' : "",
-      m.passed ? "" : '<span class="chip red">Not passed</span>'].join("");
+      labPassed(r, m) ? '<span class="chip green">Passed</span>' : labChecking(r, m) ? '<span class="chip blue">Being checked</span>' : m.passed && robDone(r) ? '<span class="chip red">Failed tougher test</span>' : '<span class="chip red">Not passed</span>'].join("");
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : r.os) : null;
     const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} similar</button>` : "";
     tr.innerHTML = `<td class="n">${num}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
       <td style="white-space:nowrap">${esc(labAssetName(r.asset))}</td><td>${esc(labStyle(r))}</td><td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}</td><td class="n">${m.margin_lot ? rupees(m.margin_lot) : "–"}</td>
       <td class="n">${m.ret_margin == null ? "–" : `<span class="${m.ret_margin > 0 ? "pos-num" : m.ret_margin < 0 ? "neg-num" : ""}">${m.ret_margin}%</span>`}</td><td class="n">${pc(m.test.net)}</td>
-      <td class="n">${rupees(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${m.score}</td><td class="n">${g.passes}/${g.nights}</td>${(() => { const L = longOf(r); return L ? `<td class="n"><span class="hint">${L.key}</span> <span class="${L.net > 0 ? "pos-num" : L.net < 0 ? "neg-num" : ""}">${rupees(L.net)}</span></td><td class="n">${L.pos}/${L.n}</td>` : '<td class="n hint">–</td><td class="n hint">–</td>'; })()}`;
+      <td class="n">${rupees(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${m.score}</td>${robCells(r)}<td class="n">${g.passes}/${g.nights}</td>${(() => { const L = longOf(r); return L ? `<td class="n"><span class="hint">${L.key}</span> <span class="${L.net > 0 ? "pos-num" : L.net < 0 ? "neg-num" : ""}">${rupees(L.net)}</span></td><td class="n">${L.pos}/${L.n}</td>` : '<td class="n hint">–</td><td class="n hint">–</td>'; })()}`;
     tr.querySelector(".t").textContent = r.label;
     tr.addEventListener("click", (e) => {
       if (e.target.closest(".famBtn")) { if (lab.openFam.has(f.key)) lab.openFam.delete(f.key); else lab.openFam.add(f.key); renderLabTable(); return; }
@@ -3143,7 +3192,7 @@ async function openLabDetail(id) {
       <div class="actions"><button class="btn small" id="ld_star" type="button">${r.starred ? "★ Starred" : "☆ Star (keep)"}</button><button class="btn small" id="ld_xlsx" type="button">Download Excel</button><button class="btn primary small" id="ld_save" type="button">Save as strategy</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
       <div id="ld_form"></div>
       <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.key === "FUT" ? "Futures" : x.label)}</button>`).join("")}</div>
-      ${m.passed ? '<div class="banner ok" style="margin-top:12px">Passed: profitable in the ranked 9 months and in the 3 months after.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc(m.why.join("; "))}.</div>`}
+      ${v.key === "FUT" ? robustHTML(r, m, true) : m.passed ? '<div class="banner ok" style="margin-top:12px">This option version passed the walk-forward check. The tougher test (other assets, timeframes, buy &amp; hold) is on the Futures tab.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc(m.why.join("; "))}.</div>`}
       <div class="stats" style="margin-top:12px">
         <div class="stat"><span class="label">Net (1 year)</span><span class="v ${m.full.net >= 0 ? "up" : "down"}">${rupees(m.full.net)}</span></div>
         <div class="stat"><span class="label">Last 3 months</span><span class="v ${m.test.net >= 0 ? "up" : "down"}">${rupees(m.test.net)}</span></div>
@@ -3194,7 +3243,7 @@ async function openLabDetailPublic(id) {
       <div class="actions"><button class="btn primary small" id="ld_use" type="button">Use this strategy</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
       <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.label)}</button>`).join("")}</div>
       <div id="ld_form"></div>
-      ${m.passed ? '<div class="banner ok" style="margin-top:12px">Passed: profitable in the ranked 9 months and in the 3 months after.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc((m.why || []).join("; "))}.</div>`}
+      ${v.key === "FUT" ? robustHTML(r, m, false) : m.passed ? '<div class="banner ok" style="margin-top:12px">This option version passed the walk-forward check. The tougher test (other assets, timeframes, buy &amp; hold) is on the first tab.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc((m.why || []).join("; "))}.</div>`}
       <div class="stats" style="margin-top:12px">
         <div class="stat"><span class="label">Net (1 year)</span><span class="v ${m.full.net >= 0 ? "up" : "down"}">${rupees(m.full.net)}</span></div>
         <div class="stat"><span class="label">Last 3 months</span><span class="v ${m.test.net >= 0 ? "up" : "down"}">${rupees(m.test.net)}</span></div>
@@ -3332,7 +3381,7 @@ async function downloadLabExcel(r, v, kv) {
   await loadScript("vendor/xlsx.mini.min.js");
   const m = v.metrics, wb = XLSX.utils.book_new();
   const p = (name, x) => [[name], ["Trades", x.n], ["Win rate (%)", x.win_rate], ["Net (Rs)", x.net], ["Gross (Rs)", x.gross], ["Charges (Rs)", x.costs], ["Profit factor", x.pf ?? "–"], ["Max drawdown (Rs)", x.max_dd], [] ];
-  const sum = XLSX.utils.aoa_to_sheet([["CA Ankit Garg Trade Desk · Strategy Lab #" + r.id], [r.label], [], ...kv, ["This version", v.label], ["Stops in this version", riskText(v.risk)], ["Passed", m.passed ? "Yes" : "No: " + m.why.join("; ")], ["Score", m.score], ["Average margin per lot (Rs)", m.margin_lot ?? "–"], ["Highest margin per lot (Rs)", m.margin_max ?? "–"], ["Margin basis", marginNote(m, labKind(v))], ["Return on average margin (%)", m.ret_margin ?? "–"], [],
+  const sum = XLSX.utils.aoa_to_sheet([["CA Ankit Garg Trade Desk · Strategy Lab #" + r.id], [r.label], [], ...kv, ["This version", v.label], ["Stops in this version", riskText(v.risk)], ["Passed", labPassed(r, m) ? "Yes" : !m.passed ? "No: " + m.why.join("; ") : robDone(r) ? "Failed tougher test: " + robOf(r).why.join("; ") : "First round only; tougher test pending"], ["Score", m.score], ["Average margin per lot (Rs)", m.margin_lot ?? "–"], ["Highest margin per lot (Rs)", m.margin_max ?? "–"], ["Margin basis", marginNote(m, labKind(v))], ["Return on average margin (%)", m.ret_margin ?? "–"], [],
     ...p("Whole year", m.full), ...p("First 9 months (ranked)", m.train), ...p("Last 3 months (check)", m.test), ["Month", "Net (Rs)", "Trades"], ...m.months.map((x) => [x.m, x.net, x.n])]);
   sum["!cols"] = [{ wch: 26 }, { wch: 90 }];
   XLSX.utils.book_append_sheet(wb, sum, "Summary");
@@ -3742,8 +3791,7 @@ async function loadWallet() {
   $("wl_stats").innerHTML = (e.ok === false ? `<div class="banner err" style="margin-bottom:10px">New trades are paused: ${esc(e.why || "")} Exits still go through.</div>` : "") + `<div class="stats">
     ${tile("Balance", rupees(b.balance), Number(b.balance) < 0 ? "down" : "", b.min_balance > 0 ? `minimum ${rupees(b.min_balance)} to open trades` : "")}
     ${tile("Free trial", b.trial_active ? `till ${b.trial_until}` : b.trial_until ? "ended" : "–", "", b.trial_active ? "nothing is charged during the trial" : "")}
-    ${tile("Profit share", `${Number(b.profit_share_pct || 0)}%`, "", "of net profit on winning live trades")}
-    ${tile("Losses to earn back", rupees(b.loss_carry), "", "set off before any profit share")}
+    ${tile("Profit share", "None", "", "you keep all your trading profit")}
     ${tile("Deployment fee", Number(b.deploy_fee) > 0 ? rupees(b.deploy_fee) : "None", "", Number(b.deploy_fee) > 0 ? (b.deploy_fee_period === "ONE_TIME" ? "once per strategy" : "per strategy, per month live") : "")}
   </div>`;
   $("wl_payto").innerHTML = b.pay_to ? `Pay to: <strong></strong>${b.pay_note ? `<br><span></span>` : ""}` : "The admin hasn't added payment details yet. Ask them how to pay.";
@@ -3780,7 +3828,7 @@ $("ad_tabs").querySelectorAll("button").forEach((b) => b.addEventListener("click
 const today0 = () => istDate(0);
 function renderUsers() {
   const cols = [["email", "Login"], ["full_name", "Name"], ["phone", "Phone"], ["status", "Status"], ["trial_until", "Trial till"], ["balance", "Wallet", "num"], ["strategies", "Strategies", "int"],
-    ["live", "Live", "int"], ["live_net", "Live P&L", "num"], ["fees_paid", "Fees paid", "num"], ["loss_carry", "Loss carried", "num"], ["broker_ok", "Dhan"], ["pending", "Recharges waiting", "int"], ["created_at", "Joined", "when"]];
+    ["live", "Live", "int"], ["live_net", "Live P&L", "num"], ["fees_paid", "Fees paid", "num"], ["broker_ok", "Dhan"], ["pending", "Recharges waiting", "int"], ["created_at", "Joined", "when"]];
   $("au_head").innerHTML = "<tr>" + cols.map(([k, l, t]) => `<th class="sort${t === "num" || t === "int" ? " n" : ""}" data-k="${k}" aria-sort="${ad.sort.key === k ? (ad.sort.dir > 0 ? "ascending" : "descending") : "none"}" tabindex="0">${esc(l)}</th>`).join("") + "<th></th></tr>";
   $("au_head").querySelectorAll("th.sort").forEach((th) => th.addEventListener("click", () => { ad.sort.dir = ad.sort.key === th.dataset.k ? -ad.sort.dir : 1; ad.sort.key = th.dataset.k; renderUsers(); }));
   const q = $("au_q").value.trim().toLowerCase(), st = $("au_st").value;
@@ -3815,7 +3863,7 @@ function editUser(u) {
       <label class="f"><span>Status</span><select data-f="status"><option value="active">Active</option><option value="blocked">Blocked (no new trades, can't sign in to trade)</option></select></label>
       <label class="f"><span>Role</span><select data-f="role"><option value="user">User</option><option value="admin">Admin</option></select></label>
       <label class="f"><span>Trial till (blank = no trial)</span><input data-f="trial_until" type="date"></label>
-      <label class="f"><span>Profit share % (blank = default)</span><input data-f="profit_share_pct" type="number" min="0" max="100" step="any"></label>
+      <input data-f="profit_share_pct" type="hidden">
       <label class="f"><span>Deployment fee ₹ (blank = default)</span><input data-f="deploy_fee" type="number" min="0" step="any"></label>
       <label class="f"><span>Can build strategies</span><select data-f="can_build"><option value="true">Yes</option><option value="false">No</option></select></label>
       <label class="f wide"><span>Admin note</span><input data-f="note"></label>
@@ -3833,7 +3881,7 @@ function editUser(u) {
   box.querySelector("h3").textContent = `${u.full_name || u.email} · ${u.email}`;
   const f = (k) => box.querySelector(`[data-f="${k}"]`);
   for (const k of ["full_name", "phone", "status", "role", "trial_until", "note"]) f(k).value = u[k] ?? "";
-  f("profit_share_pct").value = u.profit_share_pct ?? ""; f("deploy_fee").value = u.deploy_fee ?? ""; f("can_build").value = String(u.can_build !== false);
+  f("profit_share_pct").value = ""; f("deploy_fee").value = u.deploy_fee ?? ""; f("can_build").value = String(u.can_build !== false);
   $("ue_close").addEventListener("click", () => box.innerHTML = "");
   $("ue_save").addEventListener("click", (e) => run(e.currentTarget, async () => {
     const p = { full_name: f("full_name").value.trim(), phone: f("phone").value.trim(), status: f("status").value, role: f("role").value, trial_until: f("trial_until").value,
@@ -3947,13 +3995,13 @@ async function loadRecharges() {
 async function loadBilling() {
   const b = must(await db.from("billing_settings").select("*").maybeSingle()) || {};
   $("ab_trial").value = b.trial_days ?? 14; $("ab_fee").value = b.deploy_fee ?? 0; $("ab_period").value = b.deploy_fee_period || "MONTHLY";
-  $("ab_share").value = b.profit_share_pct ?? 20; $("ab_min").value = b.min_balance ?? 0; $("ab_payto").value = b.pay_to || ""; $("ab_paynote").value = b.pay_note || "";
+  $("ab_share").value = 0; $("ab_min").value = b.min_balance ?? 0; $("ab_payto").value = b.pay_to || ""; $("ab_paynote").value = b.pay_note || "";
 }
 $("ab_form").addEventListener("submit", (e) => {
   e.preventDefault();
-  const p = { trial_days: Math.trunc(Number($("ab_trial").value)), deploy_fee: Number($("ab_fee").value), deploy_fee_period: $("ab_period").value, profit_share_pct: Number($("ab_share").value),
+  const p = { trial_days: Math.trunc(Number($("ab_trial").value)), deploy_fee: Number($("ab_fee").value), deploy_fee_period: $("ab_period").value, profit_share_pct: 0,
     min_balance: Number($("ab_min").value), pay_to: $("ab_payto").value.trim(), pay_note: $("ab_paynote").value.trim() };
-  if ([p.trial_days, p.deploy_fee, p.profit_share_pct, p.min_balance].some((x) => !(x >= 0)) || p.profit_share_pct > 100) { $("ab_msg").textContent = "Use numbers of 0 or more (profit share up to 100%)."; return; }
+  if ([p.trial_days, p.deploy_fee, p.profit_share_pct, p.min_balance].some((x) => !(x >= 0)) ) { $("ab_msg").textContent = "Use numbers of 0 or more."; return; }
   run(e.submitter, async () => { must(await db.rpc("save_billing", { p })); $("ab_msg").textContent = "Saved."; toast("Billing settings saved."); });
 });
 
@@ -3964,7 +4012,7 @@ const DECLARATIONS = [
   ["Backtests and past results", "Backtests are simulations on historical prices with estimated charges and assumed fills. They don't include every real-world cost (slippage, gaps, liquidity, delays, rejections). Past or backtested performance does not guarantee future returns."],
   ["Your own broker account", "Orders go to your own Dhan account through your own API token and webhook. Your funds stay with your broker. Broker, exchange and SEBI rules on algorithmic trading by retail investors apply to you; check your broker's terms for algo / API orders."],
   ["Technology risk", "Automated orders can fail, be delayed or be duplicated because of internet, broker, exchange or software problems, and a position may stay open. Watch your positions in Dhan and use the exit button or Dhan directly when needed."],
-  ["Fees", "Fees (deployment fee, strategy price, profit share) are as shown on your Wallet page. Profit share is worked out on closed live trades, with losses carried forward and set off against later profits."],
+  ["Fees", "Fees (deployment fee and strategy price) are as shown on your Wallet page. No share of your trading profit is charged."],
 ];
 function renderDeclarations() {
   $("disclaimBox").innerHTML = DECLARATIONS.map(([h, t]) => `<p style="margin:0"><strong>${esc(h)}.</strong> ${esc(t)}</p>`).join("");
