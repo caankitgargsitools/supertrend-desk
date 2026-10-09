@@ -852,13 +852,16 @@ async function requestPhase(sb: SupabaseClient, run: Run, assets: string[]) {
 
 /* ---------- robustness: other assets, other timeframes, buy & hold ---------- */
 const ROBUST_TFS = [5, 10, 15, 25, 30, 45, 60, 75, 125];
+/** Mini and micro contracts follow the same commodity, so they don't count as another asset. */
+export const assetRoot = (k: string) => /^GOLD/.test(k) ? "GOLD" : /^SILVER/.test(k) ? "SILVER" : /^CRUDE/.test(k) ? "CRUDE" : /^NAT/.test(k) ? "NATGAS" : /^ZINC/.test(k) ? "ZINC" : /^LEAD/.test(k) ? "LEAD" : /^ALUMIN/.test(k) ? "ALUMINIUM" : k;
 type Check = { kind: "self" | "asset" | "tf"; asset: string; tf: number | null; config: LabConfig };
 /** The checks for one first-round winner, limited to assets the lab has candles for. */
 export function robustChecks(cfg: LabConfig, haveD: Set<string>, haveI5: Set<string>): Check[] {
   const out: Check[] = [{ kind: "self", asset: cfg.underlying, tf: null, config: cfg }];
   const daily = !!cfg.rules?.daily, me = LAB_ASSETS[cfg.underlying];
   // Other assets: the same family first (indices for an index strategy, commodities for a commodity one), up to 6.
-  const pool = Object.keys(LAB_ASSETS).filter((k) => k !== cfg.underlying && haveD.has(k) && (daily || haveI5.has(k)))
+  const roots = new Set([assetRoot(cfg.underlying)]);
+  const pool = Object.keys(LAB_ASSETS).filter((k) => { const r = assetRoot(k); if (roots.has(r) || !haveD.has(k) || !(daily || haveI5.has(k))) return false; roots.add(r); return true; })
     .sort((a, b) => Number(LAB_ASSETS[a].commodity !== me?.commodity) - Number(LAB_ASSETS[b].commodity !== me?.commodity));
   for (const k of pool) {
     if (out.filter((c) => c.kind === "asset").length >= 6) break;
@@ -925,6 +928,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
   // 1. Queue the checks: this run's first-round winners, then (a batch at a time) earlier ones.
   const { data: cands } = await sb.from("lab_candles").select("asset, kind");
   const haveD = new Set((cands ?? []).filter((c) => c.kind === "D").map((c) => c.asset)), haveI5 = new Set((cands ?? []).filter((c) => c.kind === "I5").map((c) => c.asset));
+  await sb.from("lab_checks").delete().eq("status", "void");
   const { count: open0 } = await sb.from("lab_checks").select("id", { count: "exact", head: true }).eq("status", "pending");
   for (const mine of [true, false]) {
     if (!mine && (open0 ?? 0) > 600) break;
@@ -970,7 +974,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
   const { data: queued } = await sb.from("lab_results").select("id, config").eq("robust_status", "queued").order("id", { ascending: false }).limit(60);
   let decided = 0;
   const ids = (queued ?? []).map((r) => r.id);
-  const { data: allCs } = ids.length ? await sb.from("lab_checks").select("lab_id, kind, asset, tf, status, result").in("lab_id", ids).limit(1000) : { data: [] };
+  const { data: allCs } = ids.length ? await sb.from("lab_checks").select("lab_id, kind, asset, tf, status, result").in("lab_id", ids).neq("status", "void").limit(1000) : { data: [] };
   for (const r of queued ?? []) {
     const cs = (allCs ?? []).filter((c) => c.lab_id === r.id);
     if (!cs.length || cs.some((c) => c.status === "pending")) continue;
