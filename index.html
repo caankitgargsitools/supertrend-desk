@@ -232,32 +232,30 @@ legend { padding: 0; margin-bottom: 4px; }
 .lab-table thead tr.fl input, .lab-table thead tr.fl select { width: 100%; min-width: 46px; padding: 5px 6px; font: 12px var(--font-data); border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
 .lab-table thead tr.fl input.on, .lab-table thead tr.fl select.on { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-soft); font-weight: 600; }
 .lab-table tbody td { border-bottom: 1px solid var(--line); }
-/* On wide screens the header sticks to the top of the window (under the page bar) as you scroll the page. */
+/* Lab grid: the table sizes each column to its content (numbers never cut off) and scrolls inside its own box,
+   both ways, with the title and filter rows fixed at the top of the box. It can never spill out of the page. */
 body.wide .wrap { max-width: 1840px; }
-.lab-table { width: 100%; table-layout: fixed; min-width: 1330px; }
-.lab-table thead tr.t th { text-align: center; vertical-align: middle; }
-.lab-table td.lbl { min-width: 0; max-width: none; overflow-wrap: anywhere; }
-.lab-table td { overflow: hidden; text-overflow: ellipsis; }
-.lab-table td.n { font-size: 12px; white-space: nowrap; }
-.lab-table tbody td { font-size: 12.5px; padding-top: 7px; padding-bottom: 7px; }
-.lab-table td.lbl .t { font-size: 12.5px; }
+.labgrid { overflow: auto !important; max-height: calc(100vh - var(--barH, 56px) - 24px) !important; overscroll-behavior: contain; }
+.lab-table { table-layout: auto; width: max-content; min-width: 100%; }
+.lab-table thead tr.t th { top: 0 !important; text-align: center; vertical-align: middle; white-space: normal; line-height: 1.2; }
+.lab-table thead tr.fl th { top: var(--labhead, 40px) !important; }
+.lab-table thead th { font-size: 10.5px; letter-spacing: .02em; padding: 7px 4px 6px; }
+.lab-table thead tr.fl input, .lab-table thead tr.fl select { min-width: 0; padding: 3px 4px; font-size: 11px; }
+.lab-table td, .lab-table th { padding-left: 6px; padding-right: 6px; }
+.lab-table tbody td { font-size: 12px; padding-top: 6px; padding-bottom: 6px; vertical-align: top; }
+.lab-table td.n { font: 11.5px var(--font-ui, inherit); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: visible; }
+.lab-table td.lbl { min-width: 0; max-width: none; white-space: normal; overflow-wrap: anywhere; }
+.lab-table td.lbl .t { font-size: 12px; font-weight: 600; }
+.lab-table td.lbl .chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.lab-table td.lbl .chip { font-size: 9.5px; padding: 3px 5px; }
 .lab-table .hint.sm { font-size: 10.5px; line-height: 1.1; }
-.lab-table thead th { font-size: 11px; letter-spacing: .02em; padding-left: 4px; padding-right: 4px; }
-.lab-table thead tr.fl input, .lab-table thead tr.fl select { min-width: 0; padding: 4px; font-size: 11px; }
-.lab-table td, .lab-table th { padding-left: 5px; padding-right: 5px; }
-/* The page-level sticky header needs the whole table to fit the card; narrower screens scroll inside the box instead. */
-@media (min-width: 1500px) {
-  .labgrid { overflow: visible; max-height: none; }
-  .lab-table thead tr.t th { top: var(--barH, 0px); }
-  .lab-table thead tr.fl th { top: calc(var(--barH, 0px) + var(--labhead, 40px)); }
-  .lab-table thead tr.t th:first-child { border-top-left-radius: var(--r); } .lab-table thead tr.t th:last-child { border-top-right-radius: var(--r); }
-}
-.lab-table td.lbl .t { font-weight: 600; overflow-wrap: anywhere; }
-/* Safety net: if the table is ever wider than its card, it scrolls inside the box instead of spilling. */
-.labgrid.spill { overflow: auto !important; max-height: calc(100vh - 150px) !important; }
-.labgrid.spill .lab-table thead tr.t th { top: 0 !important; }
-.labgrid.spill .lab-table thead tr.fl th { top: var(--labhead, 40px) !important; }
-.lab-table tr.sel td { background: var(--blue-soft); }
+/* The first two columns stay in view when the table scrolls sideways. */
+.lab-table tbody td:nth-child(1), .lab-table thead th:nth-child(1) { position: sticky; left: 0; z-index: 1; }
+.lab-table tbody td:nth-child(2), .lab-table thead th:nth-child(2) { position: sticky; left: var(--labc1, 34px); z-index: 1; box-shadow: 1px 0 0 var(--line); }
+.lab-table thead th:nth-child(1), .lab-table thead th:nth-child(2) { z-index: 3; }
+.lab-table tbody td:nth-child(1), .lab-table tbody td:nth-child(2) { background: var(--panel); }
+.lab-table tbody tr.sub td:nth-child(1), .lab-table tbody tr.sub td:nth-child(2) { background: var(--bg); }
+.lab-table tr.sel td, .lab-table tr.sel td:nth-child(1), .lab-table tr.sel td:nth-child(2) { background: var(--blue-soft); }
 .months { display: grid; grid-template-columns: repeat(auto-fit, minmax(42px, 1fr)); gap: 4px; align-items: end; height: 150px; margin-top: 8px; }
 .months .mb { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 3px; min-width: 0; }
 .months .bar { width: 100%; border-radius: 3px 3px 0 0; min-height: 2px; }
@@ -644,7 +642,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
           <div><span class="label">Research</span><h2>Strategy Lab</h2></div>
           <div class="actions">
             <button class="btn" id="lab_settings_btn" type="button">Lab settings</button>
-            <button class="btn danger" id="lab_stop" type="button" hidden>Stop tonight's run</button>
+            <button class="btn danger" id="lab_stop" type="button" hidden>Stop current run</button>
             <button class="btn primary" id="lab_run" type="button">Run now</button>
           </div>
         </div>
@@ -3059,7 +3057,7 @@ function labStyle(r) {
 const LAB_MCX = new Set(["GOLD", "GOLDM", "GOLDTEN", "GOLDGUINEA", "GOLDPETAL", "SILVER", "SILVERM", "SILVERMIC", "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "COPPER", "ZINC", "ZINCMINI", "LEAD", "LEADMINI", "ALUMINIUM", "ALUMINI", "NICKEL"]);
 const LAB_COLS = [
   { k: "no", w: 34, t: "#", n: true },
-  { k: "name", t: "Strategy", f: "text", v: (g) => g.r.label || "" },
+  { k: "name", w: 260, t: "Strategy", f: "text", v: (g) => g.r.label || "" },
   { k: "asset", w: 78, t: "Asset", f: "select", v: (g) => labAssetName(g.r.asset) },
   { k: "style", w: 64, t: "Style", f: "select", v: (g) => labStyle(g.r) },
   { k: "trades", w: 50, t: "Trades", f: "num", n: true, v: (g) => g.m.full.n },
@@ -3115,8 +3113,8 @@ function labPassFilters(g) {
 }
 function fitLabGrid() {
   const g = $("lab_grid"), t = g && g.querySelector("table"); if (!t) return;
-  g.classList.remove("spill");
-  if (t.getBoundingClientRect().width > g.clientWidth + 1) g.classList.add("spill");
+  // Keeps the sticky Strategy column right after the # column.
+  const c1 = t.querySelector("thead tr.t th"); if (c1) g.style.setProperty("--labc1", `${c1.getBoundingClientRect().width}px`);
 }
 window.addEventListener("resize", () => { if (lab.open) fitLabGrid(); });
 function renderLabHead() {
@@ -3144,6 +3142,7 @@ function renderLabHead() {
   requestAnimationFrame(() => { setBarH(); const tr = head.querySelector("tr.t"); if (tr) $("lab_grid").style.setProperty("--labhead", `${tr.getBoundingClientRect().height}px`); fitLabGrid(); });
 }
 function renderLabTable() {
+  requestAnimationFrame(fitLabGrid);
   const hd = $("lab_head");
   if (!hd.children.length || (renderLabTable.rowsFor !== lab.rows && !hd.contains(document.activeElement))) { renderLabTable.rowsFor = lab.rows; renderLabHead(); }
   const fams = labGroup(); const body = $("lab_body"); body.innerHTML = "";
