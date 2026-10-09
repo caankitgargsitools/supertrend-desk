@@ -3,6 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Trade Desk">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <title>CA Ankit Garg Trade Desk</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500;600&display=swap">
@@ -56,6 +62,43 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
 .dot.on { background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
 
+#menuBtn, .mob-only { display: none; }
+/* ---------- phones ---------- */
+@media (max-width: 760px) {
+  .bar { gap: 6px 10px; padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top)); }
+  .brand { margin-right: 0; flex: 1 1 auto; min-width: 0; }
+  .brand h1 { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brand small { display: none; }
+  .bar > .mk:not(#who) { order: 3; flex-basis: 100%; font-size: 11.5px; }
+  #menuBtn { display: inline-flex; flex: 0 0 auto; }
+  /* The pages, your login and sign-out open from the Menu button. */
+  body:not(.menu-open) #nav, body:not(.menu-open) #who, body:not(.menu-open) #myPass, body:not(.menu-open) #signOut { display: none !important; }
+  body.menu-open #nav { order: 4; flex-basis: 100%; display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px; }
+  body.menu-open #nav .btn { width: 100%; justify-content: center; padding: 10px; font-size: 14px; }
+  body.menu-open #who { order: 5; flex-basis: 100%; }
+  body.menu-open #myPass, body.menu-open #signOut { order: 6; flex: 1 1 40%; justify-content: center; padding: 10px; }
+  .wrap { padding-inline: 10px; padding-block: 10px 32px; gap: 12px; }
+  .card { padding: 12px; }
+  .mob-only { display: inline-flex; margin-bottom: 8px; }
+  #lf_box:not(.open) { display: none; }
+  .longhint:not(.open) { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  input, select, textarea { font-size: 16px; }
+  .btn { min-height: 38px; }
+  .stats { grid-template-columns: 1fr 1fr !important; }
+  .labgrid { max-height: calc(100vh - var(--barH, 56px) - 8px) !important; }
+  .lab-table td.lbl { min-width: 170px; }
+  .lab-table td.lbl .chips { display: none; }
+  .head { flex-wrap: wrap; gap: 8px; }
+  .head .actions { width: 100%; }
+  #confirmBox .confirm { width: 100%; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; border-radius: 10px; width: 100%; }
+  .seg button { padding: 10px 6px; }
+  .seg button + button { border-left: 0; }
+  .seg button:nth-child(even) { border-left: 1px solid var(--line); }
+  .seg button:nth-child(n+3) { border-top: 1px solid var(--line); }
+  .head > .actions .btn, .head .actions .btn { flex: 1 1 auto; justify-content: center; }
+  #menuBtn { min-height: 36px; padding: 6px 12px; }
+}
 .wrap { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; padding-block: 18px 40px; padding-inline: 16px; max-width: 1380px; margin: 0 auto; }
 @media (max-width: 880px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
 
@@ -305,6 +348,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 <header class="bar">
   <div class="brand"><h1><span class="b">CA</span> <span class="r">Ankit</span> <span class="y">Garg</span> <span class="g">Trade Desk</span></h1><small>Algo desk · Dhan · NSE / BSE / MCX</small></div>
   <span class="mk"><span class="dot" id="mktDot"></span><span id="mktText">Checking market hours…</span></span>
+  <button class="btn small" id="menuBtn" type="button" aria-expanded="false" aria-controls="nav">☰ Menu</button>
   <nav class="nav" id="nav" aria-label="Pages" hidden>
     <button class="btn small" id="nav_strats" type="button">Strategies</button>
     <button class="btn small" id="nav_market" type="button">Marketplace</button>
@@ -653,7 +697,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
             <button class="btn primary" id="lab_run" type="button">Run now</button>
           </div>
         </div>
-        <p class="hint" style="margin:8px 0 0">The lab runs once a day at 16:05 IST or non-stop (see Lab settings). Each run invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations and with setting tweaks. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and must also make money in the last 3 months, which the ranking never saw (round 1); then work on other assets and other timeframes (round 2); then make money in <strong>every one of the past 10 years</strong> (5 years for 5-minute strategies, the history Dhan keeps), so nothing passes on one big move of the underlying (round 3). Strategies that fail are cleared straight away; a one-line record stays so the lab never tries them again.</p>
+        <p class="hint longhint" style="margin:8px 0 0">The lab runs once a day at 16:05 IST or non-stop (see Lab settings). Each run invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations and with setting tweaks. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and must also make money in the last 3 months, which the ranking never saw (round 1); then work on other assets and other timeframes (round 2); then make money in <strong>every one of the past 10 years</strong> (5 years for 5-minute strategies, the history Dhan keeps), so nothing passes on one big move of the underlying (round 3). Strategies that fail are cleared straight away; a one-line record stays so the lab never tries them again.</p>
         <div id="lab_status" style="margin-top:12px"></div>
         <div id="lab_reqs" style="margin-top:12px"></div>
         <form id="labSetForm" hidden style="margin-top:14px">
@@ -722,7 +766,8 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
     <section class="card" id="listPane" hidden>
       <div class="head"><h2 id="lp_title">Strategies</h2>
         <div class="actions"><button class="btn primary" id="newFlip2" type="button">+ New strategy</button></div></div>
-      <div class="filters">
+      <button class="btn small mob-only" id="lf_toggle" type="button" aria-expanded="false">Filters</button>
+      <div class="filters" id="lf_box">
         <label class="f grow"><span>Search</span><input id="lf_q" type="search" placeholder="Name, asset, owner…" autocomplete="off"></label>
         <label class="f"><span>Source</span><select id="lf_src"><option value="">All</option><option value="OWN">Built here</option><option value="BOUGHT">Bought</option><option value="MASTER">Marketplace &amp; lab copies</option></select></label>
         <label class="f"><span>Status</span><select id="lf_act"><option value="">All</option><option value="ACTIVE">Active</option><option value="PAUSED">Paused</option></select></label>
@@ -3150,6 +3195,16 @@ function familyKey(r) {
   return [r.asset, ru.daily ? "D" : "I", c.direction, sig(ru.long), sig(ru.short)].join("|");
 }
 /* ---------- lab grid: columns, header with sort arrows and a filter under every column ---------- */
+/* phone menu, filter and description toggles; the app shell for "Add to Home screen" */
+(function phoneUI() {
+  const mb = $("menuBtn");
+  const setMenu = (on) => { document.body.classList.toggle("menu-open", on); mb.setAttribute("aria-expanded", String(on)); mb.textContent = on ? "✕ Close" : "☰ Menu"; setTimeout(setBarH, 0); };
+  mb.addEventListener("click", () => setMenu(!document.body.classList.contains("menu-open")));
+  document.querySelectorAll("#nav .btn, #myPass, #signOut").forEach((b) => b.addEventListener("click", () => setMenu(false)));
+  const lt = $("lf_toggle"); if (lt) lt.addEventListener("click", () => { const box = $("lf_box"), on = !box.classList.contains("open"); box.classList.toggle("open", on); lt.setAttribute("aria-expanded", String(on)); lt.textContent = on ? "Hide filters" : "Filters"; });
+  document.querySelectorAll(".longhint").forEach((p) => p.addEventListener("click", () => p.classList.toggle("open")));
+  if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+})();
 function setBarH() { const b = document.querySelector("header.bar"); if (b) document.documentElement.style.setProperty("--barH", `${b.offsetHeight}px`); }
 window.addEventListener("resize", setBarH); setTimeout(setBarH, 0);
 function labAssetName(k) { return ((PRESETS[k] && PRESETS[k].name) || k || "").replace(/\s*\(.*\)$/, ""); }
