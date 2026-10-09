@@ -1179,7 +1179,7 @@ const IND_DEFS = {
   ORB: { name: "Opening range", params: [["mins", "First minutes", 15]], ops: [["above_orh", "price above range high"], ["below_orl", "price below range low"], ["cross_above_orh", "breaks above range high"], ["cross_below_orl", "breaks below range low"]] },
 };
 const VALUE_OPS = new Set(["gt", "lt", "cross_above", "cross_below"]);
-const COND_TFS = [["base", "Strategy timeframe"], ["1", "1 min"], ["3", "3 min"], ["5", "5 min"], ["15", "15 min"], ["30", "30 min"], ["60", "1 hour"], ["120", "2 hours"], ["240", "4 hours"], ["D", "Daily"]];
+const COND_TFS = [["base", "Strategy timeframe"], ["1", "1 min"], ["3", "3 min"], ["5", "5 min"], ["15", "15 min"], ["25", "25 min"], ["30", "30 min"], ["60", "1 hour"], ["75", "75 min"], ["120", "2 hours"], ["125", "125 min"], ["240", "4 hours"], ["D", "Daily"]];
 const RULE_SETS = [
   ["long", "buy", "Buy (go long / bullish options) when", true],
   ["short", "sell", "Sell (go short / bearish options) when", true],
@@ -1192,7 +1192,10 @@ const DEFAULT_RULES = {
   exitLong: { mode: "ANY", conds: [] }, exitShort: { mode: "ANY", conds: [] },
 };
 let ruleState = JSON.parse(JSON.stringify(DEFAULT_RULES));
-const mkSel = (opts, val) => { const s = document.createElement("select"); for (const [v, t] of opts) { const o = document.createElement("option"); o.value = v; o.textContent = t; s.append(o); } if (val !== undefined) s.value = String(val); return s; };
+// A saved value the list doesn't offer is added as its own option, so the form always shows exactly what is saved.
+const mkSel = (opts, val) => { const s = document.createElement("select"); for (const [v, t] of opts) { const o = document.createElement("option"); o.value = v; o.textContent = t; s.append(o); }
+  if (val !== undefined && val !== null && !opts.some(([v]) => String(v) === String(val))) { const o = document.createElement("option"); o.value = String(val); o.textContent = /^\d+$/.test(String(val)) ? `${val} min` : String(val); s.append(o); }
+  if (val !== undefined) s.value = String(val); return s; };
 const wrapLabel = (text, el) => { const l = document.createElement("label"); const sp = document.createElement("span"); sp.textContent = text; l.append(sp, el); return l; };
 function condRow(setKey, idx, c) {
   const def = IND_DEFS[c.ind] || IND_DEFS.RSI;
@@ -1208,13 +1211,17 @@ function condRow(setKey, idx, c) {
   const tf = mkSel(COND_TFS, ruleState.daily ? "D" : c.tf); tf.addEventListener("change", () => { c.tf = tf.value; formDirty = true; });
   if (ruleState.daily) tf.disabled = true;
   row.append(wrapLabel("Timeframe", tf));
+  const slowWraps = [];
   for (const [k, label, dv] of def.params) {
     const inp = document.createElement("input"); inp.type = "number"; inp.step = k === "factor" || k === "mult" ? "0.1" : "1"; inp.min = "1";
     inp.value = String((c.p && c.p[k] !== undefined) ? c.p[k] : dv);
     inp.addEventListener("input", () => { c.p = c.p || {}; c.p[k] = Number(inp.value); });
-    row.append(wrapLabel(label, inp));
+    const w = wrapLabel(label, inp); row.append(w);
+    if (k === "len2") slowWraps.push(w);
   }
   const op = mkSel(def.ops, c.op);
+  const showSlow = () => slowWraps.forEach((w) => { w.hidden = !/^fast_/.test(op.value); });
+  op.addEventListener("change", showSlow); showSlow();
   const val = document.createElement("input"); val.type = "number"; val.step = "any"; val.value = String(c.v ?? def.value ?? 0);
   const valWrap = wrapLabel("Value", val);
   const showVal = () => { valWrap.hidden = !VALUE_OPS.has(op.value); };
@@ -1264,7 +1271,7 @@ function readRules() {
         if (c.ind === "VWAP" || c.ind === "ORB") throw new Error("VWAP and opening range need intraday candles; remove them for a once-a-day strategy.");
       }
       const def = IND_DEFS[c.ind];
-      c.p = Object.fromEntries(def.params.map(([pk, , dv]) => [pk, Number.isFinite(Number(c.p?.[pk])) && Number(c.p?.[pk]) > 0 ? Number(c.p[pk]) : dv]));
+      c.p = Object.fromEntries(def.params.filter(([pk]) => pk !== "len2" || /^fast_/.test(c.op)).map(([pk, , dv]) => [pk, Number.isFinite(Number(c.p?.[pk])) && Number(c.p?.[pk]) > 0 ? Number(c.p[pk]) : dv]));
       if (VALUE_OPS.has(c.op)) { if (!Number.isFinite(Number(c.v))) throw new Error(`Enter a value for ${def.name}.`); c.v = Number(c.v); } else delete c.v;
       if (c.ind === "VWAP" && c.tf === "D") throw new Error("VWAP is an intraday measure; pick an intraday timeframe for it.");
     }
@@ -2612,6 +2619,8 @@ function applyRiskVisibility() {
     $(`r_${k}_val`).disabled = sel.value === "NONE";
   }
   $("r_atr_len").closest(".f").hidden = premium || timed;
+  // The ATR length matters whenever a level is in ATRs, so it is shown then even in the simple view.
+  $("r_atr_len").closest(".f").classList.toggle("adv", !["sl", "tgt", "trail"].some((k) => $(`r_${k}_type`).value === "ATR"));
   $("riskHint").textContent = premium
     ? "Levels are on the option's own premium. Buying: the stop is below the entry premium and the target above it. Writing: the stop is above (premium rising against you) and the target below. Points = rupees of premium. Checked every minute live (from Dhan's option chain) and on 5-minute option candles in backtests."
     : "Levels are on the index / commodity price, in the direction of the trade; for options, in the direction of the signal (a bullish PE write is stopped if the index falls). Checked every minute live and on 5-minute candles in backtests. A trailing stop follows the best price reached. After a stop or target the strategy waits for its next entry signal. Max loss per day: once the day's closed trades have lost this much (estimated, before charges), no new trades that day.";
@@ -3078,7 +3087,9 @@ async function openLabDetail(id) {
   const c = r.config, labRun = r.run || {}, a = PRESETS[c.underlying] || {};
   const versions = [{ key: "FUT", label: c.data_segment === "MCX_COMM" ? "MCX futures (near month)" : "Index futures (index price as proxy)", side: null, risk: c.risk, metrics: r.metrics, trades: r.trades || [] }];
   for (const [col, side] of [["opt_buy", "BUY"], ["opt_sell", "SELL"]]) for (const v of ((r[col] && r[col].variants) || [])) versions.push({ key: side, label: v.label, side, risk: v.risk, metrics: v.metrics, trades: v.trades || [], skipped: v.skipped });
-  let pickI = Math.max(0, versions.findIndex((v) => v.key === lab.view));
+  // Open on the version the table row shows: the best-scoring one of the chosen side.
+  const sideVs = versions.map((v, i) => [v, i]).filter(([v]) => v.key === lab.view);
+  let pickI = sideVs.length ? sideVs.reduce((a, b) => ((b[0].metrics && b[0].metrics.score) > (a[0].metrics && a[0].metrics.score) ? b : a))[1] : 0;
   const isMcxA = c.data_segment === "MCX_COMM";
   const decideTxt = c.rules && c.rules.daily ? `Checked once a day at the session open on yesterday's completed daily candle; orders at the open. Positional.`
     : `Decides at the close of each ${c.timeframe_min}-minute candle. First trade from ${String(c.session_start).slice(0, 5)}, no new trades after ${String(c.last_entry).slice(0, 5)}${c.intraday ? `, square-off ${String(c.square_off).slice(0, 5)} (intraday)` : " (positions carried overnight)"}.`;
@@ -3145,7 +3156,9 @@ async function openLabDetailPublic(id) {
   const r = must(await db.rpc("lab_public_detail", { p_id: id }));
   const box = $("lab_detail"); box.hidden = false;
   const versions = (r.versions || []).map((v) => ({ ...v, trades: v.trades || [] }));
-  let pickI = Math.max(0, versions.findIndex((v) => v.key === lab.view));
+  // Open on the version the table row shows: the best-scoring one of the chosen side.
+  const sideVs = versions.map((v, i) => [v, i]).filter(([v]) => v.key === lab.view);
+  let pickI = sideVs.length ? sideVs.reduce((a, b) => ((b[0].metrics && b[0].metrics.score) > (a[0].metrics && a[0].metrics.score) ? b : a))[1] : 0;
   const run0 = r.run || {}, aName = (PRESETS[r.asset] && PRESETS[r.asset].name) || r.asset;
   const draw = () => {
     const v = versions[pickI], m = v.metrics;
