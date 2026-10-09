@@ -211,7 +211,31 @@ legend { padding: 0; margin-bottom: 4px; }
 /* strategy lab */
 .labbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; }
 .labbar .f { min-width: 0; }
-.lab-table td.lbl { min-width: 260px; max-width: 520px; }
+.lab-table td.lbl { min-width: 210px; max-width: 420px; }
+.lab-table td, .lab-table th { padding-left: 6px; padding-right: 6px; }
+/* Strategy Lab grid: its own scroll box, so the header row stays fixed at the top while you scroll the results. */
+.labgrid { margin-top: 8px; overflow: auto; max-height: calc(100vh - 150px); min-height: 320px; border: 1px solid var(--line); border-radius: var(--r); }
+.lab-table { border-collapse: separate; border-spacing: 0; }
+.lab-table thead th { position: sticky; z-index: 2; background: var(--ink); color: var(--panel); font-size: 12px; letter-spacing: .04em; padding: 10px 8px 8px; border-bottom: 0; vertical-align: bottom; }
+.lab-table thead tr.t th { top: 0; }
+.lab-table thead tr.fl th { top: var(--labhead, 40px); background: var(--blue-soft); padding: 6px; border-bottom: 2px solid var(--blue); }
+.lab-table thead th.sort { cursor: pointer; user-select: none; white-space: normal; line-height: 1.25; }
+.lab-table thead th.sort:hover { color: var(--logo-yellow); }
+.lab-table thead th.sort::after { content: none !important; }
+.lab-table thead tr.fl .btn { color: var(--ink); background: var(--panel); }
+.lab-table thead th .ar { display: inline-block; min-width: 1em; color: var(--logo-yellow); }
+.lab-table thead th[aria-sort="none"] .ar::after { content: "↕"; opacity: .45; }
+.lab-table thead th[aria-sort="ascending"] .ar::after { content: "▲"; } .lab-table thead th[aria-sort="descending"] .ar::after { content: "▼"; }
+.lab-table thead tr.fl input, .lab-table thead tr.fl select { width: 100%; min-width: 46px; padding: 5px 6px; font: 12px var(--font-data); border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
+.lab-table thead tr.fl input.on, .lab-table thead tr.fl select.on { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-soft); font-weight: 600; }
+.lab-table tbody td { border-bottom: 1px solid var(--line); }
+/* On wide screens the header sticks to the top of the window (under the page bar) as you scroll the page. */
+@media (min-width: 1200px) {
+  .labgrid { overflow: visible; max-height: none; }
+  .lab-table thead tr.t th { top: var(--barH, 0px); }
+  .lab-table thead tr.fl th { top: calc(var(--barH, 0px) + var(--labhead, 40px)); }
+  .lab-table thead tr.t th:first-child { border-top-left-radius: var(--r); } .lab-table thead tr.t th:last-child { border-top-right-radius: var(--r); }
+}
 .lab-table td.lbl .t { font-weight: 600; overflow-wrap: anywhere; }
 .lab-table tr.sel td { background: var(--blue-soft); }
 .months { display: grid; grid-template-columns: repeat(auto-fit, minmax(42px, 1fr)); gap: 4px; align-items: end; height: 150px; margin-top: 8px; }
@@ -628,13 +652,12 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
           <label class="f"><span>From</span><select id="lab_period"><option value="run">Latest run only</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option></select></label>
           <label class="f"><span>Stop loss</span><select id="lab_stopf"><option value="ANY">With or without</option><option value="WITH">With stop / target</option><option value="WITHOUT">Without</option></select></label>
           <label class="f"><span>Show</span><select id="lab_only"><option value="true">Passed only</option><option value="false">All tested</option></select></label>
-          <label class="f"><span>Sort by</span><select id="lab_sort"><option value="score">Score (first 9 months)</option><option value="test">Last 3 months net</option><option value="net">Net P&amp;L (1 year)</option><option value="rom">Return on margin</option><option value="pf">Profit factor</option><option value="win">Win rate</option><option value="cons">Profitable months</option><option value="dd">Smallest drawdown</option><option value="nights">Nights passed</option></select></label>
         </div>
         <div id="lab_reqfilter" class="banner info" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center" hidden></div>
         <p class="hint" id="lab_count" style="margin:10px 0 0"></p>
-        <div class="scroll" style="margin-top:8px">
+        <div class="labgrid" id="lab_grid">
           <table class="lab-table">
-            <thead><tr><th>#</th><th>Strategy</th><th class="n">Trades</th><th class="n">Win %</th><th class="n">Net (1 yr)</th><th class="n" title="Average over the trades of the margin one lot needed at each trade's entry price">Avg margin / lot</th><th class="n">Return on margin</th><th class="n">Last 3 mo</th><th class="n">Max DD</th><th class="n">PF</th><th class="n">Months +</th><th class="n">Score</th><th class="n">Nights</th></tr></thead>
+            <thead id="lab_head"></thead>
             <tbody id="lab_body"></tbody>
           </table>
         </div>
@@ -2897,17 +2920,20 @@ function labGroup() {
     if (!g) by.set(r.fingerprint, { r, m, nights: 1, passes: m.passed ? 1 : 0 });
     else { g.nights++; if (m.passed) g.passes++; if (r.run_id > g.r.run_id) { g.r = r; g.m = m; } }
   }
-  const key = { score: (g) => g.m.score, test: (g) => g.m.test.net, net: (g) => g.m.full.net, pf: (g) => g.m.full.pf ?? 0, win: (g) => g.m.full.win_rate,
-    cons: (g) => g.m.pos_months / Math.max(1, g.m.months_n), dd: (g) => -g.m.full.max_dd, nights: (g) => g.passes * 1000 + g.m.score,
-    rom: (g) => g.m.ret_margin ?? -1e9 }[lab.sort];
+  // Column filters apply to every strategy; sorting follows the column picked in the header.
+  for (const [k, g] of [...by]) if (!labPassFilters(g)) by.delete(k);
+  const col = LAB_COLS.find((c) => c.k === lab.sortKey) || LAB_COLS.find((c) => c.k === "score");
+  const dir = lab.sortDir || -1;
+  const key = (g) => { const v = col.v(g); return typeof v === "string" ? v : (v == null || Number.isNaN(v) ? -Infinity * dir : v); };
   // Families: same asset, decision style, direction and indicator/condition types; only settings differ.
   const fam = new Map();
   for (const g of by.values()) {
     const k = familyKey(g.r);
     const f = fam.get(k); if (f) f.members.push(g); else fam.set(k, { key: k, members: [g] });
   }
-  const out = [...fam.values()].map((f) => { f.members.sort((a, b) => key(b) - key(a)); f.best = f.members[0]; return f; });
-  return out.sort((a, b) => key(b.best) - key(a.best));
+  const cmp = (a, b) => { const x = key(a), y = key(b); return (typeof x === "string" ? x.localeCompare(y) : x - y) * dir; };
+  const out = [...fam.values()].map((f) => { f.members.sort(cmp); f.best = f.members[0]; return f; });
+  return out.sort((a, b) => cmp(a.best, b.best));
 }
 function familyKey(r) {
   if (r.family) return r.family;
@@ -2915,16 +2941,90 @@ function familyKey(r) {
   const sig = (set) => ((set && set.conds) || []).map((x) => `${x.ind}:${x.op}`).sort().join("+") || "-";
   return [r.asset, ru.daily ? "D" : "I", c.direction, sig(ru.long), sig(ru.short)].join("|");
 }
+/* ---------- lab grid: columns, header with sort arrows and a filter under every column ---------- */
+function setBarH() { const b = document.querySelector("header.bar"); if (b) document.documentElement.style.setProperty("--barH", `${b.offsetHeight}px`); }
+window.addEventListener("resize", setBarH); setTimeout(setBarH, 0);
+function labAssetName(k) { return ((PRESETS[k] && PRESETS[k].name) || k || "").replace(/\s*\(.*\)$/, ""); }
+function labStyle(r) {
+  if (r.config) return r.config.rules && r.config.rules.daily ? "Daily" : r.config.intraday ? "Intraday" : "Positional";
+  return LAB_MCX.has(r.asset) ? "Daily" : "–";
+}
+const LAB_MCX = new Set(["GOLD", "GOLDM", "GOLDTEN", "GOLDGUINEA", "GOLDPETAL", "SILVER", "SILVERM", "SILVERMIC", "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "COPPER", "ZINC", "ZINCMINI", "LEAD", "LEADMINI", "ALUMINIUM", "ALUMINI", "NICKEL"]);
+const LAB_COLS = [
+  { k: "no", t: "#", n: true },
+  { k: "name", t: "Strategy", f: "text", v: (g) => g.r.label || "" },
+  { k: "asset", t: "Asset", f: "select", v: (g) => labAssetName(g.r.asset) },
+  { k: "style", t: "Style", f: "select", v: (g) => labStyle(g.r) },
+  { k: "trades", t: "Trades", f: "num", n: true, v: (g) => g.m.full.n },
+  { k: "win", t: "Win %", f: "num", n: true, v: (g) => g.m.full.win_rate },
+  { k: "net", t: "Net (1 yr)", f: "num", n: true, v: (g) => g.m.full.net },
+  { k: "margin", t: "Avg margin / lot", f: "num", n: true, v: (g) => g.m.margin_lot ?? null, tip: "Average over the trades of the margin one lot needed at each trade's entry price" },
+  { k: "rom", t: "Return on margin %", f: "num", n: true, v: (g) => g.m.ret_margin ?? null },
+  { k: "test", t: "Last 3 mo", f: "num", n: true, v: (g) => g.m.test.net },
+  { k: "dd", t: "Max DD", f: "num", n: true, v: (g) => g.m.full.max_dd },
+  { k: "pf", t: "PF", f: "num", n: true, v: (g) => g.m.full.pf ?? null },
+  { k: "months", t: "Months +", f: "num", n: true, v: (g) => g.m.pos_months, tip: "Profitable months out of the months traded" },
+  { k: "score", t: "Score", f: "num", n: true, v: (g) => g.m.score },
+  { k: "nights", t: "Nights passed", f: "num", n: true, v: (g) => g.passes },
+];
+lab.filters = lab.filters || {}; lab.sortKey = lab.sortKey || "score"; lab.sortDir = lab.sortDir || -1;
+/** Number filter: "50" (at least 50), ">50", ">=50", "<0", "<=2", "=10", "10-20" (between), "!0" (not 0); 2l = 2 lakh, 1cr, 5k. */
+function numTest(expr) {
+  const e = String(expr).replace(/[,₹%\s]/g, "");
+  if (!e) return null;
+  let m;
+  if ((m = /^(-?\d*\.?\d+)(?:-|to|\.\.)(-?\d*\.?\d+)$/i.exec(e))) { const a = Number(m[1]), b = Number(m[2]); return (v) => v >= Math.min(a, b) && v <= Math.max(a, b); }
+  if ((m = /^(>=|<=|>|<|=|!)?(-?\d*\.?\d+)(k|l|cr)?$/i.exec(e))) {
+    const mult = { k: 1e3, l: 1e5, cr: 1e7 }[String(m[3] || "").toLowerCase()] || 1, x = Number(m[2]) * mult;
+    return { ">": (v) => v > x, "<": (v) => v < x, ">=": (v) => v >= x, "<=": (v) => v <= x, "=": (v) => v === x, "!": (v) => v !== x, "": (v) => v >= x }[m[1] || ""];
+  }
+  return null;
+}
+function labPassFilters(g) {
+  for (const c of LAB_COLS) {
+    const f = lab.filters[c.k]; if (!f || !c.v) continue;
+    const v = c.v(g);
+    if (c.f === "num") { const t = numTest(f); if (t && !(v != null && t(Number(v)))) return false; }
+    else if (c.f === "select") { if (v !== f) return false; }
+    else if (!String(v).toLowerCase().includes(String(f).toLowerCase())) return false;
+  }
+  return true;
+}
+function renderLabHead() {
+  const head = $("lab_head");
+  const opts = (c) => [...new Set(lab.rows.map((r) => c.v({ r, m: { full: {}, test: {} } })))].filter((x) => x && x !== "–").sort();
+  head.innerHTML = `<tr class="t">${LAB_COLS.map((c) => `<th class="${c.n ? "n " : ""}${c.v ? "sort" : ""}" data-k="${c.k}" ${c.v ? `aria-sort="${lab.sortKey === c.k ? (lab.sortDir > 0 ? "ascending" : "descending") : "none"}" tabindex="0"` : ""} ${c.tip ? `title="${esc(c.tip)}"` : ""}>${esc(c.t)} ${c.v ? '<span class="ar"></span>' : ""}</th>`).join("")}</tr>
+    <tr class="fl">${LAB_COLS.map((c) => `<th>${!c.f ? `<button type="button" class="btn small" id="lab_fclear" title="Clear all filters" style="padding:3px 8px">Clear</button>`
+      : c.f === "select" ? `<select data-f="${c.k}" aria-label="Filter ${esc(c.t)}"><option value="">All</option>${opts(c).map((o) => `<option>${esc(o)}</option>`).join("")}</select>`
+      : `<input data-f="${c.k}" ${c.f === "num" ? 'placeholder=">0"' : 'placeholder="contains…"'} aria-label="Filter ${esc(c.t)}" autocomplete="off">`}</th>`).join("")}</tr>`;
+  head.querySelectorAll("tr.t th.sort").forEach((th) => {
+    const go = () => { const k = th.dataset.k; if (lab.sortKey === k) lab.sortDir = -lab.sortDir; else { lab.sortKey = k; lab.sortDir = ["name", "asset", "style", "dd", "margin"].includes(k) ? 1 : -1; } renderLabHead(); renderLabTable(); };
+    th.addEventListener("click", go); th.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  });
+  head.querySelectorAll("[data-f]").forEach((el) => {
+    el.value = lab.filters[el.dataset.f] || ""; el.classList.toggle("on", !!el.value);
+    let t = null;
+    const apply = () => { lab.filters[el.dataset.f] = el.value.trim(); el.classList.toggle("on", !!el.value.trim()); clearTimeout(t); t = setTimeout(renderLabTable, 200); };
+    el.addEventListener(el.tagName === "SELECT" ? "change" : "input", apply);
+  });
+  const clr = $("lab_fclear"); if (clr) clr.addEventListener("click", () => { lab.filters = {}; renderLabHead(); renderLabTable(); });
+  // The filter row sits right under the title row.
+  requestAnimationFrame(() => { setBarH(); const tr = head.querySelector("tr.t"); if (tr) $("lab_grid").style.setProperty("--labhead", `${tr.getBoundingClientRect().height}px`); });
+}
 function renderLabTable() {
+  const hd = $("lab_head");
+  if (!hd.children.length || (renderLabTable.rowsFor !== lab.rows && !hd.contains(document.activeElement))) { renderLabTable.rowsFor = lab.rows; renderLabHead(); }
   const fams = labGroup(); const body = $("lab_body"); body.innerHTML = "";
+
   lab.openFam = lab.openFam || new Set();
   const nStrat = fams.reduce((a, f) => a + f.members.length, 0);
-  $("lab_count").textContent = fams.length ? `${fams.length} groups of similar strategies (${nStrat} strategies)${fams.length > 150 ? "; showing the top 150 groups" : ""}.` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
+  const nf = Object.values(lab.filters).filter(Boolean).length;
+  $("lab_count").textContent = fams.length ? `${fams.length} groups of similar strategies (${nStrat} strategies)${nf ? `, ${nf} column filter${nf === 1 ? "" : "s"} on` : ""}${fams.length > 150 ? "; showing the first 150 groups" : ""}. Click a column title to sort; type in the boxes under the titles to filter (numbers: 50 = at least 50, >50, <0, 10-20).` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
   const pc = (v) => `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${rupees(v)}</span>`;
   const rowFor = (g, num, f, sub) => {
     const m = g.m, r = g.r, c = r.config || {}, pub = !r.config;
     const tr = document.createElement("tr"); tr.className = "pick" + (sub ? " sub" : "") + (lab.sel === r.id ? " sel" : "");
-    const chips = [sub ? "" : `<span class="chip blue">${esc(r.asset)}</span>`, pub ? "" : `<span class="chip">${c.rules && c.rules.daily ? "Daily" : (c.timeframe_min + "m · " + (c.intraday ? "intraday" : "positional"))}</span>`,
+    const chips = [pub ? "" : `<span class="chip">${c.rules && c.rules.daily ? "Daily" : (c.timeframe_min + "m · " + (c.intraday ? "intraday" : "positional"))}</span>`,
       c.rules && c.rules.candles === "HA" ? '<span class="chip">HA candles</span>' : "",
       c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.champion ? '<span class="chip green">Re-tested</span>' : "",
       r.starred ? '<span class="chip yellow">★</span>' : "", r.promoted_id ? '<span class="chip green">Saved as strategy</span>' : "",
@@ -2932,7 +3032,7 @@ function renderLabTable() {
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : r.os) : null;
     const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} similar</button>` : "";
     tr.innerHTML = `<td class="n">${num}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
-      <td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}</td><td class="n">${m.margin_lot ? rupees(m.margin_lot) : "–"}</td>
+      <td style="white-space:nowrap">${esc(labAssetName(r.asset))}</td><td>${esc(labStyle(r))}</td><td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}</td><td class="n">${m.margin_lot ? rupees(m.margin_lot) : "–"}</td>
       <td class="n">${m.ret_margin == null ? "–" : `<span class="${m.ret_margin > 0 ? "pos-num" : m.ret_margin < 0 ? "neg-num" : ""}">${m.ret_margin}%</span>`}</td><td class="n">${pc(m.test.net)}</td>
       <td class="n">${rupees(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${m.score}</td><td class="n">${g.passes}/${g.nights}</td>`;
     tr.querySelector(".t").textContent = r.label;
@@ -3233,7 +3333,6 @@ $("lab_view").querySelectorAll("button").forEach((b) => b.addEventListener("clic
   $("lab_period").addEventListener("change", () => { lab.period = $("lab_period").value; loadLab().catch((e) => toast(errorText(e))); });
   $("lab_only").addEventListener("change", () => { lab.only = $("lab_only").value === "true"; loadLab().catch((e) => toast(errorText(e))); });
   $("lab_stopf").addEventListener("change", () => { lab.stopf = $("lab_stopf").value; renderLabTable(); });
-  $("lab_sort").addEventListener("change", () => { lab.sort = $("lab_sort").value; renderLabTable(); });
 }
 
 /* ================= multi-user desk: pages, roles, strategies table, marketplace, wallet, admin ================= */
