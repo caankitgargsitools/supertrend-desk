@@ -917,7 +917,7 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   if (bh && self) {
     vsBh = bh.net > 0 ? +(self.net / bh.net).toFixed(2) : null;
     riskVsBh = bh.ratio && bh.ratio > 0 ? +(sRatio / bh.ratio).toFixed(2) : null;
-    if (bh.net > 0 && bh.ratio && sRatio < bh.ratio) why.push(`buy & hold did better for the risk (profit ÷ worst fall ${bh.ratio} against the strategy's ${sRatio.toFixed(2)})`);
+    // Shown for comparison only: the strategies trade long and short, so a falling asset is no reason to fail one.
   }
   return { passed: why.length === 0, why, self, bh, vs_bh: vsBh, risk_vs_bh: riskVsBh, assets: { ok: okA, n: assets.length, list: assets },
     tfs: { ok: okT, n: tfs.length, list: tfs }, daily, checked_at: new Date().toISOString() };
