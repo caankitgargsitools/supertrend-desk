@@ -234,18 +234,29 @@ legend { padding: 0; margin-bottom: 4px; }
 .lab-table tbody td { border-bottom: 1px solid var(--line); }
 /* On wide screens the header sticks to the top of the window (under the page bar) as you scroll the page. */
 body.wide .wrap { max-width: 1840px; }
-.lab-table { width: 100%; table-layout: fixed; min-width: 1690px; }
+.lab-table { width: 100%; table-layout: fixed; min-width: 1330px; }
 .lab-table thead tr.t th { text-align: center; vertical-align: middle; }
 .lab-table td.lbl { min-width: 0; max-width: none; overflow-wrap: anywhere; }
 .lab-table td { overflow: hidden; text-overflow: ellipsis; }
-.lab-table td.n { font-size: 12.5px; }
-@media (min-width: 1440px) {
+.lab-table td.n { font-size: 12px; white-space: nowrap; }
+.lab-table tbody td { font-size: 12.5px; padding-top: 7px; padding-bottom: 7px; }
+.lab-table td.lbl .t { font-size: 12.5px; }
+.lab-table .hint.sm { font-size: 10.5px; line-height: 1.1; }
+.lab-table thead th { font-size: 11px; letter-spacing: .02em; padding-left: 4px; padding-right: 4px; }
+.lab-table thead tr.fl input, .lab-table thead tr.fl select { min-width: 0; padding: 4px; font-size: 11px; }
+.lab-table td, .lab-table th { padding-left: 5px; padding-right: 5px; }
+/* The page-level sticky header needs the whole table to fit the card; narrower screens scroll inside the box instead. */
+@media (min-width: 1500px) {
   .labgrid { overflow: visible; max-height: none; }
   .lab-table thead tr.t th { top: var(--barH, 0px); }
   .lab-table thead tr.fl th { top: calc(var(--barH, 0px) + var(--labhead, 40px)); }
   .lab-table thead tr.t th:first-child { border-top-left-radius: var(--r); } .lab-table thead tr.t th:last-child { border-top-right-radius: var(--r); }
 }
 .lab-table td.lbl .t { font-weight: 600; overflow-wrap: anywhere; }
+/* Safety net: if the table is ever wider than its card, it scrolls inside the box instead of spilling. */
+.labgrid.spill { overflow: auto !important; max-height: calc(100vh - 150px) !important; }
+.labgrid.spill .lab-table thead tr.t th { top: 0 !important; }
+.labgrid.spill .lab-table thead tr.fl th { top: var(--labhead, 40px) !important; }
 .lab-table tr.sel td { background: var(--blue-soft); }
 .months { display: grid; grid-template-columns: repeat(auto-fit, minmax(42px, 1fr)); gap: 4px; align-items: end; height: 150px; margin-top: 8px; }
 .months .mb { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 3px; min-width: 0; }
@@ -637,7 +648,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
             <button class="btn primary" id="lab_run" type="button">Run now</button>
           </div>
         </div>
-        <p class="hint" style="margin:8px 0 0">Every evening at 16:05 IST the lab invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations and with setting tweaks. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and must also make money in the last 3 months, which the ranking never saw (round 1); then work on other assets and other timeframes (round 2); then make money in <strong>every one of the past 10 years</strong> (5 years for 5-minute strategies, the history Dhan keeps), so nothing passes on one big move of the underlying (round 3). Strategies that fail are cleared straight away; a one-line record stays so the lab never tries them again.</p>
+        <p class="hint" style="margin:8px 0 0">The lab runs once a day at 16:05 IST or non-stop (see Lab settings). Each run invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations and with setting tweaks. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and must also make money in the last 3 months, which the ranking never saw (round 1); then work on other assets and other timeframes (round 2); then make money in <strong>every one of the past 10 years</strong> (5 years for 5-minute strategies, the history Dhan keeps), so nothing passes on one big move of the underlying (round 3). Strategies that fail are cleared straight away; a one-line record stays so the lab never tries them again.</p>
         <div id="lab_status" style="margin-top:12px"></div>
         <div id="lab_reqs" style="margin-top:12px"></div>
         <form id="labSetForm" hidden style="margin-top:14px">
@@ -883,6 +894,15 @@ function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = fals
 function lit(v) { if (v === null || v === undefined || v === "") return "null"; return "'" + String(v).replace(/'/g, "''") + "'"; }
 function fmtNum(v) { return v === null || v === undefined ? "–" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 }); }
 // Whole rupees: paisa are dropped, never rounded up or down.
+/** Short Indian money for tight tables: ₹45,600 · ₹12.34L · ₹1.23Cr (truncated, never rounded up). Full value goes in the title. */
+function rupeesShort(v) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return "–";
+  const n = Math.trunc(Number(v)), a = Math.abs(n), sg = n < 0 ? "−₹" : "₹";
+  const cut = (x) => (Math.trunc(x * 100) / 100).toFixed(2).replace(/\.?0+$/, "");
+  if (a >= 1e7) return `${sg}${cut(a / 1e7)}Cr`;
+  if (a >= 1e5) return `${sg}${cut(a / 1e5)}L`;
+  return sg + a.toLocaleString("en-IN");
+}
 function rupees(v) { if (v === null || v === undefined) return "–"; const n = Math.trunc(Number(v)); return (n < 0 ? "−₹" : "₹") + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 0 }); }
 function istText(iso) {
   if (!iso) return "–";
@@ -3038,27 +3058,27 @@ function labStyle(r) {
 }
 const LAB_MCX = new Set(["GOLD", "GOLDM", "GOLDTEN", "GOLDGUINEA", "GOLDPETAL", "SILVER", "SILVERM", "SILVERMIC", "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "COPPER", "ZINC", "ZINCMINI", "LEAD", "LEADMINI", "ALUMINIUM", "ALUMINI", "NICKEL"]);
 const LAB_COLS = [
-  { k: "no", w: 44, t: "#", n: true },
+  { k: "no", w: 34, t: "#", n: true },
   { k: "name", t: "Strategy", f: "text", v: (g) => g.r.label || "" },
-  { k: "asset", w: 86, t: "Asset", f: "select", v: (g) => labAssetName(g.r.asset) },
-  { k: "style", w: 74, t: "Style", f: "select", v: (g) => labStyle(g.r) },
-  { k: "trades", w: 62, t: "Trades", f: "num", n: true, v: (g) => g.m.full.n },
-  { k: "win", w: 60, t: "Win %", f: "num", n: true, v: (g) => g.m.full.win_rate },
-  { k: "net", w: 94, t: "Net (1 yr)", f: "num", n: true, v: (g) => g.m.full.net },
-  { k: "margin", w: 92, t: "Avg margin / lot", f: "num", n: true, v: (g) => g.m.margin_lot ?? null, tip: "Average over the trades of the margin one lot needed at each trade's entry price" },
-  { k: "rom", w: 80, t: "Return on margin %", f: "num", n: true, v: (g) => g.m.ret_margin ?? null },
-  { k: "test", w: 90, t: "Last 3 mo", f: "num", n: true, v: (g) => g.m.test.net },
-  { k: "dd", w: 90, t: "Max DD", f: "num", n: true, v: (g) => g.m.full.max_dd },
-  { k: "pf", w: 54, t: "PF", f: "num", n: true, v: (g) => g.m.full.pf ?? null },
-  { k: "months", w: 70, t: "Months +", f: "num", n: true, v: (g) => g.m.pos_months, tip: "Profitable months out of the months traded" },
-  { k: "score", w: 64, t: "Score", f: "num", n: true, v: (g) => g.m.score },
-  { k: "oassets", w: 76, t: "Other assets +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.assets_ok : null; }, tip: "Of the other assets the same rules were tried on (same family first: indices for index strategies, commodities for commodity ones), how many made money with a profit factor of 1.1 or more" },
-  { k: "otfs", w: 82, t: "Other timeframes +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.tfs_ok : null; }, tip: "Of the other candle timeframes tried on the same asset, how many made money with a profit factor of 1.1 or more" },
-  { k: "years", w: 74, t: "Years +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.years_ok ?? null : null; }, tip: "Of the past years tested one by one (10 for once-a-day strategies, 5 for 5-minute ones), how many made money. Every year must." },
-  { k: "vsbh", w: 84, t: "vs Buy & Hold", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.risk_vs_bh ?? null : null; }, tip: "Strategy's profit ÷ worst fall, divided by the same for holding 1 lot for the year. Above 1× = better than buy & hold for the risk taken. For comparison only: not part of the pass, since strategies also trade short" },
-  { k: "nights", w: 70, t: "Nights passed", f: "num", n: true, v: (g) => g.passes },
-  { k: "longnet", w: 112, t: "Long test net", f: "num", n: true, v: (g) => { const L = longOf(g.r); return L ? L.net : null; }, tip: "Net profit over the longest period tested in the nightly long test (up to 10 years for daily strategies, 5 years for intraday), 1 lot after charges" },
-  { k: "longpos", w: 74, t: "Long test periods +", f: "num", n: true, v: (g) => { const L = longOf(g.r); return L ? L.pos : null; }, tip: "Of the periods tested (3M, 6M, 1Y … 10Y), how many made money" },
+  { k: "asset", w: 78, t: "Asset", f: "select", v: (g) => labAssetName(g.r.asset) },
+  { k: "style", w: 64, t: "Style", f: "select", v: (g) => labStyle(g.r) },
+  { k: "trades", w: 50, t: "Trades", f: "num", n: true, v: (g) => g.m.full.n },
+  { k: "win", w: 46, t: "Win %", f: "num", n: true, v: (g) => g.m.full.win_rate },
+  { k: "net", w: 72, t: "Net (1 yr)", f: "num", n: true, v: (g) => g.m.full.net },
+  { k: "margin", w: 66, t: "Avg margin / lot", f: "num", n: true, v: (g) => g.m.margin_lot ?? null, tip: "Average over the trades of the margin one lot needed at each trade's entry price" },
+  { k: "rom", w: 58, t: "Return on margin %", f: "num", n: true, v: (g) => g.m.ret_margin ?? null },
+  { k: "test", w: 70, t: "Last 3 mo", f: "num", n: true, v: (g) => g.m.test.net },
+  { k: "dd", w: 66, t: "Max DD", f: "num", n: true, v: (g) => g.m.full.max_dd },
+  { k: "pf", w: 44, t: "PF", f: "num", n: true, v: (g) => g.m.full.pf ?? null },
+  { k: "months", w: 54, t: "Months +", f: "num", n: true, v: (g) => g.m.pos_months, tip: "Profitable months out of the months traded" },
+  { k: "score", w: 50, t: "Score", f: "num", n: true, v: (g) => g.m.score },
+  { k: "oassets", w: 56, t: "Other assets +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.assets_ok : null; }, tip: "Of the other assets the same rules were tried on (same family first: indices for index strategies, commodities for commodity ones), how many made money with a profit factor of 1.1 or more" },
+  { k: "otfs", w: 62, t: "Other time frames +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.tfs_ok : null; }, tip: "Of the other candle timeframes tried on the same asset, how many made money with a profit factor of 1.1 or more" },
+  { k: "years", w: 50, t: "Years +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.years_ok ?? null : null; }, tip: "Of the past years tested one by one (10 for once-a-day strategies, 5 for 5-minute ones), how many made money. Every year must." },
+  { k: "vsbh", w: 58, t: "vs Buy & Hold", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.risk_vs_bh ?? null : null; }, tip: "Strategy's profit ÷ worst fall, divided by the same for holding 1 lot for the year. Above 1× = better than buy & hold for the risk taken. For comparison only: not part of the pass, since strategies also trade short" },
+  { k: "nights", w: 54, t: "Nights passed", f: "num", n: true, v: (g) => g.passes },
+  { k: "longnet", w: 74, t: "Long test net", f: "num", n: true, v: (g) => { const L = longOf(g.r); return L ? L.net : null; }, tip: "Net profit over the longest period tested in the nightly long test (up to 10 years for daily strategies, 5 years for intraday), 1 lot after charges" },
+  { k: "longpos", w: 60, t: "Long test periods +", f: "num", n: true, v: (g) => { const L = longOf(g.r); return L ? L.pos : null; }, tip: "Of the periods tested (3M, 6M, 1Y … 10Y), how many made money" },
 ];
 /** The latest nightly long test of a lab strategy (futures version): its longest period and how many periods made money. */
 function longOf(r) {
@@ -3093,6 +3113,12 @@ function labPassFilters(g) {
   }
   return true;
 }
+function fitLabGrid() {
+  const g = $("lab_grid"), t = g && g.querySelector("table"); if (!t) return;
+  g.classList.remove("spill");
+  if (t.getBoundingClientRect().width > g.clientWidth + 1) g.classList.add("spill");
+}
+window.addEventListener("resize", () => { if (lab.open) fitLabGrid(); });
 function renderLabHead() {
   const head = $("lab_head");
   const tbl = head.closest("table");
@@ -3115,7 +3141,7 @@ function renderLabHead() {
   });
   const clr = $("lab_fclear"); if (clr) clr.addEventListener("click", () => { lab.filters = {}; renderLabHead(); renderLabTable(); });
   // The filter row sits right under the title row.
-  requestAnimationFrame(() => { setBarH(); const tr = head.querySelector("tr.t"); if (tr) $("lab_grid").style.setProperty("--labhead", `${tr.getBoundingClientRect().height}px`); });
+  requestAnimationFrame(() => { setBarH(); const tr = head.querySelector("tr.t"); if (tr) $("lab_grid").style.setProperty("--labhead", `${tr.getBoundingClientRect().height}px`); fitLabGrid(); });
 }
 function renderLabTable() {
   const hd = $("lab_head");
@@ -3126,7 +3152,8 @@ function renderLabTable() {
   const nStrat = fams.reduce((a, f) => a + f.members.length, 0);
   const nf = Object.values(lab.filters).filter(Boolean).length;
   $("lab_count").textContent = fams.length ? `${fams.length} groups of similar strategies (${nStrat} strategies)${nf ? `, ${nf} column filter${nf === 1 ? "" : "s"} on` : ""}${fams.length > 150 ? "; showing the first 150 groups" : ""}. Click a column title to sort; type in the boxes under the titles to filter (numbers: 50 = at least 50, >50, <0, 10-20).` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
-  const pc = (v) => `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${rupees(v)}</span>`;
+  const pc = (v) => `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}" title="${rupees(v)}">${rupeesShort(v)}</span>`;
+  const rs = (v) => v == null ? "–" : `<span title="${rupees(v)}">${rupeesShort(v)}</span>`;
   const rowFor = (g, num, f, sub) => {
     const m = g.m, r = g.r, c = r.config || {}, pub = !r.config;
     const tr = document.createElement("tr"); tr.className = "pick" + (sub ? " sub" : "") + (lab.sel === r.id ? " sel" : "");
@@ -3138,9 +3165,9 @@ function renderLabTable() {
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : r.os) : null;
     const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} similar</button>` : "";
     tr.innerHTML = `<td class="n">${num}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
-      <td style="white-space:nowrap">${esc(labAssetName(r.asset))}</td><td>${esc(labStyle(r))}</td><td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}</td><td class="n">${m.margin_lot ? rupees(m.margin_lot) : "–"}</td>
+      <td style="white-space:nowrap">${esc(labAssetName(r.asset))}</td><td>${esc(labStyle(r))}</td><td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}</td><td class="n">${m.margin_lot ? rs(m.margin_lot) : "–"}</td>
       <td class="n">${m.ret_margin == null ? "–" : `<span class="${m.ret_margin > 0 ? "pos-num" : m.ret_margin < 0 ? "neg-num" : ""}">${m.ret_margin}%</span>`}</td><td class="n">${pc(m.test.net)}</td>
-      <td class="n">${rupees(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${m.score}</td>${robCells(r)}<td class="n">${g.passes}/${g.nights}</td>${(() => { const L = longOf(r); return L ? `<td class="n"><span class="hint">${L.key}</span> <span class="${L.net > 0 ? "pos-num" : L.net < 0 ? "neg-num" : ""}">${rupees(L.net)}</span></td><td class="n">${L.pos}/${L.n}</td>` : '<td class="n hint">–</td><td class="n hint">–</td>'; })()}`;
+      <td class="n">${rs(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${m.score}</td>${robCells(r)}<td class="n">${g.passes}/${g.nights}</td>${(() => { const L = longOf(r); return L ? `<td class="n"><span class="${L.net > 0 ? "pos-num" : L.net < 0 ? "neg-num" : ""}" title="${rupees(L.net)} over ${L.key}">${rupeesShort(L.net)}</span><div class="hint sm">${L.key}</div></td><td class="n">${L.pos}/${L.n}</td>` : '<td class="n hint">–</td><td class="n hint">–</td>'; })()}`;
     tr.querySelector(".t").textContent = r.label;
     tr.addEventListener("click", (e) => {
       if (e.target.closest(".famBtn")) { if (lab.openFam.has(f.key)) lab.openFam.delete(f.key); else lab.openFam.add(f.key); renderLabTable(); return; }
