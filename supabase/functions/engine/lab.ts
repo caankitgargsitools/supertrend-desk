@@ -885,8 +885,11 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   const { data: champs } = await sb.from("lab_results").select("fingerprint, config, score").eq("passed", true)
     .gte("created_at", new Date(Date.now() - 30 * 86400000).toISOString()).order("score", { ascending: false }).limit(300);
   const rows: Record<string, unknown>[] = [];
-  const champSeen = new Set<string>();
+  // Earlier winners are re-tested once a day (on the latest candles); the rest of every run goes to new strategies and variations.
+  const { data: fresh } = await sb.from("lab_results").select("fingerprint").gte("created_at", new Date(Date.now() - 20 * 3600000).toISOString()).limit(20000);
+  const champSeen = new Set<string>(), testedToday = new Set((fresh ?? []).map((x) => x.fingerprint));
   for (const c of champs ?? []) {
+    if (testedToday.has(c.fingerprint)) continue;
     if (champSeen.size >= 25 || champSeen.has(c.fingerprint) || !assets.includes(c.config?.underlying)) continue;
     champSeen.add(c.fingerprint);
     rows.push({ run_id: run.id, asset: c.config.underlying, mode: c.config.rules?.daily ? "DAILY" : "INTRADAY", label: labelFor(c.config), fingerprint: c.fingerprint, champion: true, config: c.config, stage: "pending" });
@@ -992,6 +995,8 @@ export async function forget(sb: SupabaseClient, items: Forgettable[]) {
   }
   const ids = items.map((x) => x.id);
   for (let i = 0; i < ids.length; i += 300) await sb.from("lab_results").delete().in("id", ids.slice(i, i + 300));
+  // A winner whose latest re-test failed no longer counts as passed (its earlier results are cleared in turn).
+  for (let i = 0; i < fps.length; i += 200) await sb.from("lab_results").update({ passed: false }).in("fingerprint", fps.slice(i, i + 200)).eq("passed", true).eq("starred", false).is("promoted_id", null);
 }
 /** Clears earlier failures in batches (results kept from before failures were removed straight away). */
 async function forgetOld(sb: SupabaseClient, limit = 400) {

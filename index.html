@@ -3116,9 +3116,17 @@ function labGroup() {
     if (lab.stopf === "WITH" && !risk && lab.view === "FUT") continue;
     if (lab.stopf === "WITHOUT" && risk && lab.view === "FUT") continue;
     const g = by.get(r.fingerprint);
-    const ok = labPassed(r, m);
-    if (!g) by.set(r.fingerprint, { r, m, nights: 1, passes: ok ? 1 : 0 });
-    else { g.nights++; if (ok) g.passes++; if (r.run_id > g.r.run_id) { g.r = r; g.m = m; } }
+    const ok = labPassed(r, m), checking = labChecking(r, m);
+    if (!g) by.set(r.fingerprint, { r, m, nights: 1, passes: ok ? 1 : 0, done: checking ? null : { r, m } });
+    else {
+      g.nights++; if (ok) g.passes++;
+      if (r.run_id > g.r.run_id) { g.r = r; g.m = m; }
+      if (!checking && (!g.done || r.run_id > g.done.r.run_id)) g.done = { r, m };
+    }
+  }
+  // While today's re-test of a strategy is being checked, its line keeps showing the last complete result.
+  for (const g of by.values()) {
+    if (g.done && g.done.r !== g.r && labChecking(g.r, g.m)) { g.rechecking = g.r; g.r = g.done.r; g.m = g.done.m; }
   }
   // Column filters apply to every strategy; sorting follows the column picked in the header.
   for (const [k, g] of [...by]) if (!labPassFilters(g)) by.delete(k);
@@ -3269,7 +3277,7 @@ function renderLabTable() {
     const tr = document.createElement("tr"); tr.className = "pick" + (sub ? " sub" : "") + (lab.sel === r.id ? " sel" : "");
     const chips = [pub ? "" : `<span class="chip">${c.rules && c.rules.daily ? "Daily" : (c.timeframe_min + "m · " + (c.intraday ? "intraday" : "positional"))}</span>`,
       c.rules && c.rules.candles === "HA" ? '<span class="chip">HA candles</span>' : "",
-      c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.champion ? '<span class="chip green">Re-tested</span>' : "",
+      c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.champion ? '<span class="chip green">Re-tested</span>' : "", g.rechecking ? `<span class="chip blue" title="Showing the result from run #${g.r.run_id}; today's re-test (run #${g.rechecking.run_id}) is still being checked">Re-checking today</span>` : "",
       r.starred ? '<span class="chip yellow">★</span>' : "", r.promoted_id ? '<span class="chip green">Saved as strategy</span>' : "",
       labPassed(r, m) ? '<span class="chip green">Passed</span>' : labChecking(r, m) ? '<span class="chip blue">Being checked</span>' : m.passed && robDone(r) ? '<span class="chip red">Failed tougher test</span>' : '<span class="chip red">Not passed</span>'].join("");
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : lab.view === "SPREAD" ? r.osp : r.os) : null;
