@@ -596,8 +596,11 @@ const WALL_BUDGET = 100000; // ms of wall time per instalment
 export async function labStart(sb: SupabaseClient, manual: boolean): Promise<number | null> {
   const { data: set } = await sb.from("lab_settings").select("*").eq("id", 1).maybeSingle();
   if (!set || (!set.enabled && !manual)) return null;
-  const { data: running } = await sb.from("lab_runs").select("id, settings").eq("status", "running").limit(1);
-  if (running?.length) {
+  const { data: running } = await sb.from("lab_runs").select("id, settings, trigger").eq("status", "running").limit(1);
+  if (running?.length && running[0].trigger === "robust") {
+    // The re-check of earlier winners gives way; it carries on from where it was once the lab is free again.
+    await sb.from("lab_runs").update({ status: "done", phase: "done", progress: "Paused for a new run; carries on later", finished_at: new Date().toISOString(), lease_until: null }).eq("id", running[0].id);
+  } else if (running?.length) {
     // A variation run is busy: tonight's run starts as soon as it finishes.
     if (!manual && running[0].settings?.request_id) await sb.from("lab_settings").update({ nightly_due: true }).eq("id", 1);
     return running[0].id;
@@ -633,6 +636,20 @@ export async function labNext(sb: SupabaseClient): Promise<number | null> {
   }
   const { data: reqs } = await sb.from("lab_requests").select("*").eq("status", "pending").order("id").limit(1);
   const q = reqs?.[0];
+  if (!q && set) {
+    // Nothing else to do: re-check earlier first-round winners against the tougher test.
+    const { count } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("basic_passed", true).is("robust_status", null);
+    const { count: open } = await sb.from("lab_checks").select("id", { count: "exact", head: true }).eq("status", "pending");
+    if ((count ?? 0) > 0 || (open ?? 0) > 0) {
+      const today = ist(Date.now() / 1000).date;
+      const { data: run, error } = await sb.from("lab_runs").insert({
+        run_day: today, status: "running", phase: "robust", progress: "Re-checking earlier winners", from_day: addDays(today, -YEAR_DAYS), split_day: addDays(today, -92), to_day: today,
+        trigger: "robust", settings: { ...set, nightly_due: undefined },
+      }).select("id").single();
+      if (error) throw new Error(error.message);
+      return run.id;
+    }
+  }
   if (!q || !set) return null;
   const parentAsset = String(q.config?.underlying ?? "");
   const daily = !!q.config?.rules?.daily;
@@ -698,6 +715,18 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
     } else if (run.phase === "screen") {
       const left = await screenPhase(ctx, run, win);
       if (!left) {
+        const { count: basic } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).eq("basic_passed", true);
+        await patch({ phase: "robust", progress: `Checking ${basic ?? 0} first-round winners on other assets, other timeframes and against buy & hold`, counts: { ...counts, screened: counts.generated, basic_passed: basic } });
+      } else {
+        const { count: done } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).neq("stage", "pending");
+        await patch({ progress: `Backtested ${done} of ${counts.generated ?? "?"} strategies` });
+      }
+    } else if (run.phase === "robust") {
+      const left = await robustPhase(ctx, run, win, patch);
+      if (!left && run.trigger === "robust") {
+        await patch({ status: "done", phase: "done", progress: "Finished re-checking earlier winners", finished_at: new Date().toISOString(), lease_until: null });
+        more = false;
+      } else if (!left) {
         const top = Number(set.top_options ?? 20);
         // Options are priced for index strategies on intraday candles; positional once-a-day trades run across expiries.
         const { data: best } = await sb.from("lab_results").select("id, asset, mode").eq("run_id", run.id).eq("stage", "screened").eq("passed", true)
@@ -705,10 +734,7 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
         const pickIds = (best ?? []).filter((b) => !LAB_ASSETS[b.asset]?.commodity && b.mode === "INTRADAY").slice(0, top).map((b) => b.id);
         if (pickIds.length) await sb.from("lab_results").update({ stage: "opt_queue" }).in("id", pickIds);
         const { count: passed } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).eq("passed", true);
-        await patch({ phase: "options", progress: `Pricing the best ${pickIds.length} with real option prices`, counts: { ...counts, screened: counts.generated, passed, to_price: pickIds.length } });
-      } else {
-        const { count: done } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).neq("stage", "pending");
-        await patch({ progress: `Backtested ${done} of ${counts.generated ?? "?"} strategies` });
+        await patch({ phase: "options", progress: `Pricing the best ${pickIds.length} with real option prices`, counts: { ...counts, passed, to_price: pickIds.length } });
       }
     } else if (run.phase === "options") {
       const left = await optionsPhase(ctx, run, win, patch);
@@ -824,6 +850,149 @@ async function requestPhase(sb: SupabaseClient, run: Run, assets: string[]) {
   }
 }
 
+/* ---------- robustness: other assets, other timeframes, buy & hold ---------- */
+const ROBUST_TFS = [5, 10, 15, 25, 30, 45, 60, 75, 125];
+type Check = { kind: "self" | "asset" | "tf"; asset: string; tf: number | null; config: LabConfig };
+/** The checks for one first-round winner, limited to assets the lab has candles for. */
+export function robustChecks(cfg: LabConfig, haveD: Set<string>, haveI5: Set<string>): Check[] {
+  const out: Check[] = [{ kind: "self", asset: cfg.underlying, tf: null, config: cfg }];
+  const daily = !!cfg.rules?.daily, me = LAB_ASSETS[cfg.underlying];
+  // Other assets: the same family first (indices for an index strategy, commodities for a commodity one), up to 6.
+  const pool = Object.keys(LAB_ASSETS).filter((k) => k !== cfg.underlying && haveD.has(k) && (daily || haveI5.has(k)))
+    .sort((a, b) => Number(LAB_ASSETS[a].commodity !== me?.commodity) - Number(LAB_ASSETS[b].commodity !== me?.commodity));
+  for (const k of pool) {
+    if (out.filter((c) => c.kind === "asset").length >= 6) break;
+    const c = transfer(cfg, k);
+    if (c) out.push({ kind: "asset", asset: k, tf: null, config: c });
+  }
+  // Other timeframes: the nearest decision timeframes that keep the rules valid (up to 4).
+  if (!daily && haveI5.has(cfg.underlying)) {
+    const own = Number(cfg.timeframe_min);
+    const tfs = ROBUST_TFS.filter((t) => t !== own).sort((a, b) => Math.abs(Math.log(a / own)) - Math.abs(Math.log(b / own)));
+    for (const t of tfs) {
+      if (out.filter((c) => c.kind === "tf").length >= 4) break;
+      const c = retime(cfg, t);
+      if (c) out.push({ kind: "tf", asset: cfg.underlying, tf: t, config: c });
+    }
+  } else if (daily && haveI5.has(cfg.underlying)) {
+    // A once-a-day index strategy, decided instead at the close of 60- and 125-minute candles (daily conditions stay daily).
+    for (const t of [60, 125]) {
+      const c: LabConfig = JSON.parse(JSON.stringify(cfg));
+      delete c.rules.daily; c.timeframe_min = t; c.lab_note = `Decided on ${t}-minute candles instead of once a day`;
+      try { validateRules(c.rules); out.push({ kind: "tf", asset: cfg.underlying, tf: t, config: c }); } catch { /* skip */ }
+    }
+  }
+  return out;
+}
+/** Buy & hold over the window: 1 lot bought at the first close and held to the last, with its worst fall. */
+function buyHold(data: SimData, from: string, to: string, lot: number) {
+  const ds = data.daily.filter((d) => d.day >= from && d.day <= to);
+  if (ds.length < 2) return null;
+  const c0 = ds[0].c;
+  let peak = 0, dd = 0;
+  for (const d of ds) { const v = (d.c - c0) * lot; peak = Math.max(peak, v); dd = Math.max(dd, peak - v); }
+  const net = Math.trunc((ds[ds.length - 1].c - c0) * lot);
+  return { net, max_dd: Math.trunc(dd), ratio: dd > 0 ? +(net / dd).toFixed(2) : null, from: ds[0].day, to: ds[ds.length - 1].day };
+}
+const workOk = (f: PeriodStats, daily: boolean) => f.net > 0 && (f.pf == null || f.pf >= 1.1) && f.n >= (daily ? 5 : 10);
+/** The verdict once every check of a winner is done. */
+export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: string; tf: number | null; result: any }[]) {
+  const daily = !!cfg.rules?.daily;
+  const self = checks.find((c) => c.kind === "self")?.result ?? null;
+  const assets = checks.filter((c) => c.kind === "asset").map((c) => ({ asset: c.asset, ...c.result }));
+  const tfs = checks.filter((c) => c.kind === "tf").map((c) => ({ tf: c.tf, ...c.result }));
+  const okA = assets.filter((x) => x.ok).length, okT = tfs.filter((x) => x.ok).length;
+  const why: string[] = [];
+  if (!self || !(self.net > 0)) why.push("lost money on the latest year");
+  if (!assets.length) why.push("no other asset to test it on");
+  else if (okA < Math.min(2, assets.length)) why.push(`worked on ${okA} of ${assets.length} other assets (needs ${Math.min(2, assets.length)})`);
+  if (tfs.length) { const need = tfs.length >= 3 ? 2 : 1; if (okT < need) why.push(`worked on ${okT} of ${tfs.length} other timeframes (needs ${need})`); }
+  else if (okA < 3) why.push(`no other timeframe could be tested, so it needs 3 other assets (worked on ${okA})`);
+  const bh = self?.bh ?? null;
+  const sRatio = self && self.max_dd > 0 ? self.net / self.max_dd : self?.net > 0 ? 99 : 0;
+  let vsBh: number | null = null, riskVsBh: number | null = null;
+  if (bh && self) {
+    vsBh = bh.net > 0 ? +(self.net / bh.net).toFixed(2) : null;
+    riskVsBh = bh.ratio && bh.ratio > 0 ? +(sRatio / bh.ratio).toFixed(2) : null;
+    if (bh.net > 0 && bh.ratio && sRatio < bh.ratio) why.push(`buy & hold did better for the risk (profit ÷ worst fall ${bh.ratio} against the strategy's ${sRatio.toFixed(2)})`);
+  }
+  return { passed: why.length === 0, why, self, bh, vs_bh: vsBh, risk_vs_bh: riskVsBh, assets: { ok: okA, n: assets.length, list: assets },
+    tfs: { ok: okT, n: tfs.length, list: tfs }, daily, checked_at: new Date().toISOString() };
+}
+async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: string; to: string }, patch: (f: Record<string, unknown>) => unknown): Promise<boolean> {
+  const { sb } = ctx;
+  const capital = Number(run.settings?.capital ?? 500000);
+  // 1. Queue the checks: this run's first-round winners, then (a batch at a time) earlier ones.
+  const { data: cands } = await sb.from("lab_candles").select("asset, kind");
+  const haveD = new Set((cands ?? []).filter((c) => c.kind === "D").map((c) => c.asset)), haveI5 = new Set((cands ?? []).filter((c) => c.kind === "I5").map((c) => c.asset));
+  const { count: open0 } = await sb.from("lab_checks").select("id", { count: "exact", head: true }).eq("status", "pending");
+  for (const mine of [true, false]) {
+    if (!mine && (open0 ?? 0) > 600) break;
+    let q = sb.from("lab_results").select("id, config").eq("basic_passed", true).is("robust_status", null).order("score", { ascending: false }).limit(mine ? 400 : 60);
+    q = mine ? q.eq("run_id", run.id) : q.neq("run_id", run.id);
+    const { data: rows } = await q;
+    for (const r of rows ?? []) {
+      if (Date.now() - ctx.started > WALL_BUDGET - 20000) return true;
+      const checks = robustChecks(r.config, haveD, haveI5).map((c) => ({ lab_id: r.id, kind: c.kind, asset: c.asset, tf: c.tf, config: c.config, status: "pending" }));
+      const { error } = await sb.from("lab_checks").insert(checks);
+      if (error) throw new Error(error.message);
+      await sb.from("lab_results").update({ robust_status: "queued" }).eq("id", r.id);
+    }
+    if (!mine && (rows ?? []).length) break;
+  }
+  // 2. Run pending checks, one asset's candles at a time.
+  const { data: pend } = await sb.from("lab_checks").select("id, lab_id, kind, asset, config").eq("status", "pending").order("lab_id", { ascending: false }).limit(400);
+  if (pend?.length) {
+    const asset = pend[0].asset;
+    let cpu = 0;
+    const t0 = performance.now();
+    const data = await loadAsset(sb, asset);
+    cpu += Math.min(250, performance.now() - t0);
+    const memo = new Map<string, unknown>();
+    const rates = await loadMarginRates(sb);
+    const ups: Promise<unknown>[] = [];
+    for (const c of pend.filter((p) => p.asset === asset)) {
+      if (cpu > CPU_BUDGET || Date.now() - ctx.started > WALL_BUDGET) break;
+      const t1 = performance.now();
+      let result: Record<string, unknown>;
+      try {
+        const { metrics } = await screenOne(c.config, data, memo, win, capital, rates);
+        const f = metrics.full;
+        result = { net: f.net, pf: f.pf, max_dd: f.max_dd, n: f.n, win_rate: f.win_rate, test_net: metrics.test.net, ok: workOk(f, !!c.config.rules?.daily) };
+        if (c.kind === "self") result.bh = buyHold(data, win.from, win.to, Number(c.config.lot_size));
+      } catch (e) { result = { ok: false, error: e instanceof Error ? e.message.slice(0, 160) : String(e) }; }
+      cpu += performance.now() - t1;
+      ups.push(sb.from("lab_checks").update({ status: "done", result }).eq("id", c.id).then(() => {}));
+    }
+    await Promise.all(ups);
+  }
+  // 3. Verdicts for winners whose checks are all done.
+  const { data: queued } = await sb.from("lab_results").select("id, config").eq("robust_status", "queued").order("id", { ascending: false }).limit(60);
+  let decided = 0;
+  const ids = (queued ?? []).map((r) => r.id);
+  const { data: allCs } = ids.length ? await sb.from("lab_checks").select("lab_id, kind, asset, tf, status, result").in("lab_id", ids).limit(1000) : { data: [] };
+  for (const r of queued ?? []) {
+    const cs = (allCs ?? []).filter((c) => c.lab_id === r.id);
+    if (!cs.length || cs.some((c) => c.status === "pending")) continue;
+    const v = robustVerdict(r.config, cs);
+    await sb.from("lab_results").update({ robust_status: "done", robust: v, passed: v.passed }).eq("id", r.id);
+    await sb.from("lab_checks").delete().eq("lab_id", r.id);
+    decided++;
+  }
+  const { count: left } = await sb.from("lab_checks").select("id", { count: "exact", head: true }).eq("status", "pending");
+  const { count: mineLeft } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).eq("basic_passed", true).neq("robust_status", "done");
+  const { count: backlog } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("basic_passed", true).is("robust_status", null);
+  await patch({ progress: `Tougher test: ${left ?? 0} checks to run${backlog ? `, ${backlog} earlier winners still to re-check` : ""} (${decided} decided just now)` });
+  // A nightly run moves on once its own winners are decided; the re-check run keeps going until the backlog is done.
+  if (run.trigger === "robust") {
+    // Somebody asked for a variation run: stop here so it can start; the re-check resumes afterwards.
+    const { count: asks } = await sb.from("lab_requests").select("id", { count: "exact", head: true }).eq("status", "pending");
+    if ((asks ?? 0) > 0) return false;
+    return (left ?? 0) > 0 || (backlog ?? 0) > 0 || (queued ?? []).length > decided;
+  }
+  return (mineLeft ?? 0) > 0;
+}
+
 async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: string; to: string }): Promise<boolean> {
   const { sb } = ctx;
   const { data: pend } = await sb.from("lab_results").select("id, asset, config").eq("run_id", run.id).eq("stage", "pending").order("asset").order("id").limit(300);
@@ -843,7 +1012,9 @@ async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     let fields: Record<string, unknown>;
     try {
       const { metrics, trades } = await screenOne(row.config, data, memo, win, capital, rates);
-      fields = { stage: "screened", passed: metrics.passed, score: metrics.score, metrics, trades: slim(trades), error: null };
+      // The walk-forward check is only the first gate: "passed" is set after the robustness checks (other assets,
+      // other timeframes, against buy & hold).
+      fields = { stage: "screened", basic_passed: metrics.passed, passed: false, robust_status: null, robust: null, score: metrics.score, metrics, trades: slim(trades), error: null };
     } catch (e) {
       fields = { stage: "error", error: e instanceof Error ? e.message : String(e) };
     }
@@ -951,7 +1122,8 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
 /** Keep the tables small: strategies that didn't pass for 7 days, everything else for 45 days unless starred or turned into a strategy. */
 async function prune(sb: SupabaseClient) {
   const d = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
-  await sb.from("lab_results").delete().eq("passed", false).eq("starred", false).is("promoted_id", null).lt("created_at", d(7));
+  // Losers go after a week; first-round winners stay (45 days) so the tougher test's verdict can be seen.
+  await sb.from("lab_results").delete().eq("passed", false).or("basic_passed.is.null,basic_passed.eq.false").eq("starred", false).is("promoted_id", null).lt("created_at", d(7));
   await sb.from("lab_results").delete().eq("starred", false).is("promoted_id", null).lt("created_at", d(45));
   await sb.from("lab_opt_cache").delete().lt("created_at", d(420));
   await sb.from("lab_runs").delete().lt("created_at", d(90));

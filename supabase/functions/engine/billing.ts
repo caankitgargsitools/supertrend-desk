@@ -83,11 +83,12 @@ export async function syncUser(sb: SupabaseClient, userId: string, charge: boole
   return { day, trades: list.length, matched, desk_net: Math.trunc(deskNet), dhan_realised: dhanReal, fee, note: note || null };
 }
 
-/** Billing run: every user with LIVE trades not yet billed. */
+/** Daily check against Dhan for every user with LIVE trades in the last 3 days (no profit share is charged). */
 export async function billingDay(sb: SupabaseClient) {
-  const { data } = await sb.from("algo_trades").select("user_id").eq("mode", "LIVE").is("fee", null).not("user_id", "is", null);
+  const since = new Date(Date.now() - 3 * 86400000).toISOString();
+  const { data } = await sb.from("algo_trades").select("user_id").eq("mode", "LIVE").gte("exit_at", since).not("user_id", "is", null);
   const users = [...new Set((data ?? []).map((r) => r.user_id as string))];
   const out: Record<string, unknown> = {};
-  for (const u of users) { try { out[u] = await syncUser(sb, u, true); } catch (e) { out[u] = { error: e instanceof Error ? e.message : String(e) }; } }
+  for (const u of users) { try { out[u] = await syncUser(sb, u, false); } catch (e) { out[u] = { error: e instanceof Error ? e.message : String(e) }; } }
   return { users: users.length, results: out };
 }
