@@ -272,7 +272,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
     <button class="btn small" id="openLab" type="button" data-admin hidden>Strategy Lab</button>
     <button class="btn small" id="nav_admin" type="button" data-admin hidden>Admin</button>
   </nav>
-  <span class="mk" id="who" hidden></span><button class="btn small" id="signOut" type="button" hidden>Sign out</button>
+  <span class="mk" id="who" hidden></span><button class="btn small" id="myPass" type="button" hidden>My password</button><button class="btn small" id="signOut" type="button" hidden>Sign out</button>
 </header>
 
 <div id="gate" class="gate" hidden>
@@ -640,6 +640,18 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 
       <section class="card" id="lab_detail" hidden></section>
     </div>
+
+    <section class="card" id="passPane" hidden>
+      <div class="head"><h2>Change my password</h2></div>
+      <form id="passForm" novalidate style="margin-top:12px">
+        <div class="grid">
+          <label class="f"><span>New password (8+ characters)</span><input id="np1" type="password" autocomplete="new-password"></label>
+          <label class="f"><span>Type it again</span><input id="np2" type="password" autocomplete="new-password"></label>
+        </div>
+        <div class="formbar"><button class="btn primary" type="submit">Change password</button><span class="hint" id="np_msg"></span></div>
+      </form>
+      <p class="hint">You stay signed in here. Use the new password next time you sign in.</p>
+    </section>
 
     <section class="card" id="termsPane" hidden>
       <h2>Before you start</h2>
@@ -3094,7 +3106,7 @@ const isAdmin = () => !!me && me.role === "admin";
 const myStrats = () => state.strategies.filter((x) => me && x.owner_id === me.user_id && !x.is_master);
 function instName(s) { return s.trade_type === "OPTIONS" ? (s.option_side === "SELL" ? "Option writing" : "Option buying") : "Futures"; }
 function assetLabel(k) { return (PRESETS[k] && PRESETS[k].name) || k || "–"; }
-const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane"];
+const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane"];
 function hideNewPanes() { NEW_PANES.forEach((id) => $(id).hidden = true); }
 function markNav(id) { document.querySelectorAll("#nav .btn").forEach((b) => b.id === id ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")); }
 /** One page at a time: list, strat, market, wallet, admin, conn, cap, lab, terms. */
@@ -3113,6 +3125,7 @@ function showPage(name) {
   else if (name === "admin") { $("adminPane").hidden = false; loadAdmin().catch((e) => toast(errorText(e))); }
   else if (name === "conn") { $("connCard").hidden = false; renderConn(); }
   else if (name === "terms") { $("termsPane").hidden = false; }
+  else if (name === "pass") { $("passPane").hidden = false; $("np_msg").textContent = ""; }
   else if (name === "cap") openCap();
   else if (name === "lab") openLab();
   else if (name === "strat") { renderStrategy(); }
@@ -3129,6 +3142,18 @@ $("nav_market").addEventListener("click", () => showPage("market"));
 $("nav_wallet").addEventListener("click", () => showPage("wallet"));
 $("nav_admin").addEventListener("click", () => showPage("admin"));
 $("b_back").addEventListener("click", () => showPage("list"));
+$("myPass").addEventListener("click", () => showPage("pass"));
+$("passForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const a = $("np1").value, b = $("np2").value;
+  if (a.length < 8) { $("np_msg").textContent = "Use at least 8 characters."; return; }
+  if (a !== b) { $("np_msg").textContent = "The two passwords don't match."; return; }
+  run(e.submitter, async () => {
+    const { error } = await db.auth.updateUser({ password: a });
+    if (error) throw new Error(/session/i.test(error.message) ? "Your session has ended. Sign in again, then change the password." : error.message);
+    $("np1").value = $("np2").value = ""; $("np_msg").textContent = "Password changed."; toast("Password changed.");
+  });
+});
 $("newFlip2").addEventListener("click", (e) => run(e.currentTarget, () => createStrategy("FLIP")));
 
 /** Closed-trade totals per strategy (live and paper), for the strategies table. */
@@ -3495,8 +3520,9 @@ function editUser(u) {
       <label class="f wide"><span>Note</span><input id="uw_note"></label></div>
     <div class="formbar"><button class="btn" id="uw_go" type="button">Add wallet entry</button></div>
     <h4>Login</h4>
-    <div class="grid"><label class="f"><span>New password (8+ characters)</span><input id="up_pass" autocomplete="off"></label><button class="btn small" id="up_gen" type="button" style="align-self:end">Suggest</button></div>
-    <div class="formbar"><button class="btn" id="up_go" type="button">Set password</button><button class="btn danger" id="ud_go" type="button">Delete user</button><span class="hint">Delete only works for users with no trades or wallet entries; block the others.</span></div></div>`;
+    <p class="hint" data-self hidden style="margin:0">This is your own account. Change your password with “My password” at the top of the page; setting it here would sign you out.</p>
+    <div class="grid" data-notself><label class="f"><span>New password (8+ characters)</span><input id="up_pass" autocomplete="off"></label><button class="btn small" id="up_gen" type="button" style="align-self:end">Suggest</button></div>
+    <div class="formbar" data-notself><button class="btn" id="up_go" type="button">Set password</button><button class="btn danger" id="ud_go" type="button">Delete user</button><span class="hint">Delete only works for users with no trades or wallet entries; block the others.</span></div></div>`;
   box.querySelector("h3").textContent = `${u.full_name || u.email} · ${u.email}`;
   const f = (k) => box.querySelector(`[data-f="${k}"]`);
   for (const k of ["full_name", "phone", "status", "role", "trial_until", "note"]) f(k).value = u[k] ?? "";
@@ -3514,6 +3540,8 @@ function editUser(u) {
     toast("Wallet updated."); await loadAdmin();
   }));
   const fn = adminFn;
+  const self = me && u.user_id === me.user_id;
+  box.querySelectorAll("[data-notself]").forEach((el) => el.hidden = self); box.querySelector("[data-self]").hidden = !self;
   $("up_gen").addEventListener("click", () => { $("up_pass").value = genPassword(); });
   $("up_go").addEventListener("click", (e) => run(e.currentTarget, async () => {
     const pw = $("up_pass").value; await fn({ action: "reset_password", user_id: u.user_id, password: pw }); $("up_pass").value = "";
@@ -3533,7 +3561,9 @@ function askAdmin(q, fn) {
 async function adminFn(body) {
   const { data: { session } } = await db.auth.getSession();
   const r = await fetch(`${SUPABASE_URL}/functions/v1/admin-users`, { method: "POST", headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body) });
-  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || "Request failed."); return j;
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { await db.auth.signOut(); showLogin("Your session had ended. Please sign in again."); throw new Error("Your session had ended. Please sign in again."); }
+  if (!r.ok) throw new Error(j.error || "Request failed."); return j;
 }
 /** The text to send a new user: where to sign in, their login, and what to do first. */
 function loginText(email, password, name, trial) {
@@ -3650,7 +3680,7 @@ $("bt_to").value = istDate(-1); $("bt_from").value = istDate(-91);
 paintMarket(); setInterval(paintMarket, 30000);
 let setupMode = false, timer = null;
 function showLogin(msg) {
-  $("app").hidden = true; $("gate").hidden = false; $("who").hidden = true; $("signOut").hidden = true; $("nav").hidden = true; me = null;
+  $("app").hidden = true; $("gate").hidden = false; $("who").hidden = true; $("signOut").hidden = true; $("myPass").hidden = true; $("nav").hidden = true; me = null;
   if (msg) $("g_msg").textContent = msg;
 }
 function paintGate() {
@@ -3682,7 +3712,7 @@ $("signOut").addEventListener("click", async () => { await db.auth.signOut(); })
 
 async function enterDesk(session) {
   $("gate").hidden = true; $("app").hidden = false;
-  $("who").hidden = false; $("who").textContent = session.user.email; $("signOut").hidden = false;
+  $("who").hidden = false; $("who").textContent = session.user.email; $("signOut").hidden = false; $("myPass").hidden = false;
   try { me = must(await db.rpc("whoami")); }
   catch (e) { await db.auth.signOut(); showLogin(errorText(e)); return; }
   if (me.status === "blocked") { await db.auth.signOut(); showLogin("This account is blocked. Contact the admin."); return; }

@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
   const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
   const { data: who } = await admin.auth.getUser(jwt);
   const uid = who?.user?.id;
-  if (!uid) return out({ error: "Sign in first." }, 401);
+  if (!uid) return out({ error: "Your session has ended. Please sign in again." }, 401);
   const { data: me } = await admin.from("profiles").select("role, status").eq("user_id", uid).maybeSingle();
   const { data: owner } = await admin.from("app_owner").select("user_id").eq("user_id", uid).maybeSingle();
   if (!((me?.role === "admin" && me?.status === "active") || owner)) return out({ error: "Only the admin can manage users." }, 403);
@@ -43,6 +43,7 @@ Deno.serve(async (req) => {
       return out({ ok: true, user_id: c.user.id, trial_until: trial });
     }
     if (b.action === "reset_password") {
+      if (String(b.user_id) === uid) return out({ error: "Change your own password with “My password” at the top of the page." }, 400);
       const password = String(b.password ?? "");
       if (password.length < 8) return out({ error: "The password needs at least 8 characters." }, 400);
       const { error } = await admin.auth.admin.updateUserById(String(b.user_id), { password });
