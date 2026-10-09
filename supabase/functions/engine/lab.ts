@@ -910,7 +910,7 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   if (!assets.length) why.push("no other asset to test it on");
   else if (okA < Math.min(2, assets.length)) why.push(`worked on ${okA} of ${assets.length} other assets (needs ${Math.min(2, assets.length)})`);
   if (tfs.length) { const need = tfs.length >= 3 ? 2 : 1; if (okT < need) why.push(`worked on ${okT} of ${tfs.length} other timeframes (needs ${need})`); }
-  else if (okA < 3) why.push(`no other timeframe could be tested, so it needs 3 other assets (worked on ${okA})`);
+  else why.push("could not be tested on another timeframe (the lab has no intraday candles for this asset yet)");
   const bh = self?.bh ?? null;
   const sRatio = self && self.max_dd > 0 ? self.net / self.max_dd : self?.net > 0 ? 99 : 0;
   let vsBh: number | null = null, riskVsBh: number | null = null;
