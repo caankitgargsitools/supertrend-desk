@@ -901,11 +901,21 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   // passing night after night gets more of these tries, so the strongest ideas are tested hardest.
   const since30 = new Date(Date.now() - 30 * 86400000).toISOString();
   const { data: parents } = await sb.from("lab_results").select("id, fingerprint, config, score").eq("passed", true)
-    .gte("created_at", since30).order("score", { ascending: false }).limit(400);
+    .gte("created_at", since30).order("score", { ascending: false }).limit(2000);
   const { data: passHist } = await sb.from("lab_results").select("fingerprint").eq("passed", true).gte("created_at", since30).limit(20000);
   const passes = new Map<string, number>();
   for (const x of passHist ?? []) passes.set(x.fingerprint, (passes.get(x.fingerprint) ?? 0) + 1);
-  const pSeen = new Set<string>(), pool = (parents ?? []).filter((x) => assets.includes(x.config?.underlying) && !pSeen.has(x.fingerprint) && pSeen.add(x.fingerprint)).slice(0, 40);
+  // Parents from as many different ideas as possible: at most 2 per family (same asset, indicators and conditions),
+  // so one strong idea can't take over every run with tiny variations of itself.
+  const famOf = (c: LabConfig) => { const sig = (x?: { conds?: Cond[] }) => (x?.conds ?? []).map((q) => `${q.ind}:${q.op}`).sort().join("+") || "-";
+    return [c.underlying, c.rules?.daily ? "D" : "I", c.direction, sig(c.rules?.long), sig(c.rules?.short)].join("|"); };
+  const perFam = new Map<string, number>();
+  const pSeen = new Set<string>(), pool = (parents ?? []).filter((x) => {
+    if (!assets.includes(x.config?.underlying) || pSeen.has(x.fingerprint)) return false;
+    const f = famOf(x.config), k = perFam.get(f) ?? 0;
+    if (k >= 2) return false;
+    perFam.set(f, k + 1); pSeen.add(x.fingerprint); return true;
+  }).slice(0, 40);
   const nVar = pool.length ? Math.round(n * 0.4) : 0;
   const weight = pool.map((p, i) => Math.sqrt(passes.get(p.fingerprint) ?? 1) * (1 + (pool.length - i) / pool.length));
   const wTot = weight.reduce((a, b) => a + b, 0) || 1;
