@@ -216,7 +216,7 @@ legend { padding: 0; margin-bottom: 4px; }
 /* Strategy Lab grid: its own scroll box, so the header row stays fixed at the top while you scroll the results. */
 .labgrid { margin-top: 8px; overflow: auto; max-height: calc(100vh - 150px); min-height: 320px; border: 1px solid var(--line); border-radius: var(--r); }
 .lab-table { border-collapse: separate; border-spacing: 0; }
-.lab-table thead th { position: sticky; z-index: 2; background: var(--ink); color: var(--panel); font-size: 12px; letter-spacing: .04em; padding: 10px 8px 8px; border-bottom: 0; vertical-align: bottom; }
+.lab-table thead th { position: sticky; z-index: 2; background: var(--ink); color: var(--panel); font-size: 12px; letter-spacing: .04em; padding: 10px 6px 8px; border-bottom: 0; }
 .lab-table thead tr.t th { top: 0; }
 .lab-table thead tr.fl th { top: var(--labhead, 40px); background: var(--blue-soft); padding: 6px; border-bottom: 2px solid var(--blue); }
 .lab-table thead th.sort { cursor: pointer; user-select: none; white-space: normal; line-height: 1.25; }
@@ -230,7 +230,13 @@ legend { padding: 0; margin-bottom: 4px; }
 .lab-table thead tr.fl input.on, .lab-table thead tr.fl select.on { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-soft); font-weight: 600; }
 .lab-table tbody td { border-bottom: 1px solid var(--line); }
 /* On wide screens the header sticks to the top of the window (under the page bar) as you scroll the page. */
-@media (min-width: 1200px) {
+body.wide .wrap { max-width: 1840px; }
+.lab-table { width: 100%; table-layout: fixed; min-width: 1180px; }
+.lab-table thead tr.t th { text-align: center; vertical-align: middle; }
+.lab-table td.lbl { min-width: 0; max-width: none; overflow-wrap: anywhere; }
+.lab-table td { overflow: hidden; text-overflow: ellipsis; }
+.lab-table td.n { font-size: 12.5px; }
+@media (min-width: 1250px) {
   .labgrid { overflow: visible; max-height: none; }
   .lab-table thead tr.t th { top: var(--barH, 0px); }
   .lab-table thead tr.fl th { top: calc(var(--barH, 0px) + var(--labhead, 40px)); }
@@ -2850,14 +2856,14 @@ function condText(c) {
 function setText(set) { return set && set.conds && set.conds.length ? set.conds.map(condText).join(set.mode === "ANY" ? " OR " : " AND ") : "—"; }
 function labMetricsFor(r) { return lab.view === "FUT" ? r.metrics : lab.view === "BUY" ? r.ob && r.ob.metrics : r.os && r.os.metrics; }
 function openLab() {
-  closeCap(); hideNewPanes(); page = "lab"; markNav("openLab");
+  closeCap(); hideNewPanes(); page = "lab"; markNav("openLab"); document.body.classList.add("wide");
   lab.open = true;
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true; $("labPane").hidden = false;
   document.querySelectorAll("#stratList .strat, #archList .strat").forEach((b) => b.setAttribute("aria-current", "false"));
   $("openLab").classList.add("primary");
   loadLab().catch((e) => toast(errorText(e)));
 }
-function closeLab() { if (!lab.open) return; lab.open = false; $("labPane").hidden = true; $("openLab").classList.remove("primary"); stopLabPoll(); }
+function closeLab() { document.body.classList.remove("wide"); if (!lab.open) return; lab.open = false; $("labPane").hidden = true; $("openLab").classList.remove("primary"); stopLabPoll(); }
 function stopLabPoll() { if (lab.poll) { clearTimeout(lab.poll); lab.poll = null; } }
 async function loadLab() {
   if (!isAdmin()) {
@@ -2951,21 +2957,21 @@ function labStyle(r) {
 }
 const LAB_MCX = new Set(["GOLD", "GOLDM", "GOLDTEN", "GOLDGUINEA", "GOLDPETAL", "SILVER", "SILVERM", "SILVERMIC", "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "COPPER", "ZINC", "ZINCMINI", "LEAD", "LEADMINI", "ALUMINIUM", "ALUMINI", "NICKEL"]);
 const LAB_COLS = [
-  { k: "no", t: "#", n: true },
+  { k: "no", w: 44, t: "#", n: true },
   { k: "name", t: "Strategy", f: "text", v: (g) => g.r.label || "" },
-  { k: "asset", t: "Asset", f: "select", v: (g) => labAssetName(g.r.asset) },
-  { k: "style", t: "Style", f: "select", v: (g) => labStyle(g.r) },
-  { k: "trades", t: "Trades", f: "num", n: true, v: (g) => g.m.full.n },
-  { k: "win", t: "Win %", f: "num", n: true, v: (g) => g.m.full.win_rate },
-  { k: "net", t: "Net (1 yr)", f: "num", n: true, v: (g) => g.m.full.net },
-  { k: "margin", t: "Avg margin / lot", f: "num", n: true, v: (g) => g.m.margin_lot ?? null, tip: "Average over the trades of the margin one lot needed at each trade's entry price" },
-  { k: "rom", t: "Return on margin %", f: "num", n: true, v: (g) => g.m.ret_margin ?? null },
-  { k: "test", t: "Last 3 mo", f: "num", n: true, v: (g) => g.m.test.net },
-  { k: "dd", t: "Max DD", f: "num", n: true, v: (g) => g.m.full.max_dd },
-  { k: "pf", t: "PF", f: "num", n: true, v: (g) => g.m.full.pf ?? null },
-  { k: "months", t: "Months +", f: "num", n: true, v: (g) => g.m.pos_months, tip: "Profitable months out of the months traded" },
-  { k: "score", t: "Score", f: "num", n: true, v: (g) => g.m.score },
-  { k: "nights", t: "Nights passed", f: "num", n: true, v: (g) => g.passes },
+  { k: "asset", w: 86, t: "Asset", f: "select", v: (g) => labAssetName(g.r.asset) },
+  { k: "style", w: 74, t: "Style", f: "select", v: (g) => labStyle(g.r) },
+  { k: "trades", w: 62, t: "Trades", f: "num", n: true, v: (g) => g.m.full.n },
+  { k: "win", w: 60, t: "Win %", f: "num", n: true, v: (g) => g.m.full.win_rate },
+  { k: "net", w: 94, t: "Net (1 yr)", f: "num", n: true, v: (g) => g.m.full.net },
+  { k: "margin", w: 92, t: "Avg margin / lot", f: "num", n: true, v: (g) => g.m.margin_lot ?? null, tip: "Average over the trades of the margin one lot needed at each trade's entry price" },
+  { k: "rom", w: 80, t: "Return on margin %", f: "num", n: true, v: (g) => g.m.ret_margin ?? null },
+  { k: "test", w: 90, t: "Last 3 mo", f: "num", n: true, v: (g) => g.m.test.net },
+  { k: "dd", w: 90, t: "Max DD", f: "num", n: true, v: (g) => g.m.full.max_dd },
+  { k: "pf", w: 54, t: "PF", f: "num", n: true, v: (g) => g.m.full.pf ?? null },
+  { k: "months", w: 70, t: "Months +", f: "num", n: true, v: (g) => g.m.pos_months, tip: "Profitable months out of the months traded" },
+  { k: "score", w: 64, t: "Score", f: "num", n: true, v: (g) => g.m.score },
+  { k: "nights", w: 70, t: "Nights passed", f: "num", n: true, v: (g) => g.passes },
 ];
 lab.filters = lab.filters || {}; lab.sortKey = lab.sortKey || "score"; lab.sortDir = lab.sortDir || -1;
 /** Number filter: "50" (at least 50), ">50", ">=50", "<0", "<=2", "=10", "10-20" (between), "!0" (not 0); 2l = 2 lakh, 1cr, 5k. */
@@ -2992,9 +2998,12 @@ function labPassFilters(g) {
 }
 function renderLabHead() {
   const head = $("lab_head");
+  const tbl = head.closest("table");
+  let cg = tbl.querySelector("colgroup"); if (!cg) { cg = document.createElement("colgroup"); tbl.prepend(cg); }
+  cg.innerHTML = LAB_COLS.map((c) => `<col${c.w ? ` style="width:${c.w}px"` : ""}>`).join("");
   const opts = (c) => [...new Set(lab.rows.map((r) => c.v({ r, m: { full: {}, test: {} } })))].filter((x) => x && x !== "–").sort();
   head.innerHTML = `<tr class="t">${LAB_COLS.map((c) => `<th class="${c.n ? "n " : ""}${c.v ? "sort" : ""}" data-k="${c.k}" ${c.v ? `aria-sort="${lab.sortKey === c.k ? (lab.sortDir > 0 ? "ascending" : "descending") : "none"}" tabindex="0"` : ""} ${c.tip ? `title="${esc(c.tip)}"` : ""}>${esc(c.t)} ${c.v ? '<span class="ar"></span>' : ""}</th>`).join("")}</tr>
-    <tr class="fl">${LAB_COLS.map((c) => `<th>${!c.f ? `<button type="button" class="btn small" id="lab_fclear" title="Clear all filters" style="padding:3px 8px">Clear</button>`
+    <tr class="fl">${LAB_COLS.map((c) => `<th>${!c.f ? `<button type="button" class="btn small" id="lab_fclear" title="Clear all filters" aria-label="Clear all filters" style="padding:3px 8px;font-size:13px">✕</button>`
       : c.f === "select" ? `<select data-f="${c.k}" aria-label="Filter ${esc(c.t)}"><option value="">All</option>${opts(c).map((o) => `<option>${esc(o)}</option>`).join("")}</select>`
       : `<input data-f="${c.k}" ${c.f === "num" ? 'placeholder=">0"' : 'placeholder="contains…"'} aria-label="Filter ${esc(c.t)}" autocomplete="off">`}</th>`).join("")}</tr>`;
   head.querySelectorAll("tr.t th.sort").forEach((th) => {
