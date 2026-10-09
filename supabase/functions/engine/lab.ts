@@ -487,11 +487,17 @@ const fromCol = (c: Col) => c.t.map((t, i) => ({ t, o: c.o[i], h: c.h[i], l: c.l
 export const WARM_DAYS = 150, YEAR_DAYS = 365;
 
 /** Bring an asset's cached candles up to date (5-minute candles for indices, daily candles for every asset). */
-export async function refreshAsset(sb: SupabaseClient, creds: { client: string; token: string }, key: string, today: string) {
+export async function refreshAsset(sb: SupabaseClient, creds: { client: string; token: string }, key: string, today: string, freshHours = 0) {
   const a = LAB_ASSETS[key];
+  if (freshHours > 0) {
+    // Back-to-back runs (around-the-clock mode) reuse candles fetched in the last few hours.
+    const { data: d } = await sb.from("lab_candles").select("updated_at").eq("asset", key).eq("kind", "D").maybeSingle();
+    if (d && Date.now() - Date.parse(d.updated_at) < freshHours * 3600000) return;
+  }
   const dhan = new Dhan(creds.client, creds.token);
   const sec = (await dataSecurity(sb, creds, a.seg, a.sec, today)).sec;
-  const daily = await dhan.daily(sec, a.seg, a.instr, addDays(today, -1100), addDays(today, 1));
+  // 11 years of daily candles: the year-by-year test covers 10 years (plus warm-up for the indicators).
+  const daily = await dhan.daily(sec, a.seg, a.instr, addDays(today, -4100), addDays(today, 1));
   await sb.from("lab_candles").upsert({ asset: key, kind: "D", from_day: daily[0]?.day ?? today, to_day: daily.at(-1)?.day ?? today, bars: toCol(daily, false), updated_at: new Date().toISOString() });
   const want = addDays(today, -(YEAR_DAYS + WARM_DAYS));
   if (a.commodity) return refreshMcxIntraday(sb, dhan, a, today, want);
@@ -509,6 +515,28 @@ export async function refreshAsset(sb: SupabaseClient, creds: { client: string; 
   const lo = Date.parse(`${want}T00:00:00+05:30`) / 1000;
   const rows = [...map.values()].filter((r) => r.t >= lo).sort((x, y) => x.t - y.t);
   await sb.from("lab_candles").upsert({ asset: key, kind: "I5", from_day: ist(rows[0]?.t ?? lo).date, to_day: ist(rows.at(-1)?.t ?? lo).date, bars: toCol(rows, false), updated_at: new Date().toISOString() });
+  await refreshYearChunks(sb, dhan, a, today);
+}
+/**
+ * Older 5-minute candles of an index for the year-by-year test, one stored row per calendar year ("I5Y:2022"),
+ * fetched once a year is complete. Dhan keeps 5 years of intraday history.
+ */
+async function refreshYearChunks(sb: SupabaseClient, dhan: Dhan, a: LabAsset, today: string) {
+  const first = addDays(today, -5 * 365 + 2), y0 = Number(first.slice(0, 4)), y1 = Number(today.slice(0, 4)) - 1;
+  const { data: have } = await sb.from("lab_candles").select("kind").eq("asset", a.key).like("kind", "I5Y:%");
+  const got = new Set((have ?? []).map((h) => h.kind));
+  for (let y = y0; y <= y1; y++) {
+    if (got.has(`I5Y:${y}`)) continue;
+    const from = `${y}-01-01` < first ? first : `${y}-01-01`, to = `${y}-12-31`;
+    const map = new Map<number, { t: number; o: number; h: number; l: number; c: number }>();
+    for (let s = from; s <= to; s = addDays(s, 86)) {
+      const z = addDays(s, 85) < to ? addDays(s, 85) : to;
+      for (const r of await dhan.intraday(a.sec, a.seg, a.instr, 5, `${s} 09:00:00`, `${z} 23:59:00`)) map.set(r.t, r);
+    }
+    const rows = [...map.values()].sort((x, z) => x.t - z.t);
+    if (!rows.length) continue;
+    await sb.from("lab_candles").upsert({ asset: a.key, kind: `I5Y:${y}`, from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, false), updated_at: new Date().toISOString() });
+  }
 }
 
 /**
@@ -565,17 +593,24 @@ async function refreshMcxIntraday(sb: SupabaseClient, dhan: Dhan, a: LabAsset, t
 }
 
 /** Cached candles in the shape the simulator wants. */
-export async function loadAsset(sb: SupabaseClient, key: string): Promise<SimData> {
+export async function loadAsset(sb: SupabaseClient, key: string, long = false): Promise<SimData> {
   const a = LAB_ASSETS[key];
-  const { data: rows, error } = await sb.from("lab_candles").select("kind, bars").eq("asset", key);
+  // The year-by-year test also loads the older yearly 5-minute chunks.
+  let q = sb.from("lab_candles").select("kind, bars").eq("asset", key);
+  q = long ? q.or("kind.eq.D,kind.eq.I5,kind.like.I5Y*") : q.in("kind", ["D", "I5"]);
+  const { data: rows, error } = await q;
   if (error) throw new Error(error.message);
-  const d = rows?.find((r) => r.kind === "D"), i5 = rows?.find((r) => r.kind === "I5");
+  const d = rows?.find((r) => r.kind === "D");
   if (!d) throw new Error(`No cached candles for ${key} yet.`);
   const daily: DayBar[] = fromCol(d.bars).map((r) => ({ ...r, day: ist(r.t).date }));
   const raw: MBar[] = [];
   const byDay = new Map<string, MBar[]>();
-  if (i5) {
+  const parts = (rows ?? []).filter((r) => r.kind !== "D").sort((x, y) => (x.kind === "I5" ? 1 : 0) - (y.kind === "I5" ? 1 : 0) || x.kind.localeCompare(y.kind));
+  const seenT = new Set<number>();
+  for (const i5 of parts) {
     for (const r of fromCol(i5.bars)) {
+      if (seenT.has(r.t)) continue;
+      seenT.add(r.t);
       const p = ist(r.t), sess = sessionFor(a.seg, p.date);
       if (p.min < sess.open || p.min >= sess.close) continue;
       const m = { ...r, day: p.date, min: p.min };
@@ -583,6 +618,7 @@ export async function loadAsset(sb: SupabaseClient, key: string): Promise<SimDat
       const arr = byDay.get(p.date); if (arr) arr.push(m); else byDay.set(p.date, [m]);
     }
   }
+  if (parts.length > 1) { raw.sort((x, y) => x.t - y.t); for (const arr of byDay.values()) arr.sort((x, y) => x.t - y.t); }
   return { raw, byDay, daily };
 }
 
@@ -646,9 +682,23 @@ type Ctx = { sb: SupabaseClient; creds: { client: string; token: string }; start
 const CPU_BUDGET = 900; // ms of computing per instalment (Supabase's limit is 2 s)
 const WALL_BUDGET = 100000; // ms of wall time per instalment
 
-export async function labStart(sb: SupabaseClient, manual: boolean): Promise<number | null> {
+/**
+ * When the lab may run. "nightly": one run a day at 16:05 IST. "auto": back-to-back runs around the clock while no
+ * strategy trades live, and only 23:30–08:30 IST once any does. "night": back-to-back runs 23:30–08:30 IST only.
+ */
+export async function labWindowOpen(sb: SupabaseClient, mode: string): Promise<boolean> {
+  if (mode !== "auto" && mode !== "night") return false;
+  const m = ist(Date.now() / 1000).min, night = m >= 23 * 60 + 30 || m < 8 * 60 + 30;
+  if (night || mode === "night") return night;
+  const { count } = await sb.from("algo_strategies").select("id", { count: "exact", head: true }).eq("live", true).eq("active", true).eq("archived", false).eq("is_master", false);
+  return (count ?? 0) === 0;
+}
+
+export async function labStart(sb: SupabaseClient, manual: boolean, trigger?: string): Promise<number | null> {
   const { data: set } = await sb.from("lab_settings").select("*").eq("id", 1).maybeSingle();
   if (!set || (!set.enabled && !manual)) return null;
+  // With back-to-back runs on, the 16:05 schedule has nothing extra to do.
+  if (!manual && !trigger && (set.schedule_mode ?? "nightly") !== "nightly") return null;
   const { data: running } = await sb.from("lab_runs").select("id, settings, trigger").eq("status", "running").limit(1);
   if (running?.length && running[0].trigger === "robust") {
     // The re-check of earlier winners gives way; it carries on from where it was once the lab is free again.
@@ -662,7 +712,7 @@ export async function labStart(sb: SupabaseClient, manual: boolean): Promise<num
   const from = addDays(today, -YEAR_DAYS), split = addDays(today, -92);
   const { data: run, error } = await sb.from("lab_runs").insert({
     run_day: today, status: "running", phase: "data", progress: "Updating candles", from_day: from, split_day: split, to_day: today,
-    trigger: manual ? "manual" : "schedule", settings: set,
+    trigger: trigger ?? (manual ? "manual" : "schedule"), settings: set,
   }).select("id").single();
   if (error) throw new Error(error.message);
   return run.id;
@@ -703,6 +753,7 @@ export async function labNext(sb: SupabaseClient): Promise<number | null> {
       return run.id;
     }
   }
+  if (!q && set?.enabled && await labWindowOpen(sb, set.schedule_mode ?? "nightly")) return await labStart(sb, false, "continuous");
   if (!q || !set) return null;
   const parentAsset = String(q.config?.underlying ?? "");
   const daily = !!q.config?.rules?.daily;
@@ -748,8 +799,13 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
     if (!assets.length) throw new Error("Pick at least one asset in the lab settings.");
     const win = { from: String(run.from_day), split: String(run.split_day), to: String(run.to_day) };
 
+    if (run.trigger === "continuous" && !(await labWindowOpen(sb, (await sb.from("lab_settings").select("schedule_mode").eq("id", 1).maybeSingle()).data?.schedule_mode ?? "nightly"))) {
+      await patch({ status: "stopped", phase: "done", progress: "Stopped: outside the lab's hours (a strategy is trading live, or back-to-back runs were switched off)", finished_at: new Date().toISOString(), lease_until: null });
+      return false;
+    }
     if (run.phase === "data") {
       let i = Number(run.cursor ?? 0);
+      if (i === 0 && !counts.margins_checked && run.trigger === "continuous") counts.margins_checked = -2; // rates from the last full run
       if (i === 0 && !counts.margins_checked) {
         // Today's margin rates from Dhan's margin calculator (used for each trade's margin and the return on margin).
         await patch({ progress: "Checking margin rates with Dhan" });
@@ -758,7 +814,7 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
       }
       while (i < assets.length && Date.now() - ctx.started < WALL_BUDGET - 20000) {
         await patch({ progress: `Updating candles: ${LAB_ASSETS[assets[i]].name} (${i + 1} of ${assets.length})` });
-        await refreshAsset(sb, ctx.creds, assets[i], win.to);
+        await refreshAsset(sb, ctx.creds, assets[i], win.to, run.trigger === "continuous" ? 6 : 0);
         i++;
       }
       await patch(i < assets.length ? { cursor: i } : { cursor: 0, phase: "generate", progress: "Writing tonight's strategies" });
@@ -769,10 +825,9 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
       const left = await screenPhase(ctx, run, win);
       if (!left) {
         const { count: basic } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).eq("basic_passed", true);
-        await patch({ phase: "robust", progress: `Checking ${basic ?? 0} first-round winners on other assets, other timeframes and against buy & hold`, counts: { ...counts, screened: counts.generated, basic_passed: basic } });
+        await patch({ phase: "robust", progress: `Checking ${basic ?? 0} first-round winners on other assets, other timeframes and year by year`, counts: { ...counts, screened: counts.generated, basic_passed: basic } });
       } else {
-        const { count: done } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).neq("stage", "pending");
-        await patch({ progress: `Backtested ${done} of ${counts.generated ?? "?"} strategies` });
+        await patch({ progress: `Backtested ${run.counts?.tested ?? 0} of ${counts.generated ?? "?"} strategies (${run.counts?.failed1 ?? 0} failed the first round and were cleared)` });
       }
     } else if (run.phase === "robust") {
       const left = await robustPhase(ctx, run, win, patch);
@@ -819,6 +874,12 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   const since = new Date(Date.now() - 14 * 86400000).toISOString();
   const { data: recent } = await sb.from("lab_results").select("fingerprint").gte("created_at", since).limit(20000);
   const seen = new Set((recent ?? []).map((x) => x.fingerprint));
+  // Strategies already tried and failed are never written again.
+  for (let from = 0; ; from += 1000) {
+    const { data: tried } = await sb.from("lab_tried").select("fingerprint").range(from, from + 999);
+    for (const x of tried ?? []) seen.add(x.fingerprint);
+    if (!tried || tried.length < 1000 || from > 400000) break;
+  }
   // Champions: the best strategies of the last 30 days are re-tested every night on the rolling year.
   const { data: champs } = await sb.from("lab_results").select("fingerprint, config, score").eq("passed", true)
     .gte("created_at", new Date(Date.now() - 30 * 86400000).toISOString()).order("score", { ascending: false }).limit(300);
@@ -903,11 +964,51 @@ async function requestPhase(sb: SupabaseClient, run: Run, assets: string[]) {
   }
 }
 
+/* ---------- failed strategies: a short record, then the row goes ---------- */
+type Forgettable = { id: number; fingerprint: string; asset: string; label?: string; mode?: string; score?: number; metrics?: any; round: number; why: string[] };
+/** Rows that may be removed when they fail: not starred, not saved as a strategy, not a user's variation run. */
+const keepable = (r: { starred?: boolean; promoted_id?: unknown; request_id?: unknown }) => !r.starred && !r.promoted_id && !r.request_id;
+/**
+ * Failed strategies are removed to save space; lab_tried keeps one line per strategy (asset, result, why it failed,
+ * how often it was tried) so the generator never writes it again.
+ */
+export async function forget(sb: SupabaseClient, items: Forgettable[]) {
+  if (!items.length) return;
+  const byFp = new Map<string, Forgettable>();
+  for (const it of items) if (it.fingerprint) byFp.set(it.fingerprint, it);
+  const fps = [...byFp.keys()];
+  const { data: old } = fps.length ? await sb.from("lab_tried").select("fingerprint, times").in("fingerprint", fps) : { data: [] };
+  const times = new Map((old ?? []).map((o) => [o.fingerprint, Number(o.times) || 0]));
+  const now = new Date().toISOString();
+  const rows = [...byFp.values()].map((it) => {
+    const f = it.metrics?.full ?? {};
+    return { fingerprint: it.fingerprint, asset: it.asset, label: (it.label ?? "").slice(0, 300), mode: it.mode ?? null, round: it.round, why: (it.why ?? []).slice(0, 6),
+      net: f.net ?? null, win_rate: f.win_rate ?? null, trades: f.n ?? null, score: it.score ?? it.metrics?.score ?? null, times: (times.get(it.fingerprint) ?? 0) + 1, last_at: now };
+  });
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await sb.from("lab_tried").upsert(rows.slice(i, i + 500));
+    if (error) throw new Error(error.message);
+  }
+  const ids = items.map((x) => x.id);
+  for (let i = 0; i < ids.length; i += 300) await sb.from("lab_results").delete().in("id", ids.slice(i, i + 300));
+}
+/** Clears earlier failures in batches (results kept from before failures were removed straight away). */
+async function forgetOld(sb: SupabaseClient, limit = 400) {
+  const cols = "id, fingerprint, asset, label, mode, score, metrics, robust, basic_passed, stage, error";
+  const { data: rows } = await sb.from("lab_results").select(cols).in("stage", ["screened", "error"]).eq("starred", false).is("promoted_id", null).is("request_id", null)
+    .or("basic_passed.eq.false,stage.eq.error,and(robust_status.eq.done,passed.eq.false)").limit(limit);
+  await forget(sb, (rows ?? []).map((r: any) => ({ ...r, round: r.stage === "error" ? 0 : r.basic_passed ? 2 : 1,
+    why: r.stage === "error" ? [String(r.error ?? "error")] : r.basic_passed ? (r.robust?.why ?? []) : (r.metrics?.why ?? []) })));
+  return (rows ?? []).length;
+}
+
 /* ---------- robustness: other assets, other timeframes, buy & hold ---------- */
 const ROBUST_TFS = [5, 10, 15, 25, 30, 45, 60, 75, 125];
 /** Mini and micro contracts follow the same commodity, so they don't count as another asset. */
 export const assetRoot = (k: string) => /^GOLD/.test(k) ? "GOLD" : /^SILVER/.test(k) ? "SILVER" : /^CRUDE/.test(k) ? "CRUDE" : /^NAT/.test(k) ? "NATGAS" : /^ZINC/.test(k) ? "ZINC" : /^LEAD/.test(k) ? "LEAD" : /^ALUMIN/.test(k) ? "ALUMINIUM" : k;
-type Check = { kind: "self" | "asset" | "tf"; asset: string; tf: number | null; config: LabConfig };
+type Check = { kind: "self" | "asset" | "tf" | "year"; asset: string; tf: number | null; config: LabConfig };
+/** Years back for the year-by-year test: 10 on daily candles; 5 on 5-minute candles (the depth Dhan keeps). */
+export const yearsFor = (cfg: LabConfig) => cfg.rules?.daily ? 10 : 5;
 /** The checks for one first-round winner, limited to assets the lab has candles for. */
 export function robustChecks(cfg: LabConfig, haveD: Set<string>, haveI5: Set<string>): Check[] {
   const out: Check[] = [{ kind: "self", asset: cfg.underlying, tf: null, config: cfg }];
@@ -938,6 +1039,8 @@ export function robustChecks(cfg: LabConfig, haveD: Set<string>, haveI5: Set<str
       try { validateRules(c.rules); out.push({ kind: "tf", asset: cfg.underlying, tf: t, config: c }); } catch { /* skip */ }
     }
   }
+  // Round 3: profitable in each of the past years, one check per year (year 1 = the latest 12 months).
+  for (let k = 1; k <= yearsFor(cfg); k++) out.push({ kind: "year", asset: cfg.underlying, tf: k, config: cfg });
   return out;
 }
 /** Buy & hold over the window: 1 lot bought at the first close and held to the last, with its worst fall. */
@@ -957,12 +1060,16 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   const assets = checks.filter((c) => c.kind === "asset").map((c) => ({ asset: c.asset, ...c.result }));
   const tfs = checks.filter((c) => c.kind === "tf" && !c.result?.skip).map((c) => ({ tf: c.tf, ...c.result }));
   const okA = assets.filter((x) => x.ok).length, okT = tfs.filter((x) => x.ok).length;
+  const yrs = checks.filter((c) => c.kind === "year" && !c.result?.skip).map((c) => ({ y: c.tf, ...c.result })).sort((a, b) => a.y - b.y);
+  const okY = yrs.filter((x) => x.ok).length;
   const why: string[] = [];
   if (!self || !(self.net > 0)) why.push("lost money on the latest year");
   if (!assets.length) why.push("no other asset to test it on");
   else if (okA < Math.min(2, assets.length)) why.push(`worked on ${okA} of ${assets.length} other assets (needs ${Math.min(2, assets.length)})`);
   if (tfs.length) { const need = tfs.length >= 3 ? 2 : 1; if (okT < need) why.push(`worked on ${okT} of ${tfs.length} other timeframes (needs ${need})`); }
   else why.push("could not be tested on another timeframe yet (not enough 5-minute candles for this asset; MCX history grows every night)");
+  if (yrs.length < 3) why.push(`only ${yrs.length} year${yrs.length === 1 ? "" : "s"} of history to test year by year (needs 3)`);
+  else if (okY < yrs.length) why.push(`profitable in ${okY} of the past ${yrs.length} years (needs every year; lost or flat in ${yrs.filter((x) => !x.ok).map((x) => `year ${x.y}`).join(", ")})`);
   const bh = self?.bh ?? null;
   const sRatio = self && self.max_dd > 0 ? self.net / self.max_dd : self?.net > 0 ? 99 : 0;
   let vsBh: number | null = null, riskVsBh: number | null = null;
@@ -972,7 +1079,7 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
     // Shown for comparison only: the strategies trade long and short, so a falling asset is no reason to fail one.
   }
   return { passed: why.length === 0, why, self, bh, vs_bh: vsBh, risk_vs_bh: riskVsBh, assets: { ok: okA, n: assets.length, list: assets },
-    tfs: { ok: okT, n: tfs.length, list: tfs }, daily, checked_at: new Date().toISOString() };
+    tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, daily, checked_at: new Date().toISOString() };
 }
 async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: string; to: string }, patch: (f: Record<string, unknown>) => unknown): Promise<boolean> {
   const { sb } = ctx;
@@ -981,6 +1088,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
   const { data: cands } = await sb.from("lab_candles").select("asset, kind");
   const haveD = new Set((cands ?? []).filter((c) => c.kind === "D").map((c) => c.asset)), haveI5 = new Set((cands ?? []).filter((c) => c.kind === "I5").map((c) => c.asset));
   await sb.from("lab_checks").delete().eq("status", "void");
+  await forgetOld(sb, 300);
   const { count: open0 } = await sb.from("lab_checks").select("id", { count: "exact", head: true }).eq("status", "pending");
   for (const mine of [true, false]) {
     if (!mine && (open0 ?? 0) > 600) break;
@@ -997,17 +1105,17 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     if (!mine && (rows ?? []).length) break;
   }
   // 2. Run pending checks, one asset's candles at a time.
-  const { data: pend } = await sb.from("lab_checks").select("id, lab_id, kind, asset, config").eq("status", "pending").order("lab_id", { ascending: false }).limit(400);
+  const { data: pend } = await sb.from("lab_checks").select("id, lab_id, kind, asset, tf, config").eq("status", "pending").order("lab_id", { ascending: false }).limit(400);
   if (pend?.length) {
-    const asset = pend[0].asset;
+    const asset = pend[0].asset, long = pend[0].kind === "year";
     let cpu = 0;
     const t0 = performance.now();
-    const data = await loadAsset(sb, asset);
+    const data = await loadAsset(sb, asset, long);
     cpu += Math.min(250, performance.now() - t0);
     const memo = new Map<string, unknown>();
     const rates = await loadMarginRates(sb);
     const ups: Promise<unknown>[] = [];
-    for (const c of pend.filter((p) => p.asset === asset)) {
+    for (const c of pend.filter((p) => p.asset === asset && (p.kind === "year") === long)) {
       if (cpu > CPU_BUDGET || Date.now() - ctx.started > WALL_BUDGET) break;
       const t1 = performance.now();
       let result: Record<string, unknown>;
@@ -1015,6 +1123,23 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
         // Timeframe checks run on 5-minute candles, which for MCX only go back as far as the listed contracts have traded:
         // they are judged on that stretch (after 10 days of warm-up), with the trade minimum scaled to its length.
         let w = win, scale = 1;
+        if (c.kind === "year") {
+          // Year k = the 12 months ending k-1 years before the test's last day, after warm-up for the indicators.
+          const daily = !!c.config.rules?.daily, first = daily ? data.daily[0]?.day : data.raw[0]?.day;
+          const hi = addDays(win.to, -365 * (Number(c.tf) - 1)), lo = addDays(hi, -364);
+          const warm = first ? addDays(first, daily ? 200 : 20) : hi;
+          const from = lo < warm ? warm : lo;
+          if ((Date.parse(hi) - Date.parse(from)) / 86400000 < 300) {
+            ups.push(sb.from("lab_checks").update({ status: "done", result: { skip: true, ok: false, error: "not enough history" } }).eq("id", c.id).then(() => {}));
+            continue;
+          }
+          const { metrics } = await screenOne(c.config, data, memo, { from, split: from, to: hi }, capital, rates);
+          const f = metrics.full;
+          result = { from, to: hi, net: f.net, n: f.n, win_rate: f.win_rate, pf: f.pf, max_dd: f.max_dd, ok: f.net > 0 };
+          cpu += performance.now() - t1;
+          ups.push(sb.from("lab_checks").update({ status: "done", result }).eq("id", c.id).then(() => {}));
+          continue;
+        }
         if (c.kind === "tf") {
           const first = data.raw[0]?.day;
           const from = first ? addDays(first, 10) : win.to;
@@ -1035,7 +1160,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     await Promise.all(ups);
   }
   // 3. Verdicts for winners whose checks are all done.
-  const { data: queued } = await sb.from("lab_results").select("id, config").eq("robust_status", "queued").order("id", { ascending: false }).limit(60);
+  const { data: queued } = await sb.from("lab_results").select("id, config, fingerprint, asset, label, mode, score, metrics, starred, promoted_id, request_id").eq("robust_status", "queued").order("id", { ascending: false }).limit(40);
   let decided = 0;
   const ids = (queued ?? []).map((r) => r.id);
   const { data: allCs } = ids.length ? await sb.from("lab_checks").select("lab_id, kind, asset, tf, status, result").in("lab_id", ids).neq("status", "void").limit(1000) : { data: [] };
@@ -1045,6 +1170,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     const v = robustVerdict(r.config, cs);
     await sb.from("lab_results").update({ robust_status: "done", robust: v, passed: v.passed }).eq("id", r.id);
     await sb.from("lab_checks").delete().eq("lab_id", r.id);
+    if (!v.passed && keepable(r)) await forget(sb, [{ ...r, round: v.why.some((w: string) => /year/.test(w)) && v.why.length === 1 ? 3 : 2, why: v.why }]);
     decided++;
   }
   const { count: left } = await sb.from("lab_checks").select("id", { count: "exact", head: true }).eq("status", "pending");
@@ -1063,7 +1189,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
 
 async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: string; to: string }): Promise<boolean> {
   const { sb } = ctx;
-  const { data: pend } = await sb.from("lab_results").select("id, asset, config").eq("run_id", run.id).eq("stage", "pending").order("asset").order("id").limit(300);
+  const { data: pend } = await sb.from("lab_results").select("id, asset, config, fingerprint, label, mode, request_id").eq("run_id", run.id).eq("stage", "pending").order("asset").order("id").limit(300);
   if (!pend?.length) return false;
   const asset = pend[0].asset;
   const capital = Number(run.settings?.capital ?? 500000);
@@ -1074,12 +1200,19 @@ async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
   const memo = new Map<string, unknown>();
   const rates = await loadMarginRates(sb);
   const updates: Promise<unknown>[] = [];
+  const failed: Forgettable[] = [];
   for (const row of pend.filter((p) => p.asset === asset)) {
     if (cpu > CPU_BUDGET || Date.now() - ctx.started > WALL_BUDGET) break;
     const t1 = performance.now();
     let fields: Record<string, unknown>;
     try {
       const { metrics, trades } = await screenOne(row.config, data, memo, win, capital, rates);
+      if (!metrics.passed && !row.request_id) {
+        // Failed the first round: keep only the short record.
+        failed.push({ id: row.id, fingerprint: row.fingerprint, asset: row.asset, label: row.label, mode: row.mode, score: metrics.score, metrics, round: 1, why: metrics.why });
+        cpu += performance.now() - t1;
+        continue;
+      }
       // The walk-forward check is only the first gate: "passed" is set after the robustness checks (other assets,
       // other timeframes, against buy & hold).
       fields = { stage: "screened", basic_passed: metrics.passed, passed: false, robust_status: null, robust: null, score: metrics.score, metrics, trades: slim(trades), error: null };
@@ -1090,6 +1223,11 @@ async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     updates.push(sb.from("lab_results").update(fields).eq("id", row.id).then(() => {}));
   }
   await Promise.all(updates);
+  await forget(sb, failed);
+  run.counts = run.counts ?? {};
+  run.counts.tested = Number(run.counts.tested ?? 0) + updates.length + failed.length;
+  run.counts.failed1 = Number(run.counts.failed1 ?? 0) + failed.length;
+  await sb.from("lab_runs").update({ counts: run.counts }).eq("id", run.id);
   return true;
 }
 

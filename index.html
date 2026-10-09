@@ -234,7 +234,7 @@ legend { padding: 0; margin-bottom: 4px; }
 .lab-table tbody td { border-bottom: 1px solid var(--line); }
 /* On wide screens the header sticks to the top of the window (under the page bar) as you scroll the page. */
 body.wide .wrap { max-width: 1840px; }
-.lab-table { width: 100%; table-layout: fixed; min-width: 1610px; }
+.lab-table { width: 100%; table-layout: fixed; min-width: 1690px; }
 .lab-table thead tr.t th { text-align: center; vertical-align: middle; }
 .lab-table td.lbl { min-width: 0; max-width: none; overflow-wrap: anywhere; }
 .lab-table td { overflow: hidden; text-overflow: ellipsis; }
@@ -637,19 +637,23 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
             <button class="btn primary" id="lab_run" type="button">Run now</button>
           </div>
         </div>
-        <p class="hint" style="margin:8px 0 0">Every evening at 16:05 IST the lab invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations and with setting tweaks. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and only <strong>pass</strong> if they also made money in the last 3 months, which the ranking never saw.</p>
+        <p class="hint" style="margin:8px 0 0">Every evening at 16:05 IST the lab invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations and with setting tweaks. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and must also make money in the last 3 months, which the ranking never saw (round 1); then work on other assets and other timeframes (round 2); then make money in <strong>every one of the past 10 years</strong> (5 years for 5-minute strategies, the history Dhan keeps), so nothing passes on one big move of the underlying (round 3). Strategies that fail are cleared straight away; a one-line record stays so the lab never tries them again.</p>
         <div id="lab_status" style="margin-top:12px"></div>
         <div id="lab_reqs" style="margin-top:12px"></div>
         <form id="labSetForm" hidden style="margin-top:14px">
           <div class="grid">
-            <label class="f"><span>Nightly run</span><select id="ls_enabled"><option value="true">On (16:05 IST every day)</option><option value="false">Off (only “Run now”)</option></select></label>
+            <label class="f"><span>Lab</span><select id="ls_enabled"><option value="true">On</option><option value="false">Off (only “Run now”)</option></select></label>
+            <label class="f wide"><span>When it runs</span><select id="ls_mode">
+              <option value="auto">Non-stop: around the clock while nothing trades live; 11:30 PM – 8:30 AM once anything is live</option>
+              <option value="night">Non-stop, nights only: 11:30 PM – 8:30 AM</option>
+              <option value="nightly">Once a day at 16:05 IST</option></select></label>
             <label class="f"><span>New strategies per run</span><input id="ls_per_night" type="number" min="10" max="1000" step="10"></label>
             <label class="f"><span>Best ones priced with real options</span><input id="ls_top" type="number" min="0" max="60" step="1"></label>
             <label class="f"><span>Capital for return % (₹)</span><input id="ls_capital" type="number" min="10000" step="10000"></label>
             <label class="f"><span>Winners long-tested each night (00:30 IST)</span><input id="ls_long" type="number" min="0" max="40" step="1"></label>
           </div>
           <div class="f"><span>Assets to research</span><div class="assetpick" id="ls_assets"></div></div>
-          <p class="hint">Indices are tested on 5-minute candles (and once-a-day); commodities on daily candles, because Dhan keeps intraday history only for the current MCX contract. Mini contracts move like their big contracts, so testing both mostly repeats work.</p>
+          <p class="hint">Indices are tested on 5-minute candles (and once-a-day); commodities on daily candles, with MCX 5-minute candles (from the contracts Dhan still lists, growing every night) used for the timeframe test. Mini contracts move like their big contracts, so testing both mostly repeats work. In non-stop mode, back-to-back runs reuse candles fetched in the last 6 hours, and a run stops by itself if a strategy goes live outside 11:30 PM – 8:30 AM.</p>
           <div class="formbar"><button class="btn primary" type="submit">Save lab settings</button><span class="hint" id="ls_msg"></span></div>
         </form>
       </section>
@@ -661,7 +665,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
           <label class="f"><span>Asset</span><select id="lab_asset"><option value="ALL">All assets</option></select></label>
           <label class="f"><span>From</span><select id="lab_period"><option value="run">Latest run only</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option></select></label>
           <label class="f"><span>Stop loss</span><select id="lab_stopf"><option value="ANY">With or without</option><option value="WITH">With stop / target</option><option value="WITHOUT">Without</option></select></label>
-          <label class="f"><span>Show</span><select id="lab_only"><option value="true">Passed only</option><option value="false">All tested</option></select></label>
+          <label class="f"><span>Show</span><select id="lab_only"><option value="true">Passed only</option><option value="false">Everything kept</option></select></label>
         </div>
         <div id="lab_reqfilter" class="banner info" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center" hidden></div>
         <p class="hint" id="lab_count" style="margin:10px 0 0"></p>
@@ -2886,11 +2890,12 @@ function robOf(r) {
   if (!r.basic_passed && !(x && x.status)) return null;
   if (!x) return { status: "waiting" };
   if (x.assets && typeof x.assets === "object") return { status: x.status || (x.checked_at ? "done" : "waiting"), passed: x.passed, assets_ok: x.assets.ok, assets_n: x.assets.n, tfs_ok: x.tfs.ok, tfs_n: x.tfs.n,
+    years_ok: x.years ? x.years.ok : null, years_n: x.years ? x.years.n : null, years: x.years ? x.years.list : null,
     vs_bh: x.vs_bh, risk_vs_bh: x.risk_vs_bh, bh_net: x.bh && x.bh.net, bh_dd: x.bh && x.bh.max_dd, bh_ratio: x.bh && x.bh.ratio, net: x.self && x.self.net, max_dd: x.self && x.self.max_dd, why: x.why || [], daily: x.daily,
     assetList: x.assets.list, tfList: x.tfs.list };
   return { ...x, status: x.status || "waiting", why: x.why || [] };
 }
-/** Passed = the walk-forward pass and the tougher test (other assets, other timeframes). */
+/** Passed = the walk-forward pass and the tougher test (other assets, other timeframes, every past year profitable). */
 const robDone = (r) => { const x = robOf(r); return !!x && x.status === "done"; };
 function labPassed(r, m) { return !!(m && m.passed) && r.passed === true; }
 function labChecking(r, m) { const x = robOf(r); return !!(m && m.passed) && r.basic_passed && !!x && x.status !== "done"; }
@@ -2945,7 +2950,7 @@ function renderLabStatus() {
   if (!r) { box.innerHTML = '<div class="banner info">No runs yet. The first one starts at 16:05 IST, or press “Run now”.</div>'; return; }
   const c = r.counts || {};
   const chip = r.status === "running" ? '<span class="chip blue">Running</span>' : r.status === "done" ? '<span class="chip green">Finished</span>' : r.status === "failed" ? '<span class="chip red">Failed</span>' : '<span class="chip">Stopped</span>';
-  const phases = { data: "1 of 5 · updating candles", generate: "2 of 5 · writing strategies", screen: "3 of 5 · backtesting", robust: r.trigger === "robust" ? "re-check · other assets, timeframes, buy & hold" : "4 of 5 · other assets, timeframes, buy & hold", options: "5 of 5 · real option prices", done: "done" };
+  const phases = { data: "1 of 5 · updating candles", generate: "2 of 5 · writing strategies", screen: "3 of 5 · backtesting", robust: r.trigger === "robust" ? "re-check · other assets, timeframes, past years" : "4 of 5 · other assets, timeframes, past years", options: "5 of 5 · real option prices", done: "done" };
   box.innerHTML = `<div class="stats">
     <div class="stat"><span class="label">Latest run</span><span class="v" style="font-size:14px">#${r.id} ${chip}</span></div>
     <div class="stat"><span class="label">Started</span><span class="v" style="font-size:14px">${esc(istText(r.created_at))}</span></div>
@@ -2959,18 +2964,18 @@ function renderLabStatus() {
 }
 function robCells(r) {
   const x = robOf(r);
-  if (!x) return '<td class="n hint">–</td><td class="n hint">–</td><td class="n hint">–</td>';
-  if (x.status !== "done") return '<td class="n hint" colspan="3" style="text-align:center">being checked</td>';
+  if (!x) return '<td class="n hint">–</td><td class="n hint">–</td><td class="n hint">–</td><td class="n hint">–</td>';
+  if (x.status !== "done") return '<td class="n hint" colspan="4" style="text-align:center">being checked</td>';
   const c = (ok, n) => `<td class="n"><span class="${n && ok >= Math.min(2, n) ? "pos-num" : "neg-num"}">${ok ?? 0}/${n ?? 0}</span></td>`;
-  return `${c(x.assets_ok, x.assets_n)}${x.tfs_n ? c(x.tfs_ok, x.tfs_n) : '<td class="n hint" title="Not testable on other timeframes">n/a</td>'}<td class="n"><span>${ratioTxt(x.risk_vs_bh)}</span></td>`;
+  return `${c(x.assets_ok, x.assets_n)}${x.tfs_n ? c(x.tfs_ok, x.tfs_n) : '<td class="n hint" title="Not testable on other timeframes">n/a</td>'}${x.years_n == null ? '<td class="n hint">–</td>' : `<td class="n"><span class="${x.years_n >= 3 && x.years_ok === x.years_n ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span></td>`}<td class="n"><span>${ratioTxt(x.risk_vs_bh)}</span></td>`;
 }
 /** The tougher test as a panel for the lab detail. Users see counts; the admin also sees each asset and timeframe. */
 function robustHTML(r, m, admin) {
   const x = robOf(r);
   if (!m.passed) return `<div class="banner warn" style="margin-top:12px">Not passed: ${esc((m.why || []).join("; "))}.</div>`;
-  if (!x || x.status !== "done") return '<div class="banner info" style="margin-top:12px">Passed the first round (profitable in the ranked 9 months and in the 3 months after). Now being checked on other assets, other timeframes and against buy &amp; hold; it counts as passed only after that.</div>';
+  if (!x || x.status !== "done") return '<div class="banner info" style="margin-top:12px">Passed the first round (profitable in the ranked 9 months and in the 3 months after). Now being checked on other assets, other timeframes and year by year over the past 10 years (5 for 5-minute strategies); it counts as passed only after that.</div>';
   const pc = (v) => v == null ? "–" : `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${rupees(v)}</span>`;
-  const head = x.passed ? '<div class="banner ok" style="margin-top:12px">Passed: profitable in the ranked 9 months and the 3 months after, and works on other assets and other timeframes. (Buy &amp; hold is shown below for comparison only.)</div>'
+  const head = x.passed ? '<div class="banner ok" style="margin-top:12px">Passed all three rounds: profitable in the ranked 9 months and the 3 months after, works on other assets and other timeframes, and made money in every one of the past years tested. (Buy &amp; hold is shown below for comparison only.)</div>'
     : `<div class="banner warn" style="margin-top:12px">Failed the tougher test: ${esc(x.why.join("; "))}.</div>`;
   const list = (rows, kind) => rows && rows.length ? `<table class="mini" style="margin-top:6px"><thead><tr><th>${kind}</th><th class="n">Trades</th><th class="n">Net</th><th class="n">PF</th><th class="n">Max DD</th><th>Works?</th></tr></thead><tbody>${rows.map((y) => `<tr><td>${esc(kind === "Asset" ? labAssetName(y.asset) : y.tf + " min" + (y.from ? ` (from ${y.from})` : ""))}</td><td class="n">${y.n ?? "–"}</td><td class="n">${pc(y.net)}</td><td class="n">${y.pf ?? "–"}</td><td class="n">${y.max_dd == null ? "–" : rupees(y.max_dd)}</td><td>${y.ok ? '<span class="chip green">Yes</span>' : `<span class="chip red">No</span>${y.error ? ` <span class="hint">${esc(y.error)}</span>` : ""}`}</td></tr>`).join("")}</tbody></table>` : "";
   return `${head}
@@ -2978,11 +2983,13 @@ function robustHTML(r, m, admin) {
     <div class="stats">
       <div class="stat"><span class="label">Other assets that work</span><span class="v">${x.assets_ok ?? 0} of ${x.assets_n ?? 0}</span><span class="hint">needs ${Math.min(2, x.assets_n || 0)}</span></div>
       <div class="stat"><span class="label">Other timeframes that work</span><span class="v">${x.tfs_n ? `${x.tfs_ok} of ${x.tfs_n}` : "n/a"}</span><span class="hint">${x.tfs_n ? `needs ${x.tfs_n >= 3 ? 2 : 1}` : "no intraday candles for this asset yet, so it can't pass"}</span></div>
+      <div class="stat"><span class="label">Past years profitable</span><span class="v">${x.years_n == null ? "–" : `${x.years_ok} of ${x.years_n}`}</span><span class="hint">every year needed (at least 3 tested)</span></div>
       <div class="stat"><span class="label">Strategy net · worst fall</span><span class="v">${pc(x.net)}</span><span class="hint">max DD ${x.max_dd == null ? "–" : rupees(x.max_dd)}</span></div>
       <div class="stat"><span class="label">Buy &amp; hold 1 lot · worst fall</span><span class="v">${pc(x.bh_net)}</span><span class="hint">max DD ${x.bh_dd == null ? "–" : rupees(x.bh_dd)}</span></div>
       <div class="stat"><span class="label">Profit vs buy &amp; hold</span><span class="v">${ratioTxt(x.vs_bh)}</span><span class="hint">${x.vs_bh == null ? (x.bh_net != null && x.bh_net <= 0 ? "buy &amp; hold lost money" : "") : "strategy net ÷ buy &amp; hold net"}</span></div>
       <div class="stat"><span class="label">Risk-adjusted vs buy &amp; hold</span><span class="v ${x.risk_vs_bh == null || x.risk_vs_bh >= 1 ? "up" : "down"}">${ratioTxt(x.risk_vs_bh)}</span><span class="hint">(net ÷ max DD) ÷ buy &amp; hold's; for comparison, not part of the pass</span></div>
     </div>
+    ${x.years && x.years.length ? `<h3 style="font-size:15px;margin:16px 0 6px">Year by year (1 lot, after charges)</h3><div class="scroll"><table class="mini"><thead><tr><th>Year</th><th>From</th><th>To</th><th class="n">Trades</th><th class="n">Net</th><th></th></tr></thead><tbody>${x.years.map((y) => `<tr><td>${y.y === 1 ? "Latest 12 months" : `${y.y} years back`}</td><td class="when">${esc(y.from || "")}</td><td class="when">${esc(y.to || "")}</td><td class="n">${y.n ?? "–"}</td><td class="n">${pc(y.net)}</td><td>${y.ok ? '<span class="chip green">Profit</span>' : '<span class="chip red">Loss / flat</span>'}</td></tr>`).join("")}</tbody></table></div>` : ""}
     <p class="hint" style="margin:6px 0 0">A check “works” when it makes money with a profit factor of 1.1 or more and enough trades (5 for once-a-day, 10 for intraday).</p>
     ${admin ? list(x.assetList, "Asset") + list(x.tfList, "Timeframe") : ""}`;
 }
@@ -3047,6 +3054,7 @@ const LAB_COLS = [
   { k: "score", w: 64, t: "Score", f: "num", n: true, v: (g) => g.m.score },
   { k: "oassets", w: 76, t: "Other assets +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.assets_ok : null; }, tip: "Of the other assets the same rules were tried on (same family first: indices for index strategies, commodities for commodity ones), how many made money with a profit factor of 1.1 or more" },
   { k: "otfs", w: 82, t: "Other timeframes +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.tfs_ok : null; }, tip: "Of the other candle timeframes tried on the same asset, how many made money with a profit factor of 1.1 or more" },
+  { k: "years", w: 74, t: "Years +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.years_ok ?? null : null; }, tip: "Of the past years tested one by one (10 for once-a-day strategies, 5 for 5-minute ones), how many made money. Every year must." },
   { k: "vsbh", w: 84, t: "vs Buy & Hold", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.risk_vs_bh ?? null : null; }, tip: "Strategy's profit ÷ worst fall, divided by the same for holding 1 lot for the year. Above 1× = better than buy & hold for the risk taken. For comparison only: not part of the pass, since strategies also trade short" },
   { k: "nights", w: 70, t: "Nights passed", f: "num", n: true, v: (g) => g.passes },
   { k: "longnet", w: 112, t: "Long test net", f: "num", n: true, v: (g) => { const L = longOf(g.r); return L ? L.net : null; }, tip: "Net profit over the longest period tested in the nightly long test (up to 10 years for daily strategies, 5 years for intraday), 1 lot after charges" },
@@ -3416,7 +3424,7 @@ async function promoteLab(r, v) {
 }
 function renderLabSettings() {
   const s = lab.settings || {};
-  $("ls_enabled").value = s.enabled === false ? "false" : "true"; $("ls_per_night").value = s.per_night ?? 300; $("ls_top").value = s.top_options ?? 20; $("ls_capital").value = s.capital ?? 500000; $("ls_long").value = s.long_per_night ?? 10;
+  $("ls_enabled").value = s.enabled === false ? "false" : "true"; $("ls_mode").value = s.schedule_mode || "nightly"; $("ls_per_night").value = s.per_night ?? 300; $("ls_top").value = s.top_options ?? 20; $("ls_capital").value = s.capital ?? 500000; $("ls_long").value = s.long_per_night ?? 10;
   const box = $("ls_assets"); box.innerHTML = "";
   for (const [k, p] of Object.entries(PRESETS)) {
     const l = document.createElement("label"); const i = document.createElement("input"); i.type = "checkbox"; i.value = k; i.checked = (s.assets || []).includes(k);
@@ -3434,7 +3442,7 @@ $("labSetForm").addEventListener("submit", (e) => {
   if (!(top >= 0 && top <= 60)) { $("ls_msg").textContent = "Option pricing count must be 0–60."; return; }
   if (!(cap >= 10000)) { $("ls_msg").textContent = "Capital must be at least ₹10,000."; return; }
   run(e.submitter, async () => {
-    must(await db.from("lab_settings").update({ enabled: $("ls_enabled").value === "true", per_night: Math.trunc(per), top_options: Math.trunc(top), capital: cap, assets, long_per_night: Math.max(0, Math.min(40, Math.trunc(Number($("ls_long").value) || 0))), updated_at: new Date().toISOString() }).eq("id", 1));
+    must(await db.from("lab_settings").update({ enabled: $("ls_enabled").value === "true", schedule_mode: $("ls_mode").value, per_night: Math.trunc(per), top_options: Math.trunc(top), capital: cap, assets, long_per_night: Math.max(0, Math.min(40, Math.trunc(Number($("ls_long").value) || 0))), updated_at: new Date().toISOString() }).eq("id", 1));
     $("ls_msg").textContent = "Saved. Changes apply from the next run."; await loadLab();
   });
 });
