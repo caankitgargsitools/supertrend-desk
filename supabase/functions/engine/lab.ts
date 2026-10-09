@@ -267,6 +267,154 @@ export function mutate(parent: LabConfig, seed: number, capital = 500000): LabCo
   return cfg;
 }
 
+/* ---------- exploring a winner: other assets, timeframes, stops, trailing, indicator combinations ---------- */
+export type ExploreKind = "assets" | "timeframes" | "stops" | "trailing" | "indicators" | "tweaks";
+export const EXPLORE_KINDS: ExploreKind[] = ["assets", "timeframes", "stops", "trailing", "indicators", "tweaks"];
+const INTRA_ONLY = new Set(["VWAP", "ORB"]);
+const condsOf = (cfg: LabConfig): Cond[] => (["long", "short", "exitLong", "exitShort"] as const).flatMap((k) => cfg.rules?.[k]?.conds ?? []);
+/** Same rules on another asset (indices take intraday or daily strategies; commodities daily ones). */
+export function transfer(parent: LabConfig, key: string): LabConfig | null {
+  const a = LAB_ASSETS[key];
+  if (!a || key === parent.underlying) return null;
+  const daily = !!parent.rules?.daily;
+  if (a.commodity && !daily) return null;
+  const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
+  Object.assign(cfg, { underlying: a.key, data_security_id: a.sec, data_segment: a.seg, data_instrument: a.instr, exchange: a.exchange, dhan_symbol: a.key,
+    futures_symbol: a.key + "1!", lot_size: a.lot, strike_step: a.step ?? 1, expiry_weekday: a.wd ?? 4, expiry_flag: a.flag ?? "WEEK" });
+  if (a.commodity) Object.assign(cfg, { session_start: "09:00", last_entry: "23:00", square_off: "23:15", intraday: false, product_type: "M" });
+  else if (LAB_ASSETS[parent.underlying]?.commodity) Object.assign(cfg, { session_start: "09:15", last_entry: "15:15", square_off: "15:20" });
+  // A rupee daily loss limit sized for one contract means nothing on another.
+  if (cfg.risk?.max_day_loss) cfg.risk.max_day_loss = null;
+  cfg.lab_note = `Same rules on ${a.name}`;
+  return cfg;
+}
+/** Same rules decided on a different candle timeframe (conditions on the strategy's own timeframe move with it). */
+export function retime(parent: LabConfig, tf: number): LabConfig | null {
+  if (parent.rules?.daily || tf === parent.timeframe_min) return null;
+  const ok = condsOf(parent).every((x) => x.tf === "base" || x.tf === "D" || Number(x.tf) > tf);
+  if (!ok) return null;
+  const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
+  cfg.timeframe_min = tf;
+  cfg.lab_note = `Decision candles ${parent.timeframe_min}m → ${tf}m`;
+  return cfg;
+}
+/** Stop loss / target grid: no stop, tighter and wider stops, ATR or % stops, targets at 1–4× the stop. */
+export function stopVariants(parent: LabConfig): LabConfig[] {
+  const daily = !!parent.rules?.daily;
+  const base: Risk | null = parent.risk ?? null;
+  const out: { risk: Risk | null; note: string }[] = [];
+  if (base) out.push({ risk: null, note: "no stop loss or target" });
+  const pctSl = daily ? [1, 1.5, 2, 3, 5] : [0.25, 0.4, 0.6, 0.8, 1, 1.5];
+  const atrSl = [0.75, 1, 1.5, 2, 3];
+  for (const v of pctSl) out.push({ risk: { basis: "UNDERLYING", atr_len: 14, sl: { type: "PCT", value: v }, tgt: base?.tgt ? { type: "PCT", value: +(v * 2).toFixed(2) } : null, trail: null, max_day_loss: null }, note: `stop ${v}%${base?.tgt ? `, target ${+(v * 2).toFixed(2)}%` : ""}` });
+  for (const v of atrSl) out.push({ risk: { basis: "UNDERLYING", atr_len: base?.atr_len ?? 14, sl: { type: "ATR", value: v }, tgt: null, trail: null, max_day_loss: null }, note: `stop ${v}×ATR` });
+  const sl = base?.sl ?? base?.trail ?? { type: "PCT" as const, value: daily ? 2 : 0.5 };
+  for (const m of [1, 1.5, 2, 3, 4]) out.push({ risk: { basis: "UNDERLYING", atr_len: base?.atr_len ?? 14, sl: { ...sl }, tgt: { type: sl.type, value: +(sl.value * m).toFixed(2) }, trail: null, max_day_loss: null }, note: `stop ${sl.value}${sl.type === "PCT" ? "%" : "×ATR"}, target ${m}× the stop` });
+  return out.map((o) => { const cfg: LabConfig = JSON.parse(JSON.stringify(parent)); cfg.risk = o.risk; cfg.lab_note = `Stops: ${o.note}`; return cfg; });
+}
+/** Profit trailing: trailing stops of different widths, with and without a fixed stop, % or ATR. */
+export function trailVariants(parent: LabConfig): LabConfig[] {
+  const daily = !!parent.rules?.daily;
+  const out: LabConfig[] = [];
+  const pct = daily ? [1, 2, 3, 5] : [0.25, 0.4, 0.6, 1];
+  for (const v of pct) for (const keepSl of [false, true]) {
+    const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
+    const sl = keepSl ? (parent.risk?.sl ?? { type: "PCT", value: +(v * 1.5).toFixed(2) }) : null;
+    cfg.risk = { basis: "UNDERLYING", atr_len: parent.risk?.atr_len ?? 14, sl, tgt: null, trail: { type: "PCT", value: v }, max_day_loss: null };
+    cfg.lab_note = `Trailing stop ${v}%${sl ? ` with a ${sl.value}${sl.type === "PCT" ? "%" : "×ATR"} stop` : ""}`;
+    out.push(cfg);
+  }
+  for (const v of [1, 1.5, 2, 3]) {
+    const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
+    cfg.risk = { basis: "UNDERLYING", atr_len: parent.risk?.atr_len ?? 14, sl: null, tgt: null, trail: { type: "ATR", value: v }, max_day_loss: null };
+    cfg.lab_note = `Trailing stop ${v}×ATR`;
+    out.push(cfg);
+  }
+  return out;
+}
+/** Other indicator combinations: add a filter, swap a filter for another indicator, or drop one (the entry signal stays). */
+export function recombine(parent: LabConfig, seed: number): LabConfig | null {
+  const r = rng(seed);
+  const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
+  const daily = !!cfg.rules.daily;
+  const side = cfg.rules.long?.conds?.length ? "long" : "short";
+  const conds: Cond[] = cfg.rules[side].conds;
+  const tf = cfg.timeframe_min;
+  const higher = daily ? ["D"] : [15, 25, 30, 60, 75, 125].filter((x) => x > tf).map(String).concat(["D"]);
+  const okState = STATE.filter(([, intra]) => !(daily && intra)).map(([t]) => t);
+  const fresh = (): Cond => {
+    const c = r() < 0.55 ? { ...pick(r, okState)(r), tf: pick(r, higher) } as Cond : { ...pick(r, FILTER)(r), tf: daily ? "D" : "base" } as Cond;
+    return c;
+  };
+  const what = r();
+  let note = "";
+  if (what < 0.45 || conds.length === 1) {
+    const c = fresh();
+    if ((INTRA_ONLY.has(c.ind) && c.tf === "D") || conds.some((x) => x.ind === c.ind && x.tf === c.tf) || conds.length >= 5) return null;
+    conds.push(c); note = `added ${describeCond(c)}`;
+  } else if (what < 0.8) {
+    const i = 1 + Math.floor(r() * (conds.length - 1)), old = conds[i], c = fresh();
+    if ((INTRA_ONLY.has(c.ind) && c.tf === "D") || conds.some((x, j) => j !== i && x.ind === c.ind && x.tf === c.tf)) return null;
+    conds[i] = c; note = `${describeCond(old)} → ${describeCond(c)}`;
+  } else {
+    const i = 1 + Math.floor(r() * (conds.length - 1)), old = conds.splice(i, 1)[0]; note = `dropped ${describeCond(old)}`;
+  }
+  // Keep the other side the mirror image of this one.
+  const other = side === "long" ? "short" : "long";
+  if (cfg.rules[other]?.conds?.length) cfg.rules[other].conds = conds.map(mirror);
+  try { validateRules(cfg.rules); } catch { return null; }
+  cfg.lab_note = `Indicators: ${note}`;
+  return cfg;
+}
+/**
+ * Many relatives of one strategy, shared out between the chosen kinds of change. Each carries a lab_note saying what
+ * changed. seen: fingerprints to skip (already tested or already in the list).
+ */
+export function explore(parent: LabConfig, opts: { n: number; kinds: ExploreKind[]; assets: string[]; seed: number; capital?: number; seen?: Set<string> }): LabConfig[] {
+  const seen = opts.seen ?? new Set<string>();
+  const kinds = opts.kinds.filter((k) => EXPLORE_KINDS.includes(k));
+  if (!kinds.length) return [];
+  const out: LabConfig[] = [];
+  const add = (c: LabConfig | null) => {
+    if (!c) return false;
+    try { validateRules(c.rules); } catch { return false; }
+    const fp = fingerprint(c);
+    if (seen.has(fp)) return false;
+    seen.add(fp); out.push(c); return true;
+  };
+  const pools: Record<string, LabConfig[]> = {
+    assets: opts.assets.map((k) => transfer(parent, k)).filter((x): x is LabConfig => !!x),
+    timeframes: [5, 10, 15, 25, 30, 45, 60, 75, 125].map((t) => retime(parent, t)).filter((x): x is LabConfig => !!x),
+    stops: stopVariants(parent),
+    trailing: trailVariants(parent),
+  };
+  const per = Math.max(1, Math.ceil(opts.n / kinds.length));
+  let seed = opts.seed >>> 0;
+  // Start from a different kind each time, so small batches don't always favour the same changes.
+  const rot = seed % kinds.length;
+  const order = [...kinds.slice(rot), ...kinds.slice(0, rot)];
+  for (const k of order) {
+    let made = 0;
+    if (pools[k]) { const r0 = rng(seed + k.length); const list = [...pools[k]].sort(() => r0() - 0.5); for (const c of list) { if (made >= per || out.length >= opts.n) break; if (add(c)) made++; } }
+    else {
+      for (let tries = 0; made < per && tries < per * 8 && out.length < opts.n; tries++) {
+        seed = (seed + 104729) >>> 0;
+        if (add(k === "indicators" ? recombine(parent, seed) : mutate(parent, seed, opts.capital ?? 500000))) made++;
+      }
+    }
+  }
+  // Fill what is left with setting tweaks and combinations (e.g. a promising other asset with a different stop).
+  for (let tries = 0; out.length < opts.n && tries < opts.n * 6; tries++) {
+    seed = (seed + 7919) >>> 0;
+    const r = rng(seed);
+    const base = out.length && r() < 0.5 ? pick(r, out) : parent;
+    const c = r() < 0.5 ? mutate(base, seed, opts.capital ?? 500000) : recombine(base, seed);
+    if (c && base !== parent) c.lab_note = `${base.lab_note}; ${c.lab_note}`;
+    add(c);
+  }
+  return out.slice(0, opts.n);
+}
+
 /** Short name, e.g. "NIFTY 15m · Supertrend(10,3) own timeframe turns up & RSI(14) 60m > 55". */
 export function labelFor(cfg: LabConfig): string {
   const r = cfg.rules as Rules;
@@ -448,8 +596,12 @@ const WALL_BUDGET = 100000; // ms of wall time per instalment
 export async function labStart(sb: SupabaseClient, manual: boolean): Promise<number | null> {
   const { data: set } = await sb.from("lab_settings").select("*").eq("id", 1).maybeSingle();
   if (!set || (!set.enabled && !manual)) return null;
-  const { data: running } = await sb.from("lab_runs").select("id").eq("status", "running").limit(1);
-  if (running?.length) return running[0].id;
+  const { data: running } = await sb.from("lab_runs").select("id, settings").eq("status", "running").limit(1);
+  if (running?.length) {
+    // A variation run is busy: tonight's run starts as soon as it finishes.
+    if (!manual && running[0].settings?.request_id) await sb.from("lab_settings").update({ nightly_due: true }).eq("id", 1);
+    return running[0].id;
+  }
   const today = ist(Date.now() / 1000).date;
   const from = addDays(today, -YEAR_DAYS), split = addDays(today, -92);
   const { data: run, error } = await sb.from("lab_runs").insert({
@@ -457,6 +609,45 @@ export async function labStart(sb: SupabaseClient, manual: boolean): Promise<num
     trigger: manual ? "manual" : "schedule", settings: set,
   }).select("id").single();
   if (error) throw new Error(error.message);
+  return run.id;
+}
+
+/**
+ * When the lab is free: starts the nightly run that was held back, or the next variation run anyone asked for.
+ * Returns the run id started, or null.
+ */
+export async function labNext(sb: SupabaseClient): Promise<number | null> {
+  const { data: running } = await sb.from("lab_runs").select("id").eq("status", "running").limit(1);
+  if (running?.length) return null;
+  // Variation runs whose run ended without finishing (stopped or failed) are closed.
+  const { data: stale } = await sb.from("lab_requests").select("id, run_id").eq("status", "running");
+  for (const q of stale ?? []) {
+    const { data: rr } = await sb.from("lab_runs").select("status, error").eq("id", q.run_id).maybeSingle();
+    if (!rr || rr.status !== "running") await sb.from("lab_requests").update({ status: rr?.status === "done" ? "done" : "failed", error: rr?.error ?? (rr ? "The run was stopped." : "The run disappeared."), finished_at: new Date().toISOString() }).eq("id", q.id);
+  }
+  const { data: set } = await sb.from("lab_settings").select("*").eq("id", 1).maybeSingle();
+  if (set?.nightly_due) {
+    await sb.from("lab_settings").update({ nightly_due: false }).eq("id", 1);
+    const id = await labStart(sb, false);
+    if (id) return id;
+  }
+  const { data: reqs } = await sb.from("lab_requests").select("*").eq("status", "pending").order("id").limit(1);
+  const q = reqs?.[0];
+  if (!q || !set) return null;
+  const parentAsset = String(q.config?.underlying ?? "");
+  const daily = !!q.config?.rules?.daily;
+  const wantAssets: string[] = (q.kinds ?? []).includes("assets")
+    ? ((q.assets?.length ? q.assets : set.assets) ?? []).filter((k: string) => LAB_ASSETS[k] && (daily || !LAB_ASSETS[k].commodity))
+    : [];
+  const assets = [...new Set([parentAsset, ...wantAssets])].filter((k) => LAB_ASSETS[k]);
+  if (!assets.length) { await sb.from("lab_requests").update({ status: "failed", error: "This strategy's asset isn't one the lab can test.", finished_at: new Date().toISOString() }).eq("id", q.id); return null; }
+  const today = ist(Date.now() / 1000).date;
+  const { data: run, error } = await sb.from("lab_runs").insert({
+    run_day: today, status: "running", phase: "data", progress: "Updating candles", from_day: addDays(today, -YEAR_DAYS), split_day: addDays(today, -92), to_day: today,
+    trigger: "request", settings: { ...set, nightly_due: undefined, assets, per_night: q.n, top_options: Math.min(5, Number(set.top_options ?? 5)), request_id: q.id, requested_by: q.user_id },
+  }).select("id").single();
+  if (error) throw new Error(error.message);
+  await sb.from("lab_requests").update({ status: "running", run_id: run.id, progress: "Started" }).eq("id", q.id);
   return run.id;
 }
 
@@ -470,7 +661,15 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
   const run: Run | undefined = claimed?.[0];
   if (!run) return false;
   const set = run.settings ?? {};
-  const patch = (f: Record<string, unknown>) => sb.from("lab_runs").update({ ...f, updated_at: new Date().toISOString() }).eq("id", run.id);
+  const reqId = run.settings?.request_id ?? null;
+  const patch = async (f: Record<string, unknown>) => {
+    await sb.from("lab_runs").update({ ...f, updated_at: new Date().toISOString() }).eq("id", run.id);
+    // A variation run reports its progress to whoever asked for it.
+    if (reqId) {
+      const st = f.status === "done" ? "done" : f.status === "failed" ? "failed" : null;
+      await sb.from("lab_requests").update({ ...(f.progress ? { progress: f.progress } : {}), ...(st ? { status: st, finished_at: new Date().toISOString(), error: f.error ?? null } : {}) }).eq("id", reqId);
+    }
+  };
   const counts = run.counts ?? {};
   let more = true;
   try {
@@ -521,7 +720,7 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
       }
     } else more = false;
   } catch (e) {
-    await patch({ status: "failed", error: e instanceof Error ? e.message : String(e), finished_at: new Date().toISOString(), lease_until: null });
+    await patch({ status: "failed", progress: "Failed", error: e instanceof Error ? e.message : String(e), finished_at: new Date().toISOString(), lease_until: null });
     return false;
   }
   if (more) await sb.from("lab_runs").update({ lease_until: null }).eq("id", run.id);
@@ -537,6 +736,7 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   const set = run.settings ?? {};
   const n = Math.max(10, Math.min(1000, Number(set.per_night ?? 300)));
   if ((await countRows(sb, run.id)) > 0) return; // already written (instalment repeated)
+  if (set.request_id) return requestPhase(sb, run, assets);
   const since = new Date(Date.now() - 14 * 86400000).toISOString();
   const { data: recent } = await sb.from("lab_results").select("fingerprint").gte("created_at", since).limit(20000);
   const seen = new Set((recent ?? []).map((x) => x.fingerprint));
@@ -552,25 +752,34 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   }
   const capital = Number(set.capital ?? 500000);
   let seed = (Number(run.id) * 1000003) >>> 0;
-  // Variations: about a quarter of the night goes to close relatives of the best recent strategies (one or two settings changed).
-  const { data: parents } = await sb.from("lab_results").select("id, fingerprint, config").eq("passed", true)
-    .gte("created_at", new Date(Date.now() - 30 * 86400000).toISOString()).order("score", { ascending: false }).limit(200);
+  // Evolution: about 40% of the night goes to the winners. Each is tried on the other assets, other decision timeframes,
+  // other stop / target / trailing-stop settings, other indicator combinations and setting tweaks. A strategy that keeps
+  // passing night after night gets more of these tries, so the strongest ideas are tested hardest.
+  const since30 = new Date(Date.now() - 30 * 86400000).toISOString();
+  const { data: parents } = await sb.from("lab_results").select("id, fingerprint, config, score").eq("passed", true)
+    .gte("created_at", since30).order("score", { ascending: false }).limit(400);
+  const { data: passHist } = await sb.from("lab_results").select("fingerprint").eq("passed", true).gte("created_at", since30).limit(20000);
+  const passes = new Map<string, number>();
+  for (const x of passHist ?? []) passes.set(x.fingerprint, (passes.get(x.fingerprint) ?? 0) + 1);
   const pSeen = new Set<string>(), pool = (parents ?? []).filter((x) => assets.includes(x.config?.underlying) && !pSeen.has(x.fingerprint) && pSeen.add(x.fingerprint)).slice(0, 40);
-  const nVar = pool.length ? Math.round(n * 0.25) : 0;
-  for (let made = 0, tries = 0; made < nVar && tries < nVar * 6; tries++) {
+  const nVar = pool.length ? Math.round(n * 0.4) : 0;
+  const weight = pool.map((p, i) => Math.sqrt(passes.get(p.fingerprint) ?? 1) * (1 + (pool.length - i) / pool.length));
+  const wTot = weight.reduce((a, b) => a + b, 0) || 1;
+  let nMade = 0;
+  pool.forEach((parent, i) => {
+    const want = Math.max(1, Math.round((nVar * weight[i]) / wTot));
+    if (nMade >= nVar) return;
     seed = (seed + 104729) >>> 0;
-    const parent = pool[made % pool.length];
-    const cfg = mutate(parent.config, seed, capital);
-    if (!cfg) continue;
-    const fp = fingerprint(cfg);
-    if (seen.has(fp)) continue;
-    seen.add(fp); made++;
-    cfg.lab_note = `${cfg.lab_note} (from lab strategy #${parent.id})`;
-    rows.push({ run_id: run.id, asset: cfg.underlying, mode: cfg.rules.daily ? "DAILY" : "INTRADAY", label: labelFor(cfg), fingerprint: fp, champion: false, config: cfg, stage: "pending" });
-  }
+    const kids = explore(parent.config, { n: Math.min(want, nVar - nMade), kinds: EXPLORE_KINDS, assets, seed, capital, seen });
+    for (const cfg of kids) {
+      cfg.lab_note = `${cfg.lab_note} (from lab strategy #${parent.id}, passed ${passes.get(parent.fingerprint) ?? 1} night${(passes.get(parent.fingerprint) ?? 1) === 1 ? "" : "s"})`;
+      rows.push({ run_id: run.id, asset: cfg.underlying, mode: cfg.rules.daily ? "DAILY" : "INTRADAY", label: labelFor(cfg), fingerprint: fingerprint(cfg), champion: false, config: cfg, stage: "pending" });
+      nMade++;
+    }
+  });
   // New strategies, shared between assets (an index gets twice a commodity's share: it has intraday and option variants).
   const w = assets.map((k) => LAB_ASSETS[k].commodity ? 1 : 2), wsum = w.reduce((a, b) => a + b, 0);
-  const nNew = n - nVar;
+  const nNew = Math.max(0, n - nMade);
   assets.forEach((k, i) => {
     const want = Math.max(1, Math.round((nNew * w[i]) / wsum));
     let made = 0, tries = 0;
@@ -584,6 +793,31 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
       rows.push({ run_id: run.id, asset: k, mode: cfg.rules.daily ? "DAILY" : "INTRADAY", label: labelFor(cfg), fingerprint: fp, champion: false, config: cfg, stage: "pending" });
     }
   });
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await sb.from("lab_results").insert(rows.slice(i, i + 200));
+    if (error) throw new Error(error.message);
+  }
+}
+
+/** A variation run for one strategy: the strategy itself as the baseline, plus its relatives of the kinds asked for. */
+async function requestPhase(sb: SupabaseClient, run: Run, assets: string[]) {
+  const set = run.settings ?? {};
+  const { data: q } = await sb.from("lab_requests").select("*").eq("id", set.request_id).single();
+  if (!q) throw new Error("The variation request was removed.");
+  const parent: LabConfig = {};
+  const KEYS = ["strategy_kind", "underlying", "data_security_id", "data_segment", "data_instrument", "exchange", "dhan_symbol", "futures_symbol", "timeframe_min", "rules",
+    "direction", "entry_mode", "session_start", "last_entry", "square_off", "intraday", "trade_type", "option_side", "lots", "lot_size", "qty_mode", "product_type",
+    "strike_step", "strike_offset", "expiry_weekday", "expiry_flag", "roll_on_expiry", "atr_period", "factor", "entry_trigger", "buffer_points", "after_hours_flip", "risk"];
+  for (const k of KEYS) if (q.config?.[k] !== undefined) parent[k] = q.config[k];
+  // The lab tests futures; option settings are priced afterwards for the best index results.
+  Object.assign(parent, { trade_type: "FUTURES", lots: 1, qty_mode: "LOTS", strategy_kind: "RULES" });
+  for (const t of ["session_start", "last_entry", "square_off"]) if (typeof parent[t] === "string") parent[t] = parent[t].slice(0, 5);
+  validateRules(parent.rules);
+  const seen = new Set<string>([fingerprint(parent)]);
+  const kids = explore(parent, { n: Math.max(1, Number(q.n) - 1), kinds: (q.kinds ?? EXPLORE_KINDS) as ExploreKind[], assets: assets.filter((k) => k !== parent.underlying), seed: (Number(q.id) * 7919 + Number(run.id)) >>> 0, capital: Number(set.capital ?? 500000), seen });
+  const base = { ...parent, lab_note: "The strategy as it is (baseline)" };
+  const rows = [base, ...kids].map((cfg, i) => ({ run_id: run.id, asset: cfg.underlying, mode: cfg.rules.daily ? "DAILY" : "INTRADAY", label: labelFor(cfg), fingerprint: fingerprint(cfg),
+    champion: i === 0, config: cfg, stage: "pending", requested_by: q.user_id, request_id: q.id }));
   for (let i = 0; i < rows.length; i += 200) {
     const { error } = await sb.from("lab_results").insert(rows.slice(i, i + 200));
     if (error) throw new Error(error.message);

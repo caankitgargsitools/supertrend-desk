@@ -74,8 +74,11 @@ export async function entryGate(sb: SupabaseClient, s: Record<string, any>, cach
   if (!g.trial && (g.fee ?? 0) > 0 && (!s.deploy_paid_until || String(s.deploy_paid_until) < today)) return "Deployment fee due. Recharge the wallet; it is taken automatically.";
   if (s.source_id) {
     if (s._missing) return "This strategy is no longer available from its publisher.";
-    const { data: p } = await sb.from("purchases").select("id").eq("user_id", u).eq("listing_id", s.listing_id).maybeSingle();
-    if (!p) return "This strategy hasn't been bought on this account.";
+    // Marketplace strategies need a purchase; Strategy Lab picks are free.
+    if (s.listing_id) {
+      const { data: p } = await sb.from("purchases").select("id").eq("user_id", u).eq("listing_id", s.listing_id).maybeSingle();
+      if (!p) return "This strategy hasn't been bought on this account.";
+    }
   }
   return null;
 }

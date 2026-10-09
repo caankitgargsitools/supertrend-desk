@@ -13,7 +13,7 @@ import { dataSecurity, syncMcx } from "./instruments.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
-import { LAB_ASSETS, labStart, labStep, TOKEN_ERR } from "./lab.ts";
+import { LAB_ASSETS, labNext, labStart, labStep, TOKEN_ERR } from "./lab.ts";
 import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
 import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
@@ -928,6 +928,8 @@ async function labLoop() {
   };
   const more = await labStep({ sb, creds, started: Date.now(), chain });
   if (more) await chain();
+  // The lab is free: start the held-back nightly run or the next variation run.
+  else if (await labNext(sb)) await chain();
 }
 
 async function runBacktestJob(id: number) {
@@ -1029,6 +1031,11 @@ Deno.serve(async (req) => {
     return Response.json({ accepted: true });
   }
 
+  if (action === "lab_next") {
+    const id = await labNext(sb);
+    if (id) EdgeRuntime.waitUntil(labLoop().catch((e) => console.error("lab", e)));
+    return Response.json({ action, started: id });
+  }
   if (action === "lab_start" || action === "lab_start_manual" || action === "lab") {
     if (action !== "lab") {
       const id = await labStart(sb, action === "lab_start_manual");

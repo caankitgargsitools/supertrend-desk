@@ -269,7 +269,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
     <button class="btn small" id="openCap" type="button">Capital</button>
     <button class="btn small" id="nav_wallet" type="button">Wallet</button>
     <button class="btn small" id="openSettings" type="button">Dhan connection</button>
-    <button class="btn small" id="openLab" type="button" data-admin hidden>Strategy Lab</button>
+    <button class="btn small" id="openLab" type="button" hidden>Strategy Lab</button>
     <button class="btn small" id="nav_admin" type="button" data-admin hidden>Admin</button>
   </nav>
   <span class="mk" id="who" hidden></span><button class="btn small" id="myPass" type="button" hidden>My password</button><button class="btn small" id="signOut" type="button" hidden>Sign out</button>
@@ -325,6 +325,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
             <button class="btn" id="b_live" type="button"></button>
             <button class="btn danger" id="b_flat" type="button">Exit position now</button>
             <button class="btn" id="b_publish" type="button" data-admin hidden>Publish to marketplace</button>
+            <button class="btn" id="b_vary" type="button" hidden>Find variations</button>
           </div>
         </div>
         <div id="archBanner" class="banner warn archbar" style="margin-top:12px" hidden>
@@ -603,8 +604,9 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
             <button class="btn primary" id="lab_run" type="button">Run now</button>
           </div>
         </div>
-        <p class="hint" style="margin:8px 0 0">Every evening at 16:05 IST the lab invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. About a quarter of each night goes to variations of recent winners, with one or two settings changed (indicator lengths and levels, decision timeframe, stop distance, trailing stop or target, normal or Heikin Ashi candles, entry style, session times), so good ideas get tuned rather than found by luck once. The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and only <strong>pass</strong> if they also made money in the last 3 months, which the ranking never saw.</p>
+        <p class="hint" style="margin:8px 0 0">Every evening at 16:05 IST the lab invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations and with setting tweaks. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and only <strong>pass</strong> if they also made money in the last 3 months, which the ranking never saw.</p>
         <div id="lab_status" style="margin-top:12px"></div>
+        <div id="lab_reqs" style="margin-top:12px"></div>
         <form id="labSetForm" hidden style="margin-top:14px">
           <div class="grid">
             <label class="f"><span>Nightly run</span><select id="ls_enabled"><option value="true">On (16:05 IST every day)</option><option value="false">Off (only “Run now”)</option></select></label>
@@ -628,6 +630,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
           <label class="f"><span>Show</span><select id="lab_only"><option value="true">Passed only</option><option value="false">All tested</option></select></label>
           <label class="f"><span>Sort by</span><select id="lab_sort"><option value="score">Score (first 9 months)</option><option value="test">Last 3 months net</option><option value="net">Net P&amp;L (1 year)</option><option value="rom">Return on margin</option><option value="pf">Profit factor</option><option value="win">Win rate</option><option value="cons">Profitable months</option><option value="dd">Smallest drawdown</option><option value="nights">Nights passed</option></select></label>
         </div>
+        <div id="lab_reqfilter" class="banner info" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center" hidden></div>
         <p class="hint" id="lab_count" style="margin:10px 0 0"></p>
         <div class="scroll" style="margin-top:8px">
           <table class="lab-table">
@@ -2834,6 +2837,16 @@ function openLab() {
 function closeLab() { if (!lab.open) return; lab.open = false; $("labPane").hidden = true; $("openLab").classList.remove("primary"); stopLabPoll(); }
 function stopLabPoll() { if (lab.poll) { clearTimeout(lab.poll); lab.poll = null; } }
 async function loadLab() {
+  if (!isAdmin()) {
+    // Users: results and trades only, from a server view that leaves out every parameter.
+    const res = must(await db.rpc("lab_feed", { p_view: lab.view, p_asset: lab.asset, p_period: lab.period, p_only: lab.only, p_request: lab.request || null }));
+    lab.settings = null; lab.runs = res.run ? [res.run] : [];
+    lab.rows = (res.rows || []).map((r) => ({ ...r, config: null, label: `Lab #${r.id} · ${(PRESETS[r.asset] && PRESETS[r.asset].name) || r.asset}` }));
+    renderLabStatus(); renderLabTable(); $("lab_stop").hidden = true; $("lab_run").hidden = true; loadLabRequests().catch(() => {});
+    stopLabPoll();
+    if (lab.open && lab.runs[0] && lab.runs[0].status === "running") lab.poll = setTimeout(() => loadLab().catch(() => {}), 30000);
+    return;
+  }
   const [settings, runs] = await Promise.all([
     db.from("lab_settings").select("*").eq("id", 1).maybeSingle().then(must),
     db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at").order("id", { ascending: false }).limit(8).then(must),
@@ -2841,13 +2854,14 @@ async function loadLab() {
   lab.settings = settings; lab.runs = runs;
   let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, score, metrics, starred, promoted_id, ob:opt_buy->summary, os:opt_sell->summary")
     .in("stage", ["screened", "opt_queue", "pricing", "priced"]);
-  if (lab.period === "run") q = q.eq("run_id", runs[0] ? runs[0].id : -1);
+  if (lab.request) q = q.eq("request_id", lab.request);
+  else if (lab.period === "run") q = q.eq("run_id", runs[0] ? runs[0].id : -1);
   else q = q.gte("created_at", new Date(Date.now() - Number(lab.period) * 86400000).toISOString());
   if (lab.only && lab.view === "FUT") q = q.eq("passed", true);
   if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : "opt_sell", "is", null);
   if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
   lab.rows = must(await q.order("score", { ascending: false }).limit(2000));
-  renderLabStatus(); renderLabTable();
+  renderLabStatus(); renderLabTable(); loadLabRequests().catch(() => {});
   stopLabPoll();
   if (lab.open && runs[0] && runs[0].status === "running") lab.poll = setTimeout(() => loadLab().catch(() => {}), 15000);
 }
@@ -2876,7 +2890,7 @@ function labGroup() {
   for (const r of lab.rows) {
     const m = labMetricsFor(r); if (!m) continue;
     if (lab.view !== "FUT" && lab.only && !m.passed) continue;
-    const risk = r.config && r.config.risk;
+    const risk = r.config ? r.config.risk : r.has_risk;
     if (lab.stopf === "WITH" && !risk && lab.view === "FUT") continue;
     if (lab.stopf === "WITHOUT" && risk && lab.view === "FUT") continue;
     const g = by.get(r.fingerprint);
@@ -2896,6 +2910,7 @@ function labGroup() {
   return out.sort((a, b) => key(b.best) - key(a.best));
 }
 function familyKey(r) {
+  if (r.family) return r.family;
   const c = r.config || {}, ru = c.rules || {};
   const sig = (set) => ((set && set.conds) || []).map((x) => `${x.ind}:${x.op}`).sort().join("+") || "-";
   return [r.asset, ru.daily ? "D" : "I", c.direction, sig(ru.long), sig(ru.short)].join("|");
@@ -2907,16 +2922,16 @@ function renderLabTable() {
   $("lab_count").textContent = fams.length ? `${fams.length} groups of similar strategies (${nStrat} strategies)${fams.length > 150 ? "; showing the top 150 groups" : ""}.` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
   const pc = (v) => `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${rupees(v)}</span>`;
   const rowFor = (g, num, f, sub) => {
-    const m = g.m, r = g.r, c = r.config || {};
+    const m = g.m, r = g.r, c = r.config || {}, pub = !r.config;
     const tr = document.createElement("tr"); tr.className = "pick" + (sub ? " sub" : "") + (lab.sel === r.id ? " sel" : "");
-    const chips = [sub ? "" : `<span class="chip blue">${esc(r.asset)}</span>`, `<span class="chip">${c.rules && c.rules.daily ? "Daily" : (c.timeframe_min + "m · " + (c.intraday ? "intraday" : "positional"))}</span>`,
+    const chips = [sub ? "" : `<span class="chip blue">${esc(r.asset)}</span>`, pub ? "" : `<span class="chip">${c.rules && c.rules.daily ? "Daily" : (c.timeframe_min + "m · " + (c.intraday ? "intraday" : "positional"))}</span>`,
       c.rules && c.rules.candles === "HA" ? '<span class="chip">HA candles</span>' : "",
       c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.champion ? '<span class="chip green">Re-tested</span>' : "",
       r.starred ? '<span class="chip yellow">★</span>' : "", r.promoted_id ? '<span class="chip green">Saved as strategy</span>' : "",
       m.passed ? "" : '<span class="chip red">Not passed</span>'].join("");
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : r.os) : null;
     const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} similar</button>` : "";
-    tr.innerHTML = `<td class="n">${num}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}${more}</div>${ver ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
+    tr.innerHTML = `<td class="n">${num}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
       <td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}</td><td class="n">${m.margin_lot ? rupees(m.margin_lot) : "–"}</td>
       <td class="n">${m.ret_margin == null ? "–" : `<span class="${m.ret_margin > 0 ? "pos-num" : m.ret_margin < 0 ? "neg-num" : ""}">${m.ret_margin}%</span>`}</td><td class="n">${pc(m.test.net)}</td>
       <td class="n">${rupees(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${m.score}</td><td class="n">${g.passes}/${g.nights}</td>`;
@@ -2946,6 +2961,7 @@ function statsTable(m) {
 }
 let labDetailRow = null, labDetailTrades = [];
 async function openLabDetail(id) {
+  if (!isAdmin()) return openLabDetailPublic(id);
   lab.sel = id; renderLabTable();
   const r = must(await db.from("lab_results").select("*, run:lab_runs(id, from_day, split_day, to_day, created_at, settings)").eq("id", id).single());
   labDetailRow = r;
@@ -2980,7 +2996,8 @@ async function openLabDetail(id) {
     const mk = labKind(v), tm = (t) => t.margin ?? labTradeMargin(r.config, mk, t, m.margin_pct);
     const mMax = m.margin_max ?? (v.trades.length ? Math.max(...v.trades.map(tm)) : null);
     box.innerHTML = `<div class="head"><div><span class="label">Lab strategy #${r.id}</span><h2 style="font-size:18px"></h2></div>
-      <div class="actions"><button class="btn small" id="ld_star" type="button">${r.starred ? "★ Starred" : "☆ Star (keep)"}</button><button class="btn small" id="ld_xlsx" type="button">Download Excel</button><button class="btn primary small" id="ld_save" type="button">Save as strategy</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
+      <div class="actions"><button class="btn small" id="ld_star" type="button">${r.starred ? "★ Starred" : "☆ Star (keep)"}</button><button class="btn small" id="ld_xlsx" type="button">Download Excel</button><button class="btn primary small" id="ld_save" type="button">Save as strategy</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
+      <div id="ld_form"></div>
       <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.key === "FUT" ? "Futures" : x.label)}</button>`).join("")}</div>
       ${m.passed ? '<div class="banner ok" style="margin-top:12px">Passed: profitable in the ranked 9 months and in the 3 months after.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc(m.why.join("; "))}.</div>`}
       <div class="stats" style="margin-top:12px">
@@ -3008,9 +3025,129 @@ async function openLabDetail(id) {
     $("ld_star").addEventListener("click", (e) => run(e.currentTarget, async () => { must(await db.from("lab_results").update({ starred: !r.starred }).eq("id", r.id)); r.starred = !r.starred; draw(); toast(r.starred ? "Starred: kept beyond 45 days." : "Star removed."); }));
     $("ld_xlsx").addEventListener("click", (e) => run(e.currentTarget, () => downloadLabExcel(r, versions[pickI], kv)));
     $("ld_save").addEventListener("click", (e) => run(e.currentTarget, () => promoteLab(r, versions[pickI])));
+    $("ld_var").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: !!(r.config.rules && r.config.rules.daily), title: `Lab #${r.id}` }));
     box.scrollIntoView({ block: "start", behavior: "smooth" });
   };
   draw();
+}
+/** A lab strategy for a user: results and trades of each version, no parameters, and “Use this strategy”. */
+async function openLabDetailPublic(id) {
+  lab.sel = id; renderLabTable();
+  const r = must(await db.rpc("lab_public_detail", { p_id: id }));
+  const box = $("lab_detail"); box.hidden = false;
+  const versions = (r.versions || []).map((v) => ({ ...v, trades: v.trades || [] }));
+  let pickI = Math.max(0, versions.findIndex((v) => v.key === lab.view));
+  const run0 = r.run || {}, aName = (PRESETS[r.asset] && PRESETS[r.asset].name) || r.asset;
+  const draw = () => {
+    const v = versions[pickI], m = v.metrics;
+    const mk = labKind(v), tm = (t) => t.margin ?? labTradeMargin(r.cfg || {}, mk, t, m.margin_pct);
+    const mMax = m.margin_max ?? (v.trades.length ? Math.max(...v.trades.map(tm)) : null);
+    box.innerHTML = `<div class="head"><div><span class="label">Lab strategy #${r.id}</span><h2 style="font-size:18px"></h2></div>
+      <div class="actions"><button class="btn primary small" id="ld_use" type="button">Use this strategy</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
+      <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.label)}</button>`).join("")}</div>
+      <div id="ld_form"></div>
+      ${m.passed ? '<div class="banner ok" style="margin-top:12px">Passed: profitable in the ranked 9 months and in the 3 months after.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc((m.why || []).join("; "))}.</div>`}
+      <div class="stats" style="margin-top:12px">
+        <div class="stat"><span class="label">Net (1 year)</span><span class="v ${m.full.net >= 0 ? "up" : "down"}">${rupees(m.full.net)}</span></div>
+        <div class="stat"><span class="label">Last 3 months</span><span class="v ${m.test.net >= 0 ? "up" : "down"}">${rupees(m.test.net)}</span></div>
+        <div class="stat"><span class="label">Trades · win rate</span><span class="v">${m.full.n} · ${m.full.win_rate}%</span></div>
+        <div class="stat"><span class="label">Profit factor</span><span class="v">${m.full.pf ?? "–"}</span></div>
+        <div class="stat"><span class="label">Max drawdown</span><span class="v">${rupees(m.full.max_dd)}</span></div>
+        <div class="stat"><span class="label">Avg margin / lot</span><span class="v">${m.margin_lot ? rupees(m.margin_lot) : "–"}</span></div>
+        <div class="stat"><span class="label">Highest margin / lot</span><span class="v">${mMax ? rupees(mMax) : "–"}</span></div>
+        <div class="stat"><span class="label">Return on avg margin</span><span class="v ${m.ret_margin > 0 ? "up" : m.ret_margin < 0 ? "down" : ""}">${m.ret_margin == null ? "–" : m.ret_margin + "%"}</span></div>
+        <div class="stat"><span class="label">Profitable months</span><span class="v">${m.pos_months} of ${m.months_n}</span></div>
+      </div>
+      ${monthsHTML(m)}
+      <h3 style="font-size:15px;margin:16px 0 6px">Results by period</h3>${statsTable(m)}
+      <p class="hint">Tested on ${esc(aName)} from ${esc(run0.from_day || "")} to ${esc(run0.to_day || "")}, 1 lot, after brokerage and statutory charges. The strategy's settings stay private.</p>
+      <h3 style="font-size:15px;margin:16px 0 6px">Trades ${v.trades.length ? `(${v.trades.length})` : ""}</h3>
+      ${v.trades.length ? `<div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Entry</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">In</th><th class="n">Out</th><th class="n">Margin (1 lot)</th><th class="n">Net</th><th>Exit</th></tr></thead><tbody>${v.trades.map((t) => `<tr><td class="when">${esc(t.entry)}</td><td class="when">${esc(t.exit)}</td><td>${t.side === "LONG" ? "Long" : "Short"}</td><td>${esc(t.contract)}</td><td class="n">${fmtNum(t.entry_px)}</td><td class="n">${fmtNum(t.exit_px)}</td><td class="n">${rupees(tm(t))}</td><td class="n ${t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : ""}">${rupees(t.net)}</td><td>${esc(t.exit_why)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="hint">No trade list kept for this test.</p>'}
+      <p class="riskline" style="margin-top:10px">Backtest on past prices with estimated charges and fills. Past performance does not guarantee future returns. Not investment advice.</p>`;
+    box.querySelector("h2").textContent = `Lab #${r.id} · ${aName}`;
+    box.querySelectorAll("#ld_vers button").forEach((b) => b.addEventListener("click", () => { pickI = Number(b.dataset.i); draw(); }));
+    $("ld_close").addEventListener("click", () => { box.hidden = true; lab.sel = null; renderLabTable(); });
+    $("ld_var").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: r.cfg && r.cfg.data_segment === "MCX_COMM" ? true : null, title: `Lab #${r.id}` }));
+    $("ld_use").addEventListener("click", () => {
+      const f = $("ld_form");
+      f.innerHTML = `<div class="ued" style="margin-top:12px"><strong>Add “${esc(v.label)}” to my strategies</strong>
+        <div class="grid"><label class="f"><span>Name</span><input id="lu_name"></label>
+          <label class="f"><span>Capital to deploy (₹)</span><input id="lu_cap" type="number" min="0" step="any" placeholder="blank = fixed lots"></label>
+          <label class="f"><span>Never more than (lots)</span><input id="lu_max" type="number" min="1" step="1" value="2"></label>
+          <label class="f"><span>Lots per trade (if no capital)</span><input id="lu_lots" type="number" min="1" step="1" value="1"></label></div>
+        <label class="showtr"><input type="checkbox" id="lu_ok"> I understand backtest results don't guarantee future returns and derivatives trading can lose money.</label>
+        <div class="formbar"><button class="btn primary" id="lu_go" type="button" disabled>Add to my strategies</button><button class="btn" id="lu_no" type="button">Cancel</button></div>
+        <p class="hint" style="margin:0">It starts paused and in paper mode. Its settings stay private; you see every signal, order and trade.</p></div>`;
+      $("lu_name").value = `Lab #${r.id} · ${aName} · ${v.label}`;
+      $("lu_ok").addEventListener("change", () => $("lu_go").disabled = !$("lu_ok").checked);
+      $("lu_no").addEventListener("click", () => f.innerHTML = "");
+      $("lu_go").addEventListener("click", (e) => run(e.currentTarget, async () => {
+        const nid = must(await db.rpc("lab_adopt", { p_id: r.id, p_side: v.side || "FUT", p_variant: v.i || null, p_name: $("lu_name").value.trim(),
+          p_capital: Number($("lu_cap").value) || 0, p_lots: Math.trunc(Number($("lu_lots").value)) || 1, p_max_lots: Math.trunc(Number($("lu_max").value)) || 2 }));
+        toast("Added to your strategies. It starts paused, in paper mode."); await loadAll(); openStrat(nid);
+      }));
+    });
+    box.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
+  draw();
+}
+/* ---------- variation runs ---------- */
+const VAR_KINDS = [["assets", "Other assets"], ["timeframes", "Other decision timeframes"], ["stops", "Stop loss & target settings"], ["trailing", "Profit trailing (trailing stops)"], ["indicators", "Other indicator combinations"], ["tweaks", "Indicator setting tweaks"]];
+const VAR_INDEX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX"], VAR_MCX = ["GOLD", "SILVER", "CRUDEOIL", "NATURALGAS", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL"];
+/** Form to ask the lab to test a strategy many more ways. src: { labId } or { strategyId }, plus asset and daily (null = unknown). */
+function variationForm(box, src) {
+  const idxOnly = src.daily === false;
+  const assets = [...VAR_INDEX, ...(idxOnly ? [] : VAR_MCX)].filter((k) => PRESETS[k]);
+  const isIdx = VAR_INDEX.includes(src.asset);
+  box.innerHTML = `<div class="ued" style="margin-top:12px"><strong>Run variations of ${esc(src.title)}</strong>
+    <p class="hint" style="margin:0">The lab tests this strategy many more ways on the past year, ranks the results the same way as the nightly run, and shows them to you under “Variation runs”. Its settings stay private; you see results and trades. Runs one at a time after the lab's other work; it can take 10–60 minutes.</p>
+    <div class="f"><span>Try</span><div class="assetpick">${VAR_KINDS.map(([k, l]) => `<label><input type="checkbox" data-k="${k}" checked> ${esc(l)}</label>`).join("")}</div></div>
+    <div class="f"><span>On these assets (for “Other assets”)</span><div class="assetpick">${assets.map((k) => `<label><input type="checkbox" data-a="${k}" ${(isIdx ? VAR_INDEX.includes(k) : true) ? "checked" : ""}> ${esc(PRESETS[k].name)}</label>`).join("")}</div>
+      <span class="hint">Commodities are tested on daily candles, so only once-a-day strategies move to them.</span></div>
+    <div class="grid"><label class="f"><span>How many versions</span><select id="vf_n"><option value="50">50 (quicker)</option><option value="100" selected>100</option><option value="150">150</option>${isAdmin() ? '<option value="300">300</option>' : ""}</select></label></div>
+    <div class="formbar"><button class="btn primary" id="vf_go" type="button">Start variation run</button><button class="btn" id="vf_no" type="button">Cancel</button></div></div>`;
+  $("vf_no").addEventListener("click", () => box.innerHTML = "");
+  $("vf_go").addEventListener("click", (e) => run(e.currentTarget, async () => {
+    const kinds = [...box.querySelectorAll("[data-k]:checked")].map((i) => i.dataset.k), as = [...box.querySelectorAll("[data-a]:checked")].map((i) => i.dataset.a);
+    if (!kinds.length) throw new Error("Pick at least one kind of change.");
+    const id = must(await db.rpc("request_lab_variations", { p_lab_id: src.labId || null, p_strategy: src.strategyId || null, p_n: Number($("vf_n").value), p_kinds: kinds, p_assets: as }));
+    box.innerHTML = ""; toast(`Variation run #${id} queued. Follow it on the Strategy Lab page.`);
+    if (lab.open) await loadLabRequests();
+  }));
+  box.scrollIntoView({ block: "nearest" });
+}
+$("b_vary").addEventListener("click", () => {
+  const s = cur(); if (!s) return;
+  variationForm($("publishBox"), { strategyId: s.id, asset: s.underlying, daily: s.locked ? null : !!(s.rules && s.rules.daily), title: s.name });
+  $("publishBox").hidden = false;
+});
+async function loadLabRequests() {
+  const rows = must(await db.rpc("my_lab_requests")) || [];
+  const box = $("lab_reqs");
+  const chip = (st) => ({ pending: '<span class="chip yellow">Waiting</span>', running: '<span class="chip blue">Running</span>', done: '<span class="chip green">Finished</span>', failed: '<span class="chip red">Failed</span>', cancelled: '<span class="chip">Cancelled</span>' }[st] || esc(st));
+  if (!rows.length) { box.innerHTML = '<p class="hint" style="margin:0">Variation runs: open any lab strategy (or a condition strategy of yours) and press “Run variations” to test it on other assets, timeframes, stops, trailing stops and indicator combinations.</p>'; }
+  else {
+    box.innerHTML = `<h3 style="font-size:15px;margin:0 0 6px">Variation runs</h3><div class="scroll"><table class="mini"><thead><tr><th>#</th><th>Strategy</th>${isAdmin() ? "<th>By</th>" : ""}<th>Status</th><th class="n">Tested</th><th class="n">Passed</th><th class="n">Best score</th><th>Progress</th><th></th></tr></thead><tbody></tbody></table></div>`;
+    const tb = box.querySelector("tbody");
+    for (const q of rows) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td class="mono">${q.id}</td><td></td>${isAdmin() ? "<td></td>" : ""}<td>${chip(q.status)}</td><td class="n">${q.tested}/${q.n}</td><td class="n">${q.passed}</td><td class="n">${q.best_score ?? "–"}</td><td class="hint"></td><td></td>`;
+      tr.children[1].textContent = q.title || "";
+      if (isAdmin()) tr.children[2].textContent = ownerName(q.user_id);
+      tr.children[isAdmin() ? 7 : 6].textContent = q.error ? q.error : q.progress || "";
+      const act = tr.lastElementChild;
+      if (q.tested > 0) { const b = document.createElement("button"); b.className = "btn small"; b.type = "button"; b.textContent = lab.request === q.id ? "Showing" : "Show results"; b.addEventListener("click", () => { lab.request = q.id; loadLab().catch((e) => toast(errorText(e))); }); act.append(b); }
+      if (q.status === "pending") { const c = document.createElement("button"); c.className = "btn small"; c.type = "button"; c.textContent = "Cancel"; c.addEventListener("click", (e) => run(e.currentTarget, async () => { must(await db.rpc("cancel_lab_request", { p_id: q.id })); await loadLabRequests(); })); act.append(" ", c); }
+      tb.append(tr);
+    }
+  }
+  const f = $("lab_reqfilter");
+  f.hidden = !lab.request;
+  if (lab.request) {
+    f.innerHTML = `<span>Showing variation run #${lab.request}. The first line marked “Re-tested” is the strategy as it is; compare the others with it.</span><button class="btn small" type="button">Show all lab results</button>`;
+    f.querySelector("button").addEventListener("click", () => { lab.request = null; loadLab().catch((e) => toast(errorText(e))); });
+  }
+  if (lab.open && rows.some((q) => q.status === "running" || q.status === "pending")) { clearTimeout(loadLabRequests.t); loadLabRequests.t = setTimeout(() => { if (lab.open) loadLabRequests().catch(() => {}); }, 30000); }
 }
 /* Margin per lot for one lab trade, worked out the same way as the lab engine. */
 function labKind(v) { return v.key === "FUT" ? "FUT" : v.side === "SELL" ? "SELL" : "BUY"; }
@@ -3263,6 +3400,8 @@ function renderLockedView(s) {
   if (noRules && currentTab !== "log") showTab("log");
   document.querySelector("details.chartmore").hidden = !isAdmin() && (locked || !(me && me.can_build));
   $("b_publish").hidden = !(isAdmin() && !s.locked && !s.is_master && !s.archived);
+  // Variation runs: condition strategies (own, Strategy Lab picks, or marketplace ones, whose rules stay private).
+  $("b_vary").hidden = !(me && (isAdmin() || me.can_build) && !s.archived && (s.locked || s.strategy_kind === "RULES"));
   $("sp_owner").textContent = isAdmin() && me && s.owner_id !== me.user_id ? `Owner: ${ownerName(s.owner_id)}` : s.is_master ? "Marketplace copy: buyers run exactly these settings." : "";
   if (!locked) { box.hidden = true; box.innerHTML = ""; return; }
   if (box.dataset.for === s.id && box.contains(document.activeElement)) return;
@@ -3673,6 +3812,8 @@ $("terms_go").addEventListener("click", (e) => run(e.currentTarget, async () => 
 }));
 function applyRole() {
   document.querySelectorAll("[data-admin]").forEach((el) => el.hidden = !isAdmin());
+  $("openLab").hidden = !(isAdmin() || (me && me.can_build));
+  ["lab_settings_btn", "lab_run"].forEach((id) => $(id).hidden = !isAdmin());
   $("newFlip").hidden = !(isAdmin() || (me && me.can_build));
   $("lp_title").textContent = isAdmin() ? "Strategies" : "My strategies";
 }
