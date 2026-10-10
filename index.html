@@ -1194,6 +1194,7 @@ function plainCond(c, s) {
     case "VWAP": t = `Price ${verb(c.op)} VWAP`; break;
     case "BB": t = `Price ${/close_/.test(c.op) ? "closes " + (/upper/.test(c.op) ? "above the upper" : "below the lower") : /cross/.test(c.op) ? verb(c.op) + " the " + (/upper/.test(c.op) ? "upper" : "lower") : verb(c.op) + " the middle"} Bollinger band (${p.len ?? 20}, ${p.mult ?? 2})`; break;
     case "PDHL": t = `Price ${verb(c.op)} the previous day's ${/pdh/.test(c.op) ? "high" : "low"}`; break;
+    case "SWEEP": t = `Liquidity sweep: price ${c.op === "bull_sweep" ? "dips below" : "pokes above"} ${Number(p.src) === 1 ? "the previous day's " + (c.op === "bull_sweep" ? "low" : "high") : `the ${c.op === "bull_sweep" ? "lowest low" : "highest high"} of the last ${p.len ?? 20} candles`} and the candle closes back ${c.op === "bull_sweep" ? "above" : "below"} it${(p.within ?? 1) > 1 ? ` (in the last ${p.within} candles)` : ""}`; break;
     case "ORB": t = `Price ${/cross/.test(c.op) ? (/orh/.test(c.op) ? "breaks above" : "breaks below") : verb(c.op)} the first ${p.mins ?? 15} minutes' ${/orh/.test(c.op) ? "high" : "low"}`; break;
     default: t = condText(c);
   }
@@ -1281,6 +1282,8 @@ const IND_DEFS = {
   ATR: { name: "ATR (points)", params: [["len", "Length", 14]], ops: [["gt", "is above"], ["lt", "is below"]], value: 50 },
   PDHL: { name: "Previous day high / low", params: [], ops: [["above_pdh", "price above prev-day high"], ["below_pdl", "price below prev-day low"], ["cross_above_pdh", "crosses above prev-day high"], ["cross_below_pdl", "crosses below prev-day low"]] },
   ORB: { name: "Opening range", params: [["mins", "First minutes", 15]], ops: [["above_orh", "price above range high"], ["below_orl", "price below range low"], ["cross_above_orh", "breaks above range high"], ["cross_below_orl", "breaks below range low"]] },
+  SWEEP: { name: "Liquidity sweep", params: [["src", "Levels swept", 0], ["len", "Swing look-back (candles)", 20], ["within", "Signal lasts (candles)", 1]],
+    ops: [["bull_sweep", "lows swept, closed back above (bullish)"], ["bear_sweep", "highs swept, closed back below (bearish)"]] },
 };
 const VALUE_OPS = new Set(["gt", "lt", "cross_above", "cross_below"]);
 const COND_TFS = [["base", "Strategy timeframe"], ["1", "1 min"], ["3", "3 min"], ["5", "5 min"], ["15", "15 min"], ["25", "25 min"], ["30", "30 min"], ["60", "1 hour"], ["75", "75 min"], ["120", "2 hours"], ["125", "125 min"], ["240", "4 hours"], ["D", "Daily"]];
@@ -1317,6 +1320,11 @@ function condRow(setKey, idx, c) {
   row.append(wrapLabel("Timeframe", tf));
   const slowWraps = [];
   for (const [k, label, dv] of def.params) {
+    if (k === "src") { // liquidity sweep: which levels
+      const sel = mkSel([["0", "Swing high / low"], ["1", "Previous day high / low"]], String(c.p && c.p.src !== undefined ? c.p.src : dv));
+      sel.addEventListener("change", () => { c.p = c.p || {}; c.p.src = Number(sel.value); formDirty = true; });
+      row.append(wrapLabel(label, sel)); continue;
+    }
     const inp = document.createElement("input"); inp.type = "number"; inp.step = k === "factor" || k === "mult" ? "0.1" : "1"; inp.min = "1";
     inp.value = String((c.p && c.p[k] !== undefined) ? c.p[k] : dv);
     inp.addEventListener("input", () => { c.p = c.p || {}; c.p[k] = Number(inp.value); });
@@ -1738,7 +1746,7 @@ function istMinOf(t) { const d = new Date((t + 19800) * 1000); return d.getUTCHo
 const sessOpen = () => isMcx(cx.seg) ? 540 : 555;
 const sessClose = (day) => isMcx(cx.seg) ? mcxClose(day) : 930;
 function haCandlesJS(bars) { const h = heikinAshiJS(bars); return bars.map((b, i) => ({ ...b, o: h.hO[i], c: h.hC[i], h: Math.max(b.h, h.hO[i], h.hC[i]), l: Math.min(b.l, h.hO[i], h.hC[i]) })); }
-const REAL_PRICE_IND = new Set(["VWAP", "PDHL", "ORB"]);
+const REAL_PRICE_IND = new Set(["VWAP", "PDHL", "ORB", "SWEEP"]);
 function ruleConds(r) { return ["long", "short", "exitLong", "exitShort"].flatMap((k) => (r && r[k] && r[k].conds) || []); }
 function condTfOnChart(c) { return cx.tf === "D" || cx.tf === "W" ? "D" : c.tf === "base" ? cx.tf : String(c.tf); }
 /** One entry per distinct indicator line the strategy's conditions read. */
@@ -1757,7 +1765,8 @@ function indicatorPlan(r) {
       const it = add(`${k0}|${p.len ?? 14}`, { ind: c.ind, tf, ha, p: { len: p.len ?? 14 } });
       if (c.v !== undefined && VALUE_OPS.has(c.op)) it.levels.add(Number(c.v));
     } else if (c.ind === "VWAP") { if (tf !== "D") add(`VWAP|${tf}`, { ind: "VWAP", tf, ha: false, p: {} }); }
-    else if (c.ind === "PDHL") add("PDHL", { ind: "PDHL", tf: "D", ha: false, p: {} });
+    else if (c.ind === "PDHL" || (c.ind === "SWEEP" && Number(p.src) === 1)) add("PDHL", { ind: "PDHL", tf: "D", ha: false, p: {} });
+    else if (c.ind === "SWEEP") add(`SWEEP|${tf}|${p.len ?? 20}`, { ind: "SWEEP", tf, ha: false, p: { len: p.len ?? 20 } });
     else if (c.ind === "ORB") { if (cx.tf !== "D") add(`ORB|${p.mins ?? 15}`, { ind: "ORB", tf: cx.tf, ha: false, p: { mins: p.mins ?? 15 } }); }
     else if (c.ind === "HA") add("HA", { ind: "HA", tf, ha: false, p: {} });
   }
@@ -1776,7 +1785,7 @@ function neededFrames(r) {
 function itemLabel(it) {
   const p = it.p, where = it.tf === cx.tf ? "" : ` · ${it.tf === "D" ? "daily" : tfName(it.tf)}`, ha = it.ha ? " · HA candles" : "";
   const name = { ST: `Supertrend(${p.atr}, ${p.factor})`, EMA: `EMA ${p.len}`, SMA: `SMA ${p.len}`, BB: `Bollinger(${p.len}, ${p.mult})`, MACD: `MACD(${p.fast}, ${p.slow}, ${p.sig})`,
-    RSI: `RSI ${p.len}`, ADX: `ADX / DMI ${p.len}`, ATR: `ATR ${p.len}`, VWAP: "VWAP", PDHL: "Previous-day high / low", ORB: `Opening range ${p.mins} min`, HA: "Heikin Ashi" }[it.ind] || it.ind;
+    RSI: `RSI ${p.len}`, ADX: `ADX / DMI ${p.len}`, ATR: `ATR ${p.len}`, VWAP: "VWAP", PDHL: "Previous-day high / low", SWEEP: `Swing high / low (${p.len} candles) for sweeps`, ORB: `Opening range ${p.mins} min`, HA: "Heikin Ashi" }[it.ind] || it.ind;
   return name + where + ha;
 }
 /** End time (epoch s) of each candle, capped at the session close on a day's last candle. */
@@ -1866,6 +1875,13 @@ function drawIndicators(start) {
     }
     const f = frameOf(it); if (!f) { legend.push({ color: cssVar("--muted"), label: label + " (no candles)" }); continue; }
     const close = f.map((b) => b.c);
+    if (it.ind === "SWEEP") {
+      // The levels a sweep runs: highest high and lowest low of the previous N candles.
+      const L = it.p.len, hi = f.map((_, k) => k < L ? NaN : Math.max(...f.slice(k - L, k).map((x) => x.h))), lo = f.map((_, k) => k < L ? NaN : Math.min(...f.slice(k - L, k).map((x) => x.l)));
+      const col = nextColor();
+      overlays.push({ data: series(mapVals(it, f, hi), col), color: col, dash: 1 }, { data: series(mapVals(it, f, lo), col), color: col, dash: 1 });
+      legend.push({ color: col, label, dash: true }); continue;
+    }
     if (it.ind === "EMA" || it.ind === "SMA") {
       const col = nextColor(); overlays.push({ data: series(mapVals(it, f, IX[it.ind.toLowerCase()](close, it.p.len)), col), color: col }); legend.push({ color: col, label });
     } else if (it.ind === "VWAP") {
@@ -3053,12 +3069,12 @@ $("capForm").addEventListener("submit", (e) => {
 
 /* ---------- strategy lab ---------- */
 const lab = { open: false, settings: null, runs: [], rows: [], view: "FUT", asset: "ALL", period: "30", stopf: "ANY", only: true, sort: "score", poll: null, sel: null };
-const LAB_IND = { ST: "Supertrend", HA: "Heikin Ashi", RSI: "RSI", EMA: "EMA", SMA: "SMA", MACD: "MACD", VWAP: "VWAP", BB: "Bollinger", ADX: "ADX", ATR: "ATR", PDHL: "Prev-day H/L", ORB: "Opening range" };
+const LAB_IND = { ST: "Supertrend", HA: "Heikin Ashi", RSI: "RSI", EMA: "EMA", SMA: "SMA", MACD: "MACD", VWAP: "VWAP", BB: "Bollinger", ADX: "ADX", ATR: "ATR", PDHL: "Prev-day H/L", ORB: "Opening range", SWEEP: "Liquidity sweep" };
 function condText(c) {
   const def = IND_DEFS[c.ind] || { name: c.ind, ops: [] };
   const p = c.p || {};
   const params = c.ind === "ST" ? `(${p.atr ?? 10}, ${p.factor ?? 3})` : c.ind === "MACD" ? `(${p.fast ?? 12}, ${p.slow ?? 26}, ${p.sig ?? 9})` : c.ind === "BB" ? `(${p.len ?? 20}, ${p.mult ?? 2})`
-    : (c.ind === "EMA" || c.ind === "SMA") ? (p.len2 && /fast/.test(c.op) ? `(${p.len ?? 9}/${p.len2})` : `(${p.len ?? 20})`) : c.ind === "ORB" ? `(${p.mins ?? 15} min)` : p.len ? `(${p.len})` : "";
+    : (c.ind === "EMA" || c.ind === "SMA") ? (p.len2 && /fast/.test(c.op) ? `(${p.len ?? 9}/${p.len2})` : `(${p.len ?? 20})`) : c.ind === "ORB" ? `(${p.mins ?? 15} min)` : c.ind === "SWEEP" ? (Number(p.src) === 1 ? "(prev-day H/L)" : `(${p.len ?? 20}-candle swing${(p.within ?? 1) > 1 ? `, ${p.within} candles` : ""})`) : p.len ? `(${p.len})` : "";
   const tf = c.tf === "D" ? "daily" : c.tf === "base" ? "decision candles" : `${c.tf}-min`;
   const op = (def.ops.find(([v]) => v === c.op) || [c.op, c.op])[1];
   return `${def.name}${params} on ${tf} ${op}${c.v !== undefined && VALUE_OPS.has(c.op) ? " " + c.v : ""}`;

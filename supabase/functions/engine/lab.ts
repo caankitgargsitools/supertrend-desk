@@ -58,7 +58,7 @@ for (const [a, b] of [["up", "down"], ["turns_up", "turns_down"], ["green", "red
   ["price_cross_above", "price_cross_below"], ["fast_above_slow", "fast_below_slow"], ["fast_cross_above", "fast_cross_below"], ["above_signal", "below_signal"],
   ["cross_above_signal", "cross_below_signal"], ["hist_pos", "hist_neg"], ["above_zero", "below_zero"], ["close_above_upper", "close_below_lower"],
   ["cross_above_upper", "cross_below_lower"], ["price_above_mid", "price_below_mid"], ["plus_above_minus", "minus_above_plus"], ["above_pdh", "below_pdl"],
-  ["cross_above_pdh", "cross_below_pdl"], ["above_orh", "below_orl"], ["cross_above_orh", "cross_below_orl"]]) { MIRROR[a] = b; MIRROR[b] = a; }
+  ["cross_above_pdh", "cross_below_pdl"], ["above_orh", "below_orl"], ["cross_above_orh", "cross_below_orl"], ["bull_sweep", "bear_sweep"]]) { MIRROR[a] = b; MIRROR[b] = a; }
 
 /** The same condition for the other direction (RSI 60 ↔ 40; ADX and ATR are non-directional and stay as they are). */
 export function mirror(c: Cond): Cond {
@@ -100,7 +100,10 @@ const EVENT: [Tpl, boolean][] = [
   [(r) => ({ ind: "ORB", p: { mins: pick(r, [15, 30, 45, 60]) }, op: "cross_above_orh" }), true],
   [() => ({ ind: "PDHL", op: "cross_above_pdh" }), true],
   [() => ({ ind: "VWAP", op: "price_cross_above" }), true],
+  [(r) => ({ ind: "SWEEP", p: sweepP(r, false), op: "bull_sweep" }), false],
 ];
+/** Liquidity-sweep settings: swing look-back, how long the signal stays alive, and (intraday) swing or previous-day levels. */
+const sweepP = (r: R, daily: boolean) => ({ len: pick(r, [5, 10, 20, 30, 50]), within: pick(r, [1, 1, 2, 3]), src: daily ? 0 : pick(r, [0, 0, 1]) });
 const FILTER: Tpl[] = [
   (r) => ({ ind: "RSI", p: { len: pick(r, RSI_LEN) }, op: "gt", v: pick(r, [50, 55, 60]) }),
   (r) => ({ ind: "ADX", p: { len: pick(r, ADX_LEN) }, op: "gt", v: pick(r, [18, 20, 25, 30]) }),
@@ -131,10 +134,21 @@ export function generate(assetKey: string, seed: number, capital = 500000): LabC
   const higher = daily ? [] : [15, 25, 30, 60, 75, 125].filter((x) => x > tf && x % 5 === 0 && x !== tf).map(String).concat(["D"]);
   const ctf = (base: boolean) => daily ? "D" : base ? "base" : pick(r, higher);
   const candles = r() < 0.2 ? "HA" : "NORMAL";
-  const style = r() < 0.2 ? "reversion" : "trend";
+  const sr = r();
+  const style = sr < 0.2 ? "reversion" : sr < 0.45 ? "sweep" : "trend";
   const conds: Cond[] = [];
   let exitLong: Cond[] = [];
-  if (style === "reversion") {
+  if (style === "sweep") {
+    // Liquidity sweep: buy after price runs the stops below a swing low (or yesterday's low) and closes back above it;
+    // often only in the direction of the higher-timeframe trend.
+    const primary: Cond = { ind: "SWEEP", tf: ctf(true), p: sweepP(r, daily), op: "bull_sweep" };
+    conds.push(primary);
+    if (r() < 0.6) conds.push({ ...pick(r, okTpl(STATE))(r), tf: daily ? "D" : (higher.length ? pick(r, higher) : "base") } as Cond);
+    if (r() < 0.3) { const f = { ...pick(r, FILTER)(r), tf: ctf(true) } as Cond; if (!conds.some((x) => x.ind === f.ind && x.tf === f.tf)) conds.push(f); }
+    const ex = r();
+    if (ex < 0.45) exitLong = [{ ...primary, op: "bear_sweep" }];
+    else if (ex < 0.75) exitLong = [mirror({ ...pick(r, okTpl(STATE))(r), tf: ctf(true) } as Cond)];
+  } else if (style === "reversion") {
     // Oversold bounce: buy when RSI recovers from below a low level; take profit when RSI is strong again.
     const len = pick(r, RSI_LEN);
     conds.push({ ind: "RSI", tf: ctf(true), p: { len }, op: "cross_above", v: pick(r, [20, 25, 30, 35]) });

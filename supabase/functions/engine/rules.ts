@@ -20,7 +20,7 @@ export function haCandles<T extends { o: number; h: number; l: number; c: number
   const { ho, hc } = heikinAshi(bars);
   return bars.map((b, i) => ({ ...b, o: ho[i], c: hc[i], h: Math.max(b.h, ho[i], hc[i]), l: Math.min(b.l, ho[i], hc[i]) }));
 }
-const REAL_PRICE = new Set(["VWAP", "PDHL", "ORB"]);
+const REAL_PRICE = new Set(["VWAP", "PDHL", "ORB", "SWEEP"]);
 export type Signals = { long: boolean; short: boolean; exitLong: boolean | null; exitShort: boolean | null };
 type Side = "LONG" | "SHORT";
 
@@ -38,7 +38,7 @@ export function ruleTimeframes(r: Rules, baseTf: number): { intraday: number[]; 
   const tfs = new Set<number>([baseTf]);
   let daily = false;
   for (const c of allConds(r)) {
-    if (c.ind === "PDHL") daily = true;
+    if (c.ind === "PDHL" || (c.ind === "SWEEP" && Number(c.p?.src) === 1)) daily = true;
     if (c.tf === "D") daily = true;
     else tfs.add(c.tf === "base" ? baseTf : Number(c.tf));
   }
@@ -78,12 +78,14 @@ export function describeCond(c: Cond): string {
     cross_above_pdh: "crosses above previous day high", cross_below_pdl: "crosses below previous day low",
     above_orh: "price above opening-range high", below_orl: "price below opening-range low",
     cross_above_orh: "breaks above opening-range high", cross_below_orl: "breaks below opening-range low",
+    bull_sweep: "of the lows (wick below, close back above)", bear_sweep: "of the highs (wick above, close back below)",
   };
   const name: Record<string, string> = {
     ST: `Supertrend(${p.atr ?? 10},${p.factor ?? 3})`, HA: "Heikin Ashi", RSI: `RSI(${p.len ?? 14})`,
     EMA: p.len2 ? `EMA(${p.len ?? 9}/${p.len2})` : `EMA(${p.len ?? 20})`, SMA: p.len2 ? `SMA(${p.len ?? 9}/${p.len2})` : `SMA(${p.len ?? 20})`,
     MACD: `MACD(${p.fast ?? 12},${p.slow ?? 26},${p.sig ?? 9})`, VWAP: "VWAP", BB: `Bollinger(${p.len ?? 20},${p.mult ?? 2})`,
     ADX: `ADX(${p.len ?? 14})`, ATR: `ATR(${p.len ?? 14})`, PDHL: "Prev-day H/L", ORB: `Opening range (${p.mins ?? 15}m)`,
+    SWEEP: `Liquidity sweep (${Number(p.src) === 1 ? "prev-day high/low" : `${p.len ?? 20}-candle swing`}${(p.within ?? 1) > 1 ? `, within ${p.within} candles` : ""})`,
   };
   return `${name[c.ind] ?? c.ind} ${tf} ${ops[c.op] ?? c.op}`;
 }
@@ -218,6 +220,42 @@ export class RuleBook {
         };
         break;
       }
+      case "SWEEP": {
+        // Liquidity sweep: price runs beyond a level where stops sit (the highest high / lowest low of the last N candles,
+        // or the previous day's high / low) and the candle closes back on the other side of it. "within" keeps the
+        // signal alive for that many candles after the sweep.
+        const len = Math.max(2, Math.trunc(p.len ?? 20)), within = Math.max(1, Math.trunc(p.within ?? 1)), prevDaySrc = Number(p.src) === 1;
+        const lv = prevDaySrc ? null : M(`SWLV${len}`, () => {
+          const hi = new Array(b.length).fill(NaN), lo = new Array(b.length).fill(NaN);
+          for (let k = len; k < b.length; k++) {
+            let h = -Infinity, l = Infinity;
+            for (let j = k - len; j < k; j++) { if (b[j].h > h) h = b[j].h; if (b[j].l < l) l = b[j].l; }
+            hi[k] = h; lo[k] = l;
+          }
+          return { hi, lo };
+        });
+        const daily = this.daily;
+        const prevOf = (day: string) => { let j = -1; for (let i = daily.length - 1; i >= 0; i--) if (daily[i].day < day) { j = i; break; } return j >= 0 ? daily[j] : null; };
+        const pdCache = new Map<string, DayBar | null>();
+        const pd = (day: string) => { if (!pdCache.has(day)) pdCache.set(day, prevOf(day)); return pdCache.get(day)!; };
+        const swept = (j: number): number => { // 1 = lows swept (bullish), -1 = highs swept (bearish), 0 = none
+          let H: number, L: number;
+          if (prevDaySrc) { const d = pd(b[j].day); if (!d) return 0; H = d.h; L = d.l; }
+          else { H = lv!.hi[j]; L = lv!.lo[j]; if (isNaN(H) || isNaN(L)) return 0; }
+          const bull = b[j].l < L && b[j].c > L, bear = b[j].h > H && b[j].c < H;
+          return bull && !bear ? 1 : bear && !bull ? -1 : 0;
+        };
+        const want = c.op === "bull_sweep" ? 1 : c.op === "bear_sweep" ? -1 : 0;
+        check = (k) => {
+          if (!want) return false;
+          for (let j = k; j >= Math.max(1, k - within + 1); j--) {
+            if (!frame.isDaily && prevDaySrc && b[j].day !== b[k].day) break; // a previous-day sweep counts on its own day only
+            if (swept(j) === want) return true;
+          }
+          return false;
+        };
+        break;
+      }
       case "ORB": {
         // High/low of the first N minutes after the session opens, from base candles; usable once that window has passed.
         const mins = p.mins ?? 15;
@@ -310,7 +348,7 @@ export function decide(pos: "FLAT" | Side, now: Signals, prev: Signals | null, c
 /** Validates a rule book from the strategy form / database. */
 export function validateRules(r: unknown): Rules {
   const rules = (r ?? {}) as Rules;
-  const IND = new Set(["ST", "HA", "RSI", "EMA", "SMA", "MACD", "VWAP", "BB", "ADX", "ATR", "PDHL", "ORB"]);
+  const IND = new Set(["ST", "HA", "RSI", "EMA", "SMA", "MACD", "VWAP", "BB", "ADX", "ATR", "PDHL", "ORB", "SWEEP"]);
   const TF = new Set(["base", "1", "3", "5", "15", "25", "30", "60", "75", "120", "125", "240", "D"]);
   for (const k of ["long", "short", "exitLong", "exitShort"] as const) {
     const set = rules[k];
