@@ -1527,7 +1527,10 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
   const { count: left } = await sb.from("lab_checks").select("id", { count: "exact", head: true }).eq("status", "pending");
   const { count: mineLeft } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).eq("basic_passed", true).neq("robust_status", "done");
   const { count: backlog } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("basic_passed", true).is("robust_status", null);
-  await patch({ progress: `Tougher test: ${left ?? 0} checks to run${backlog ? `, ${backlog} earlier winners still to re-check` : ""} (${decided} decided just now)` });
+  // For the progress bar: this run's winners still to decide (the re-check run: checks still to run).
+  const robLeft = run.trigger === "robust" ? (left ?? 0) : (mineLeft ?? 0);
+  await patch({ progress: `Tougher test: ${left ?? 0} checks to run${backlog ? `, ${backlog} earlier winners still to re-check` : ""} (${decided} decided just now)`,
+    counts: { ...(run.counts ?? {}), rob_left: robLeft, rob_max: Math.max(Number(run.counts?.rob_max ?? 0), robLeft) } });
   // A nightly run moves on once its own winners are decided; the re-check run keeps going until the backlog is done.
   if (run.trigger === "robust") {
     // Somebody asked for a variation run: stop here so it can start; the re-check resumes afterwards.
@@ -1643,7 +1646,8 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
       job.cursor = 0; job.acc = newAcc(capital); job.trades = [];
     }
     const { count: left } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).in("stage", ["pricing", "opt_queue"]);
-    await patch({ progress: `Real option prices: ${row.label.slice(0, 60)}… (${vr.label}; ${left} strategies to go)` });
+    await patch({ progress: `Real option prices: ${row.label.slice(0, 60)}… (${vr.label}; ${left} strategies to go)`,
+      counts: { ...(run.counts ?? {}), opt_left: left ?? 0, opt_v: job.v, opt_vn: variants.length } });
     const busyBefore = job.acc.busy ?? 0;
     let res: { trades: Record<string, unknown>[]; next: number; acc: Acc };
     try {

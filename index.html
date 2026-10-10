@@ -360,6 +360,23 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 .fillcell { white-space: nowrap; font-size: 12.5px; } .fillcell .fill + .fill { margin-top: 4px; }
 .ued { display: grid; gap: 10px; background: var(--bg); border-radius: var(--r); padding: 12px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+/* Lab run progress: a bar for how far the run has got, and a live dot that shows the engine is still working. */
+.labprog { margin-top: 12px; }
+.labprog .track { position: relative; height: 10px; border-radius: 99px; background: var(--chip); overflow: hidden; }
+.labprog .fill { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: var(--blue); transition: width .6s ease; }
+.labprog.live .fill { background-image: linear-gradient(45deg, rgba(255,255,255,.28) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.28) 50%, rgba(255,255,255,.28) 75%, transparent 75%); background-size: 16px 16px; animation: labstripes 1s linear infinite; }
+.labprog .row { display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 12.5px; }
+.labprog .steps { display: flex; gap: 4px; flex-wrap: wrap; }
+.labprog .steps span { font-size: 11px; padding: 2px 7px; border-radius: 99px; background: var(--chip); color: var(--muted); }
+.labprog .steps span.on { background: var(--blue-soft); color: var(--blue); font-weight: 600; }
+.labprog .steps span.done { color: var(--green); }
+.beat { display: inline-flex; align-items: center; gap: 7px; }
+.beat i { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 currentColor; color: var(--green); animation: beat 1.4s ease-out infinite; }
+.beat.slow i { background: var(--yellow); color: var(--yellow); }
+.beat.stuck i { background: var(--red); color: var(--red); animation: none; }
+@keyframes beat { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); } 100% { box-shadow: 0 0 0 9px transparent; } }
+@keyframes labstripes { to { background-position: 16px 0; } }
+@media (prefers-reduced-motion: reduce) { .labprog.live .fill, .beat i { animation: none; } }
 </style>
 </head>
 <body>
@@ -3267,7 +3284,7 @@ async function loadLab() {
   }
   const [settings, runs] = await Promise.all([
     db.from("lab_settings").select("*").eq("id", 1).maybeSingle().then(must),
-    db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at, focus:settings->focus, fassets:settings->assets").order("id", { ascending: false }).limit(8).then(must),
+    db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at, cursor, focus:settings->focus, fassets:settings->assets").order("id", { ascending: false }).limit(8).then(must),
   ]);
   lab.settings = settings; lab.runs = runs;
   let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary")
@@ -3283,7 +3300,7 @@ async function loadLab() {
   lab.long = await db.rpc("lab_long_map").then((x) => x.data || {}).catch(() => ({}));
   renderLabStatus(); renderLabTable(); loadLabRequests().catch(() => {});
   stopLabPoll();
-  if (lab.open && runs[0] && runs[0].status === "running") lab.poll = setTimeout(() => loadLab().catch(() => {}), 15000);
+  if (lab.open && runs[0] && runs[0].status === "running") lab.poll = setTimeout(() => loadLab().catch(() => {}), 10000);
 }
 function renderLabStatus() {
   const box = $("lab_status"); const r = lab.runs[0];
@@ -3305,8 +3322,46 @@ function renderLabStatus() {
   <p class="hint" style="margin:8px 0 0">${r.status === "running" ? `Step ${esc(phases[r.phase] || r.phase)}: ${esc(r.progress || "")}` : esc(r.progress || "")}</p>
   ${r.error ? `<div class="banner err" style="margin-top:8px">${esc(r.error)}</div>` : ""}
   ${pausedTill && r.status !== "running" ? `<div class="banner warn" style="margin-top:8px">Stopped by hand. The lab starts again by itself at ${esc(istText(pausedTill))} IST, or press “Run now”.</div>` : ""}
+  ${r.status === "running" ? labProgressHTML(r) : ""}
+  ${lab.runs.length > 1 ? `<p class="hint" style="margin:8px 0 0">Every run gets the next number, so the number goes up as runs follow one another. Recent: ${lab.runs.slice(0, 5).map((x) => {
+    const kind = x.focus === true ? `focused on ${(x.fassets || []).map(labAssetName).join(", ")}` : ({ continuous: "automatic", schedule: "16:05", manual: "Run now", robust: "re-check of earlier winners", request: "variation run" })[x.trigger] || x.trigger;
+    const st = x.status === "running" ? "running" : x.status === "done" ? `${(x.counts || {}).generated ?? 0} tested, ${(x.counts || {}).passed ?? 0} passed` : x.status;
+    return `#${x.id} ${esc(kind)} (${esc(st)})`;
+  }).join(" · ")}</p>` : ""}
   ${r.focus === true ? `<div class="banner info" style="margin-top:8px">Focused run on ${esc((r.fassets || []).map(labAssetName).join(", "))}: new strategies only.</div>` : ""}`;
 }
+/** How far a running lab run has got (0–100), from its step and counts. */
+function labPct(r) {
+  const c = r.counts || {}, frac = (a, b) => (b > 0 ? Math.max(0, Math.min(1, a / b)) : 0);
+  if (r.trigger === "robust") return c.rob_max ? 100 * (1 - frac(c.rob_left, c.rob_max)) : 0;
+  const n = (r.fassets || []).length || 1;
+  switch (r.phase) {
+    case "data": return 8 * frac(Number(r.cursor || 0), n);
+    case "generate": return 9;
+    case "screen": return 10 + 45 * frac(c.tested || 0, c.generated || 0);
+    case "robust": return 55 + 30 * (c.rob_max ? 1 - frac(c.rob_left, c.rob_max) : 0);
+    case "options": return 85 + 15 * (c.to_price ? 1 - frac(c.opt_left ?? c.to_price, c.to_price) : 0);
+    default: return 100;
+  }
+}
+function labProgressHTML(r) {
+  const pct = Math.round(labPct(r));
+  const steps = r.trigger === "robust" ? [["robust", "Re-checking winners"]] : [["data", "Candles"], ["generate", "Writing"], ["screen", "Backtesting"], ["robust", "Tougher test"], ["options", "Options"]];
+  const at = steps.findIndex(([k]) => k === r.phase);
+  return `<div class="labprog live" id="labProg"><div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="Run progress"><div class="fill" style="width:${Math.max(3, pct)}%"></div></div>
+    <div class="row"><div class="steps">${steps.map(([k, t], i) => `<span class="${i === at ? "on" : i < at ? "done" : ""}">${i < at ? "✓ " : ""}${t}</span>`).join("")}</div>
+    <span><b>${pct}%</b> · <span class="beat" id="labBeat"><i></i><span></span></span></span></div></div>`;
+}
+/** The live dot: green while the engine reports in, amber when it has been quiet a few minutes, red when it looks stuck. */
+function paintLabBeat() {
+  const r = lab.runs && lab.runs[0], el = document.getElementById("labBeat"); if (!el || !r || r.status !== "running") return;
+  const age = Math.max(0, Math.round((Date.now() - Date.parse(r.updated_at)) / 1000));
+  const ago = age < 90 ? `${age}s ago` : `${Math.round(age / 60)} min ago`;
+  el.className = "beat" + (age > 420 ? " stuck" : age > 150 ? " slow" : "");
+  el.querySelector("span").textContent = age > 420 ? `No progress for ${ago}; the watchdog restarts a stuck run within 5 minutes` : age > 150 ? `Last update ${ago} (a slow step, e.g. waiting for Dhan)` : `Working · last update ${ago}`;
+  document.getElementById("labProg")?.classList.toggle("live", age <= 420);
+}
+setInterval(paintLabBeat, 1000);
 $("lab_focus_btn").addEventListener("click", () => {
   const f = $("labFocusForm"); f.hidden = !f.hidden; if (f.hidden) return;
   const box = $("lf_assets"); box.innerHTML = "";
