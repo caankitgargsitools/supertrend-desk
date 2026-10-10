@@ -849,8 +849,12 @@ export async function labStart(sb: SupabaseClient, manual: boolean, trigger?: st
   if (!set || (!set.enabled && !manual)) return null;
   // With back-to-back runs on, the 16:05 schedule has nothing extra to do.
   if (!manual && !trigger && (set.schedule_mode ?? "nightly") !== "nightly") return null;
+  // A focused run (one or a few assets, new strategies only), asked for from the Lab page.
+  const focus = manual && trigger === "focus" ? set.focus as { assets?: string[]; n?: number } | null : null;
+  if (trigger === "focus" && !focus?.assets?.length) return null;
   const { data: running } = await sb.from("lab_runs").select("id, settings, trigger").eq("status", "running").limit(1);
-  if (running?.length && running[0].trigger === "robust") {
+  if (running?.length && (running[0].trigger === "robust" || (manual && ["continuous", "schedule"].includes(running[0].trigger)))) {
+    // The re-check of earlier winners (or, for a run you start yourself, the automatic run) gives way.
     // The re-check of earlier winners gives way; it carries on from where it was once the lab is free again.
     await sb.from("lab_runs").update({ status: "done", phase: "done", progress: "Paused for a new run; carries on later", finished_at: new Date().toISOString(), lease_until: null }).eq("id", running[0].id);
   } else if (running?.length) {
@@ -860,9 +864,14 @@ export async function labStart(sb: SupabaseClient, manual: boolean, trigger?: st
   }
   const today = ist(Date.now() / 1000).date;
   const from = addDays(today, -YEAR_DAYS), split = addDays(today, -92);
+  const settings = focus
+    ? { ...set, focus: true, assets: focus.assets!.filter((k) => LAB_ASSETS[k]), per_night: Math.max(10, Math.min(1000, Number(focus.n) || 300)) }
+    : { ...set, focus: undefined };
+  if (focus) await sb.from("lab_settings").update({ focus: null }).eq("id", 1);
+  if (manual) await sb.from("lab_settings").update({ paused_until: null }).eq("id", 1);
   const { data: run, error } = await sb.from("lab_runs").insert({
-    run_day: today, status: "running", phase: "data", progress: "Updating candles", from_day: from, split_day: split, to_day: today,
-    trigger: trigger ?? (manual ? "manual" : "schedule"), settings: set,
+    run_day: today, status: "running", phase: "data", progress: focus ? `Focused run: ${settings.assets.map((k: string) => LAB_ASSETS[k]?.name ?? k).join(", ")}` : "Updating candles", from_day: from, split_day: split, to_day: today,
+    trigger: trigger ?? (manual ? "manual" : "schedule"), settings,
   }).select("id").single();
   if (error) throw new Error(error.message);
   return run.id;
@@ -882,6 +891,8 @@ export async function labNext(sb: SupabaseClient): Promise<number | null> {
     if (!rr || rr.status !== "running") await sb.from("lab_requests").update({ status: rr?.status === "done" ? "done" : "failed", error: rr?.error ?? (rr ? "The run was stopped." : "The run disappeared."), finished_at: new Date().toISOString() }).eq("id", q.id);
   }
   const { data: set } = await sb.from("lab_settings").select("*").eq("id", 1).maybeSingle();
+  // A run stopped by hand pauses the lab for an hour; after that it carries on by itself.
+  if (set?.paused_until && Date.parse(set.paused_until) > Date.now()) return null;
   if (set?.nightly_due) {
     await sb.from("lab_settings").update({ nightly_due: false }).eq("id", 1);
     const id = await labStart(sb, false);
@@ -1034,10 +1045,12 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   const { data: champs } = await sb.from("lab_results").select("fingerprint, config, score").eq("passed", true)
     .gte("created_at", new Date(Date.now() - 30 * 86400000).toISOString()).order("score", { ascending: false }).limit(300);
   const rows: Record<string, unknown>[] = [];
-  // Earlier winners are re-tested once a day (on the latest candles); the rest of every run goes to new strategies and variations.
+  // Earlier winners are re-tested once a day on the latest candles, and only at night (23:30–08:30 IST); the rest of
+  // every run goes to new strategies and variations. A focused run is new strategies only.
+  const nm = ist(Date.now() / 1000).min, night = nm >= 23 * 60 + 30 || nm < 8 * 60 + 30;
   const { data: fresh } = await sb.from("lab_results").select("fingerprint").gte("created_at", new Date(Date.now() - 20 * 3600000).toISOString()).limit(20000);
   const champSeen = new Set<string>(), testedToday = new Set((fresh ?? []).map((x) => x.fingerprint));
-  for (const c of champs ?? []) {
+  for (const c of (night && !set.focus) ? champs ?? [] : []) {
     if (testedToday.has(c.fingerprint)) continue;
     if (champSeen.size >= 25 || champSeen.has(c.fingerprint) || !assets.includes(c.config?.underlying)) continue;
     champSeen.add(c.fingerprint);
@@ -1066,7 +1079,7 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
     if (k >= 2 || ka >= 6) return false;
     perFam.set(f, k + 1); perAsset.set(a, ka + 1); pSeen.add(x.fingerprint); return true;
   }).slice(0, 40);
-  const nVar = pool.length ? Math.round(n * 0.4) : 0;
+  const nVar = pool.length && !set.focus ? Math.round(n * 0.4) : 0;
   const weight = pool.map((p, i) => Math.sqrt(passes.get(p.fingerprint) ?? 1) * (1 + (pool.length - i) / pool.length));
   const wTot = weight.reduce((a, b) => a + b, 0) || 1;
   let nMade = 0;

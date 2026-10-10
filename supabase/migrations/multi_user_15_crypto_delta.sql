@@ -76,3 +76,8 @@ grant execute on function public.usd_inr() to authenticated;
 -- Replaced by delta_send (http extension, synchronous): pg_net only sends after the calling engine request ends,
 -- which let the 5-second signature expire. create extension http with schema extensions; delta_send(user, method,
 -- path, query, body) returns {status, body}; service_role only.
+
+-- Lab: a run stopped by hand pauses the automatic runs for an hour (lab_settings.paused_until, set by lab_stop and
+-- checked by the strategy-lab-next cron and labNext); focused runs (lab_run_focus(assets, n) → lab_settings.focus →
+-- engine lab_start_focus): only the picked assets, new strategies only. Champions are re-tested only at night.
+alter table public.lab_settings add column if not exists paused_until timestamptz, add column if not exists focus jsonb;

@@ -741,10 +741,19 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
           <div class="actions">
             <button class="btn" id="lab_settings_btn" type="button">Lab settings</button>
             <button class="btn danger" id="lab_stop" type="button" hidden>Stop current run</button>
+            <button class="btn" id="lab_focus_btn" type="button">Focused run</button>
             <button class="btn primary" id="lab_run" type="button">Run now</button>
           </div>
         </div>
-        <p class="hint longhint" style="margin:8px 0 0">The lab runs once a day at 16:05 IST or non-stop (see Lab settings). Each run invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations, and with small steps on every indicator setting (lengths ±1, ±2 and ±10%, Supertrend factor and Bollinger width ±0.25/±0.5, RSI / ADX levels ±2/±5), which get a double share. About a quarter of new strategies are built around liquidity sweeps. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and must also make money in the last 3 months, which the ranking never saw (round 1); then work on other assets and other timeframes (round 2); then make money in <strong>every one of the past 10 years</strong> (5 years for 5-minute strategies, the history Dhan keeps), so nothing passes on one big move of the underlying (round 3). 5-minute strategies must also stay profitable, in total and in every year, with charges and slippage doubled. Every backtest fills each order a little worse than the test price (slippage set per asset from how liquid it is: 0.01% on Nifty and Gold up to 0.04–0.05% on Midcap Select, Nifty Next 50, Bankex, Nickel and the mini contracts; 0.5–2% of premium on options). Variations come from at most 6 winners per asset, so no single asset fills the runs. Crypto (Bitcoin, Ether, Solana, XRP and any coin added under Connections) is tested as Delta Exchange perpetual futures on 15-minute candles (Binance spot history before the coin listed on Delta India), on the crypto day 05:30–24:00 IST every day of the week, with Delta's 0.05% fee + GST, funding on long positions and per-coin slippage. Strategies that fail are cleared straight away; a one-line record stays so the lab never tries them again.</p>
+        <form id="labFocusForm" hidden style="margin-top:14px">
+          <div class="f"><span>Assets to research in depth</span><div class="assetpick" id="lf_assets"></div></div>
+          <div class="grid" style="margin-top:8px">
+            <label class="f"><span>New strategies to invent and test</span><select id="lf_n"><option value="200">200</option><option value="500" selected>500</option><option value="1000">1,000</option></select></label>
+          </div>
+          <p class="hint">A run on only the assets you tick: every strategy in it is new (no re-tests of earlier winners, no variations), shared between those assets, and goes through the same three rounds. It replaces the automatic run that is going on now; the automatic runs carry on after it.</p>
+          <div class="formbar"><button class="btn primary" type="submit">Start focused run</button><span class="hint" id="lf_msg"></span></div>
+        </form>
+        <p class="hint longhint" style="margin:8px 0 0">The lab runs once a day at 16:05 IST or non-stop (see Lab settings). Each run invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year (once a day, and only at night, 11:30 PM – 8:30 AM). A run stopped by hand pauses the lab for an hour, then it carries on by itself. “Focused run” researches only the assets you pick, with new strategies only. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations, and with small steps on every indicator setting (lengths ±1, ±2 and ±10%, Supertrend factor and Bollinger width ±0.25/±0.5, RSI / ADX levels ±2/±5), which get a double share. About a quarter of new strategies are built around liquidity sweeps. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and must also make money in the last 3 months, which the ranking never saw (round 1); then work on other assets and other timeframes (round 2); then make money in <strong>every one of the past 10 years</strong> (5 years for 5-minute strategies, the history Dhan keeps), so nothing passes on one big move of the underlying (round 3). 5-minute strategies must also stay profitable, in total and in every year, with charges and slippage doubled. Every backtest fills each order a little worse than the test price (slippage set per asset from how liquid it is: 0.01% on Nifty and Gold up to 0.04–0.05% on Midcap Select, Nifty Next 50, Bankex, Nickel and the mini contracts; 0.5–2% of premium on options). Variations come from at most 6 winners per asset, so no single asset fills the runs. Crypto (Bitcoin, Ether, Solana, XRP and any coin added under Connections) is tested as Delta Exchange perpetual futures on 15-minute candles (Binance spot history before the coin listed on Delta India), on the crypto day 05:30–24:00 IST every day of the week, with Delta's 0.05% fee + GST, funding on long positions and per-coin slippage. Strategies that fail are cleared straight away; a one-line record stays so the lab never tries them again.</p>
         <div id="lab_status" style="margin-top:12px"></div>
         <div id="lab_reqs" style="margin-top:12px"></div>
         <form id="labSetForm" hidden style="margin-top:14px">
@@ -3258,7 +3267,7 @@ async function loadLab() {
   }
   const [settings, runs] = await Promise.all([
     db.from("lab_settings").select("*").eq("id", 1).maybeSingle().then(must),
-    db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at").order("id", { ascending: false }).limit(8).then(must),
+    db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at, focus:settings->focus, fassets:settings->assets").order("id", { ascending: false }).limit(8).then(must),
   ]);
   lab.settings = settings; lab.runs = runs;
   let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary")
@@ -3281,6 +3290,7 @@ function renderLabStatus() {
   $("lab_stop").hidden = !(r && r.status === "running");
   $("lab_run").disabled = !!(r && r.status === "running");
   if (!r) { box.innerHTML = '<div class="banner info">No runs yet. The first one starts at 16:05 IST, or press “Run now”.</div>'; return; }
+  const pausedTill = lab.settings && lab.settings.paused_until && Date.parse(lab.settings.paused_until) > Date.now() ? lab.settings.paused_until : null;
   const c = r.counts || {};
   const chip = r.status === "running" ? '<span class="chip blue">Running</span>' : r.status === "done" ? '<span class="chip green">Finished</span>' : r.status === "failed" ? '<span class="chip red">Failed</span>' : '<span class="chip">Stopped</span>';
   const phases = { data: "1 of 5 · updating candles", generate: "2 of 5 · writing strategies", screen: "3 of 5 · backtesting", robust: r.trigger === "robust" ? "re-check · other assets, timeframes, past years" : "4 of 5 · other assets, timeframes, past years", options: "5 of 5 · real option prices", done: "done" };
@@ -3293,8 +3303,30 @@ function renderLabStatus() {
     <div class="stat"><span class="label">Test year</span><span class="v" style="font-size:13px">${esc(r.from_day || "")} → ${esc(r.to_day || "")}<br><span class="hint">ranked to ${esc(r.split_day || "")}</span></span></div>
   </div>
   <p class="hint" style="margin:8px 0 0">${r.status === "running" ? `Step ${esc(phases[r.phase] || r.phase)}: ${esc(r.progress || "")}` : esc(r.progress || "")}</p>
-  ${r.error ? `<div class="banner err" style="margin-top:8px">${esc(r.error)}</div>` : ""}`;
+  ${r.error ? `<div class="banner err" style="margin-top:8px">${esc(r.error)}</div>` : ""}
+  ${pausedTill && r.status !== "running" ? `<div class="banner warn" style="margin-top:8px">Stopped by hand. The lab starts again by itself at ${esc(istText(pausedTill))} IST, or press “Run now”.</div>` : ""}
+  ${r.focus === true ? `<div class="banner info" style="margin-top:8px">Focused run on ${esc((r.fassets || []).map(labAssetName).join(", "))}: new strategies only.</div>` : ""}`;
 }
+$("lab_focus_btn").addEventListener("click", () => {
+  const f = $("labFocusForm"); f.hidden = !f.hidden; if (f.hidden) return;
+  const box = $("lf_assets"); box.innerHTML = "";
+  for (const [k, p] of Object.entries(PRESETS)) {
+    const l = document.createElement("label"); const i = document.createElement("input"); i.type = "checkbox"; i.value = k;
+    l.append(i, document.createTextNode(p.name)); box.append(l);
+  }
+});
+$("labFocusForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const assets = [...document.querySelectorAll("#lf_assets input:checked")].map((i) => i.value);
+  if (!assets.length) { $("lf_msg").textContent = "Tick at least one asset."; return; }
+  const r = lab.runs[0], busy = r && r.status === "running";
+  const go = () => run(e.submitter, async () => {
+    must(await db.rpc("lab_run_focus", { p_assets: assets, p_n: Number($("lf_n").value) }));
+    $("labFocusForm").hidden = true; toast("Focused run started."); await new Promise((res) => setTimeout(res, 4000)); await loadLab();
+  });
+  if (busy) askConfirm("<strong>Replace the run that is going on now?</strong><br>Its results so far are kept; the automatic runs carry on after your focused run.", "Start focused run", go);
+  else go();
+});
 /** Total profit of the year-by-year test (up to 10 years; 5 for 5-minute strategies), 1 lot after charges. */
 function longTotal(r) {
   const x = robOf(r);
