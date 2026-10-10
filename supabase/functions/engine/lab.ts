@@ -1305,6 +1305,15 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
     const a = LAB_ASSETS[row.asset];
     const job = row.opt_job ?? { v: 0 };
     const variants = optVariants(row.config);
+    // A version whose pricing keeps getting cut off (the function's CPU limit) without moving forward is skipped,
+    // so one heavy version can never hold up the whole lab.
+    job.tries = (job.tries ?? 0) + 1;
+    if (job.tries > 3) {
+      const lastV = job.v + 1 >= variants.length;
+      await sb.from("lab_results").update({ stage: lastV ? "priced" : "pricing", opt_job: lastV ? null : { v: job.v + 1 } }).eq("id", row.id);
+      continue;
+    }
+    await sb.from("lab_results").update({ opt_job: job }).eq("id", row.id);
     const vr = variants[job.v];
     const s = { ...row.config, trade_type: "OPTIONS", option_side: vr.side === "SELL" ? "SELL" : "BUY", structure: vr.structure ?? null, risk: vr.risk, strike_offset: 0, strike_step: a.step, expiry_flag: a.flag, expiry_weekday: a.wd, roll_on_expiry: true };
     if (!job.plans) {
@@ -1326,6 +1335,7 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
         return true;
       } else { await sb.from("lab_results").update({ stage: "error", error: e instanceof Error ? e.message : String(e), opt_job: null }).eq("id", row.id); continue; }
     }
+    job.tries = 0; // this instalment finished normally: not stuck
     job.trades = job.trades.concat(slim(res.trades)); job.cursor = res.next; job.acc = res.acc;
     if (job.cursor >= job.plans.length) {
       // Option buying ties up the premium; writing ties up margin on the index's contract value.
