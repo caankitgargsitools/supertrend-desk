@@ -365,7 +365,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 <body>
 
 <header class="bar">
-  <div class="brand"><h1><span class="b">CA</span> <span class="r">Ankit</span> <span class="y">Garg</span> <span class="g">Trade Desk</span></h1><small>Algo desk · Dhan · NSE / BSE / MCX</small></div>
+  <div class="brand"><h1><span class="b">CA</span> <span class="r">Ankit</span> <span class="y">Garg</span> <span class="g">Trade Desk</span></h1><small>Algo desk · Dhan · NSE / BSE / MCX · Delta crypto</small></div>
   <span class="mk"><span class="dot" id="mktDot"></span><span id="mktText">Checking market hours…</span></span>
   <button class="btn small" id="menuBtn" type="button" aria-expanded="false" aria-controls="nav">☰ Menu</button>
   <nav class="nav" id="nav" aria-label="Pages" hidden>
@@ -487,7 +487,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
         </div>
         <div class="grid" id="cx_custom" style="margin-top:10px" hidden>
           <label class="f"><span>Dhan security ID</span><input id="cx_sec" inputmode="numeric" placeholder="e.g. 13"></label>
-          <label class="f"><span>Segment</span><select id="cx_seg"><option>IDX_I</option><option>NSE_EQ</option><option>BSE_EQ</option><option>NSE_FNO</option><option>BSE_FNO</option><option>MCX_COMM</option></select></label>
+          <label class="f"><span>Segment</span><select id="cx_seg"><option>IDX_I</option><option>NSE_EQ</option><option>BSE_EQ</option><option>NSE_FNO</option><option>BSE_FNO</option><option>MCX_COMM</option><option>DELTA</option></select></label>
           <label class="f"><span>Instrument</span><select id="cx_instr"><option>INDEX</option><option>EQUITY</option><option>FUTIDX</option><option>FUTSTK</option><option>OPTIDX</option><option>OPTSTK</option><option>FUTCOM</option></select></label>
           <div class="f"><span>&nbsp;</span><button class="btn" id="cx_load" type="button">Load</button></div>
         </div>
@@ -586,7 +586,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
               <label class="f"><span id="lotLabel">Lot size (verify current)</span><input id="f_lot_size" type="number" min="1" step="1"></label>
               <label class="f adv"><span>Send quantity as</span><select id="f_qty_mode"><option value="LOTS">Lots</option><option value="UNITS">Units</option></select></label>
               <label class="f adv"><span>Product type</span><select id="f_product_type"><option value="I">I · Intraday</option><option value="M">M · Carry forward</option></select></label>
-              <label class="f adv"><span>Exchange</span><select id="f_exchange"><option>NSE</option><option>BSE</option><option>MCX</option></select></label>
+              <label class="f adv"><span>Exchange</span><select id="f_exchange"><option>NSE</option><option>BSE</option><option>MCX</option><option value="DELTA">DELTA (crypto)</option></select></label>
               <label class="f adv"><span>Option symbol (Dhan)</span><input id="f_dhan_symbol"></label>
               <label class="f adv"><span>Futures symbol (Dhan)</span><input id="f_futures_symbol"></label>
             </div>
