@@ -3823,7 +3823,8 @@ function variationForm(box, src) {
     box.querySelector(".vf-tfs").hidden = !exact;
     box.querySelectorAll(".vk").forEach((l) => { const k = l.querySelector("input").dataset.k; l.hidden = exact && !["settings", "stops", "trailing"].includes(k); if (exact && ["assets", "timeframes"].includes(k)) l.querySelector("input").checked = false; });
     box.querySelector("#vf_n").closest(".f").hidden = exact;
-    if (exact && !box.dataset.cleared) { box.querySelectorAll("[data-a]").forEach((i) => { i.checked = false; }); box.dataset.cleared = "1"; }
+    // A manual test starts empty: only what is ticked afterwards (an asset alone tests just that asset).
+    if (exact && !box.dataset.cleared) { box.querySelectorAll("[data-a]").forEach((i) => { i.checked = false; }); box.querySelectorAll(".vk input").forEach((i) => { i.checked = false; }); box.dataset.cleared = "1"; }
   };
   box.querySelectorAll('[name="vf_mode"]').forEach((r) => r.addEventListener("change", syncMode));
   if (src.manual) { box.querySelector('[name="vf_mode"][value="exact"]').checked = true; syncMode(); }
