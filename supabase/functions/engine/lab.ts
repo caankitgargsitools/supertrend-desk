@@ -1326,7 +1326,9 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
     const busyBefore = job.acc.busy ?? 0;
     let res: { trades: Record<string, unknown>[]; next: number; acc: Acc };
     try {
-      res = await priceBatch(s, ctx.creds, labParams(a, win.from, win.to, capital), job.plans as Plan[], job.cursor, job.acc, ctx.started + WALL_BUDGET - 10000, async () => {}, store);
+      res = await priceBatch(s, ctx.creds, labParams(a, win.from, win.to, capital), job.plans as Plan[], job.cursor, job.acc,
+        // Short slices: reading many saved option series is CPU work, and the function is stopped after 2 s of CPU.
+        Math.min(ctx.started + WALL_BUDGET - 10000, Date.now() + 8000), async () => {}, store);
     } catch (e) {
       if (e instanceof DhanBusyError) { job.acc.busy = busyBefore + 1; res = { trades: [], next: job.cursor, acc: job.acc }; }
       else if (TOKEN_ERR.test(e instanceof Error ? e.message : String(e))) {
