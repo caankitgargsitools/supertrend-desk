@@ -4,7 +4,7 @@
 //   2. priceBatch    – prices as many planned trades as fit in one invocation; the engine chains the rest
 //   3. summarize     – totals once every trade is priced
 import { legsFor, legSign, legText, structMargin, structName, structOf } from "./structures.ts";
-import { CRYPTO } from "./crypto.ts";
+import { CRYPTO, cryptoDaily, cryptoFunding } from "./crypto.ts";
 import { Dhan, DhanBusyError, type OptBar } from "./dhan.ts";
 import {
   addDays, aggregate, type Bar, type DayBar, dayMinutes, isCommodity, isCrypto, isLastWeekdayOfMonth, ist, minToTime, partialDay, type Raw,
@@ -49,7 +49,18 @@ export const slipped = (px: number, buy: boolean, frac: number, opt: boolean) =>
   const d = Math.max(opt ? 0.05 : 0, px * frac);
   return buy ? px + d : Math.max(opt ? 0.05 : 0, px - d);
 };
-export type BtParams = { no_slippage?: boolean; from: string; to: string; capital: number; brokerage: number; other_pct?: number; charges?: ChargeRates; near_code: number; sizing?: boolean; deploy_pct?: number; margin_rate?: number | null; sell_rate?: number | null };
+/** Funding over a holding period for a long position of this rupee value (negative = received). rates: % per 8h by UTC day. */
+export function fundingCost(fromSec: number, toSec: number, value: number, rates: Record<string, number> | null): number {
+  let cost = 0;
+  for (let a = fromSec; a < toSec;) {
+    const dayStart = Math.floor(a / 86400) * 86400, b = Math.min(toSec, dayStart + 86400);
+    const r = rates?.[new Date(dayStart * 1000).toISOString().slice(0, 10)] ?? 0.01;
+    cost += value * (r / 100) * ((b - a) / 3600 / 8);
+    a = b;
+  }
+  return cost;
+}
+export type BtParams = { funding?: Record<string, number> | null; no_slippage?: boolean; from: string; to: string; capital: number; brokerage: number; other_pct?: number; charges?: ChargeRates; near_code: number; sizing?: boolean; deploy_pct?: number; margin_rate?: number | null; sell_rate?: number | null };
 export type ChargeBreakdown = { brokerage: number; stt: number; exch: number; sebi: number; gst: number; stamp: number; total: number };
 
 /** Charges for one round trip (one buy and one sell order), the way the broker's calculator works them out. */
@@ -211,7 +222,14 @@ export async function planBacktest(
     const daily: DayBar[] = ruleTfs!.daily
       ? await dhan.daily(dataSec(s), seg, s.data_instrument, addDays(p.from, -Math.ceil(warmBars * 1.5)), addDays(p.to, 1))
       : [];
-    plans.push(...simulateRules(s, { raw, byDay, daily }, p.from, p.to));
+    // Crypto conditions on Bitcoin's trend or the funding rate need those series too.
+    const ext: Partial<SimData> = {};
+    if (isCrypto(seg)) {
+      const cs = [rules!.long, rules!.short, rules!.exitLong, rules!.exitShort].flatMap((x) => x?.conds ?? []);
+      if (cs.some((c) => c.ind === "BTC") && s.underlying !== "BTCUSD") ext.btc = await cryptoDaily("BTCUSD", addDays(p.from, -800), addDays(p.to, 1));
+      if (cs.some((c) => c.ind === "FUND")) ext.funding = await cryptoFunding(String(s.underlying), addDays(p.from, -3), addDays(p.to, 1));
+    }
+    plans.push(...simulateRules(s, { raw, byDay, daily, ...ext }, p.from, p.to));
   } else if (kind !== "TIMED") {
     const sigName = kind === "HA" ? "Heikin Ashi" : "Supertrend";
     await progress(`Replaying ${sigName} signals`);
@@ -288,7 +306,9 @@ export async function planBacktest(
         }
       }
 
-      const inWindow = b.endMin >= ss && b.endMin < le && (!s.intraday || b.endMin < sq) && b.endMin < sessionFor(seg, b.day).close;
+      // Crypto never closes: a positional crypto strategy also decides on the candle that ends at midnight.
+    const allDay = isCrypto(seg) && !s.intraday;
+    const inWindow = b.endMin >= ss && (allDay || b.endMin < le) && (!s.intraday || b.endMin < sq) && (allDay || b.endMin < sessionFor(seg, b.day).close);
       if (!inWindow) continue;
       const desired = want(trend[i]);
       const flipped = trend[i] !== trend[i - 1];
@@ -384,7 +404,7 @@ export async function planBacktest(
 }
 
 /** Candle data a condition strategy is simulated on. */
-export type SimData = { raw: MBar[]; byDay: Map<string, MBar[]>; daily: DayBar[] };
+export type SimData = { raw: MBar[]; byDay: Map<string, MBar[]>; daily: DayBar[]; btc?: DayBar[]; funding?: Map<string, number> };
 
 /**
  * Every trade a condition strategy would have made between `from` and `to` (pure: no network).
@@ -418,7 +438,7 @@ export function simulateRules(s: Record<string, any>, data: SimData, from: strin
 
   if (rules.daily) {
     const days = data.daily;
-    const book = new RuleBook(rules, s.timeframe_min, new Map(), days, data.byDay as any, seg, cache);
+    const book = new RuleBook(rules, s.timeframe_min, new Map(), days, data.byDay as any, seg, cache, { btc: data.btc, funding: data.funding });
     const openT = (day: string) => Date.parse(`${day}T00:00:00+05:30`) / 1000 + sessionFor(seg, day).open * 60 + 60;
     const close = (d: DayBar, why: string, px: number, atClose = false) => {
       if (!pos) return;
@@ -457,7 +477,7 @@ export function simulateRules(s: Record<string, any>, data: SimData, from: strin
   const nowSec = Date.now() / 1000;
   const frames = new Map<number, Bar[]>();
   for (const tf of tfs.intraday) frames.set(tf, M(`frame|${tf}`, () => aggregate(data.raw, tf, seg).filter((b) => b.endT <= nowSec)));
-  const book = new RuleBook(rules, s.timeframe_min, frames, data.daily, data.byDay as any, seg, cache);
+  const book = new RuleBook(rules, s.timeframe_min, frames, data.daily, data.byDay as any, seg, cache, { btc: data.btc, funding: data.funding });
   const bars = frames.get(s.timeframe_min)!;
   const ss = timeToMin(String(s.session_start)), le = timeToMin(String(s.last_entry)), sq = timeToMin(String(s.square_off));
   const close = (day: string, min: number, why: string, px?: number) => {
@@ -481,7 +501,9 @@ export function simulateRules(s: Record<string, any>, data: SimData, from: strin
     lastDay = b.day;
     if (prev === null) prev = book.at(bars[i - 1].endT);
     const now = book.at(b.endT);
-    const inWindow = b.endMin >= ss && b.endMin < le && (!s.intraday || b.endMin < sq) && b.endMin < sessionFor(seg, b.day).close;
+    // Crypto never closes: a positional crypto strategy also decides on the candle that ends at midnight.
+    const allDay = isCrypto(seg) && !s.intraday;
+    const inWindow = b.endMin >= ss && (allDay || b.endMin < le) && (!s.intraday || b.endMin < sq) && (allDay || b.endMin < sessionFor(seg, b.day).close);
     if (inWindow) {
       const dc = decide(pos ? pos.side : "FLAT", now, prev, cfg);
       if (dc.exit) close(b.day, b.endMin, dc.why);
@@ -728,13 +750,13 @@ export async function priceBatch(
     // Buy and sell legs: a long (or an option buy) buys at entry and sells at exit; a short (or an option write) the reverse.
     const buyVal = (dir === 1 ? inPx : outPx) * units, sellVal = (dir === 1 ? outPx : inPx) * units;
     const ch = tradeCharges(p, isOpt, buyVal, sellVal);
-    // Crypto perpetuals: funding, charged to longs at 0.01% of the position every 8 hours held (its usual level;
-    // shorts usually receive it, which the test leaves out to stay on the safe side).
+    // Crypto perpetuals: funding (see fundingCost).
     let fundRs = 0;
-    if (isCrypto(String(s.data_segment)) && dir === 1 && !p.no_slippage) {
+    if (isCrypto(String(s.data_segment)) && !p.no_slippage) {
+      // Funding for the hours held: Delta's actual daily rate where known (late 2023 on), else its usual 0.01% per
+      // 8 hours. Longs pay a positive rate and shorts receive it (and the other way round when it is negative).
       const at = (d: string, m: number) => Date.parse(`${d}T00:00:00+05:30`) / 1000 + m * 60;
-      const hrs = Math.max(0, (at(t.exitDay, t.exitMin) - at(t.entryDay, t.entryMin)) / 3600);
-      fundRs = rawIn * units * 0.0001 * (hrs / 8);
+      fundRs = fundingCost(at(t.entryDay, t.entryMin), at(t.exitDay, t.exitMin), rawIn * units, p.funding ?? null) * dir;
       ch.total = Math.round((ch.total + fundRs) * 100) / 100;
     }
     // Whole rupees only: paisa are dropped (not rounded up or down).

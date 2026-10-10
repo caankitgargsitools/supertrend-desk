@@ -770,7 +770,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
           <p class="hint">A run on only the assets you tick: every strategy in it is new (no re-tests of earlier winners, no variations), shared between those assets, and goes through the same three rounds. It replaces the automatic run that is going on now; the automatic runs carry on after it.</p>
           <div class="formbar"><button class="btn primary" type="submit">Start focused run</button><span class="hint" id="lf_msg"></span></div>
         </form>
-        <p class="hint longhint" style="margin:8px 0 0">The lab runs once a day at 16:05 IST or non-stop (see Lab settings). Each run invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year (once a day, and only at night, 11:30 PM – 8:30 AM). A run stopped by hand pauses the lab for an hour, then it carries on by itself. “Focused run” researches only the assets you pick, with new strategies only. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations, and with small steps on every indicator setting (lengths ±1, ±2 and ±10%, Supertrend factor and Bollinger width ±0.25/±0.5, RSI / ADX levels ±2/±5), which get a double share. About a quarter of new strategies are built around liquidity sweeps. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and must also make money in the last 3 months, which the ranking never saw (round 1); then work on other assets and other timeframes (round 2); then make money in <strong>every one of the past 10 years</strong> (5 years for 5-minute strategies, the history Dhan keeps), so nothing passes on one big move of the underlying (round 3). 5-minute strategies must also stay profitable, in total and in every year, with charges and slippage doubled. Every backtest fills each order a little worse than the test price (slippage set per asset from how liquid it is: 0.01% on Nifty and Gold up to 0.04–0.05% on Midcap Select, Nifty Next 50, Bankex, Nickel and the mini contracts; 0.5–2% of premium on options). Variations come from at most 6 winners per asset, so no single asset fills the runs. Crypto (Bitcoin, Ether, Solana, XRP and any coin added under Connections) is tested as Delta Exchange perpetual futures on 15-minute candles (Binance spot history before the coin listed on Delta India), on the crypto day 05:30–24:00 IST every day of the week, with Delta's 0.05% fee + GST, funding on long positions and per-coin slippage. Strategies that fail are cleared straight away; a one-line record stays so the lab never tries them again.</p>
+        <p class="hint longhint" style="margin:8px 0 0">The lab runs once a day at 16:05 IST or non-stop (see Lab settings). Each run invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year (once a day, and only at night, 11:30 PM – 8:30 AM). A run stopped by hand pauses the lab for an hour, then it carries on by itself. “Focused run” researches only the assets you pick, with new strategies only. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations, and with small steps on every indicator setting (lengths ±1, ±2 and ±10%, Supertrend factor and Bollinger width ±0.25/±0.5, RSI / ADX levels ±2/±5), which get a double share. About a quarter of new strategies are built around liquidity sweeps. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and must also make money in the last 3 months, which the ranking never saw (round 1); then work on other assets and other timeframes (round 2); then make money in <strong>every one of the past 10 years</strong> (5 years for 5-minute strategies, the history Dhan keeps), so nothing passes on one big move of the underlying (round 3). 5-minute strategies must also stay profitable, in total and in every year, with charges and slippage doubled. Every backtest fills each order a little worse than the test price (slippage set per asset from how liquid it is: 0.01% on Nifty and Gold up to 0.04–0.05% on Midcap Select, Nifty Next 50, Bankex, Nickel and the mini contracts; 0.5–2% of premium on options). Variations come from at most 6 winners per asset, so no single asset fills the runs. Crypto (Bitcoin, Ether, Solana, XRP and any coin added under Connections) is tested as Delta Exchange perpetual futures round the clock, every day, on daily, weekly and 15-minute-based candles (Binance spot history before the coin traded properly on Delta India), with Delta's 0.05% fee + GST, Delta's actual funding (longs pay, shorts receive) and per-coin slippage. Crypto strategies are mostly slow trend followers that trade both ways: Supertrend and Heikin Ashi on daily and weekly candles, moving averages, Donchian breakouts, dips bought only in an uptrend, the late-US-evening hours, with volatility and Bitcoin-trend filters. Strategies that fail are cleared straight away; a one-line record stays so the lab never tries them again.</p>
         <div id="lab_status" style="margin-top:12px"></div>
         <div id="lab_reqs" style="margin-top:12px"></div>
         <form id="labSetForm" hidden style="margin-top:14px">
@@ -1066,7 +1066,7 @@ function mcxClose(date) {
 }
 function marketOpenFor(seg) {
   const n = istNow();
-  if (isCrypto(seg)) return n.min >= 330; // crypto: every day, 05:30–24:00 IST
+  if (isCrypto(seg)) return true; // crypto: round the clock, every day
   if (n.wd < 1 || n.wd > 5) return false;
   return isMcx(seg) ? n.min >= 540 && n.min < mcxClose(istDate(0)) : n.min >= 555 && n.min < 930;
 }
@@ -1362,9 +1362,16 @@ const IND_DEFS = {
   ORB: { name: "Opening range", params: [["mins", "First minutes", 15]], ops: [["above_orh", "price above range high"], ["below_orl", "price below range low"], ["cross_above_orh", "breaks above range high"], ["cross_below_orl", "breaks below range low"]] },
   SWEEP: { name: "Liquidity sweep", params: [["src", "Levels swept", 0], ["len", "Swing look-back (candles)", 20], ["within", "Signal lasts (candles)", 1]],
     ops: [["bull_sweep", "lows swept, closed back above (bullish)"], ["bear_sweep", "highs swept, closed back below (bearish)"]] },
+  DON: { name: "Donchian channel (N-candle high / low)", params: [["len", "Candles", 20]], ops: [["new_high", "closes above the highest high (breakout)"], ["new_low", "closes below the lowest low (breakdown)"], ["above_mid", "price above the channel middle"], ["below_mid", "price below the channel middle"]] },
+  VOL: { name: "Volatility regime", params: [["len", "Volatility over (candles)", 20], ["look", "Compared with the last (candles)", 250]], ops: [["high_vol", "is high (above its median)"], ["low_vol", "is low (below its median)"]] },
+  TIME: { name: "Time of day / day of week (IST)", params: [["from", "From hour (0–23)", 2], ["to", "To hour (1–24)", 5], ["d", "Day (0 Sun … 6 Sat)", 5]], ops: [["in_hours", "is between the hours"], ["on_weekday", "is the day"], ["not_weekend", "is a weekday (Mon–Fri)"]] },
+  BTC: { name: "Bitcoin trend (crypto filter)", params: [["len", "EMA length (days)", 50]], ops: [["btc_up", "Bitcoin's daily close above its EMA"], ["btc_down", "Bitcoin's daily close below its EMA"]] },
+  FUND: { name: "Funding rate (crypto, % per 8h)", params: [], ops: [["gt", "is above"], ["lt", "is below"]], value: 0.01 },
 };
+// Parameters that may be 0 (an hour of the day, Sunday).
+const ZERO_OK = new Set(["from", "d"]);
 const VALUE_OPS = new Set(["gt", "lt", "cross_above", "cross_below"]);
-const COND_TFS = [["base", "Strategy timeframe"], ["1", "1 min"], ["3", "3 min"], ["5", "5 min"], ["15", "15 min"], ["25", "25 min"], ["30", "30 min"], ["60", "1 hour"], ["75", "75 min"], ["120", "2 hours"], ["125", "125 min"], ["240", "4 hours"], ["D", "Daily"]];
+const COND_TFS = [["base", "Strategy timeframe"], ["1", "1 min"], ["3", "3 min"], ["5", "5 min"], ["15", "15 min"], ["25", "25 min"], ["30", "30 min"], ["45", "45 min"], ["60", "1 hour"], ["75", "75 min"], ["120", "2 hours"], ["125", "125 min"], ["240", "4 hours"], ["D", "Daily"], ["W", "Weekly"]];
 const RULE_SETS = [
   ["long", "buy", "Buy (go long / bullish options) when", true],
   ["short", "sell", "Sell (go short / bearish options) when", true],
@@ -1393,8 +1400,8 @@ function condRow(setKey, idx, c) {
     renderRules(); formDirty = true;
   });
   row.append(wrapLabel("Indicator", ind));
-  const tf = mkSel(COND_TFS, ruleState.daily ? "D" : c.tf); tf.addEventListener("change", () => { c.tf = tf.value; formDirty = true; });
-  if (ruleState.daily) tf.disabled = true;
+  // A once-a-day strategy reads daily or weekly candles.
+  const tf = mkSel(ruleState.daily ? [["D", "Daily"], ["W", "Weekly"]] : COND_TFS, ruleState.daily ? (c.tf === "W" ? "W" : "D") : c.tf); tf.addEventListener("change", () => { c.tf = tf.value; formDirty = true; });
   row.append(wrapLabel("Timeframe", tf));
   const slowWraps = [];
   for (const [k, label, dv] of def.params) {
@@ -1403,7 +1410,7 @@ function condRow(setKey, idx, c) {
       sel.addEventListener("change", () => { c.p = c.p || {}; c.p.src = Number(sel.value); formDirty = true; });
       row.append(wrapLabel(label, sel)); continue;
     }
-    const inp = document.createElement("input"); inp.type = "number"; inp.step = k === "factor" || k === "mult" ? "0.1" : "1"; inp.min = "1";
+    const inp = document.createElement("input"); inp.type = "number"; inp.step = k === "factor" || k === "mult" ? "0.1" : "1"; inp.min = ZERO_OK.has(k) ? "0" : "1";
     inp.value = String((c.p && c.p[k] !== undefined) ? c.p[k] : dv);
     inp.addEventListener("input", () => { c.p = c.p || {}; c.p[k] = Number(inp.value); });
     const w = wrapLabel(label, inp); row.append(w);
@@ -1457,11 +1464,12 @@ function readRules() {
   for (const k of Object.keys(r)) {
     for (const c of r[k].conds) {
       if (daily) {
-        c.tf = "D";
+        if (c.tf !== "W") c.tf = "D";
         if (c.ind === "VWAP" || c.ind === "ORB") throw new Error("VWAP and opening range need intraday candles; remove them for a once-a-day strategy.");
       }
       const def = IND_DEFS[c.ind];
-      c.p = Object.fromEntries(def.params.filter(([pk]) => pk !== "len2" || /^fast_/.test(c.op)).map(([pk, , dv]) => [pk, Number.isFinite(Number(c.p?.[pk])) && Number(c.p?.[pk]) > 0 ? Number(c.p[pk]) : dv]));
+      c.p = Object.fromEntries(def.params.filter(([pk]) => pk !== "len2" || /^fast_/.test(c.op)).map(([pk, , dv]) => [pk, Number.isFinite(Number(c.p?.[pk])) && (Number(c.p?.[pk]) > 0 || (ZERO_OK.has(pk) && Number(c.p?.[pk]) === 0)) ? Number(c.p[pk]) : dv]));
+      if (c.ind === "TIME" && (c.p.from > 23 || c.p.to > 24 || c.p.d > 6)) throw new Error("Time: hours 0–24 and day 0 (Sunday) to 6 (Saturday).");
       if (VALUE_OPS.has(c.op)) { if (!Number.isFinite(Number(c.v))) throw new Error(`Enter a value for ${def.name}.`); c.v = Number(c.v); } else delete c.v;
       if (c.ind === "VWAP" && c.tf === "D") throw new Error("VWAP is an intraday measure; pick an intraday timeframe for it.");
     }
@@ -1822,7 +1830,7 @@ const IX = {
 };
 function istDay(t) { return new Date((t + 19800) * 1000).toISOString().slice(0, 10); }
 function istMinOf(t) { const d = new Date((t + 19800) * 1000); return d.getUTCHours() * 60 + d.getUTCMinutes(); }
-const sessOpen = () => isCrypto(cx.seg) ? 330 : isMcx(cx.seg) ? 540 : 555;
+const sessOpen = () => isCrypto(cx.seg) ? 0 : isMcx(cx.seg) ? 540 : 555;
 const sessClose = (day) => isCrypto(cx.seg) ? 1440 : isMcx(cx.seg) ? mcxClose(day) : 930;
 function haCandlesJS(bars) { const h = heikinAshiJS(bars); return bars.map((b, i) => ({ ...b, o: h.hO[i], c: h.hC[i], h: Math.max(b.h, h.hO[i], h.hC[i]), l: Math.min(b.l, h.hO[i], h.hC[i]) })); }
 const REAL_PRICE_IND = new Set(["VWAP", "PDHL", "ORB", "SWEEP"]);
@@ -2726,11 +2734,11 @@ $("f_underlying").addEventListener("change", () => {
   const p = PRESETS[$("f_underlying").value]; if (!p) return;
   for (const [k, v] of Object.entries(p)) { const el = $("f_" + k); if (el && k !== "name") el.value = String(v); }
   if (p.crypto) {
-    // Crypto: Delta perpetual futures, quantity in lots, every day 05:30–24:00 IST.
+    // Crypto: Delta perpetual futures, quantity in lots, round the clock, every day.
     $("f_trade_type").value = "FUTURES"; $("f_qty_mode").value = "LOTS"; $("f_product_type").value = "M";
-    $("f_session_start").value = "05:30"; $("f_last_entry").value = "23:30"; $("f_square_off").value = "23:45";
+    $("f_session_start").value = "00:00"; $("f_last_entry").value = "23:59"; $("f_square_off").value = "23:59"; $("f_intraday").value = "false";
     const c = coinOf($("f_underlying").value) || {};
-    $("formMsg").textContent = `Filled ${p.name.replace(/\s*\(.*\)$/, "")} on Delta Exchange: perpetual futures, 1 lot = ${lotCoinsOf(c)} ${String(c.key || "").replace(/USD$/, "")} (₹${p.lot_size} per $1 move at ₹${USD_INR}/$), crypto day 05:30–24:00 IST every day (square-off 23:45 for intraday). Orders go through your Delta API key.`;
+    $("formMsg").textContent = `Filled ${p.name.replace(/\s*\(.*\)$/, "")} on Delta Exchange: perpetual futures, 1 lot = ${lotCoinsOf(c)} ${String(c.key || "").replace(/USD$/, "")} (₹${p.lot_size} per $1 move at ₹${USD_INR}/$), round the clock, every day (the crypto day is the IST calendar day; set a square-off time only for intraday). Orders go through your Delta API key.`;
   } else if (p.commodity) {
     // MCX futures: quantity in lots, evening session.
     $("f_trade_type").value = "FUTURES"; $("f_qty_mode").value = "LOTS";
@@ -2768,8 +2776,8 @@ function readForm() {
     if (out.intraday && out.last_entry > out.square_off) throw new Error("“No trades after” must not be later than the square-off time.");
   } else {
     const mcx = isMcx(out.data_segment), cry = isCrypto(out.data_segment);
-    const inMkt = (t) => cry ? t >= "05:30" && t <= "23:59" : mcx ? t >= "09:00" && t < "23:30" : t >= "09:15" && t < "15:30";
-    if (!inMkt(out.entry_time) || !inMkt(out.exit_time)) throw new Error(cry ? "Buy and sell times must be between 05:30 and 23:59 (the crypto day)." : mcx ? "Buy and sell times must be between 09:00 and 23:29." : "Buy and sell times must be between 09:15 and 15:29.");
+    const inMkt = (t) => cry ? t >= "00:00" && t <= "23:59" : mcx ? t >= "09:00" && t < "23:30" : t >= "09:15" && t < "15:30";
+    if (!inMkt(out.entry_time) || !inMkt(out.exit_time)) throw new Error(cry ? "Buy and sell times must be between 00:00 and 23:59." : mcx ? "Buy and sell times must be between 09:00 and 23:29." : "Buy and sell times must be between 09:15 and 15:29.");
     if (!out.exit_next_day && out.exit_time <= out.entry_time) throw new Error("For a same-day exit, “Sell at” must be later than “Buy at”.");
     if (out.exit_next_day && out.trade_type === "OPTIONS" && !out.roll_on_expiry) throw new Error("For overnight option trades, set “On expiry day” to use next week's expiry; today's contract expires before your exit.");
     if (out.exit_next_day && out.product_type === "I") throw new Error("Overnight trades need product type M (carry forward); intraday positions get squared off by the broker.");

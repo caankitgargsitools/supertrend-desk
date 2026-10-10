@@ -4,7 +4,7 @@
 // strategy's own timeframe closes, against the latest COMPLETED candle of each condition's timeframe, so a
 // backtest never looks ahead.
 import { adx, atr, bollinger, ema, macd, rsi, sma, vwap } from "./indicators.ts";
-import { type Bar, type DayBar, heikinAshi, ist, sessionFor, supertrend } from "./logic.ts";
+import { addDays, type Bar, type DayBar, heikinAshi, ist, sessionFor, supertrend, weekdayOf } from "./logic.ts";
 
 export type Cond = { ind: string; tf: string; p?: Record<string, number>; op: string; v?: number };
 export type RuleSet = { mode: "ALL" | "ANY"; conds: Cond[] };
@@ -20,7 +20,21 @@ export function haCandles<T extends { o: number; h: number; l: number; c: number
   const { ho, hc } = heikinAshi(bars);
   return bars.map((b, i) => ({ ...b, o: ho[i], c: hc[i], h: Math.max(b.h, ho[i], hc[i]), l: Math.min(b.l, ho[i], hc[i]) }));
 }
-const REAL_PRICE = new Set(["VWAP", "PDHL", "ORB", "SWEEP"]);
+const REAL_PRICE = new Set(["VWAP", "PDHL", "ORB", "SWEEP", "TIME", "BTC", "FUND"]);
+/** Monday of a date's week (weeks run Monday–Sunday). */
+export const mondayOf = (day: string) => addDays(day, -((weekdayOf(day) + 6) % 7));
+/** Weekly candles from daily ones, each dated by its Monday. */
+export function weeklyBars(daily: DayBar[]): DayBar[] {
+  const out: DayBar[] = [];
+  for (const d of daily) {
+    const wk = mondayOf(d.day), last = out[out.length - 1];
+    if (last && last.day === wk) { last.h = Math.max(last.h, d.h); last.l = Math.min(last.l, d.l); last.c = d.c; last.v = (last.v ?? 0) + (d.v ?? 0); }
+    else out.push({ t: d.t, o: d.o, h: d.h, l: d.l, c: d.c, v: d.v ?? 0, day: wk });
+  }
+  return out;
+}
+/** Extra series some conditions read: Bitcoin's daily candles (a filter for other coins) and daily funding rates. */
+export type RuleExt = { btc?: DayBar[]; funding?: Map<string, number> };
 export type Signals = { long: boolean; short: boolean; exitLong: boolean | null; exitShort: boolean | null };
 type Side = "LONG" | "SHORT";
 
@@ -39,7 +53,8 @@ export function ruleTimeframes(r: Rules, baseTf: number): { intraday: number[]; 
   let daily = false;
   for (const c of allConds(r)) {
     if (c.ind === "PDHL" || (c.ind === "SWEEP" && Number(c.p?.src) === 1)) daily = true;
-    if (c.tf === "D") daily = true;
+    if (c.ind === "TIME" || c.ind === "BTC" || c.ind === "FUND") { if (c.tf !== "D" && c.tf !== "W") tfs.add(c.tf === "base" ? baseTf : Number(c.tf)); continue; }
+    if (c.tf === "D" || c.tf === "W") daily = true;
     else tfs.add(c.tf === "base" ? baseTf : Number(c.tf));
   }
   return { intraday: [...tfs].filter((x) => x > 0).sort((a, b) => a - b), daily };
@@ -51,7 +66,9 @@ export function warmBarsFor(r: Rules): number {
   for (const c of allConds(r)) {
     const p = c.p ?? {};
     const len = Math.max(p.len ?? 0, p.len2 ?? 0, p.slow ?? 0, (p.slow ?? 0) + (p.sig ?? 0), p.atr ?? 0);
-    n = Math.max(n, c.ind === "ST" || c.ind === "HA" ? 500 : len * 10 + 50);
+    const lk = c.ind === "VOL" ? (p.look ?? 250) + (p.len ?? 20) : 0;
+    n = Math.max(n, c.ind === "ST" || c.ind === "HA" ? 500 : Math.max(len * 10 + 50, lk + 20));
+    if (c.tf === "W") n = Math.max(n, Math.min(1500, (c.ind === "ST" || c.ind === "HA" ? 120 : len * 4 + 10) * 7));
   }
   return Math.min(n, 1500);
 }
@@ -61,7 +78,7 @@ const tm = (x: string) => { const [h, m] = x.split(":").map(Number); return h * 
 /** Human-readable text for one condition (used in logs and the trade list). */
 export function describeCond(c: Cond): string {
   const p = c.p ?? {};
-  const tf = c.tf === "D" ? "daily" : c.tf === "base" ? "own timeframe" : `${c.tf}m`;
+  const tf = c.tf === "D" ? "daily" : c.tf === "W" ? "weekly" : c.tf === "base" ? "own timeframe" : `${c.tf}m`;
   const v = c.v ?? 0;
   const ops: Record<string, string> = {
     up: "is up", down: "is down", turns_up: "turns up", turns_down: "turns down",
@@ -79,18 +96,25 @@ export function describeCond(c: Cond): string {
     above_orh: "price above opening-range high", below_orl: "price below opening-range low",
     cross_above_orh: "breaks above opening-range high", cross_below_orl: "breaks below opening-range low",
     bull_sweep: "of the lows (wick below, close back above)", bear_sweep: "of the highs (wick above, close back below)",
+    new_high: "close above the highest high (breakout)", new_low: "close below the lowest low (breakdown)", above_mid: "price above the channel middle", below_mid: "price below the channel middle",
+    high_vol: "is high (above its usual level)", low_vol: "is low (below its usual level)",
+    in_hours: `between ${String(p.from ?? 0).padStart(2, "0")}:00 and ${String(p.to ?? 24).padStart(2, "0")}:00 IST`, on_weekday: `is a ${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][Number(p.d ?? 5)] ?? "?"}`,
+    not_weekend: "is a weekday (Mon–Fri)", btc_up: `is up (daily close above its ${p.len ?? 50}-day EMA)`, btc_down: `is down (daily close below its ${p.len ?? 50}-day EMA)`,
   };
   const name: Record<string, string> = {
     ST: `Supertrend(${p.atr ?? 10},${p.factor ?? 3})`, HA: "Heikin Ashi", RSI: `RSI(${p.len ?? 14})`,
     EMA: p.len2 ? `EMA(${p.len ?? 9}/${p.len2})` : `EMA(${p.len ?? 20})`, SMA: p.len2 ? `SMA(${p.len ?? 9}/${p.len2})` : `SMA(${p.len ?? 20})`,
     MACD: `MACD(${p.fast ?? 12},${p.slow ?? 26},${p.sig ?? 9})`, VWAP: "VWAP", BB: `Bollinger(${p.len ?? 20},${p.mult ?? 2})`,
     ADX: `ADX(${p.len ?? 14})`, ATR: `ATR(${p.len ?? 14})`, PDHL: "Prev-day H/L", ORB: `Opening range (${p.mins ?? 15}m)`,
+    DON: `Donchian(${p.len ?? 20})`, VOL: `Volatility(${p.len ?? 20} vs ${p.look ?? 250})`, TIME: "Time", BTC: "Bitcoin trend", FUND: "Funding rate (% per 8h)",
     SWEEP: `Liquidity sweep (${Number(p.src) === 1 ? "prev-day high/low" : `${p.len ?? 20}-candle swing`}${(p.within ?? 1) > 1 ? `, within ${p.within} candles` : ""})`,
   };
+  if (c.ind === "TIME") return `Time ${ops[c.op] ?? c.op}`;
+  if (c.ind === "BTC") return `Bitcoin ${ops[c.op] ?? c.op}`;
   return `${name[c.ind] ?? c.ind} ${tf} ${ops[c.op] ?? c.op}`;
 }
 
-type Frame = { bars: (Bar | DayBar)[]; isDaily: boolean };
+type Frame = { bars: (Bar | DayBar)[]; isDaily: boolean; weekly?: boolean };
 type Check = (k: number, T: number, day: string) => boolean;
 
 /**
@@ -106,11 +130,12 @@ export class RuleBook {
   private baseByDay: Map<string, { min: number; h: number; l: number }[]>;
   private seg: string;
   private memo: Map<string, unknown>;
+  private ext: RuleExt;
   /** memo: optional cache of indicator series shared by many rule books on the same candles (the strategy lab). */
   constructor(rules: Rules, baseTf: number, frames: Map<number, Bar[]>, daily: DayBar[],
-    baseByDay: Map<string, { min: number; h: number; l: number }[]>, seg: string, memo?: Map<string, unknown>) {
+    baseByDay: Map<string, { min: number; h: number; l: number }[]>, seg: string, memo?: Map<string, unknown>, ext?: RuleExt) {
     this.rules = rules; this.baseTf = baseTf; this.frames = frames; this.daily = daily; this.baseByDay = baseByDay; this.seg = seg;
-    this.memo = memo ?? new Map();
+    this.memo = memo ?? new Map(); this.ext = ext ?? {};
     for (const c of allConds(rules)) this.checks.set(c, this.build(c));
   }
 
@@ -123,6 +148,16 @@ export class RuleBook {
       return this.memo.get(k) as T[];
     };
     if (c.tf === "D") return { bars: conv("D", this.daily), isDaily: true, ha };
+    if (c.tf === "W") {
+      const k = `WEEKLY|${this.daily.length}|${this.daily[0]?.t ?? 0}`;
+      if (!this.memo.has(k)) this.memo.set(k, weeklyBars(this.daily));
+      return { bars: conv("W", this.memo.get(k) as DayBar[]), isDaily: true, weekly: true, ha };
+    }
+    // Time, Bitcoin trend and funding read the decision time itself: any frame will do.
+    if (c.ind === "TIME" || c.ind === "BTC" || c.ind === "FUND") {
+      const own = this.frames.get(this.baseTf);
+      return own ? { bars: own, isDaily: false, ha: false } : { bars: this.daily, isDaily: true, ha: false };
+    }
     const tf = c.tf === "base" ? this.baseTf : Number(c.tf);
     const bars = this.frames.get(tf);
     if (!bars) throw new Error(`No ${tf}-minute candles prepared for "${describeCond(c)}".`);
@@ -132,7 +167,7 @@ export class RuleBook {
   private build(c: Cond): { frame: Frame; check: Check } {
     const frame = this.frameFor(c);
     const b = frame.bars as (Bar & DayBar)[];
-    const fk = (frame.ha ? "HA:" : "") + (c.tf === "D" ? "D" : String(c.tf === "base" ? this.baseTf : Number(c.tf)));
+    const fk = (frame.ha ? "HA:" : "") + (c.tf === "D" || c.tf === "W" ? c.tf : String(c.tf === "base" ? this.baseTf : Number(c.tf)));
     const M = <T>(name: string, fn: () => T): T => {
       const key = `${fk}|${b.length}|${name}`;
       if (!this.memo.has(key)) this.memo.set(key, fn());
@@ -256,6 +291,65 @@ export class RuleBook {
         };
         break;
       }
+      case "DON": {
+        // Donchian channel: highest high / lowest low of the previous N candles (not counting this one).
+        const len = Math.max(2, Math.trunc(p.len ?? 20));
+        const ch = M(`DON${len}`, () => {
+          const hi = new Array(b.length).fill(NaN), lo = new Array(b.length).fill(NaN);
+          for (let k = len; k < b.length; k++) { let h = -Infinity, l = Infinity; for (let j = k - len; j < k; j++) { if (b[j].h > h) h = b[j].h; if (b[j].l < l) l = b[j].l; } hi[k] = h; lo[k] = l; }
+          return { hi, lo };
+        });
+        check = (k) => {
+          const h = ch.hi[k], l = ch.lo[k]; if (isNaN(h) || isNaN(l)) return false;
+          return c.op === "new_high" ? close[k] > h : c.op === "new_low" ? close[k] < l : c.op === "above_mid" ? close[k] > (h + l) / 2 : c.op === "below_mid" ? close[k] < (h + l) / 2 : false;
+        };
+        break;
+      }
+      case "VOL": {
+        // Volatility regime: standard deviation of the last N returns against its median over a longer look-back.
+        const len = Math.max(5, Math.trunc(p.len ?? 20)), look = Math.max(20, Math.trunc(p.look ?? 250));
+        const reg = M(`VOL${len},${look}`, () => {
+          const r = close.map((x, i) => i ? Math.log(x / close[i - 1]) : NaN);
+          const sd = new Array(b.length).fill(NaN);
+          for (let k = len; k < b.length; k++) { let m = 0; for (let j = k - len + 1; j <= k; j++) m += r[j]; m /= len; let q = 0; for (let j = k - len + 1; j <= k; j++) q += (r[j] - m) ** 2; sd[k] = Math.sqrt(q / (len - 1)); }
+          const med = new Array(b.length).fill(NaN);
+          for (let k = len + look; k < b.length; k++) { const w = sd.slice(k - look, k).filter((x) => !isNaN(x)).sort((x, y) => x - y); if (w.length) med[k] = w[w.length >> 1]; }
+          return { sd, med };
+        });
+        check = (k) => ok(reg.sd[k], reg.med[k]) && (c.op === "high_vol" ? reg.sd[k] > reg.med[k] : c.op === "low_vol" ? reg.sd[k] < reg.med[k] : false);
+        break;
+      }
+      case "TIME": {
+        // Hour of day (IST) at the decision time, or the day of the week.
+        const from = Number(p.from ?? 0) * 60, to = Number(p.to ?? 24) * 60, wd = Number(p.d ?? 5);
+        check = (_k, T, day) => {
+          const m = ist(T - 1).min, w = weekdayOf(day);
+          return c.op === "in_hours" ? (from <= to ? m >= from && m < to : m >= from || m < to)
+            : c.op === "on_weekday" ? w === wd : c.op === "not_weekend" ? w >= 1 && w <= 5 : false;
+        };
+        break;
+      }
+      case "BTC": {
+        // Bitcoin's own trend as a filter (for other coins): yesterday's daily close against its EMA.
+        const btc = this.ext.btc ?? this.daily, len = Math.max(2, Math.trunc(p.len ?? 50));
+        const e = M(`BTCEMA${len}|${btc.length}`, () => ema(btc.map((x) => x.c), len));
+        check = (_k, _T, day) => {
+          let j = -1, lo = 0, hi = btc.length - 1;
+          while (lo <= hi) { const m = (lo + hi) >> 1; if (btc[m].day < day) { j = m; lo = m + 1; } else hi = m - 1; }
+          if (j < 1 || isNaN(e[j])) return false;
+          return c.op === "btc_up" ? btc[j].c > e[j] : c.op === "btc_down" ? btc[j].c < e[j] : false;
+        };
+        break;
+      }
+      case "FUND": {
+        // Perpetual funding rate (% per 8 hours) of the previous day; unknown days (before Delta's history) are false.
+        const f = this.ext.funding;
+        check = (_k, _T, day) => {
+          const x = f?.get(addDays(day, -1)); if (x === undefined) return false;
+          return c.op === "gt" ? x > v : c.op === "lt" ? x < v : false;
+        };
+        break;
+      }
       case "ORB": {
         // High/low of the first N minutes after the session opens, from base candles; usable once that window has passed.
         const mins = p.mins ?? 15;
@@ -289,7 +383,7 @@ export class RuleBook {
     let lo = 0, hi = bars.length - 1, k = -1;
     while (lo <= hi) {
       const m = (lo + hi) >> 1;
-      const done = frame.isDaily ? (bars[m] as DayBar).day < day : (bars[m] as Bar).endT <= T;
+      const done = frame.weekly ? (bars[m] as DayBar).day < mondayOf(day) : frame.isDaily ? (bars[m] as DayBar).day < day : (bars[m] as Bar).endT <= T;
       if (done) { k = m; lo = m + 1; } else hi = m - 1;
     }
     return k;
@@ -300,7 +394,7 @@ export class RuleBook {
     const res = r!.conds.map((c) => {
       const { frame, check } = this.checks.get(c)!;
       const k = this.latest(frame, T, day);
-      return k >= 1 && check(k, T, day);
+      return (k >= 1 || ((c.ind === "TIME" || c.ind === "FUND" || c.ind === "BTC") && k >= 0)) && check(Math.max(k, 0), T, day);
     });
     return r!.mode === "ANY" ? res.some(Boolean) : res.every(Boolean);
   }
@@ -348,8 +442,8 @@ export function decide(pos: "FLAT" | Side, now: Signals, prev: Signals | null, c
 /** Validates a rule book from the strategy form / database. */
 export function validateRules(r: unknown): Rules {
   const rules = (r ?? {}) as Rules;
-  const IND = new Set(["ST", "HA", "RSI", "EMA", "SMA", "MACD", "VWAP", "BB", "ADX", "ATR", "PDHL", "ORB", "SWEEP"]);
-  const TF = new Set(["base", "1", "3", "5", "15", "25", "30", "60", "75", "120", "125", "240", "D"]);
+  const IND = new Set(["ST", "HA", "RSI", "EMA", "SMA", "MACD", "VWAP", "BB", "ADX", "ATR", "PDHL", "ORB", "SWEEP", "DON", "VOL", "TIME", "BTC", "FUND"]);
+  const TF = new Set(["base", "1", "3", "5", "15", "25", "30", "45", "60", "75", "120", "125", "240", "D", "W"]);
   for (const k of ["long", "short", "exitLong", "exitShort"] as const) {
     const set = rules[k];
     if (!set) continue;
@@ -362,7 +456,7 @@ export function validateRules(r: unknown): Rules {
   if (rules.candles !== undefined && rules.candles !== "NORMAL" && rules.candles !== "HA") throw new Error("Candle type must be normal or Heikin Ashi.");
   if (rules.daily) {
     for (const c of allConds(rules)) {
-      if (c.tf !== "D") throw new Error("A once-a-day strategy uses daily candles only; set every condition's timeframe to Daily.");
+      if (c.tf !== "D" && c.tf !== "W") throw new Error("A once-a-day strategy uses daily (or weekly) candles only; set every condition's timeframe to Daily or Weekly.");
       if (c.ind === "VWAP" || c.ind === "ORB") throw new Error("VWAP and opening range need intraday candles, so they can't be used in a once-a-day strategy.");
     }
   }

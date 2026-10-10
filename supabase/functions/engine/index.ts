@@ -14,7 +14,7 @@ import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules
 import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
 import { LAB_ASSETS, labNext, labStart, labStep, loadCryptoAssets, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
-import { contractsFor, cryptoDailyDelta, cryptoLtp, cryptoProduct, deltaBalances, deltaOrder, niceLot } from "./crypto.ts";
+import { contractsFor, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaOrder, niceLot } from "./crypto.ts";
 import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
 import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
@@ -713,7 +713,7 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
     const okMin = (m: number) => m >= ss && m < le && (!s.intraday || m < sqOff);
     const openMode = s.after_hours_flip === "OPEN";
     const newCandle = last.t !== s.last_candle_ts;
-    const fresh = last.day === now.date && nowSec - last.endT <= Math.max(600, s.timeframe_min * 120);
+    const fresh = (last.day === now.date || isCrypto(String(s.data_segment))) && nowSec - last.endT <= Math.max(600, s.timeframe_min * 120);
     const candleInWindow = last.endMin >= ss && last.endMin < le && (!s.intraday || last.endMin < sqOff);
     const CLOSE_MIN = sessionFor(s.data_segment, now.date).close;
     const nowInWindow = now.min >= ss && now.min < le && (!s.intraday || now.min < sqOff) && now.min < CLOSE_MIN;
@@ -830,7 +830,16 @@ async function rulesData(s: Strategy, dhan: Dhan, nowSec: number) {
     const p = ist(r.t);
     const a = baseByDay.get(p.date) ?? []; a.push({ min: p.min, h: r.h, l: r.l }); baseByDay.set(p.date, a);
   }
-  return { rules, book: new RuleBook(rules, s.timeframe_min, frames, daily, baseByDay, seg), bars: frames.get(s.timeframe_min)! };
+  return { rules, book: new RuleBook(rules, s.timeframe_min, frames, daily, baseByDay, seg, undefined, await cryptoExt(s, rules, today)), bars: frames.get(s.timeframe_min)! };
+}
+/** Crypto rules that read Bitcoin's trend or the funding rate get those series (other strategies: none). */
+async function cryptoExt(s: Strategy, rules: ReturnType<typeof validateRules>, today: string) {
+  if (!isCrypto(String(s.data_segment))) return undefined;
+  const cs = [rules.long, rules.short, rules.exitLong, rules.exitShort].flatMap((x) => x?.conds ?? []);
+  const ext: { btc?: DayBar[]; funding?: Map<string, number> } = {};
+  if (cs.some((c) => c.ind === "BTC") && s.underlying !== "BTCUSD") ext.btc = (await cryptoDaily("BTCUSD", addDays(today, -500), addDays(today, 1))).filter((d) => d.day < today);
+  if (cs.some((c) => c.ind === "FUND")) ext.funding = await cryptoFunding(String(s.underlying), addDays(today, -10), addDays(today, 1));
+  return ext;
 }
 
 /** Once-a-day condition strategies: decided at the session open from completed daily candles, like the backtest. */
@@ -841,7 +850,7 @@ async function processRulesDaily(s: Strategy, set: Settings, action: string) {
   const all = await dhan.daily(s.data_security_id, seg, s.data_instrument, addDays(now.date, -Math.ceil(warmBarsFor(rules) * 1.5)), addDays(now.date, 1));
   const days = all.filter((d) => d.day < now.date);
   if (days.length < 3) throw new Error(`Only ${days.length} daily candles came back from Dhan.`);
-  const book = new RuleBook(rules, s.timeframe_min, new Map(), days, new Map(), seg);
+  const book = new RuleBook(rules, s.timeframe_min, new Map(), days, new Map(), seg, undefined, await cryptoExt(s, rules, now.date));
   const openT = (day: string) => Date.parse(`${day}T00:00:00+05:30`) / 1000 + sessionFor(seg, day).open * 60 + 60;
   const last = days[days.length - 1];
   const sig = book.at(openT(now.date)), prev = book.at(openT(last.day));
@@ -907,8 +916,9 @@ async function processRules(s: Strategy, set: Settings, action: string) {
       legs.push(...asArr(exitLeg(s, 1))); notes.push(`Square-off: ${exitLabel(s)}`); event = "SQUARE_OFF"; newState = FLAT_STATE;
     }
   } else if (last.t !== s.last_candle_ts) {
-    const fresh = last.day === now.date && nowSec - last.endT <= Math.max(600, s.timeframe_min * 120);
-    const candleInWindow = last.endMin >= ss && last.endMin < le && (!s.intraday || last.endMin < sqOff) && now.min < sess.close;
+    const fresh = (last.day === now.date || isCrypto(String(s.data_segment))) && nowSec - last.endT <= Math.max(600, s.timeframe_min * 120);
+    const allDay = isCrypto(String(s.data_segment)) && !s.intraday; // crypto never closes: positional ones decide on every candle
+    const candleInWindow = last.endMin >= ss && (allDay || last.endMin < le) && (!s.intraday || last.endMin < sqOff) && (allDay || now.min < sess.close);
     if (s.last_candle_ts == null) {
       notes.push("Started tracking. Waiting for the next candle to close."); event = "INFO";
     } else if (fresh && candleInWindow) {
@@ -1165,6 +1175,10 @@ async function runBacktestJob(id: number) {
         snapshot.data_sec_resolved = r.sec;
       }
       const res = await planBacktest(snapshot, creds, params, async (m) => { await setRow({ progress: m }); });
+      // Crypto: Delta's daily funding rates over the test, for the funding each trade pays or receives.
+      if (isCrypto(String(snapshot.data_segment))) {
+        try { params = { ...params, funding: Object.fromEntries(await cryptoFunding(String(snapshot.underlying), addDays(String(params.from), -3), addDays(String(params.to), 3))) }; } catch { /* default rate */ }
+      }
       plans = res.plans; acc = newAcc(Number(params.capital)); acc.calls = res.calls; acc.notes = res.notes; cursor = 0; trades = [];
       if (params.lab_period) await sb.from("lab_periods").update({ status: "running", updated_at: new Date().toISOString() }).eq("id", params.lab_period);
       // Structures: futures and option-writing margin rates for the legs (Dhan's figures from the morning check).

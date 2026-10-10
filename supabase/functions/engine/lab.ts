@@ -13,7 +13,7 @@ import { describeCond, type Cond, type Rules, validateRules } from "./rules.ts";
 import { dataSecurity } from "./instruments.ts";
 import { describeRisk, type Risk } from "./risk.ts";
 import { loadMarginRates, type MarginRate, refreshMargins } from "./margins.ts";
-import { CRYPTO, cryptoDaily, cryptoIntraday, cryptoLot, loadCrypto } from "./crypto.ts";
+import { CRYPTO, cryptoDaily, cryptoFunding, cryptoIntraday, cryptoLot, loadCrypto } from "./crypto.ts";
 
 /* ---------- assets ---------- */
 export type LabAsset = {
@@ -64,7 +64,7 @@ function fitTimeframes(cfg: LabConfig, key: string) {
   cfg.timeframe_min = own;
   for (const k of ["long", "short", "exitLong", "exitShort"] as const) {
     for (const c of (cfg.rules?.[k]?.conds ?? []) as Cond[]) {
-      if (c.tf === "base" || c.tf === "D") continue;
+      if (c.tf === "base" || c.tf === "D" || c.tf === "W") continue;
       const v = nearestTf(Number(c.tf), list.filter((x) => x > own));
       c.tf = Number(c.tf) > own && list.some((x) => x > own) ? String(v) : "base";
     }
@@ -93,11 +93,16 @@ for (const [a, b] of [["up", "down"], ["turns_up", "turns_down"], ["green", "red
   ["price_cross_above", "price_cross_below"], ["fast_above_slow", "fast_below_slow"], ["fast_cross_above", "fast_cross_below"], ["above_signal", "below_signal"],
   ["cross_above_signal", "cross_below_signal"], ["hist_pos", "hist_neg"], ["above_zero", "below_zero"], ["close_above_upper", "close_below_lower"],
   ["cross_above_upper", "cross_below_lower"], ["price_above_mid", "price_below_mid"], ["plus_above_minus", "minus_above_plus"], ["above_pdh", "below_pdl"],
-  ["cross_above_pdh", "cross_below_pdl"], ["above_orh", "below_orl"], ["cross_above_orh", "cross_below_orl"], ["bull_sweep", "bear_sweep"]]) { MIRROR[a] = b; MIRROR[b] = a; }
+  ["cross_above_pdh", "cross_below_pdl"], ["above_orh", "below_orl"], ["cross_above_orh", "cross_below_orl"], ["bull_sweep", "bear_sweep"],
+  ["new_high", "new_low"], ["above_mid", "below_mid"], ["btc_up", "btc_down"]]) { MIRROR[a] = b; MIRROR[b] = a; }
 
 /** The same condition for the other direction (RSI 60 ↔ 40; ADX and ATR are non-directional and stay as they are). */
 export function mirror(c: Cond): Cond {
   if (c.ind === "ADX" || c.ind === "ATR") return c.op in MIRROR ? { ...c, op: MIRROR[c.op] } : { ...c };
+  // Volatility and time filters work the same for both directions.
+  if (c.ind === "VOL" || c.ind === "TIME") return { ...c };
+  // Funding (contrarian): longs when funding is low (crowd short) ↔ shorts when it is high (crowd long).
+  if (c.ind === "FUND") return { ...c, op: c.op === "lt" ? "gt" : "lt", v: +(0.02 - Number(c.v ?? 0)).toFixed(4) };
   if (c.ind === "RSI") {
     const op = { gt: "lt", lt: "gt", cross_above: "cross_below", cross_below: "cross_above" }[c.op] ?? c.op;
     return { ...c, op, v: 100 - Number(c.v ?? 50) };
@@ -162,6 +167,7 @@ function randomRisk(r: R, daily: boolean, intraday: boolean, capital: number): R
 /** One random strategy for an asset. Index strategies are intraday-candle based (85%) or once-a-day; commodities once-a-day. */
 export function generate(assetKey: string, seed: number, capital = 500000): LabConfig {
   const a = LAB_ASSETS[assetKey];
+  if (a.crypto) return generateCrypto(a, seed, capital);
   const r = rng(seed);
   const cr = !!a.crypto;
   const daily = a.commodity || r() < (cr ? 0.3 : 0.15);
@@ -241,11 +247,112 @@ export function generate(assetKey: string, seed: number, capital = 500000): LabC
   return cfg;
 }
 
-/** Crypto session times: the crypto day runs 05:30–24:00 IST; intraday trades start at 05:30 or later and close by 23:45. */
+/** Crypto session times: crypto trades round the clock (the desk's crypto day is the IST calendar day). */
 function cryptoTimes(cfg: LabConfig, r?: R) {
-  if (cfg.rules?.daily || !cfg.intraday) return { session_start: "05:30", last_entry: "23:30", square_off: "23:45" };
-  return { session_start: r ? pick(r, ["05:30", "05:30", "09:00", "13:30", "18:00"]) : "05:30", last_entry: r ? pick(r, ["21:00", "22:30", "23:30"]) : "23:30", square_off: "23:45" };
+  if (cfg.rules?.daily || !cfg.intraday) return { session_start: "00:00", last_entry: "23:59", square_off: "23:59" };
+  return { session_start: r ? pick(r, ["00:00", "00:00", "05:30", "13:30", "18:00"]) : "00:00", last_entry: r ? pick(r, ["21:00", "22:30", "23:30"]) : "23:30", square_off: "23:45" };
 }
+
+/* ---------- crypto generator ---------- */
+/**
+ * Crypto strategies follow what the research and the lab's own results point to: slow trend following (daily and weekly
+ * Supertrend, Heikin Ashi colour, moving averages, Donchian breakouts), buying dips only inside an uptrend, and the
+ * late-US-evening hours (21:00–23:00 UTC = 02:30–04:30 IST). Long and short both, so a crash year can still be a
+ * profitable year; few trades, because every trade pays about 0.12% in fees and GST plus slippage and funding.
+ */
+export function generateCrypto(a: LabAsset, seed: number, capital = 500000): LabConfig {
+  const r = rng(seed);
+  const btc = a.key === "BTCUSD";
+  const sr = r();
+  const style = sr < 0.4 ? "trend" : sr < 0.62 ? "breakout" : sr < 0.8 ? "dip" : sr < 0.9 ? "hours" : "intratrend";
+  const daily = style !== "hours" && style !== "intratrend";
+  const dtf = () => (r() < 0.3 ? "W" : "D");
+  const conds: Cond[] = [];
+  let exitLong: Cond[] = [];
+  let tf = daily ? 375 : 60, intraday = false, times: Record<string, string> | null = null, direction = r() < 0.75 ? "BOTH" : r() < 0.6 ? "LONG_ONLY" : "SHORT_ONLY";
+  const TREND: Tpl[] = [
+    (q) => ({ ind: "ST", p: st(q), op: "up" }),
+    () => ({ ind: "HA", op: "green" }),
+    (q) => { const [x, y] = pick(q, [[9, 21], [20, 50], [50, 100], [50, 200], [13, 34]]); return { ind: "EMA", p: { len: x, len2: y }, op: "fast_above_slow" }; },
+    (q) => ({ ind: pick(q, ["EMA", "SMA"]), p: { len: pick(q, [20, 50, 100, 200]) }, op: "price_above" }),
+    (q) => ({ ind: "DON", p: { len: pick(q, [20, 30, 55]) }, op: "above_mid" }),
+    (q) => ({ ind: "MACD", p: pick(q, [{ fast: 12, slow: 26, sig: 9 }, { fast: 8, slow: 21, sig: 5 }]), op: pick(q, ["above_zero", "above_signal"]) }),
+  ];
+  const filters = (tfx: () => string) => {
+    const out: Cond[] = [];
+    if (r() < 0.35) out.push({ ind: "VOL", tf: tfx(), p: { len: pick(r, [10, 20, 30]), look: pick(r, [120, 250, 365]) }, op: pick(r, ["high_vol", "low_vol"]) });
+    if (r() < 0.25) out.push({ ind: "ADX", tf: tfx(), p: { len: pick(r, ADX_LEN) }, op: "gt", v: pick(r, [18, 20, 25]) });
+    if (!btc && r() < 0.35) out.push({ ind: "BTC", tf: "D", p: { len: pick(r, [20, 50, 100, 200]) }, op: "btc_up" });
+    // (Funding is offered in the strategy builder only: Delta's history starts in late 2023, too short for the
+    // every-year test.)
+    return out;
+  };
+  if (style === "trend") {
+    // Stop and reverse on a slow trend signal (weekly or daily); its mirror rides the downtrends short.
+    const primary = { ...pick(r, TREND)(r), tf: dtf() } as Cond;
+    conds.push(primary);
+    if (r() < 0.4) { const f = { ...pick(r, TREND)(r), tf: primary.tf === "W" ? "D" : pick(r, ["D", "W"]) } as Cond; if (f.ind !== primary.ind) conds.push(f); }
+    conds.push(...filters(() => "D"));
+  } else if (style === "breakout") {
+    // New N-day high (or low for the short side): momentum after new highs is Bitcoin's best-documented edge.
+    const len = pick(r, [10, 20, 30, 55]);
+    conds.push({ ind: "DON", tf: "D", p: { len }, op: "new_high" });
+    if (r() < 0.5) conds.push({ ...pick(r, TREND)(r), tf: dtf() } as Cond);
+    conds.push(...filters(() => "D"));
+    exitLong = [r() < 0.5 ? { ind: "DON", tf: "D", p: { len: Math.max(5, Math.round(len / 2)) }, op: "new_low" } : mirror({ ...pick(r, TREND.slice(0, 2))(r), tf: "D" } as Cond)];
+  } else if (style === "dip") {
+    // Buy a fresh N-day low only while the longer trend is up (and short a fresh high in a downtrend).
+    const len = pick(r, [5, 10, 15, 20]);
+    conds.push({ ind: "DON", tf: "D", p: { len }, op: "new_low" }, { ind: pick(r, ["EMA", "SMA"]), tf: "D", p: { len: pick(r, [50, 100, 200]) }, op: "price_above" });
+    if (r() < 0.5) conds[0] = { ind: "RSI", tf: "D", p: { len: pick(r, [2, 3, 5, 7]) }, op: "lt", v: pick(r, [10, 15, 20, 25]) };
+    conds.push(...filters(() => "D"));
+    exitLong = [r() < 0.5 ? { ind: "DON", tf: "D", p: { len: pick(r, [5, 10]) }, op: "new_high" } : { ind: "RSI", tf: "D", p: { len: 3 }, op: "gt", v: pick(r, [60, 70, 80]) }];
+  } else if (style === "hours") {
+    // The late-US-evening window: in by 02:30 IST, out by 04:30–05:30 IST, mostly in uptrends.
+    tf = 30; intraday = true; direction = r() < 0.8 ? "LONG_ONLY" : "BOTH";
+    conds.push({ ind: "TIME", tf: "base", p: { from: 2, to: 6 }, op: "in_hours" });
+    conds.push({ ...pick(r, TREND)(r), tf: "D" } as Cond);
+    if (r() < 0.4) conds.push({ ind: "TIME", tf: "base", p: { d: 6 }, op: "on_weekday" }); // Friday night in the US = early Saturday IST
+    if (r() < 0.3) conds.push({ ind: "VOL", tf: "D", p: { len: 30, look: 365 }, op: "high_vol" });
+    times = { session_start: "02:00", last_entry: "03:00", square_off: pick(r, ["04:30", "05:30"]) };
+  } else {
+    // Positional on 4-hour / 2-hour candles in the direction of the daily trend.
+    tf = pick(r, [240, 240, 120]);
+    conds.push({ ...pick(r, TREND)(r), tf: "base" } as Cond, { ...pick(r, TREND)(r), tf: pick(r, ["D", "W"]) } as Cond);
+    conds.push(...filters(() => "D"));
+  }
+  // De-duplicate identical indicator/timeframe pairs.
+  const seen = new Set<string>(); const cs = conds.filter((c) => { const k = `${c.ind}|${c.tf}|${c.op}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  const rules: Rules = {
+    long: { mode: "ALL", conds: cs }, short: { mode: "ALL", conds: cs.map(mirror) },
+    exitLong: { mode: "ANY", conds: exitLong }, exitShort: { mode: "ANY", conds: exitLong.map(mirror) },
+    ...(daily ? { daily: true } : {}),
+  };
+  if (style === "hours") { rules.exitLong = { mode: "ANY", conds: [] }; rules.exitShort = { mode: "ANY", conds: [] }; }
+  if (direction === "LONG_ONLY") rules.short = { mode: "ALL", conds: [] };
+  if (direction === "SHORT_ONLY") rules.long = { mode: "ALL", conds: [] };
+  if (direction !== "BOTH" && !exitLong.length && style !== "hours") {
+    rules.exitLong = { mode: "ANY", conds: [mirror(cs[0])] }; rules.exitShort = { mode: "ANY", conds: [cs[0]] };
+  }
+  const cfg: LabConfig = {
+    strategy_kind: "RULES", underlying: a.key, data_security_id: a.sec, data_segment: a.seg, data_instrument: a.instr,
+    exchange: a.exchange, dhan_symbol: a.key, futures_symbol: a.key, timeframe_min: tf, rules, direction,
+    entry_mode: style === "hours" ? "JOIN" : r() < 0.8 ? "FLIP" : "JOIN", intraday, lots: 1, lot_size: a.lot, qty_mode: "LOTS",
+    trade_type: "FUTURES", option_side: "BUY", product_type: intraday ? "I" : "M", strike_step: 1, strike_offset: 0, expiry_weekday: 4, expiry_flag: "WEEK",
+    roll_on_expiry: true, atr_period: 10, factor: 3, entry_trigger: "CLOSE", buffer_points: 0, after_hours_flip: "FIRST_CLOSE",
+  };
+  Object.assign(cfg, times ?? cryptoTimes(cfg, r));
+  // Wide stops: trends need room. ATR trailing stops on most; some with no stop (the opposite signal closes them).
+  const rk = r();
+  cfg.risk = rk < 0.25 ? null
+    : rk < 0.7 ? { basis: "UNDERLYING", atr_len: pick(r, [14, 20]), sl: null, tgt: null, trail: { type: "ATR", value: pick(r, [2, 2.5, 3, 4]) }, max_day_loss: null }
+    : { basis: "UNDERLYING", atr_len: pick(r, [14, 20]), sl: { type: "ATR", value: pick(r, [1.5, 2, 3]) }, tgt: r() < 0.4 ? { type: "ATR", value: pick(r, [4, 6, 8]) } : null, trail: null, max_day_loss: null };
+  if (style === "hours") cfg.risk = r() < 0.5 ? null : { basis: "UNDERLYING", atr_len: 14, sl: { type: "PCT", value: pick(r, [1, 1.5, 2]) }, tgt: null, trail: null, max_day_loss: null };
+  void capital;
+  validateRules(cfg.rules);
+  return cfg;
+}
+
 
 /* ---------- variations of winners ---------- */
 const NEAR: Record<string, number[]> = {
@@ -312,10 +419,10 @@ export function mutate(parent: LabConfig, seed: number, capital = 500000): LabCo
       cfg.entry_mode = cfg.entry_mode === "JOIN" ? "FLIP" : "JOIN"; changes.push(cfg.entry_mode === "JOIN" ? "enter whenever the rules are true" : "enter only when the rules newly become true");
     } else if (!daily && cfg.intraday) {
       const cr = !!LAB_ASSETS[cfg.underlying]?.crypto;
-      const old = cfg.session_start; cfg.session_start = pick(r, (cr ? ["05:30", "07:30", "09:00", "13:30", "18:00"] : ["09:15", "09:20", "09:30", "09:45", "10:15"]).filter((x) => x !== old)); changes.push(`first trade from ${old} → ${cfg.session_start}`);
+      const old = cfg.session_start; cfg.session_start = pick(r, (cr ? ["00:00", "05:30", "09:00", "13:30", "18:00"] : ["09:15", "09:20", "09:30", "09:45", "10:15"]).filter((x) => x !== old)); changes.push(`first trade from ${old} → ${cfg.session_start}`);
     } else if (!daily && !LAB_ASSETS[cfg.underlying]?.commodity) {
       cfg.intraday = !cfg.intraday; cfg.product_type = cfg.intraday ? "I" : "M";
-      if (LAB_ASSETS[cfg.underlying]?.crypto) Object.assign(cfg, cfg.intraday ? { last_entry: "23:00", square_off: "23:45" } : { session_start: "05:30", last_entry: "23:30", square_off: "23:45" });
+      if (LAB_ASSETS[cfg.underlying]?.crypto) Object.assign(cfg, cfg.intraday ? { last_entry: "23:00", square_off: "23:45" } : { session_start: "00:00", last_entry: "23:59", square_off: "23:59" });
       else if (cfg.intraday) Object.assign(cfg, { last_entry: "14:30", square_off: "15:15" }); else Object.assign(cfg, { last_entry: "15:15", square_off: "15:20" });
       changes.push(cfg.intraday ? "positional → intraday (square off daily)" : "intraday → positional (carry overnight)");
     }
@@ -337,8 +444,9 @@ export function settingVariants(parent: LabConfig): LabConfig[] {
   const out: LabConfig[] = [];
   const sets = (["long", "short", "exitLong", "exitShort"] as const).filter((k) => parent.rules[k]?.conds?.length);
   const seenCond = new Set<string>();
-  const INT = new Set(["len", "len2", "atr", "fast", "slow", "sig", "mins", "within"]);
+  const INT = new Set(["len", "len2", "atr", "fast", "slow", "sig", "mins", "within", "look"]);
   for (const k of sets) for (const c of parent.rules[k].conds as Cond[]) {
+    if (c.ind === "TIME" || c.ind === "FUND") continue; // a clock window or funding level isn't a setting to nudge
     const key = `${c.ind}|${c.tf}|${JSON.stringify(c.p ?? {})}`;
     if (seenCond.has(key)) continue;
     seenCond.add(key);
@@ -657,10 +765,15 @@ async function refreshYearChunks(sb: SupabaseClient, dhan: Dhan, a: LabAsset, to
 /**
  * A coin's candles: 11 years of daily candles, the latest 17 months of 15-minute candles ("I5", kept up to date), and
  * one row of 15-minute candles per earlier calendar year for the year-by-year test (two missing years per run, so a
- * first download is spread over a couple of runs). Only the desk's crypto session (05:30–24:00 IST) is kept.
+ * first download is spread over a couple of runs). Crypto trades all day, so every candle is kept.
  */
 async function refreshCrypto(sb: SupabaseClient, a: LabAsset, today: string) {
   const daily = await cryptoDaily(a.sec, addDays(today, -4100), addDays(today, 1));
+  try {
+    const fm = await cryptoFunding(a.sec, "2023-12-01", addDays(today, 1));
+    const d = [...fm.keys()].sort();
+    if (d.length) await sb.from("lab_candles").upsert({ asset: a.key, kind: "F", from_day: d[0], to_day: d.at(-1), bars: { d, r: d.map((x) => +fm.get(x)!.toFixed(6)) }, updated_at: new Date().toISOString() });
+  } catch (e) { console.error("funding", a.key, e); }
   await sb.from("lab_candles").upsert({ asset: a.key, kind: "D", from_day: daily[0]?.day ?? today, to_day: daily.at(-1)?.day ?? today, bars: toCol(daily, true), updated_at: new Date().toISOString() });
   const inSess = (t: number) => { const p = ist(t), ss = sessionFor(a.seg, p.date); return p.min >= ss.open && p.min < ss.close; };
   const want = addDays(today, -(YEAR_DAYS + WARM_DAYS));
@@ -745,7 +858,7 @@ export async function loadAsset(sb: SupabaseClient, key: string, long = false): 
   const a = LAB_ASSETS[key];
   // The year-by-year test also loads the older yearly 5-minute chunks.
   let q = sb.from("lab_candles").select("kind, bars").eq("asset", key);
-  q = long ? q.or("kind.eq.D,kind.eq.I5,kind.like.I5Y*") : q.in("kind", ["D", "I5"]);
+  q = long ? q.or("kind.eq.D,kind.eq.I5,kind.eq.F,kind.like.I5Y*") : q.in("kind", ["D", "I5", "F"]);
   const { data: rows, error } = await q;
   if (error) throw new Error(error.message);
   const d = rows?.find((r) => r.kind === "D");
@@ -753,7 +866,7 @@ export async function loadAsset(sb: SupabaseClient, key: string, long = false): 
   const daily: DayBar[] = fromCol(d.bars).map((r) => ({ ...r, day: ist(r.t).date }));
   const raw: MBar[] = [];
   const byDay = new Map<string, MBar[]>();
-  const parts = (rows ?? []).filter((r) => r.kind !== "D").sort((x, y) => (x.kind === "I5" ? 1 : 0) - (y.kind === "I5" ? 1 : 0) || x.kind.localeCompare(y.kind));
+  const parts = (rows ?? []).filter((r) => r.kind !== "D" && r.kind !== "F").sort((x, y) => (x.kind === "I5" ? 1 : 0) - (y.kind === "I5" ? 1 : 0) || x.kind.localeCompare(y.kind));
   const seenT = new Set<number>();
   for (const i5 of parts) {
     for (const r of fromCol(i5.bars)) {
@@ -767,7 +880,17 @@ export async function loadAsset(sb: SupabaseClient, key: string, long = false): 
     }
   }
   if (parts.length > 1) { raw.sort((x, y) => x.t - y.t); for (const arr of byDay.values()) arr.sort((x, y) => x.t - y.t); }
-  return { raw, byDay, daily };
+  const out: SimData = { raw, byDay, daily };
+  if (a.crypto) {
+    // Crypto extras: Delta's daily funding rates, and Bitcoin's daily candles for the "Bitcoin trend" filter on other coins.
+    const f = rows?.find((r) => r.kind === "F")?.bars as { d?: string[]; r?: number[] } | undefined;
+    if (f?.d) out.funding = new Map(f.d.map((d, i) => [d, Number(f.r![i])]));
+    if (key !== "BTCUSD") {
+      const { data: b } = await sb.from("lab_candles").select("bars").eq("asset", "BTCUSD").eq("kind", "D").maybeSingle();
+      if (b) out.btc = fromCol(b.bars).map((r) => ({ ...r, day: ist(r.t).date }));
+    }
+  }
+  return out;
 }
 
 /* ---------- one strategy ---------- */
@@ -778,7 +901,9 @@ export function labParams(a: LabAsset, from: string, to: string, capital: number
 export async function screenOne(cfg: LabConfig, data: SimData, memo: Map<string, unknown>, win: { from: string; split: string; to: string }, capital: number, rates: Record<string, MarginRate> = {}) {
   const a = LAB_ASSETS[cfg.underlying];
   const plans = simulateRules(cfg, data, win.from, win.to, memo);
-  const { trades } = await priceBatch(cfg, { client: "-", token: "-" }, labParams(a, win.from, win.to, capital), plans, 0, newAcc(capital), Infinity, async () => {});
+  const fk = "__funding_obj", dm = data as SimData & { [fk]?: Record<string, number> };
+  if (data.funding && !dm[fk]) dm[fk] = Object.fromEntries(data.funding);
+  const { trades } = await priceBatch(cfg, { client: "-", token: "-" }, { ...labParams(a, win.from, win.to, capital), funding: dm[fk] ?? null }, plans, 0, newAcc(capital), Infinity, async () => {});
   const base = labMetrics(trades as T[], win.from, win.split, win.to, !!cfg.rules.daily);
   // Margin for every trade at its own entry price; with no trades, at the last close.
   const metrics = withTradeMargins(base, cfg, "FUT", trades, rates, data.daily.at(-1)?.c ?? 0);

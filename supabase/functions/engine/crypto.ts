@@ -131,17 +131,57 @@ export async function cryptoIntraday(symbol: string, interval: number, fromDate:
   const out: Raw[] = [];
   let cur: Raw | null = null;
   for (const b of raw) {
-    const day0 = Math.floor(b.t / 86400) * 86400, k = day0 + Math.floor((b.t - day0) / (interval * 60)) * interval * 60;
+    const day0 = Math.floor((b.t + 19800) / 86400) * 86400 - 19800, k = day0 + Math.floor((b.t - day0) / (interval * 60)) * interval * 60; // IST midnight
     if (!cur || cur.t !== k) { if (cur) out.push(cur); cur = { t: k, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v ?? 0 }; }
     else { cur.h = Math.max(cur.h, b.h); cur.l = Math.min(cur.l, b.l); cur.c = b.c; cur.v = (cur.v ?? 0) + (b.v ?? 0); }
   }
   if (cur) out.push(cur);
   return out;
 }
-/** Daily candles (00:00 UTC days, dated by their IST date); toDate is exclusive. */
+/**
+ * Daily candles of IST calendar days (00:00–24:00 IST, the desk's crypto day); toDate is exclusive. They come from the
+ * coin's Binance pair, which can cut days at IST midnight (Delta's own daily candles are cut at 00:00 UTC = 05:30 IST);
+ * a coin without one gets them built from Delta's 30-minute candles.
+ */
 export async function cryptoDaily(symbol: string, fromDate: string, toDate: string): Promise<DayBar[]> {
-  const from = Date.parse(`${fromDate}T00:00:00Z`) / 1000, to = Date.parse(`${toDate}T00:00:00Z`) / 1000 - 1;
-  return (await coinRange(symbol, 1440, from, to)).map((r) => ({ ...r, day: ist(r.t).date }));
+  const from = Date.parse(`${fromDate}T00:00:00+05:30`) / 1000, to = Date.parse(`${toDate}T00:00:00+05:30`) / 1000 - 1;
+  const pair = CRYPTO[symbol]?.history_symbol;
+  if (pair) {
+    const out: DayBar[] = [];
+    let a = from * 1000;
+    while (a <= to * 1000) {
+      const j = await getJson(`${BINANCE}/api/v3/klines?symbol=${encodeURIComponent(pair)}&interval=1d&timeZone=5:30&startTime=${a}&endTime=${to * 1000}&limit=1000`);
+      if (!Array.isArray(j) || !j.length) break;
+      for (const k of j) { const t = Math.floor(Number(k[0]) / 1000); out.push({ t, o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5], day: ist(t).date }); }
+      if (j.length < 1000) break;
+      a = Number(j[j.length - 1][0]) + 86400000;
+    }
+    return out;
+  }
+  const raw = await deltaRange(symbol, 30, from, to);
+  const days = new Map<string, DayBar>();
+  for (const b of raw) {
+    const d = ist(b.t).date, x = days.get(d);
+    if (!x) days.set(d, { t: Date.parse(`${d}T00:00:00+05:30`) / 1000, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v ?? 0, day: d });
+    else { x.h = Math.max(x.h, b.h); x.l = Math.min(x.l, b.l); x.c = b.c; x.v = (x.v ?? 0) + (b.v ?? 0); }
+  }
+  return [...days.values()].sort((x, y) => x.t - y.t);
+}
+/**
+ * Delta's funding rate per day (% per 8 hours, the day's average), by UTC date, from when Delta India has it (late
+ * 2023). Longs pay it to shorts when positive.
+ */
+export async function cryptoFunding(symbol: string, fromDate: string, toDate: string): Promise<Map<string, number>> {
+  const from = Date.parse(`${fromDate}T00:00:00Z`) / 1000, to = Date.parse(`${toDate}T00:00:00Z`) / 1000;
+  const out = new Map<string, number>();
+  for (let a = from; a <= to; a += 86400 * 2000) {
+    const j = await getJson(`${DELTA}/v2/history/candles?resolution=1d&symbol=${encodeURIComponent("FUNDING:" + symbol)}&start=${a}&end=${Math.min(to, a + 86400 * 2000 - 1)}`);
+    for (const c of j?.result ?? []) {
+      const v = [c.open, c.high, c.low, c.close].map(Number).filter((x) => Number.isFinite(x));
+      if (v.length) out.set(new Date(Number(c.time) * 1000).toISOString().slice(0, 10), v.reduce((x, y) => x + y, 0) / v.length);
+    }
+  }
+  return out;
 }
 /** Delta India's own daily candles only (no Binance history), for the liquidity check of a newly added coin. */
 export async function cryptoDailyDelta(symbol: string, fromDate: string, toDate: string): Promise<DayBar[]> {
