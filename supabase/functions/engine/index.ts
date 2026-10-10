@@ -13,7 +13,7 @@ import { dataSecurity, syncMcx } from "./instruments.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
-import { LAB_ASSETS, labNext, labStart, labStep, loadCryptoAssets, periodWindows, TOKEN_ERR } from "./lab.ts";
+import { LAB_ASSETS, labNext, labStart, labStep, loadCryptoAssets, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
 import { contractsFor, cryptoLtp, cryptoProduct, deltaBalances, deltaOrder, niceLot } from "./crypto.ts";
 import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
@@ -1253,6 +1253,19 @@ Deno.serve(async (req) => {
     return Response.json({ action, ...(await deltaCheck(body.user_id)) });
   }
   if (action === "crypto_sync") return Response.json({ action, ...(await cryptoSync()) });
+  if (action === "crypto_candles") {
+    // The lab's candle cache for every coin (the lab also does this at the start of each run), in the background.
+    const keys = Object.values(LAB_ASSETS).filter((x) => x.crypto).map((x) => x.key);
+    const today = ist(Date.now() / 1000).date;
+    EdgeRuntime.waitUntil((async () => {
+      for (const k of keys) {
+        const t0 = Date.now();
+        try { await refreshAsset(sb, { client: "-", token: "-" }, k, today); console.log("crypto candles", k, Date.now() - t0, "ms"); }
+        catch (e) { console.error("crypto candles", k, e); }
+      }
+    })());
+    return Response.json({ action, coins: keys });
+  }
   if (action === "token" || action === "token_renew") return Response.json({ action, ...(await tokenCheck(action === "token_renew", body.user_id)) });
   if (action === "funds") {
     if (body.user_id) return Response.json({ action, ...(await refreshFunds(body.user_id)) });
