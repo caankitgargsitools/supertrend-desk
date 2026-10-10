@@ -267,6 +267,9 @@ legend { padding: 0; margin-bottom: 4px; }
 .gate { max-width: 560px; margin: 40px auto; padding-inline: 16px; }
 .btwrap { display: grid; gap: 16px; }
 .pos-num { color: var(--green); } .neg-num { color: var(--red); }
+.l10 { color: var(--green); } .lS { color: #e8710a; }
+.lt { font-size: 10.5px; font-weight: 700; margin-top: 2px; white-space: nowrap; }
+@media (prefers-color-scheme: dark) { .lS { color: #fbad6b; } }
 .pair { display: flex; gap: 6px; min-width: 0; }
 .pair select { width: auto !important; flex: 0 0 auto; }
 .pair input { flex: 1 1 60px; }
@@ -3159,6 +3162,18 @@ function renderLabStatus() {
   <p class="hint" style="margin:8px 0 0">${r.status === "running" ? `Step ${esc(phases[r.phase] || r.phase)}: ${esc(r.progress || "")}` : esc(r.progress || "")}</p>
   ${r.error ? `<div class="banner err" style="margin-top:8px">${esc(r.error)}</div>` : ""}`;
 }
+/** Total profit of the year-by-year test (up to 10 years; 5 for 5-minute strategies), 1 lot after charges. */
+function longTotal(r) {
+  const x = robOf(r);
+  if (!x || x.status !== "done" || !x.years_n) return null;
+  const net = x.quality && x.quality.net != null ? x.quality.net : (x.years || []).reduce((a, y) => a + (Number(y.net) || 0), 0);
+  return { net, n: x.years_n };
+}
+/** The line under the 1-year net: the 10-year total in green, a shorter total (e.g. 5 years) in orange. */
+function longNetLine(r) {
+  const L = longTotal(r);
+  return L ? `<div class="${L.n >= 10 ? "l10" : "lS"} lt" title="Total over ${L.n} years: ${rupees(L.net)} (1 lot, after charges)">${L.n}Y ${rupeesShort(L.net)}</div>` : "";
+}
 function robCells(r) {
   const x = robOf(r);
   if (!x) return '<td class="n hint">–</td><td class="n hint">–</td><td class="n hint">–</td><td class="n hint">–</td>';
@@ -3422,7 +3437,7 @@ function renderLabTable() {
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : lab.view === "SPREAD" ? r.osp : r.os) : null;
     const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} similar</button>` : "";
     tr.innerHTML = `<td class="n">${num}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
-      <td style="white-space:nowrap">${esc(labAssetName(r.asset))}</td><td>${esc(labStyle(r))}</td><td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}</td><td class="n">${m.margin_lot ? rs(m.margin_lot) : "–"}</td>
+      <td style="white-space:nowrap">${esc(labAssetName(r.asset))}</td><td>${esc(labStyle(r))}</td><td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}${longNetLine(r)}</td><td class="n">${m.margin_lot ? rs(m.margin_lot) : "–"}</td>
       <td class="n">${m.ret_margin == null ? "–" : `<span class="${m.ret_margin > 0 ? "pos-num" : m.ret_margin < 0 ? "neg-num" : ""}">${m.ret_margin}%</span>`}</td><td class="n">${pc(m.test.net)}</td>
       <td class="n">${rs(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td>${(() => { const x = robOf(r), q = x && x.quality; return q ? `<td class="n"><b class="${q.score >= 70 ? "pos-num" : q.score < 40 ? "neg-num" : ""}">${q.score}</b></td>` : '<td class="n hint">–</td>'; })()}<td class="n">${m.score}</td>${robCells(r)}<td class="n">${g.passes}/${g.nights}</td>${(() => { const L = longOf(r); return L ? `<td class="n"><span class="${L.net > 0 ? "pos-num" : L.net < 0 ? "neg-num" : ""}" title="${rupees(L.net)} over ${L.key}">${rupeesShort(L.net)}</span><div class="hint sm">${L.key}</div></td><td class="n">${L.pos}/${L.n}</td>` : '<td class="n hint">–</td><td class="n hint">–</td>'; })()}`;
     tr.querySelector(".t").textContent = r.label;
@@ -3466,7 +3481,7 @@ function renderLabCards(fams, pc, rs) {
     el.innerHTML = `<div class="tt"><span class="no">${num}</span><span class="nm"></span></div>
       <div class="sub">${esc(labAssetName(r.asset))} · ${esc(labStyle(r))}${g.passes ? ` · passed ${g.passes} of ${g.nights} run${g.nights === 1 ? "" : "s"}` : ""}</div>
       <div class="chips">${status}${g.rechecking ? '<span class="chip blue">Re-checking today</span>' : ""}${r.champion ? '<span class="chip green">Re-tested</span>' : ""}${r.starred ? '<span class="chip yellow">★</span>' : ""}</div>
-      <div class="mg">${cell("Net (1 yr)", pc(m.full.net))}${cell("Win %", m.full.win_rate)}${cell("Trades", m.full.n)}
+      <div class="mg">${cell("Net (1 yr)", pc(m.full.net) + longNetLine(r))}${cell("Win %", m.full.win_rate)}${cell("Trades", m.full.n)}
         ${cell("Max DD", rs(m.full.max_dd))}${cell("PF", m.full.pf ?? "–")}${cell("Months +", `${m.pos_months}/${m.months_n}`)}
         ${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Quality", x && x.quality ? `<span class="${x.quality.score >= 70 ? "pos-num" : x.quality.score < 40 ? "neg-num" : ""}">${x.quality.score}</span>` : "–")}
         ${done ? cell("Assets +", ratio(x.assets_ok, x.assets_n)) + cell("Timeframes +", x.tfs_n ? ratio(x.tfs_ok, x.tfs_n) : "n/a") + cell("Years +", x.years_n == null ? "–" : `<span class="${x.years_n >= 3 && x.years_ok === x.years_n ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span>`) : ""}</div>
@@ -3540,7 +3555,7 @@ async function openLabDetail(id) {
       <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.key === "FUT" ? "Futures" : x.label)}</button>`).join("")}</div>
       ${v.key === "FUT" ? robustHTML(r, m, true) : m.passed ? '<div class="banner ok" style="margin-top:12px">This option version passed the walk-forward check. The tougher test (other assets, timeframes, buy &amp; hold) is on the Futures tab.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc(m.why.join("; "))}.</div>`}
       <div class="stats" style="margin-top:12px">
-        <div class="stat"><span class="label">Net (1 year)</span><span class="v ${m.full.net >= 0 ? "up" : "down"}">${rupees(m.full.net)}</span></div>
+        <div class="stat"><span class="label">Net (1 year)</span><span class="v ${m.full.net >= 0 ? "up" : "down"}">${rupees(m.full.net)}</span>${(() => { const L = longTotal(r); return v.key === "FUT" && L ? `<span class="${L.n >= 10 ? "l10" : "lS"}" style="font-weight:700">${L.n}-year total ${rupees(L.net)}</span>` : ""; })()}</div>
         <div class="stat"><span class="label">Last 3 months</span><span class="v ${m.test.net >= 0 ? "up" : "down"}">${rupees(m.test.net)}</span></div>
         <div class="stat"><span class="label">Trades · win rate</span><span class="v">${m.full.n} · ${m.full.win_rate}%</span></div>
         <div class="stat"><span class="label">Profit factor</span><span class="v">${m.full.pf ?? "–"}</span></div>
@@ -3592,7 +3607,7 @@ async function openLabDetailPublic(id) {
       <div id="ld_form"></div>
       ${v.key === "FUT" ? robustHTML(r, m, false) : m.passed ? '<div class="banner ok" style="margin-top:12px">This option version passed the walk-forward check. The tougher test (other assets, timeframes, buy &amp; hold) is on the first tab.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc((m.why || []).join("; "))}.</div>`}
       <div class="stats" style="margin-top:12px">
-        <div class="stat"><span class="label">Net (1 year)</span><span class="v ${m.full.net >= 0 ? "up" : "down"}">${rupees(m.full.net)}</span></div>
+        <div class="stat"><span class="label">Net (1 year)</span><span class="v ${m.full.net >= 0 ? "up" : "down"}">${rupees(m.full.net)}</span>${(() => { const L = longTotal(r); return v.key === "FUT" && L ? `<span class="${L.n >= 10 ? "l10" : "lS"}" style="font-weight:700">${L.n}-year total ${rupees(L.net)}</span>` : ""; })()}</div>
         <div class="stat"><span class="label">Last 3 months</span><span class="v ${m.test.net >= 0 ? "up" : "down"}">${rupees(m.test.net)}</span></div>
         <div class="stat"><span class="label">Trades · win rate</span><span class="v">${m.full.n} · ${m.full.win_rate}%</span></div>
         <div class="stat"><span class="label">Profit factor</span><span class="v">${m.full.pf ?? "–"}</span></div>

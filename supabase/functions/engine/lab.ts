@@ -1292,7 +1292,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
           // Year k = the 12 months ending k-1 years before the test's last day, after warm-up for the indicators.
           const daily = !!c.config.rules?.daily, first = daily ? data.daily[0]?.day : data.raw[0]?.day;
           const hi = addDays(win.to, -365 * (Number(c.tf) - 1)), lo = addDays(hi, -364);
-          const warm = first ? addDays(first, daily ? 200 : 20) : hi;
+          const warm = first ? addDays(first, daily ? 60 : 20) : hi; // 60 days lets the 10th year back fit in the daily history Dhan has (from mid-2015)
           const from = lo < warm ? warm : lo;
           if ((Date.parse(hi) - Date.parse(from)) / 86400000 < 300) {
             ups.push(sb.from("lab_checks").update({ status: "done", result: { skip: true, ok: false, error: "not enough history" } }).eq("id", c.id).then(() => {}));
