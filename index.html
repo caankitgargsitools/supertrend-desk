@@ -3092,7 +3092,7 @@ function robOf(r) {
   if (x.assets && typeof x.assets === "object") return { status: x.status || (x.checked_at ? "done" : "waiting"), passed: x.passed, assets_ok: x.assets.ok, assets_n: x.assets.n, tfs_ok: x.tfs.ok, tfs_n: x.tfs.n,
     years_ok: x.years ? x.years.ok : null, years_n: x.years ? x.years.n : null, years: x.years ? x.years.list : null, quality: x.quality || null,
     vs_bh: x.vs_bh, risk_vs_bh: x.risk_vs_bh, bh_net: x.bh && x.bh.net, bh_dd: x.bh && x.bh.max_dd, bh_ratio: x.bh && x.bh.ratio, net: x.self && x.self.net, max_dd: x.self && x.self.max_dd, why: x.why || [], daily: x.daily,
-    assetList: x.assets.list, tfList: x.tfs.list };
+    assetList: x.assets.list, tfList: x.tfs.list, stepList: x.steps ? x.steps.list : null };
   return { ...x, status: x.status || "waiting", why: x.why || [] };
 }
 /** Passed = the walk-forward pass and the tougher test (other assets, other timeframes, every past year profitable). */
@@ -3185,13 +3185,23 @@ function robCells(r) {
 /** The quality score and what it is made of. */
 function qualityHTML(q) {
   if (!q) return "";
-  const P = [["continuity", 25, "Continuity of profits", `profitable years in unbroken runs (best run ${q.best_streak} of ${q.years} years, latest run ${q.latest_streak})`],
-    ["months", 15, "Profitable months", `${q.pos_months} of ${q.months} months made money`],
-    ["return_risk", 20, "Return vs worst drawdown", `${rupees(q.per_year)} a year ÷ worst drawdown ${rupees(q.max_dd)} = ${q.calmar} (2 or more = full marks)`],
-    ["profit_factor", 10, "Profit factor", `gross profit ÷ gross loss = ${q.pf} (2.5 or more = full marks)`],
-    ["steadiness", 15, "Steadiness", `how even the yearly profits are (spread ${q.cv}; worst year ${rupees(q.worst_year)})`],
-    ["robustness", 10, "Robustness", "share of other assets and timeframes it also worked on"],
-    ["sample", 5, "Enough trades", `${q.trades} trades in ${q.years} years (12 a year or more = full marks)`]];
+  const has = (k) => q.parts && q.parts[k] !== undefined;
+  const P = [["continuity", 16, "Continuity of profits", `profitable years in unbroken runs (best run ${q.best_streak} of ${q.years} years, latest run ${q.latest_streak})`],
+    ["return_risk", 11, "Return vs worst drawdown", `${rupees(q.per_year)} a year ÷ worst drawdown ${rupees(q.max_dd)} = ${q.calmar} (2 or more = full marks)`],
+    ["months", 7, "Profitable months", `${q.pos_months} of ${q.months} months made money`],
+    ["steadiness", 8, "Steadiness", `how even the yearly profits are (spread ${q.cv}; worst year ${rupees(q.worst_year)})`],
+    ["profit_factor", 6, "Profit factor", `gross profit ÷ gross loss = ${q.pf} (2.5 or more = full marks)`],
+    ["robustness", 6, "Other assets & timeframes", "share of other assets and timeframes it also worked on"],
+    ["sample", 3, "Enough trades", `${q.trades} trades in ${q.years} years (12 a year or more = full marks)`],
+    ["stability", 10, "Setting stability", q.steps_n ? `${q.steps_ok} of ${q.steps_n} small setting steps (±1/±2 on lengths, ±2/±5 on levels) also work on the latest year` : "no indicator settings to step (half marks)"],
+    ["cost", 7, "Cost stress test", `with charges paid twice and 0.01% slippage per order: ${rupees(q.stress_net)} left (extra cost ${rupees(q.extra_cost)}), ${q.stress_years_ok} of ${q.years} years still profitable`],
+    ["underwater", 5, "Time under water", `longest stretch from a peak back to a new peak: ${q.underwater_days} days (a year or more = 0)`],
+    ["tail", 5, "Worst month & worst trade", `worst month ${rupees(q.worst_month)} vs average month ${rupees(q.avg_month)}; worst trade ${rupees(q.worst_trade)} vs average win ${rupees(q.avg_win)}`],
+    ["montecarlo", 5, "Random order of trades", `trades shuffled 1,000 times: drawdown above 25% of ${rupees(q.mc_capital)} in ${q.mc_over}% of them; 95% of orders stay under ${rupees(q.mc_p95)}`],
+    ["updown", 4, "Up years vs down years", `profitable in ${q.up_ok} of ${q.up_n} years the asset rose and ${q.down_ok} of ${q.down_n} years it fell`],
+    ["longshort", 3, "Long / short balance", q.two_way ? `long trades ${rupees(q.long_net)}, short trades ${rupees(q.short_net)} (both must make money)` : "one-way strategy (full marks)"],
+    ["margin", 4, "Return on margin", `${q.rom_pct}% a year on an average margin of ${rupees(q.avg_margin)} per lot (100% a year = full marks)`]]
+    .filter(([k]) => has(k));
   return `<h3 style="font-size:15px;margin:16px 0 6px">Quality score: <span class="${q.score >= 70 ? "pos-num" : q.score < 40 ? "neg-num" : ""}">${q.score}</span> / 100</h3>
     <div class="scroll"><table class="mini"><thead><tr><th>Part</th><th class="n">Points</th><th class="n">Max</th><th>Why</th></tr></thead><tbody>${P.map(([k, mx, name, why]) => `<tr><td>${esc(name)}</td><td class="n">${q.parts[k] ?? 0}</td><td class="n">${mx}</td><td class="hint">${esc(why)}</td></tr>`).join("")}</tbody></table></div>
     <p class="hint" style="margin:6px 0 0">${q.years} years tested: net ${rupees(q.net)} for 1 lot after charges, ${q.profitable_years} profitable years.</p>`;
@@ -3247,7 +3257,8 @@ function robustHTML(r, m, admin) {
         <button class="btn small" id="lt_xlsx" type="button">Download Excel</button><span class="hint" id="lt_sum"></span></div>
       <div class="scroll" style="max-height:420px;overflow-y:auto"><table class="mini"><thead><tr><th>#</th><th>Entry</th><th>Exit</th><th>Side</th><th class="n">In</th><th class="n">Out</th><th class="n">Net (1 lot)</th><th class="n">Running total</th><th>Exit</th></tr></thead><tbody id="lt_body"></tbody></table></div>` : ""}
     <p class="hint" style="margin:6px 0 0">A check “works” when it makes money with a profit factor of 1.1 or more and enough trades (5 for once-a-day, 10 for intraday).</p>
-    ${admin ? list(x.assetList, "Asset") + list(x.tfList, "Timeframe") : ""}`;
+    ${admin ? list(x.assetList, "Asset") + list(x.tfList, "Timeframe") : ""}
+    ${admin && x.stepList && x.stepList.length ? `<table class="mini" style="margin-top:6px"><thead><tr><th>Setting step (latest year)</th><th class="n">Trades</th><th class="n">Net</th><th class="n">PF</th><th>Works?</th></tr></thead><tbody>${x.stepList.map((y) => `<tr><td>${esc(y.note || "")}</td><td class="n">${y.n ?? "–"}</td><td class="n">${pc(y.net)}</td><td class="n">${y.pf ?? "–"}</td><td>${y.ok ? '<span class="chip green">Yes</span>' : '<span class="chip red">No</span>'}</td></tr>`).join("")}</tbody></table>` : ""}`;
 }
 function labGroup() {
   // One line per strategy (same rules and stops), showing its latest result and how often it passed.

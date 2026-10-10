@@ -1097,7 +1097,7 @@ async function forgetOld(sb: SupabaseClient, limit = 400) {
 const ROBUST_TFS = [5, 10, 15, 25, 30, 45, 60, 75, 125];
 /** Mini and micro contracts follow the same commodity, so they don't count as another asset. */
 export const assetRoot = (k: string) => /^GOLD/.test(k) ? "GOLD" : /^SILVER/.test(k) ? "SILVER" : /^CRUDE/.test(k) ? "CRUDE" : /^NAT/.test(k) ? "NATGAS" : /^ZINC/.test(k) ? "ZINC" : /^LEAD/.test(k) ? "LEAD" : /^ALUMIN/.test(k) ? "ALUMINIUM" : k;
-type Check = { kind: "self" | "asset" | "tf" | "year"; asset: string; tf: number | null; config: LabConfig };
+type Check = { kind: "self" | "asset" | "tf" | "year" | "step"; asset: string; tf: number | null; config: LabConfig };
 /** Years back for the year-by-year test: 10 on daily candles; 5 on 5-minute candles (the depth Dhan keeps). */
 export const yearsFor = (cfg: LabConfig) => cfg.rules?.daily ? 10 : 5;
 /** The checks for one first-round winner, limited to assets the lab has candles for. */
@@ -1132,6 +1132,11 @@ export function robustChecks(cfg: LabConfig, haveD: Set<string>, haveI5: Set<str
   }
   // Round 3: profitable in each of the past years, one check per year (year 1 = the latest 12 months).
   for (let k = 1; k <= yearsFor(cfg); k++) out.push({ kind: "year", asset: cfg.underlying, tf: k, config: cfg });
+  // Setting stability: up to 8 small steps on the indicator settings (±1 / ±2 on lengths, ±2 / ±5 on levels …),
+  // each tested on the latest year. A strategy that only works at one exact setting is curve-fitted.
+  const steps = settingVariants(cfg).filter((c) => { try { validateRules(c.rules); return true; } catch { return false; } });
+  const pickN = Math.min(8, steps.length);
+  for (let i = 0; i < pickN; i++) out.push({ kind: "step", asset: cfg.underlying, tf: null, config: steps[Math.floor((i * steps.length) / pickN)] });
   return out;
 }
 /** Buy & hold over the window: 1 lot bought at the first close and held to the last, with its worst fall. */
@@ -1170,9 +1175,11 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
     riskVsBh = bh.ratio && bh.ratio > 0 ? +(sRatio / bh.ratio).toFixed(2) : null;
     // Shown for comparison only: the strategies trade long and short, so a falling asset is no reason to fail one.
   }
-  const quality = qualityScore(yrs, allTrades, { okA, nA: assets.length, okT, nT: tfs.length });
+  const stepList = checks.filter((c) => c.kind === "step" && c.result && !c.result.skip && !c.result.error).map((c) => ({ note: c.result.note, net: c.result.net, pf: c.result.pf, n: c.result.n, ok: !!c.result.ok }));
+  const quality = qualityScore(yrs, allTrades, { okA, nA: assets.length, okT, nT: tfs.length },
+    { stepsOk: stepList.filter((x) => x.ok).length, stepsN: stepList.length, twoWay: cfg.direction === "BOTH", capital: 500000 });
   return { passed: why.length === 0, why, self, bh, vs_bh: vsBh, risk_vs_bh: riskVsBh, assets: { ok: okA, n: assets.length, list: assets },
-    tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, quality, daily, checked_at: new Date().toISOString() };
+    tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, steps: { ok: stepList.filter((x) => x.ok).length, n: stepList.length, list: stepList }, quality, daily, checked_at: new Date().toISOString() };
 }
 
 /* ---------- long trade lists and the quality score ---------- */
@@ -1198,32 +1205,51 @@ export function unpackTrades(p: Packed | null | undefined) {
   return p.e.map((e, k) => ({ entry: e, exit: p.x[k], side: p.s[k] === "S" ? "SHORT" : "LONG", entry_px: p.i[k], exit_px: p.o[k], net: p.n[k], exit_why: p.why[p.w[k]] ?? "" }));
 }
 /**
- * Quality score, 0–100, from the whole year-by-year test (up to 10 years; 5 for 5-minute strategies):
- *  continuity 25 – profitable years, with unbroken runs of profitable years counting more (sum of run lengths² ÷ years²)
- *  months 15     – share of months that made money
- *  return/risk 20 – yearly net ÷ the worst drawdown over the whole period (2 or more scores full)
- *  profit factor 10 – gross profit ÷ gross loss (2.5 or more scores full)
- *  steadiness 15 – how even the yearly profits are (spread of yearly nets, and the worst year against the average)
- *  robustness 10 – share of other assets and other timeframes the rules also worked on
- *  sample 5      – enough trades to trust it (12 or more a year scores full)
+ * Quality score, 0–100, from the whole year-by-year test (up to 10 years; 5 for 5-minute strategies) and the checks:
+ *  continuity 16 – profitable years, unbroken runs counting more (sum of run lengths² ÷ years²)
+ *  return/risk 11 – yearly net ÷ the worst drawdown over the whole period (2 or more = full)
+ *  months 7 – share of months that made money          steadiness 8 – how even the yearly profits are
+ *  profit factor 6 (2.5 or more = full)                 robustness 6 – other assets and timeframes that work
+ *  enough trades 3 (12 a year)                          setting stability 10 – small setting steps that also work
+ *  cost stress 7 – profit left with charges paid twice and 0.01% slippage per order, and the years still profitable
+ *  time under water 5 – longest stretch from a peak back to a new peak (a year or more = 0)
+ *  tail risk 5 – worst month vs the average month, worst trade vs the average winning trade
+ *  random order 5 – trades shuffled 1,000 times: how often the drawdown passes 25% of the capital
+ *  up vs down years 4 – profitable in years when the asset rose and in years when it fell
+ *  long / short 3 – for two-way strategies, both sides make money
+ *  return on margin 4 – yearly net ÷ average margin per lot (100% a year = full)
  */
-export function qualityScore(yrs: { y: number; net: number; n: number; ok: boolean }[], trades: { exit: string; net: number }[], rb: { okA: number; nA: number; okT: number; nT: number }) {
+export function qualityScore(
+  yrs: { y: number; net: number; n: number; ok: boolean; xcost?: number; under?: number | null; margin?: number | null }[],
+  trades: { exit: string; net: number; side?: string }[],
+  rb: { okA: number; nA: number; okT: number; nT: number },
+  ex: { stepsOk: number; stepsN: number; twoWay: boolean; capital: number } = { stepsOk: 0, stepsN: 0, twoWay: false, capital: 500000 },
+) {
   const n = yrs.length;
   if (n < 1) return null;
+  const clamp = (x: number) => Math.max(0, Math.min(1, x));
+  // Continuity: unbroken runs of profitable years, each run counting by its length squared.
   const byOld = [...yrs].sort((a, b) => b.y - a.y); // oldest first
   let runs = 0, cur = 0, best = 0;
   for (const y of byOld) { if (y.ok) { cur++; best = Math.max(best, cur); } else { runs += cur * cur; cur = 0; } }
   runs += cur * cur;
   let latest = 0; for (const y of [...yrs].sort((a, b) => a.y - b.y)) { if (y.ok) latest++; else break; }
-  const continuity = runs / (n * n);
+  // Equity curve over the whole period: drawdown, time under water, months, wins and losses, long and short.
   const months = new Map<string, number>();
-  let eq = 0, peak = 0, dd = 0, gw = 0, gl = 0;
+  let eq = 0, peak = 0, dd = 0, gw = 0, gl = 0, wins = 0, worstTrade = 0, longNet = 0, shortNet = 0;
+  let peakDay = trades[0]?.exit?.slice(0, 10) ?? "", longestUw = 0;
+  const days = (a: string, b: string) => (Date.parse(b) - Date.parse(a)) / 86400000;
   for (const t of trades) {
-    const v = Number(t.net) || 0;
-    eq += v; peak = Math.max(peak, eq); dd = Math.max(dd, peak - eq);
-    if (v > 0) gw += v; else gl += -v;
-    const m = String(t.exit).slice(0, 7); months.set(m, (months.get(m) ?? 0) + v);
+    const v = Number(t.net) || 0, d = String(t.exit).slice(0, 10);
+    eq += v;
+    if (eq >= peak) { if (peak > 0 || eq > 0) longestUw = Math.max(longestUw, days(peakDay, d)); peak = eq; peakDay = d; }
+    dd = Math.max(dd, peak - eq);
+    if (v > 0) { gw += v; wins++; } else gl += -v;
+    worstTrade = Math.min(worstTrade, v);
+    if (t.side === "SHORT") shortNet += v; else longNet += v;
+    const m = d.slice(0, 7); months.set(m, (months.get(m) ?? 0) + v);
   }
+  if (trades.length) longestUw = Math.max(longestUw, days(peakDay, String(trades[trades.length - 1].exit).slice(0, 10))); // still under water at the end
   const mVals = [...months.values()], posM = mVals.filter((x) => x > 0).length;
   const monthsShare = mVals.length ? posM / mVals.length : 0;
   const total = trades.reduce((a, t) => a + (Number(t.net) || 0), 0);
@@ -1234,17 +1260,58 @@ export function qualityScore(yrs: { y: number; net: number; n: number; ok: boole
   const sd = Math.sqrt(nets.reduce((a, b) => a + (b - mean) ** 2, 0) / n);
   const cv = mean > 0 ? sd / mean : 9;
   const worst = Math.min(...nets);
-  const steady = mean > 0 ? 0.6 * (1 / (1 + cv)) + 0.4 * Math.max(0, Math.min(1, worst / mean)) : 0;
+  const steady = mean > 0 ? 0.6 * (1 / (1 + cv)) + 0.4 * clamp(worst / mean) : 0;
   const robust = ((rb.nA ? rb.okA / rb.nA : 0) + (rb.nT ? rb.okT / rb.nT : 0)) / 2;
   const sample = Math.min(1, trades.length / (n * 12));
+  // Setting stability: share of the small setting steps that also work (no steps to try: half marks).
+  const stability = ex.stepsN ? ex.stepsOk / ex.stepsN : 0.5;
+  // Cost stress: what is left after paying charges twice and 0.01% slippage on every order.
+  const xcost = yrs.reduce((a, y) => a + (Number(y.xcost) || 0), 0);
+  const stressNet = total - xcost, stressYearsOk = yrs.filter((y) => (Number(y.net) || 0) - (Number(y.xcost) || 0) > 0).length;
+  const cost = total > 0 && stressNet > 0 ? clamp(stressNet / total) * (stressYearsOk / n) : 0;
+  // Time under water: longest stretch from a peak back to a new peak (a year or more scores nothing).
+  const underwater = clamp(1 - longestUw / 365);
+  // Tail risk: worst month against the average month, and worst trade against the average winning trade.
+  const avgMonth = mVals.length ? total / mVals.length : 0, worstMonth = mVals.length ? Math.min(...mVals) : 0, avgWin = wins ? gw / wins : 0;
+  const tailM = worstMonth < 0 ? (avgMonth > 0 ? -worstMonth / avgMonth : 99) : 0, tailT = worstTrade < 0 ? (avgWin > 0 ? -worstTrade / avgWin : 99) : 0;
+  const tail = (1 / (1 + tailM / 3) + 1 / (1 + tailT / 5)) / 2;
+  // Random order: the same trades shuffled 1,000 times; how often the drawdown passes 25% of the capital.
+  const margins = yrs.map((y) => Number(y.margin)).filter((x) => x > 0), avgMargin = margins.length ? margins.reduce((a, b) => a + b, 0) / margins.length : 0;
+  const capital = Math.max(ex.capital, 2 * avgMargin), limit = capital * 0.25;
+  const nv = trades.map((t) => Number(t.net) || 0), r = rng(12345), dds: number[] = [];
+  let over = 0;
+  for (let k = 0; k < 1000 && nv.length; k++) {
+    for (let i = nv.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [nv[i], nv[j]] = [nv[j], nv[i]]; }
+    let e = 0, pk = 0, d = 0;
+    for (const v of nv) { e += v; pk = Math.max(pk, e); d = Math.max(d, pk - e); }
+    dds.push(d); if (d > limit) over++;
+  }
+  dds.sort((a, b) => a - b);
+  const mcP = dds.length ? over / dds.length : 1, mcP95 = dds.length ? dds[Math.floor(dds.length * 0.95)] : 0;
+  // Up years vs down years of the asset itself.
+  const up = yrs.filter((y) => (y.under ?? 0) > 0), down = yrs.filter((y) => y.under != null && y.under < 0);
+  const upShare = up.length ? up.filter((y) => y.ok).length / up.length : null, downShare = down.length ? down.filter((y) => y.ok).length / down.length : null;
+  const updown = upShare != null && downShare != null ? 0.5 * Math.min(upShare, downShare) + 0.25 * (upShare + downShare) : 0.6 * (upShare ?? downShare ?? 0);
+  // Long / short balance for two-way strategies (one-way strategies: full marks, nothing to balance).
+  const longShort = ex.twoWay ? (longNet > 0 ? 0.5 : 0) + (shortNet > 0 ? 0.5 : 0) : 1;
+  // Return on margin per year (100% a year or more scores full).
+  const rom = avgMargin > 0 ? perYear / avgMargin : 0;
+  const pts = (w: number, x: number) => +(w * clamp(x)).toFixed(1);
   const parts = {
-    continuity: +(25 * continuity).toFixed(1), months: +(15 * monthsShare).toFixed(1), return_risk: +(20 * Math.max(0, Math.min(1, calmar / 2))).toFixed(1),
-    profit_factor: +(10 * Math.max(0, Math.min(1, (pf - 1) / 1.5))).toFixed(1), steadiness: +(15 * steady).toFixed(1), robustness: +(10 * robust).toFixed(1), sample: +(5 * sample).toFixed(1),
+    continuity: pts(16, runs / (n * n)), return_risk: pts(11, calmar / 2), months: pts(7, monthsShare), steadiness: pts(8, steady),
+    profit_factor: pts(6, (pf - 1) / 1.5), robustness: pts(6, robust), sample: pts(3, sample),
+    stability: pts(10, stability), cost: pts(7, cost), underwater: pts(5, underwater), tail: pts(5, tail), montecarlo: pts(5, 1 - mcP),
+    updown: pts(4, updown), longshort: pts(3, longShort), margin: pts(4, rom),
   };
   const score = +Object.values(parts).reduce((a, b) => a + b, 0).toFixed(1);
   return { score, parts, years: n, profitable_years: yrs.filter((y) => y.ok).length, best_streak: best, latest_streak: latest,
     months: mVals.length, pos_months: posM, net: Math.trunc(total), per_year: Math.trunc(perYear), max_dd: Math.trunc(dd), calmar: +calmar.toFixed(2),
-    pf: +pf.toFixed(2), cv: +cv.toFixed(2), worst_year: Math.trunc(worst), trades: trades.length };
+    pf: +pf.toFixed(2), cv: +cv.toFixed(2), worst_year: Math.trunc(worst), trades: trades.length,
+    steps_ok: ex.stepsOk, steps_n: ex.stepsN, stress_net: Math.trunc(stressNet), stress_years_ok: stressYearsOk, extra_cost: Math.trunc(xcost),
+    underwater_days: Math.round(longestUw), worst_month: Math.trunc(worstMonth), avg_month: Math.trunc(avgMonth), worst_trade: Math.trunc(worstTrade), avg_win: Math.trunc(avgWin),
+    mc_over: +(mcP * 100).toFixed(1), mc_p95: Math.trunc(mcP95), mc_capital: Math.trunc(capital),
+    up_ok: up.filter((y) => y.ok).length, up_n: up.length, down_ok: down.filter((y) => y.ok).length, down_n: down.length,
+    long_net: Math.trunc(longNet), short_net: Math.trunc(shortNet), two_way: ex.twoWay, rom_pct: +(rom * 100).toFixed(1), avg_margin: Math.trunc(avgMargin) };
 }
 async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: string; to: string }, patch: (f: Record<string, unknown>) => unknown): Promise<boolean> {
   const { sb } = ctx;
@@ -1300,7 +1367,12 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
           }
           const { metrics, trades } = await screenOne(c.config, data, memo, { from, split: from, to: hi }, capital, rates);
           const f = metrics.full;
-          result = { from, to: hi, net: f.net, n: f.n, win_rate: f.win_rate, pf: f.pf, max_dd: f.max_dd, ok: f.net > 0, tr: packTrades(trades) };
+          // Cost stress: charges paid a second time plus slippage of 0.01% of the price on every order (entry and exit).
+          const xcost = Math.trunc(trades.reduce((a: number, t: any) => a + (Number(t.costs) || 0) + 0.0001 * ((Number(t.entry_px) || 0) + (Number(t.exit_px) || 0)) * (Number(t.units) || 0), 0));
+          // How the asset itself moved in that year (for the up-years / down-years check).
+          const dd0 = data.daily.filter((d) => d.day >= from && d.day <= hi);
+          const under = dd0.length > 1 ? +(((dd0[dd0.length - 1].c - dd0[0].c) / dd0[0].c) * 100).toFixed(2) : null;
+          result = { from, to: hi, net: f.net, n: f.n, win_rate: f.win_rate, pf: f.pf, max_dd: f.max_dd, ok: f.net > 0, xcost, under, margin: metrics.margin_lot ?? null, tr: packTrades(trades) };
           cpu += performance.now() - t1;
           ups.push(sb.from("lab_checks").update({ status: "done", result }).eq("id", c.id).then(() => {}));
           continue;
@@ -1316,7 +1388,8 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
         const { metrics } = await screenOne(c.config, data, memo, w, capital, rates);
         const f = metrics.full, daily = !!c.config.rules?.daily;
         const minN = Math.max(3, Math.round((daily ? 5 : 10) * scale));
-        result = { net: f.net, pf: f.pf, max_dd: f.max_dd, n: f.n, win_rate: f.win_rate, test_net: metrics.test.net, ok: f.net > 0 && (f.pf == null || f.pf >= 1.1) && f.n >= minN, ...(w.from !== win.from ? { from: w.from } : {}) };
+        result = { net: f.net, pf: f.pf, max_dd: f.max_dd, n: f.n, win_rate: f.win_rate, test_net: metrics.test.net, ok: f.net > 0 && (f.pf == null || f.pf >= 1.1) && f.n >= minN, ...(w.from !== win.from ? { from: w.from } : {}),
+          ...(c.kind === "step" ? { note: String(c.config.lab_note ?? "").replace(/^Variation of a winner: /, "") } : {}) };
         if (c.kind === "self") result.bh = buyHold(data, win.from, win.to, Number(c.config.lot_size));
       } catch (e) { result = { ok: false, error: e instanceof Error ? e.message.slice(0, 160) : String(e) }; }
       cpu += performance.now() - t1;
