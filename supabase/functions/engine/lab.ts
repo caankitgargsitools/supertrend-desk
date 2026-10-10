@@ -893,6 +893,38 @@ export async function loadAsset(sb: SupabaseClient, key: string, long = false): 
   return out;
 }
 
+/**
+ * Candle data kept in the engine's memory between steps (and between calls while the function instance stays warm),
+ * so the lab doesn't reload several MB of candles from the database for every batch of checks. A cheap look at the
+ * rows' update times tells when the stored candles changed (each run's candle update), and only then is it reloaded.
+ * Least recently used assets are dropped beyond about 600,000 candles (roughly 80 MB).
+ */
+const ASSET_CACHE = new Map<string, { sig: string; data: SimData; bars: number; used: number }>();
+const CACHE_MAX_BARS = 600000;
+export const cacheStats = { hits: 0, loads: 0 };
+export async function cachedAsset(sb: SupabaseClient, key: string, long = false): Promise<SimData> {
+  const ck = `${key}|${long ? 1 : 0}`;
+  let q = sb.from("lab_candles").select("kind, updated_at").eq("asset", key);
+  q = long ? q.or("kind.eq.D,kind.eq.I5,kind.eq.F,kind.like.I5Y*") : q.in("kind", ["D", "I5", "F"]);
+  const { data: meta } = await q;
+  let sig = (meta ?? []).map((m) => `${m.kind}@${m.updated_at}`).sort().join(",");
+  if (LAB_ASSETS[key]?.crypto && key !== "BTCUSD") {
+    const { data: b } = await sb.from("lab_candles").select("updated_at").eq("asset", "BTCUSD").eq("kind", "D").maybeSingle();
+    sig += `|BTC@${b?.updated_at ?? ""}`;
+  }
+  const hit = ASSET_CACHE.get(ck);
+  if (hit && hit.sig === sig) { hit.used = Date.now(); cacheStats.hits++; return hit.data; }
+  const data = await loadAsset(sb, key, long);
+  cacheStats.loads++;
+  ASSET_CACHE.set(ck, { sig, data, bars: data.raw.length + data.daily.length, used: Date.now() });
+  let total = [...ASSET_CACHE.values()].reduce((a, x) => a + x.bars, 0);
+  while (total > CACHE_MAX_BARS && ASSET_CACHE.size > 1) {
+    const [oldK, old] = [...ASSET_CACHE.entries()].filter(([k]) => k !== ck).sort((a, b) => a[1].used - b[1].used)[0];
+    ASSET_CACHE.delete(oldK); total -= old.bars;
+  }
+  return data;
+}
+
 /* ---------- one strategy ---------- */
 export function labParams(a: LabAsset, from: string, to: string, capital: number): BtParams {
   return { from, to, capital, brokerage: 20, charges: chargeRates(a), near_code: 1 };
@@ -1067,6 +1099,9 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
     .eq("status", "running").or(`lease_until.is.null,lease_until.lt.${now.toISOString()}`).select("*").limit(1);
   const run: Run | undefined = claimed?.[0];
   if (!run) return false;
+  // How long each step takes, added up per run (lab_runs.timings, milliseconds; "recheck" for re-check runs).
+  const stepT0 = Date.now(), stepName = run.trigger === "robust" ? "recheck" : String(run.phase);
+  const logTime = () => sb.rpc("lab_add_time", { p_run: run.id, p_phase: stepName, p_ms: Math.round(Date.now() - stepT0) }).then(() => {}, () => {});
   const set = run.settings ?? {};
   const reqId = run.settings?.request_id ?? null;
   const patch = async (f: Record<string, unknown>) => {
@@ -1141,8 +1176,10 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
     } else more = false;
   } catch (e) {
     await patch({ status: "failed", progress: "Failed", error: e instanceof Error ? e.message : String(e), finished_at: new Date().toISOString(), lease_until: null });
+    await logTime();
     return false;
   }
+  await logTime();
   if (more) await sb.from("lab_runs").update({ lease_until: null }).eq("id", run.id);
   return more;
 }
@@ -1578,7 +1615,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     const asset = pend[0].asset, long = pend[0].kind === "year";
     let cpu = 0;
     const t0 = performance.now();
-    const data = await loadAsset(sb, asset, long);
+    const data = await cachedAsset(sb, asset, long);
     cpu += Math.min(250, performance.now() - t0);
     const memo = new Map<string, unknown>();
     const rates = await loadMarginRates(sb);
@@ -1674,7 +1711,7 @@ async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
   const capital = Number(run.settings?.capital ?? 500000);
   let cpu = 0;
   const t0 = performance.now();
-  const data = await loadAsset(sb, asset);
+  const data = await cachedAsset(sb, asset);
   cpu += Math.min(250, performance.now() - t0);
   const memo = new Map<string, unknown>();
   const rates = await loadMarginRates(sb);
@@ -1766,7 +1803,7 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
     const vr = variants[job.v];
     const s = { ...row.config, trade_type: "OPTIONS", option_side: vr.side === "SELL" ? "SELL" : "BUY", structure: vr.structure ?? null, risk: vr.risk, strike_offset: 0, strike_step: a.step, expiry_flag: a.flag, expiry_weekday: a.wd, roll_on_expiry: true };
     if (!job.plans) {
-      const data = await loadAsset(sb, row.asset);
+      const data = await cachedAsset(sb, row.asset);
       job.plans = simulateRules(s, data, win.from, win.to);
       job.cursor = 0; job.acc = newAcc(capital); job.trades = [];
     }

@@ -3292,7 +3292,7 @@ async function loadLab() {
   }
   const [settings, runs] = await Promise.all([
     db.from("lab_settings").select("*").eq("id", 1).maybeSingle().then(must),
-    db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at, cursor, focus:settings->focus, fassets:settings->assets").order("id", { ascending: false }).limit(8).then(must),
+    db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at, cursor, timings, focus:settings->focus, fassets:settings->assets").order("id", { ascending: false }).limit(8).then(must),
   ]);
   lab.settings = settings; lab.runs = runs;
   let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary")
@@ -3331,12 +3331,25 @@ function renderLabStatus() {
   ${r.error ? `<div class="banner err" style="margin-top:8px">${esc(r.error)}</div>` : ""}
   ${pausedTill && r.status !== "running" ? `<div class="banner warn" style="margin-top:8px">Stopped by hand. The lab starts again by itself at ${esc(istText(pausedTill))} IST, or press “Run now”.</div>` : ""}
   ${r.status === "running" ? labProgressHTML(r) : ""}
+  ${labTimingsHTML(r)}
   ${lab.runs.length > 1 ? `<p class="hint" style="margin:8px 0 0">Every run gets the next number, so the number goes up as runs follow one another. Recent: ${lab.runs.slice(0, 5).map((x) => {
     const kind = x.focus === true ? `focused on ${(x.fassets || []).map(labAssetName).join(", ")}` : ({ continuous: "automatic", schedule: "16:05", manual: "Run now", robust: "re-check of earlier winners", request: "variation run" })[x.trigger] || x.trigger;
     const st = x.status === "running" ? "running" : x.status === "done" ? `${(x.counts || {}).generated ?? 0} tested, ${(x.counts || {}).passed ?? 0} passed` : x.status;
     return `#${x.id} ${esc(kind)} (${esc(st)})`;
   }).join(" · ")}</p>` : ""}
   ${r.focus === true ? `<div class="banner info" style="margin-top:8px">Focused run on ${esc((r.fassets || []).map(labAssetName).join(", "))}: new strategies only.</div>` : ""}`;
+}
+/** Time spent in each step of a run (recorded by the engine), plus the time spent waiting between steps. */
+function labTimingsHTML(r) {
+  const t = r.timings; if (!t) return "";
+  const names = [["data", "Candles"], ["generate", "Writing"], ["screen", "Backtesting"], ["robust", "Tougher test"], ["options", "Options"], ["recheck", "Re-check"]];
+  const fmt = (ms) => { const s = Math.floor(ms / 1000); return s < 60 ? `${s}s` : `${Math.floor(s / 60)} min ${s % 60}s`; };
+  const parts = names.filter(([k]) => t[k] > 0).map(([k, n]) => `${n} ${fmt(t[k])}`);
+  if (!parts.length) return "";
+  const work = names.reduce((a, [k]) => a + (Number(t[k]) || 0), 0);
+  const end = r.status === "running" ? Date.parse(r.updated_at) : Date.parse(r.finished_at || r.updated_at);
+  const wall = end - Date.parse(r.created_at), wait = wall - work;
+  return `<p class="hint" style="margin:8px 0 0">Time per step: ${esc(parts.join(" · "))}. Working ${esc(fmt(work))} in ${t.steps ?? "?"} steps${wait > 0 ? `, waiting between steps ${esc(fmt(wait))}` : ""}.</p>`;
 }
 /** How far a running lab run has got (0–100), from its step and counts. */
 function labPct(r) {
