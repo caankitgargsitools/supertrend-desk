@@ -1077,7 +1077,7 @@ async function liquidFrom(symbol: string, launched: string, cv: number): Promise
   const usd = days.map((d) => (d.v ?? 0) * d.c); // volume is already in coins
   for (let i = 29; i < days.length; i++) {
     const avg = usd.slice(i - 29, i + 1).reduce((a, b) => a + b, 0) / 30;
-    if (avg >= 5e6) return days[i - 29].day;
+    if (avg >= 5e6) return days[i].day; // the day the month behind it reached that level
   }
   void cv;
   return today;
