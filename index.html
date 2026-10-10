@@ -428,6 +428,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
             <button class="btn danger" id="b_flat" type="button">Exit position now</button>
             <button class="btn" id="b_publish" type="button" data-admin hidden>Publish to marketplace</button>
             <button class="btn" id="b_vary" type="button" hidden>Find variations</button>
+            <button class="btn" id="b_mtest" type="button" hidden>Manual test</button>
             <button class="btn" id="b_archive" type="button">Archive</button>
           </div>
         </div>
@@ -3086,7 +3087,7 @@ function robOf(r) {
   if (!r.basic_passed && !(x && x.status)) return null;
   if (!x) return { status: "waiting" };
   if (x.assets && typeof x.assets === "object") return { status: x.status || (x.checked_at ? "done" : "waiting"), passed: x.passed, assets_ok: x.assets.ok, assets_n: x.assets.n, tfs_ok: x.tfs.ok, tfs_n: x.tfs.n,
-    years_ok: x.years ? x.years.ok : null, years_n: x.years ? x.years.n : null, years: x.years ? x.years.list : null,
+    years_ok: x.years ? x.years.ok : null, years_n: x.years ? x.years.n : null, years: x.years ? x.years.list : null, quality: x.quality || null,
     vs_bh: x.vs_bh, risk_vs_bh: x.risk_vs_bh, bh_net: x.bh && x.bh.net, bh_dd: x.bh && x.bh.max_dd, bh_ratio: x.bh && x.bh.ratio, net: x.self && x.self.net, max_dd: x.self && x.self.max_dd, why: x.why || [], daily: x.daily,
     assetList: x.assets.list, tfList: x.tfs.list };
   return { ...x, status: x.status || "waiting", why: x.why || [] };
@@ -3166,6 +3167,44 @@ function robCells(r) {
   return `${c(x.assets_ok, x.assets_n)}${x.tfs_n ? c(x.tfs_ok, x.tfs_n) : '<td class="n hint" title="Not testable on other timeframes">n/a</td>'}${x.years_n == null ? '<td class="n hint">–</td>' : `<td class="n"><span class="${x.years_n >= 3 && x.years_ok === x.years_n ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span></td>`}<td class="n"><span>${ratioTxt(x.risk_vs_bh)}</span></td>`;
 }
 /** The tougher test as a panel for the lab detail. Users see counts; the admin also sees each asset and timeframe. */
+/** The quality score and what it is made of. */
+function qualityHTML(q) {
+  if (!q) return "";
+  const P = [["continuity", 25, "Continuity of profits", `profitable years in unbroken runs (best run ${q.best_streak} of ${q.years} years, latest run ${q.latest_streak})`],
+    ["months", 15, "Profitable months", `${q.pos_months} of ${q.months} months made money`],
+    ["return_risk", 20, "Return vs worst drawdown", `${rupees(q.per_year)} a year ÷ worst drawdown ${rupees(q.max_dd)} = ${q.calmar} (2 or more = full marks)`],
+    ["profit_factor", 10, "Profit factor", `gross profit ÷ gross loss = ${q.pf} (2.5 or more = full marks)`],
+    ["steadiness", 15, "Steadiness", `how even the yearly profits are (spread ${q.cv}; worst year ${rupees(q.worst_year)})`],
+    ["robustness", 10, "Robustness", "share of other assets and timeframes it also worked on"],
+    ["sample", 5, "Enough trades", `${q.trades} trades in ${q.years} years (12 a year or more = full marks)`]];
+  return `<h3 style="font-size:15px;margin:16px 0 6px">Quality score: <span class="${q.score >= 70 ? "pos-num" : q.score < 40 ? "neg-num" : ""}">${q.score}</span> / 100</h3>
+    <div class="scroll"><table class="mini"><thead><tr><th>Part</th><th class="n">Points</th><th class="n">Max</th><th>Why</th></tr></thead><tbody>${P.map(([k, mx, name, why]) => `<tr><td>${esc(name)}</td><td class="n">${q.parts[k] ?? 0}</td><td class="n">${mx}</td><td class="hint">${esc(why)}</td></tr>`).join("")}</tbody></table></div>
+    <p class="hint" style="margin:6px 0 0">${q.years} years tested: net ${rupees(q.net)} for 1 lot after charges, ${q.profitable_years} profitable years.</p>`;
+}
+function unpackLong(p) { return p && p.e ? p.e.map((e, k) => ({ entry: e, exit: p.x[k], side: p.s[k] === "S" ? "SHORT" : "LONG", entry_px: p.i[k], exit_px: p.o[k], net: p.n[k], exit_why: (p.why || [])[p.w[k]] || "" })) : []; }
+/** Fills the long trade list in a lab detail, with year and side filters and an Excel download. */
+function wireLongTrades(box, r) {
+  const body = box.querySelector("#lt_body"); if (!body) return;
+  const all = unpackLong(r.trades_long);
+  const draw = () => {
+    const [from, to] = (box.querySelector("#lt_year").value || "|").split("|"), side = box.querySelector("#lt_side").value;
+    const rows = all.filter((t) => (!from || (t.exit.slice(0, 10) >= from && t.exit.slice(0, 10) <= to)) && (!side || t.side === side));
+    let run = 0, wins = 0;
+    body.innerHTML = rows.map((t, i) => { run += t.net; if (t.net > 0) wins++; return `<tr><td class="n">${i + 1}</td><td class="when">${esc(t.entry)}</td><td class="when">${esc(t.exit)}</td><td>${t.side === "LONG" ? "Long" : "Short"}</td><td class="n">${fmtNum(t.entry_px)}</td><td class="n">${fmtNum(t.exit_px)}</td><td class="n ${t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : ""}">${rupees(t.net)}</td><td class="n">${rupees(run)}</td><td>${esc(t.exit_why)}</td></tr>`; }).join("");
+    box.querySelector("#lt_sum").textContent = rows.length ? `${rows.length} trades · net ${rupees(run)} · win rate ${Math.round((wins / rows.length) * 100)}%` : "No trades in this period.";
+    return rows;
+  };
+  box.querySelector("#lt_year").addEventListener("change", draw);
+  box.querySelector("#lt_side").addEventListener("change", draw);
+  box.querySelector("#lt_xlsx").addEventListener("click", (e) => run(e.currentTarget, async () => {
+    await loadScript("vendor/xlsx.mini.min.js");
+    let tot = 0;
+    const rows = draw().map((t) => { tot += t.net; return { Entry: t.entry, Exit: t.exit, Side: t.side === "LONG" ? "Long" : "Short", In: t.entry_px, Out: t.exit_px, "Net (1 lot, Rs)": t.net, "Running total (Rs)": tot, "Exit reason": t.exit_why }; });
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Trades");
+    XLSX.writeFile(wb, `lab-${r.id}-all-trades.xlsx`);
+  }));
+  draw();
+}
 function robustHTML(r, m, admin) {
   const x = robOf(r);
   if (!m.passed) return `<div class="banner warn" style="margin-top:12px">Not passed: ${esc((m.why || []).join("; "))}.</div>`;
@@ -3186,6 +3225,12 @@ function robustHTML(r, m, admin) {
       <div class="stat"><span class="label">Risk-adjusted vs buy &amp; hold</span><span class="v ${x.risk_vs_bh == null || x.risk_vs_bh >= 1 ? "up" : "down"}">${ratioTxt(x.risk_vs_bh)}</span><span class="hint">(net ÷ max DD) ÷ buy &amp; hold's; for comparison, not part of the pass</span></div>
     </div>
     ${x.years && x.years.length ? `<h3 style="font-size:15px;margin:16px 0 6px">Year by year (1 lot, after charges)</h3><div class="scroll"><table class="mini"><thead><tr><th>Year</th><th>From</th><th>To</th><th class="n">Trades</th><th class="n">Net</th><th></th></tr></thead><tbody>${x.years.map((y) => `<tr><td>${y.y === 1 ? "Latest 12 months" : `${y.y} years back`}</td><td class="when">${esc(y.from || "")}</td><td class="when">${esc(y.to || "")}</td><td class="n">${y.n ?? "–"}</td><td class="n">${pc(y.net)}</td><td>${y.ok ? '<span class="chip green">Profit</span>' : '<span class="chip red">Loss / flat</span>'}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${qualityHTML(x.quality)}
+    ${r.trades_long && r.trades_long.e && r.trades_long.e.length ? `<h3 style="font-size:15px;margin:16px 0 6px">Every trade of the year-by-year test (${r.trades_long.e.length})</h3>
+      <div class="formbar" style="margin:0 0 6px"><select id="lt_year" aria-label="Year"><option value="">All years</option>${(x.years || []).map((y) => `<option value="${y.from}|${y.to}">${y.y === 1 ? "Latest 12 months" : y.y + " years back"} (${esc(y.from || "")} → ${esc(y.to || "")})</option>`).join("")}</select>
+        <select id="lt_side" aria-label="Side"><option value="">Long and short</option><option value="LONG">Long only</option><option value="SHORT">Short only</option></select>
+        <button class="btn small" id="lt_xlsx" type="button">Download Excel</button><span class="hint" id="lt_sum"></span></div>
+      <div class="scroll" style="max-height:420px;overflow-y:auto"><table class="mini"><thead><tr><th>#</th><th>Entry</th><th>Exit</th><th>Side</th><th class="n">In</th><th class="n">Out</th><th class="n">Net (1 lot)</th><th class="n">Running total</th><th>Exit</th></tr></thead><tbody id="lt_body"></tbody></table></div>` : ""}
     <p class="hint" style="margin:6px 0 0">A check “works” when it makes money with a profit factor of 1.1 or more and enough trades (5 for once-a-day, 10 for intraday).</p>
     ${admin ? list(x.assetList, "Asset") + list(x.tfList, "Timeframe") : ""}`;
 }
@@ -3265,7 +3310,8 @@ const LAB_COLS = [
   { k: "dd", w: 66, t: "Max DD", f: "num", n: true, v: (g) => g.m.full.max_dd },
   { k: "pf", w: 44, t: "PF", f: "num", n: true, v: (g) => g.m.full.pf ?? null },
   { k: "months", w: 54, t: "Months +", f: "num", n: true, v: (g) => g.m.pos_months, tip: "Profitable months out of the months traded" },
-  { k: "score", w: 50, t: "Score", f: "num", n: true, v: (g) => g.m.score },
+  { k: "quality", w: 58, t: "Quality (0–100)", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.quality ? x.quality.score : null; }, tip: "Quality score from the whole year-by-year test (up to 10 years): unbroken runs of profitable years, profitable months, yearly profit ÷ worst drawdown, profit factor, how even the yearly profits are, other assets and timeframes, and enough trades. Open a strategy to see the breakdown." },
+  { k: "score", w: 50, t: "Rank score (9 mo)", f: "num", n: true, v: (g) => g.m.score, tip: "The first-round ranking: net of the first 9 months ÷ their worst drawdown × share of profitable months" },
   { k: "oassets", w: 56, t: "Other assets +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.assets_ok : null; }, tip: "Of the other assets the same rules were tried on (same family first: indices for index strategies, commodities for commodity ones), how many made money with a profit factor of 1.1 or more" },
   { k: "otfs", w: 62, t: "Other time frames +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.tfs_ok : null; }, tip: "Of the other candle timeframes tried on the same asset, how many made money with a profit factor of 1.1 or more" },
   { k: "years", w: 50, t: "Years +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.years_ok ?? null : null; }, tip: "Of the past years tested one by one (10 for once-a-day strategies, 5 for 5-minute ones), how many made money. Every year must." },
@@ -3284,7 +3330,7 @@ function longOf(r) {
   const longest = ks.sort((a, b) => order.indexOf(b) - order.indexOf(a))[0];
   return { key: longest, net: L.windows[longest].net, pos: ks.filter((k) => L.windows[k].net > 0).length, n: ks.length };
 }
-lab.filters = lab.filters || {}; lab.sortKey = lab.sortKey || "score"; lab.sortDir = lab.sortDir || -1;
+lab.filters = lab.filters || {}; lab.sortKey = lab.sortKey || "quality"; lab.sortDir = lab.sortDir || -1;
 /** Number filter: "50" (at least 50), ">50", ">=50", "<0", "<=2", "=10", "10-20" (between), "!0" (not 0); 2l = 2 lakh, 1cr, 5k. */
 function numTest(expr) {
   const e = String(expr).replace(/[,₹%\s]/g, "");
@@ -3378,7 +3424,7 @@ function renderLabTable() {
     tr.innerHTML = `<td class="n">${num}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
       <td style="white-space:nowrap">${esc(labAssetName(r.asset))}</td><td>${esc(labStyle(r))}</td><td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}</td><td class="n">${m.margin_lot ? rs(m.margin_lot) : "–"}</td>
       <td class="n">${m.ret_margin == null ? "–" : `<span class="${m.ret_margin > 0 ? "pos-num" : m.ret_margin < 0 ? "neg-num" : ""}">${m.ret_margin}%</span>`}</td><td class="n">${pc(m.test.net)}</td>
-      <td class="n">${rs(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${m.score}</td>${robCells(r)}<td class="n">${g.passes}/${g.nights}</td>${(() => { const L = longOf(r); return L ? `<td class="n"><span class="${L.net > 0 ? "pos-num" : L.net < 0 ? "neg-num" : ""}" title="${rupees(L.net)} over ${L.key}">${rupeesShort(L.net)}</span><div class="hint sm">${L.key}</div></td><td class="n">${L.pos}/${L.n}</td>` : '<td class="n hint">–</td><td class="n hint">–</td>'; })()}`;
+      <td class="n">${rs(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td>${(() => { const x = robOf(r), q = x && x.quality; return q ? `<td class="n"><b class="${q.score >= 70 ? "pos-num" : q.score < 40 ? "neg-num" : ""}">${q.score}</b></td>` : '<td class="n hint">–</td>'; })()}<td class="n">${m.score}</td>${robCells(r)}<td class="n">${g.passes}/${g.nights}</td>${(() => { const L = longOf(r); return L ? `<td class="n"><span class="${L.net > 0 ? "pos-num" : L.net < 0 ? "neg-num" : ""}" title="${rupees(L.net)} over ${L.key}">${rupeesShort(L.net)}</span><div class="hint sm">${L.key}</div></td><td class="n">${L.pos}/${L.n}</td>` : '<td class="n hint">–</td><td class="n hint">–</td>'; })()}`;
     tr.querySelector(".t").textContent = r.label;
     tr.addEventListener("click", (e) => {
       if (e.target.closest(".famBtn")) { if (lab.openFam.has(f.key)) lab.openFam.delete(f.key); else lab.openFam.add(f.key); renderLabTable(); return; }
@@ -3422,7 +3468,7 @@ function renderLabCards(fams, pc, rs) {
       <div class="chips">${status}${g.rechecking ? '<span class="chip blue">Re-checking today</span>' : ""}${r.champion ? '<span class="chip green">Re-tested</span>' : ""}${r.starred ? '<span class="chip yellow">★</span>' : ""}</div>
       <div class="mg">${cell("Net (1 yr)", pc(m.full.net))}${cell("Win %", m.full.win_rate)}${cell("Trades", m.full.n)}
         ${cell("Max DD", rs(m.full.max_dd))}${cell("PF", m.full.pf ?? "–")}${cell("Months +", `${m.pos_months}/${m.months_n}`)}
-        ${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Score", m.score)}
+        ${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Quality", x && x.quality ? `<span class="${x.quality.score >= 70 ? "pos-num" : x.quality.score < 40 ? "neg-num" : ""}">${x.quality.score}</span>` : "–")}
         ${done ? cell("Assets +", ratio(x.assets_ok, x.assets_n)) + cell("Timeframes +", x.tfs_n ? ratio(x.tfs_ok, x.tfs_n) : "n/a") + cell("Years +", x.years_n == null ? "–" : `<span class="${x.years_n >= 3 && x.years_ok === x.years_n ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span>`) : ""}</div>
       ${!sub && f.members.length > 1 ? `<button type="button" class="btn small fam">${lab.openFam.has(f.key) ? "Hide similar" : `+${f.members.length - 1} similar`}</button>` : ""}`;
     el.querySelector(".nm").textContent = r.label;
@@ -3489,7 +3535,7 @@ async function openLabDetail(id) {
     const mk = labKind(v), tm = (t) => t.margin ?? labTradeMargin(r.config, mk, t, m.margin_pct);
     const mMax = m.margin_max ?? (v.trades.length ? Math.max(...v.trades.map(tm)) : null);
     box.innerHTML = `<div class="head"><div><span class="label">Lab strategy #${r.id}</span><h2 style="font-size:18px"></h2></div>
-      <div class="actions"><button class="btn small" id="ld_star" type="button">${r.starred ? "★ Starred" : "☆ Star (keep)"}</button><button class="btn small" id="ld_xlsx" type="button">Download Excel</button><button class="btn primary small" id="ld_save" type="button">Save as strategy</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
+      <div class="actions"><button class="btn small" id="ld_star" type="button">${r.starred ? "★ Starred" : "☆ Star (keep)"}</button><button class="btn small" id="ld_xlsx" type="button">Download Excel</button><button class="btn primary small" id="ld_save" type="button">Save as strategy</button><button class="btn small" id="ld_mtest" type="button">Manual test</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
       <div id="ld_form"></div>
       <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.key === "FUT" ? "Futures" : x.label)}</button>`).join("")}</div>
       ${v.key === "FUT" ? robustHTML(r, m, true) : m.passed ? '<div class="banner ok" style="margin-top:12px">This option version passed the walk-forward check. The tougher test (other assets, timeframes, buy &amp; hold) is on the Futures tab.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc(m.why.join("; "))}.</div>`}
@@ -3520,7 +3566,8 @@ async function openLabDetail(id) {
     $("ld_xlsx").addEventListener("click", (e) => run(e.currentTarget, () => downloadLabExcel(r, versions[pickI], kv)));
     $("ld_save").addEventListener("click", (e) => run(e.currentTarget, () => promoteLab(r, versions[pickI])));
     $("ld_var").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: !!(r.config.rules && r.config.rules.daily), title: `Lab #${r.id}` }));
-    renderLongTests(r.id);
+    $("ld_mtest").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: !!(r.config.rules && r.config.rules.daily), title: `Lab #${r.id}`, manual: true }));
+    renderLongTests(r.id); wireLongTrades(box, r);
     box.scrollIntoView({ block: "start", behavior: "smooth" });
   };
   draw();
@@ -3540,7 +3587,7 @@ async function openLabDetailPublic(id) {
     const mk = labKind(v), tm = (t) => t.margin ?? labTradeMargin(r.cfg || {}, mk, t, m.margin_pct);
     const mMax = m.margin_max ?? (v.trades.length ? Math.max(...v.trades.map(tm)) : null);
     box.innerHTML = `<div class="head"><div><span class="label">Lab strategy #${r.id}</span><h2 style="font-size:18px"></h2></div>
-      <div class="actions"><button class="btn primary small" id="ld_use" type="button">Use this strategy</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
+      <div class="actions"><button class="btn primary small" id="ld_use" type="button">Use this strategy</button><button class="btn small" id="ld_mtest" type="button">Manual test</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
       <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.label)}</button>`).join("")}</div>
       <div id="ld_form"></div>
       ${v.key === "FUT" ? robustHTML(r, m, false) : m.passed ? '<div class="banner ok" style="margin-top:12px">This option version passed the walk-forward check. The tougher test (other assets, timeframes, buy &amp; hold) is on the first tab.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc((m.why || []).join("; "))}.</div>`}
@@ -3566,7 +3613,8 @@ async function openLabDetailPublic(id) {
     box.querySelectorAll("#ld_vers button").forEach((b) => b.addEventListener("click", () => { pickI = Number(b.dataset.i); draw(); }));
     $("ld_close").addEventListener("click", () => { box.hidden = true; lab.sel = null; renderLabTable(); });
     $("ld_var").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: r.cfg && r.cfg.data_segment === "MCX_COMM" ? true : null, title: `Lab #${r.id}` }));
-    renderLongTests(r.id);
+    $("ld_mtest").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: r.cfg && r.cfg.data_segment === "MCX_COMM" ? true : null, title: `Lab #${r.id}`, manual: true }));
+    renderLongTests(r.id); wireLongTrades(box, r);
     $("ld_use").addEventListener("click", () => {
       const f = $("ld_form");
       f.innerHTML = `<div class="ued" style="margin-top:12px"><strong>Add “${esc(v.label)}” to my strategies</strong>
@@ -3598,23 +3646,43 @@ function variationForm(box, src) {
   const idxOnly = src.daily === false;
   const assets = [...VAR_INDEX, ...(idxOnly ? [] : VAR_MCX)].filter((k) => PRESETS[k]);
   const isIdx = VAR_INDEX.includes(src.asset);
-  box.innerHTML = `<div class="ued" style="margin-top:12px"><strong>Run variations of ${esc(src.title)}</strong>
+  box.innerHTML = `<div class="ued" style="margin-top:12px"><strong>${src.manual ? "Manual test" : "Run variations"} of ${esc(src.title)}</strong>
     <p class="hint" style="margin:0">The lab tests this strategy many more ways on the past year, ranks the results the same way as the nightly run, and shows them to you under “Variation runs”. Its settings stay private; you see results and trades. Runs one at a time after the lab's other work; it can take 10–60 minutes.</p>
-    <div class="f"><span>Try</span><div class="assetpick">${VAR_KINDS.map(([k, l]) => `<label><input type="checkbox" data-k="${k}" checked> ${esc(l)}</label>`).join("")}</div></div>
+    <div class="f"><span>How</span><div class="assetpick"><label><input type="radio" name="vf_mode" value="mix" checked> Let the lab mix changes (random combinations)</label><label><input type="radio" name="vf_mode" value="exact"> Manual test: exactly what I tick below</label></div></div>
+    <div class="f"><span>Try</span><div class="assetpick">${VAR_KINDS.map(([k, l]) => `<label class="vk vk-${k}"><input type="checkbox" data-k="${k}" checked> ${esc(l)}</label>`).join("")}</div></div>
+    <div class="f vf-tfs" hidden><span>On these decision timeframes (minutes)</span><div class="assetpick">${[5, 10, 15, 25, 30, 45, 60, 75, 125].map((t) => `<label><input type="checkbox" data-t="${t}"> ${t} min</label>`).join("")}</div>
+      <span class="hint">Once-a-day strategies stay on daily candles; timeframes that don't fit the rules are skipped.</span></div>
     <div class="f"><span>On these assets (for “Other assets”)</span><div class="assetpick">${assets.map((k) => `<label><input type="checkbox" data-a="${k}" ${(isIdx ? VAR_INDEX.includes(k) : true) ? "checked" : ""}> ${esc(PRESETS[k].name)}</label>`).join("")}</div>
       <span class="hint">Commodities are tested on daily candles, so only once-a-day strategies move to them.</span></div>
     <div class="grid"><label class="f"><span>How many versions</span><select id="vf_n"><option value="50">50 (quicker)</option><option value="100" selected>100</option><option value="150">150</option>${isAdmin() ? '<option value="300">300</option>' : ""}</select></label></div>
     <div class="formbar"><button class="btn primary" id="vf_go" type="button">Start variation run</button><button class="btn" id="vf_no" type="button">Cancel</button></div></div>`;
   $("vf_no").addEventListener("click", () => box.innerHTML = "");
+  // Manual test: assets and timeframes are picked one by one; of the setting changes only the exact lists apply.
+  const syncMode = () => {
+    const exact = box.querySelector('[name="vf_mode"]:checked').value === "exact";
+    box.querySelector(".vf-tfs").hidden = !exact;
+    box.querySelectorAll(".vk").forEach((l) => { const k = l.querySelector("input").dataset.k; l.hidden = exact && !["settings", "stops", "trailing"].includes(k); if (exact && ["assets", "timeframes"].includes(k)) l.querySelector("input").checked = false; });
+    box.querySelector("#vf_n").closest(".f").hidden = exact;
+    if (exact && !box.dataset.cleared) { box.querySelectorAll("[data-a]").forEach((i) => { i.checked = false; }); box.dataset.cleared = "1"; }
+  };
+  box.querySelectorAll('[name="vf_mode"]').forEach((r) => r.addEventListener("change", syncMode));
+  if (src.manual) { box.querySelector('[name="vf_mode"][value="exact"]').checked = true; syncMode(); }
   $("vf_go").addEventListener("click", (e) => run(e.currentTarget, async () => {
     const kinds = [...box.querySelectorAll("[data-k]:checked")].map((i) => i.dataset.k), as = [...box.querySelectorAll("[data-a]:checked")].map((i) => i.dataset.a);
-    if (!kinds.length) throw new Error("Pick at least one kind of change.");
-    const id = must(await db.rpc("request_lab_variations", { p_lab_id: src.labId || null, p_strategy: src.strategyId || null, p_n: Number($("vf_n").value), p_kinds: kinds, p_assets: as }));
+    const exact = box.querySelector('[name="vf_mode"]:checked').value === "exact", tfs = [...box.querySelectorAll("[data-t]:checked")].map((i) => Number(i.dataset.t));
+    if (exact) { if (!as.length && !tfs.length && !kinds.length) throw new Error("Tick at least one asset, timeframe or kind of setting change."); }
+    else if (!kinds.length) throw new Error("Pick at least one kind of change.");
+    const id = must(await db.rpc("request_lab_variations", { p_lab_id: src.labId || null, p_strategy: src.strategyId || null, p_n: Number($("vf_n").value), p_kinds: exact ? kinds.filter((k) => ["settings", "stops", "trailing"].includes(k)) : kinds, p_assets: as, p_tfs: exact ? tfs : null, p_exact: exact }));
     box.innerHTML = ""; toast(`Variation run #${id} queued. Follow it on the Strategy Lab page.`);
     if (lab.open) await loadLabRequests();
   }));
   box.scrollIntoView({ block: "nearest" });
 }
+$("b_mtest").addEventListener("click", () => {
+  const s = cur(); if (!s) return;
+  variationForm($("publishBox"), { strategyId: s.id, asset: s.underlying, daily: s.locked ? null : !!(s.rules && s.rules.daily), title: s.name, manual: true });
+  $("publishBox").hidden = false;
+});
 $("b_vary").addEventListener("click", () => {
   const s = cur(); if (!s) return;
   variationForm($("publishBox"), { strategyId: s.id, asset: s.underlying, daily: s.locked ? null : !!(s.rules && s.rules.daily), title: s.name });
@@ -3919,6 +3987,7 @@ function renderLockedView(s) {
   $("b_publish").hidden = !(isAdmin() && !s.locked && !s.is_master && !s.archived);
   // Variation runs: condition strategies (own, Strategy Lab picks, or marketplace ones, whose rules stay private).
   $("b_vary").hidden = !(me && (isAdmin() || me.can_build) && !s.archived && (s.locked || s.strategy_kind === "RULES"));
+  $("b_mtest").hidden = $("b_vary").hidden;
   $("sp_owner").textContent = isAdmin() && me && s.owner_id !== me.user_id ? `Owner: ${ownerName(s.owner_id)}` : s.is_master ? "Marketplace copy: buyers run exactly these settings." : "";
   if (!locked) { box.hidden = true; box.innerHTML = ""; return; }
   if (box.dataset.for === s.id && box.contains(document.activeElement)) return;

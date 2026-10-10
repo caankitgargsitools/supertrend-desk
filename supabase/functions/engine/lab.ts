@@ -1031,7 +1031,19 @@ async function requestPhase(sb: SupabaseClient, run: Run, assets: string[]) {
   for (const t of ["session_start", "last_entry", "square_off"]) if (typeof parent[t] === "string") parent[t] = parent[t].slice(0, 5);
   validateRules(parent.rules);
   const seen = new Set<string>([fingerprint(parent)]);
-  const kids = explore(parent, { n: Math.max(1, Number(q.n) - 1), kinds: (q.kinds ?? EXPLORE_KINDS) as ExploreKind[], assets: assets.filter((k) => k !== parent.underlying), seed: (Number(q.id) * 7919 + Number(run.id)) >>> 0, capital: Number(set.capital ?? 500000), seen });
+  let kids: LabConfig[];
+  if (q.exact) {
+    // A manual test: exactly the assets, timeframes and setting steps that were picked, nothing random.
+    const out: LabConfig[] = [];
+    const add = (c: LabConfig | null) => { if (!c) return; try { validateRules(c.rules); } catch { return; } const fp = fingerprint(c); if (seen.has(fp)) return; seen.add(fp); out.push(c); };
+    for (const k of (q.assets ?? []) as string[]) if (k !== parent.underlying && LAB_ASSETS[k]) add(transfer(parent, k));
+    for (const t of (q.tfs ?? []) as number[]) add(retime(parent, Number(t)));
+    const kinds = (q.kinds ?? []) as string[];
+    if (kinds.includes("settings")) settingVariants(parent).forEach(add);
+    if (kinds.includes("stops")) stopVariants(parent).forEach(add);
+    if (kinds.includes("trailing")) trailVariants(parent).forEach(add);
+    kids = out.slice(0, 400);
+  } else kids = explore(parent, { n: Math.max(1, Number(q.n) - 1), kinds: (q.kinds ?? EXPLORE_KINDS) as ExploreKind[], assets: assets.filter((k) => k !== parent.underlying), seed: (Number(q.id) * 7919 + Number(run.id)) >>> 0, capital: Number(set.capital ?? 500000), seen });
   const base = { ...parent, lab_note: "The strategy as it is (baseline)" };
   const rows = [base, ...kids].map((cfg, i) => ({ run_id: run.id, asset: cfg.underlying, mode: cfg.rules.daily ? "DAILY" : "INTRADAY", label: labelFor(cfg), fingerprint: fingerprint(cfg),
     champion: i === 0, config: cfg, stage: "pending", requested_by: q.user_id, request_id: q.id }));
@@ -1139,7 +1151,8 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   const assets = checks.filter((c) => c.kind === "asset").map((c) => ({ asset: c.asset, ...c.result }));
   const tfs = checks.filter((c) => c.kind === "tf" && !c.result?.skip).map((c) => ({ tf: c.tf, ...c.result }));
   const okA = assets.filter((x) => x.ok).length, okT = tfs.filter((x) => x.ok).length;
-  const yrs = checks.filter((c) => c.kind === "year" && !c.result?.skip).map((c) => ({ y: c.tf, ...c.result })).sort((a, b) => a.y - b.y);
+  const yrs = checks.filter((c) => c.kind === "year" && !c.result?.skip).map((c) => { const { tr: _t, ...rest } = c.result ?? {}; return { y: c.tf, ...rest }; }).sort((a, b) => a.y - b.y);
+  const allTrades = unpackTrades(joinTrades(checks.filter((c) => c.kind === "year" && !c.result?.skip).map((c) => c.result?.tr).filter(Boolean)));
   const okY = yrs.filter((x) => x.ok).length;
   const why: string[] = [];
   if (!self || !(self.net > 0)) why.push("lost money on the latest year");
@@ -1157,8 +1170,81 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
     riskVsBh = bh.ratio && bh.ratio > 0 ? +(sRatio / bh.ratio).toFixed(2) : null;
     // Shown for comparison only: the strategies trade long and short, so a falling asset is no reason to fail one.
   }
+  const quality = qualityScore(yrs, allTrades, { okA, nA: assets.length, okT, nT: tfs.length });
   return { passed: why.length === 0, why, self, bh, vs_bh: vsBh, risk_vs_bh: riskVsBh, assets: { ok: okA, n: assets.length, list: assets },
-    tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, daily, checked_at: new Date().toISOString() };
+    tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, quality, daily, checked_at: new Date().toISOString() };
+}
+
+/* ---------- long trade lists and the quality score ---------- */
+type Packed = { e: string[]; x: string[]; s: string[]; i: number[]; o: number[]; n: number[]; w: number[]; why: string[] };
+/** Trades packed in columns: entry, exit, side (L/S), in, out, net, exit reason (index into why). */
+export function packTrades(ts: Record<string, any>[]): Packed {
+  const why: string[] = [], wi = new Map<string, number>();
+  const p: Packed = { e: [], x: [], s: [], i: [], o: [], n: [], w: [], why };
+  for (const t of ts) {
+    const w = String(t.exit_why ?? "").slice(0, 60);
+    if (!wi.has(w)) { wi.set(w, why.length); why.push(w); }
+    p.e.push(String(t.entry)); p.x.push(String(t.exit)); p.s.push(t.side === "SHORT" ? "S" : "L");
+    p.i.push(+Number(t.entry_px ?? 0).toFixed(2)); p.o.push(+Number(t.exit_px ?? 0).toFixed(2)); p.n.push(Math.trunc(Number(t.net) || 0)); p.w.push(wi.get(w)!);
+  }
+  return p;
+}
+export function joinTrades(parts: Packed[]): Packed {
+  const all = parts.flatMap((p) => unpackTrades(p)).sort((a, b) => a.exit.localeCompare(b.exit));
+  return packTrades(all);
+}
+export function unpackTrades(p: Packed | null | undefined) {
+  if (!p || !Array.isArray(p.e)) return [] as { entry: string; exit: string; side: string; entry_px: number; exit_px: number; net: number; exit_why: string }[];
+  return p.e.map((e, k) => ({ entry: e, exit: p.x[k], side: p.s[k] === "S" ? "SHORT" : "LONG", entry_px: p.i[k], exit_px: p.o[k], net: p.n[k], exit_why: p.why[p.w[k]] ?? "" }));
+}
+/**
+ * Quality score, 0–100, from the whole year-by-year test (up to 10 years; 5 for 5-minute strategies):
+ *  continuity 25 – profitable years, with unbroken runs of profitable years counting more (sum of run lengths² ÷ years²)
+ *  months 15     – share of months that made money
+ *  return/risk 20 – yearly net ÷ the worst drawdown over the whole period (2 or more scores full)
+ *  profit factor 10 – gross profit ÷ gross loss (2.5 or more scores full)
+ *  steadiness 15 – how even the yearly profits are (spread of yearly nets, and the worst year against the average)
+ *  robustness 10 – share of other assets and other timeframes the rules also worked on
+ *  sample 5      – enough trades to trust it (12 or more a year scores full)
+ */
+export function qualityScore(yrs: { y: number; net: number; n: number; ok: boolean }[], trades: { exit: string; net: number }[], rb: { okA: number; nA: number; okT: number; nT: number }) {
+  const n = yrs.length;
+  if (n < 1) return null;
+  const byOld = [...yrs].sort((a, b) => b.y - a.y); // oldest first
+  let runs = 0, cur = 0, best = 0;
+  for (const y of byOld) { if (y.ok) { cur++; best = Math.max(best, cur); } else { runs += cur * cur; cur = 0; } }
+  runs += cur * cur;
+  let latest = 0; for (const y of [...yrs].sort((a, b) => a.y - b.y)) { if (y.ok) latest++; else break; }
+  const continuity = runs / (n * n);
+  const months = new Map<string, number>();
+  let eq = 0, peak = 0, dd = 0, gw = 0, gl = 0;
+  for (const t of trades) {
+    const v = Number(t.net) || 0;
+    eq += v; peak = Math.max(peak, eq); dd = Math.max(dd, peak - eq);
+    if (v > 0) gw += v; else gl += -v;
+    const m = String(t.exit).slice(0, 7); months.set(m, (months.get(m) ?? 0) + v);
+  }
+  const mVals = [...months.values()], posM = mVals.filter((x) => x > 0).length;
+  const monthsShare = mVals.length ? posM / mVals.length : 0;
+  const total = trades.reduce((a, t) => a + (Number(t.net) || 0), 0);
+  const perYear = total / n;
+  const calmar = dd > 0 ? perYear / dd : perYear > 0 ? 9 : 0;
+  const pf = gl > 0 ? gw / gl : gw > 0 ? 9 : 0;
+  const nets = yrs.map((y) => Number(y.net) || 0), mean = nets.reduce((a, b) => a + b, 0) / n;
+  const sd = Math.sqrt(nets.reduce((a, b) => a + (b - mean) ** 2, 0) / n);
+  const cv = mean > 0 ? sd / mean : 9;
+  const worst = Math.min(...nets);
+  const steady = mean > 0 ? 0.6 * (1 / (1 + cv)) + 0.4 * Math.max(0, Math.min(1, worst / mean)) : 0;
+  const robust = ((rb.nA ? rb.okA / rb.nA : 0) + (rb.nT ? rb.okT / rb.nT : 0)) / 2;
+  const sample = Math.min(1, trades.length / (n * 12));
+  const parts = {
+    continuity: +(25 * continuity).toFixed(1), months: +(15 * monthsShare).toFixed(1), return_risk: +(20 * Math.max(0, Math.min(1, calmar / 2))).toFixed(1),
+    profit_factor: +(10 * Math.max(0, Math.min(1, (pf - 1) / 1.5))).toFixed(1), steadiness: +(15 * steady).toFixed(1), robustness: +(10 * robust).toFixed(1), sample: +(5 * sample).toFixed(1),
+  };
+  const score = +Object.values(parts).reduce((a, b) => a + b, 0).toFixed(1);
+  return { score, parts, years: n, profitable_years: yrs.filter((y) => y.ok).length, best_streak: best, latest_streak: latest,
+    months: mVals.length, pos_months: posM, net: Math.trunc(total), per_year: Math.trunc(perYear), max_dd: Math.trunc(dd), calmar: +calmar.toFixed(2),
+    pf: +pf.toFixed(2), cv: +cv.toFixed(2), worst_year: Math.trunc(worst), trades: trades.length };
 }
 async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: string; to: string }, patch: (f: Record<string, unknown>) => unknown): Promise<boolean> {
   const { sb } = ctx;
@@ -1212,9 +1298,9 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
             ups.push(sb.from("lab_checks").update({ status: "done", result: { skip: true, ok: false, error: "not enough history" } }).eq("id", c.id).then(() => {}));
             continue;
           }
-          const { metrics } = await screenOne(c.config, data, memo, { from, split: from, to: hi }, capital, rates);
+          const { metrics, trades } = await screenOne(c.config, data, memo, { from, split: from, to: hi }, capital, rates);
           const f = metrics.full;
-          result = { from, to: hi, net: f.net, n: f.n, win_rate: f.win_rate, pf: f.pf, max_dd: f.max_dd, ok: f.net > 0 };
+          result = { from, to: hi, net: f.net, n: f.n, win_rate: f.win_rate, pf: f.pf, max_dd: f.max_dd, ok: f.net > 0, tr: packTrades(trades) };
           cpu += performance.now() - t1;
           ups.push(sb.from("lab_checks").update({ status: "done", result }).eq("id", c.id).then(() => {}));
           continue;
@@ -1239,7 +1325,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     await Promise.all(ups);
   }
   // 3. Verdicts for winners whose checks are all done.
-  const { data: queued } = await sb.from("lab_results").select("id, config, fingerprint, asset, label, mode, score, metrics, starred, promoted_id, request_id").eq("robust_status", "queued").order("id", { ascending: false }).limit(40);
+  const { data: queued } = await sb.from("lab_results").select("id, config, fingerprint, asset, label, mode, score, metrics, starred, promoted_id, request_id").eq("robust_status", "queued").order("id", { ascending: false }).limit(20);
   let decided = 0;
   const ids = (queued ?? []).map((r) => r.id);
   const { data: allCs } = ids.length ? await sb.from("lab_checks").select("lab_id, kind, asset, tf, status, result").in("lab_id", ids).neq("status", "void").limit(1000) : { data: [] };
@@ -1247,7 +1333,9 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     const cs = (allCs ?? []).filter((c) => c.lab_id === r.id);
     if (!cs.length || cs.some((c) => c.status === "pending")) continue;
     const v = robustVerdict(r.config, cs);
-    await sb.from("lab_results").update({ robust_status: "done", robust: v, passed: v.passed }).eq("id", r.id);
+    // Every trade of the year-by-year test is kept with the result (packed in columns to stay small).
+    const longTrades = joinTrades(cs.filter((c) => c.kind === "year" && !c.result?.skip).map((c) => c.result?.tr).filter(Boolean));
+    await sb.from("lab_results").update({ robust_status: "done", robust: v, passed: v.passed, trades_long: longTrades }).eq("id", r.id);
     await sb.from("lab_checks").delete().eq("lab_id", r.id);
     if (!v.passed && keepable(r)) await forget(sb, [{ ...r, round: v.why.some((w: string) => /year/.test(w)) && v.why.length === 1 ? 3 : 2, why: v.why }]);
     decided++;
