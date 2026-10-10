@@ -22,15 +22,21 @@ export function timeToMin(t: string): number {
   return h * 60 + m;
 }
 
-/** Trading session in IST minutes. NSE/BSE: 09:15–15:30. MCX: 09:00–23:30 while US daylight saving is on, else 23:55. */
+/** Trading session in IST minutes. NSE/BSE: 09:15–15:30. MCX: 09:00–23:30 while US daylight saving is on, else 23:55. Crypto: 05:30–24:00. */
 export type Session = { open: number; close: number };
 export function isCommodity(seg: string): boolean { return seg === "MCX_COMM"; }
+/** Crypto perpetuals on Delta Exchange: trade every day of the week. */
+export function isCrypto(seg: string): boolean { return seg === "DELTA"; }
+/** Trading minutes in a day (for warm-up estimates). */
+export function dayMinutes(seg: string): number { return isCrypto(seg) ? 1110 : isCommodity(seg) ? 860 : 375; }
 function nthSunday(y: number, month: number, n: number): string {
   const first = new Date(Date.UTC(y, month - 1, 1)).getUTCDay();
   const day = 1 + ((7 - first) % 7) + (n - 1) * 7;
   return `${y}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 export function sessionFor(seg: string, date: string): Session {
+  // Crypto: the desk's crypto day runs 05:30–24:00 IST (Delta's daily candle starts at 00:00 UTC = 05:30 IST), every day.
+  if (isCrypto(seg)) return { open: 330, close: 1440 };
   if (!isCommodity(seg)) return { open: OPEN_MIN, close: CLOSE_MIN };
   const y = Number(date.slice(0, 4));
   const usDst = date >= nthSunday(y, 3, 2) && date < nthSunday(y, 11, 1);

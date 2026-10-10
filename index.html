@@ -373,7 +373,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
     <button class="btn small" id="nav_market" type="button">Marketplace</button>
     <button class="btn small" id="openCap" type="button">Capital</button>
     <button class="btn small" id="nav_wallet" type="button">Wallet</button>
-    <button class="btn small" id="openSettings" type="button">Dhan connection</button>
+    <button class="btn small" id="openSettings" type="button">Connections</button>
     <button class="btn small" id="openLab" type="button" hidden>Strategy Lab</button>
     <button class="btn small" id="nav_admin" type="button" data-admin hidden>Admin</button>
   </nav>
@@ -405,6 +405,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
   <main class="pane" id="pane">
     <section class="card" id="connCard" hidden>
       <div class="head"><h2>Dhan connection</h2><button class="btn small" id="closeSettings" type="button" hidden>Close</button></div>
+      <p class="hint" style="margin:4px 0 0">Indices and MCX trade through Dhan. Crypto trades through Delta Exchange India (further down).</p>
       <form id="connForm" style="margin-top:12px">
         <div class="grid">
           <label class="f"><span>Dhan client ID</span><input id="c_client" autocomplete="off"></label>
@@ -416,6 +417,32 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
         <p class="hint">These details are stored on the server and never shown in full again. The access token reads candles, option prices and your Dhan funds (Dhan Data API subscription needed). Orders go to the webhook URL with its secret, in the same JSON format your TradingView alerts send to Dhan. Dhan tokens last 24 hours; the desk renews the saved token automatically (Dhan's RenewToken) every day before it expires, so you only paste one again if a renewal fails or the token has already expired.</p>
         <div class="formbar"><button class="btn primary" type="submit">Save connection</button><span class="hint" id="connMsg"></span></div>
       </form>
+      <form id="deltaForm" style="margin-top:22px;border-top:1px solid var(--line);padding-top:16px">
+        <h2 style="font-size:17px">Delta Exchange connection (crypto)</h2>
+        <div class="grid" style="margin-top:10px">
+          <label class="f"><span>API key <em id="dkState" class="hint"></em></span><input id="d_key" type="password" placeholder="Paste to add or replace" autocomplete="off"></label>
+          <label class="f"><span>API secret <em id="dsState" class="hint"></em></span><input id="d_secret" type="password" placeholder="Paste to add or replace" autocomplete="off"></label>
+        </div>
+        <div id="dNote" style="margin-top:10px"></div>
+        <p class="hint">Create the key on Delta Exchange India (Account → API keys) with Trading permission. If Delta asks for IP whitelisting, leave it off for this key (the desk's server has no fixed IP). Crypto strategies trade Delta's perpetual futures with market orders; quantities are in lots (one lot is a set number of coins, shown next to each coin). Paper trading and backtests don't need a key: Delta's prices are public. The key and secret are stored on the server and never shown again.</p>
+        <div class="formbar"><button class="btn primary" type="submit">Save Delta connection</button><button class="btn" id="d_check" type="button">Check connection</button><span class="hint" id="dMsg"></span></div>
+      </form>
+      <div id="coinBox" data-admin hidden style="margin-top:22px;border-top:1px solid var(--line);padding-top:16px">
+        <h2 style="font-size:17px">Crypto coins</h2>
+        <p class="hint" style="margin:4px 0 10px">Coins offered for strategies, the lab and charts (Delta Exchange India perpetual futures). Add a coin by its Delta symbol; its contract details are read from Delta. A Binance pair (e.g. DOGEUSDT) gives older history from before the coin listed on Delta India. Switch a coin off to hide it.</p>
+        <div class="scroll"><table class="mini"><thead><tr><th>Coin</th><th>Delta symbol</th><th class="n">1 lot (coins)</th><th class="n">Slippage %</th><th>On</th><th>Details</th><th></th></tr></thead><tbody id="coinRows"></tbody></table></div>
+        <div class="grid" style="margin-top:12px">
+          <label class="f"><span>Delta symbol</span><input id="cn_key" placeholder="e.g. DOGEUSD" autocomplete="off"></label>
+          <label class="f"><span>Name</span><input id="cn_name" placeholder="e.g. Dogecoin" autocomplete="off"></label>
+          <label class="f"><span>Binance pair for older history (optional)</span><input id="cn_hist" placeholder="e.g. DOGEUSDT" autocomplete="off"></label>
+          <div class="f"><span>&nbsp;</span><button class="btn" id="cn_add" type="button">Add coin</button></div>
+        </div>
+        <div class="grid" style="margin-top:12px">
+          <label class="f"><span>Rupees per US dollar (P&amp;L, charges and margins)</span><input id="cn_fx" inputmode="decimal"></label>
+          <div class="f"><span>&nbsp;</span><button class="btn" id="cn_fx_save" type="button">Save rate</button></div>
+        </div>
+        <p class="hint" id="cn_msg"></p>
+      </div>
     </section>
 
     <section class="card" id="emptyPane"><div class="empty">Loading your strategies…</div></section>
@@ -717,7 +744,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
             <button class="btn primary" id="lab_run" type="button">Run now</button>
           </div>
         </div>
-        <p class="hint longhint" style="margin:8px 0 0">The lab runs once a day at 16:05 IST or non-stop (see Lab settings). Each run invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations, and with small steps on every indicator setting (lengths ±1, ±2 and ±10%, Supertrend factor and Bollinger width ±0.25/±0.5, RSI / ADX levels ±2/±5), which get a double share. About a quarter of new strategies are built around liquidity sweeps. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and must also make money in the last 3 months, which the ranking never saw (round 1); then work on other assets and other timeframes (round 2); then make money in <strong>every one of the past 10 years</strong> (5 years for 5-minute strategies, the history Dhan keeps), so nothing passes on one big move of the underlying (round 3). 5-minute strategies must also stay profitable, in total and in every year, with charges and slippage doubled. Every backtest fills each order a little worse than the test price (slippage set per asset from how liquid it is: 0.01% on Nifty and Gold up to 0.04–0.05% on Midcap Select, Nifty Next 50, Bankex, Nickel and the mini contracts; 0.5–2% of premium on options). Variations come from at most 6 winners per asset, so no single asset fills the runs. Strategies that fail are cleared straight away; a one-line record stays so the lab never tries them again.</p>
+        <p class="hint longhint" style="margin:8px 0 0">The lab runs once a day at 16:05 IST or non-stop (see Lab settings). Each run invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations, and with small steps on every indicator setting (lengths ±1, ±2 and ±10%, Supertrend factor and Bollinger width ±0.25/±0.5, RSI / ADX levels ±2/±5), which get a double share. About a quarter of new strategies are built around liquidity sweeps. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). The best index strategies are then priced with real expired-option prices, as option buying and option writing. Strategies are <strong>ranked on the first 9 months</strong> and must also make money in the last 3 months, which the ranking never saw (round 1); then work on other assets and other timeframes (round 2); then make money in <strong>every one of the past 10 years</strong> (5 years for 5-minute strategies, the history Dhan keeps), so nothing passes on one big move of the underlying (round 3). 5-minute strategies must also stay profitable, in total and in every year, with charges and slippage doubled. Every backtest fills each order a little worse than the test price (slippage set per asset from how liquid it is: 0.01% on Nifty and Gold up to 0.04–0.05% on Midcap Select, Nifty Next 50, Bankex, Nickel and the mini contracts; 0.5–2% of premium on options). Variations come from at most 6 winners per asset, so no single asset fills the runs. Crypto (Bitcoin, Ether, Solana, XRP and any coin added under Connections) is tested as Delta Exchange perpetual futures on 15-minute candles (Binance spot history before the coin listed on Delta India), on the crypto day 05:30–24:00 IST every day of the week, with Delta's 0.05% fee + GST, funding on long positions and per-coin slippage. Strategies that fail are cleared straight away; a one-line record stays so the lab never tries them again.</p>
         <div id="lab_status" style="margin-top:12px"></div>
         <div id="lab_reqs" style="margin-top:12px"></div>
         <form id="labSetForm" hidden style="margin-top:14px">
@@ -939,6 +966,25 @@ const PRESETS = {
   NICKEL: MCX("NICKEL", "Nickel (250 kg)", 250, "Base metals (MCX)"),
 };
 const isMcx = (seg) => seg === "MCX_COMM";
+const isCrypto = (seg) => seg === "DELTA";
+/* ---------- crypto coins (Delta Exchange India perpetual futures), from the crypto_assets table ---------- */
+let COINS = [], USD_INR = 88;
+const coinOf = (k) => COINS.find((c) => c.key === k);
+const lotCoinsOf = (c) => Number(c.lot_coins || c.contract_value || 1);
+async function loadCryptoPresets() {
+  const [rows, fx] = await Promise.all([db.from("crypto_assets").select("*").order("sort").then(must), db.rpc("usd_inr").then((r) => r.data).catch(() => null)]);
+  COINS = rows || []; if (Number(fx) > 0) USD_INR = Number(fx);
+  for (const k of Object.keys(PRESETS)) if (PRESETS[k].crypto) delete PRESETS[k];
+  for (const c of COINS.filter((x) => x.enabled)) {
+    const coin = c.key.replace(/USD$/, "");
+    PRESETS[c.key] = { group: "Crypto (Delta Exchange)", name: `${c.name} (lot ${lotCoinsOf(c)} ${coin})`, data_security_id: c.key, data_segment: "DELTA", data_instrument: "PERP", exchange: "DELTA",
+      dhan_symbol: c.key, futures_symbol: c.key, lot_size: +(lotCoinsOf(c) * USD_INR).toFixed(4), crypto: true };
+  }
+  // The chart's asset list and the strategy form's underlying list.
+  ASSETS.splice(0, ASSETS.length, ...Object.entries(PRESETS).map(([k, p]) => ({ key: p.data_security_id, name: p.name, group: p.group, sec: p.data_security_id, seg: p.data_segment, instr: p.data_instrument })), { key: "custom", name: "Other instrument…", group: "Other" });
+  const keep = $("f_underlying").value; fillUnderlyingSelect($("f_underlying"), true); if (keep) $("f_underlying").value = keep;
+  buildCxControls(); paintCx();
+}
 function fillUnderlyingSelect(sel, withCustom) {
   sel.innerHTML = "";
   const groups = {};
@@ -955,11 +1001,11 @@ const FIELDS = ["name","underlying","data_security_id","data_segment","data_inst
   "trade_type","direction","lots","lot_size","qty_mode","product_type","exchange","dhan_symbol","futures_symbol",
   "option_side","expiry_flag","strike_step","strike_offset","expiry_weekday","roll_on_expiry","expiry_override","session_start","last_entry","square_off","intraday","after_hours_flip",
   "leg_template_opt","leg_template_fut"];
-const INT_FIELDS = ["timeframe_min","atr_period","lots","lot_size","strike_step","strike_offset","expiry_weekday"];
+const INT_FIELDS = ["timeframe_min","atr_period","lots","strike_step","strike_offset","expiry_weekday"];
 const BOOL_FIELDS = ["roll_on_expiry","intraday","exit_next_day"];
 const TIME_FIELDS = ["session_start","last_entry","square_off","entry_time","exit_time"];
 const ENUMS = { entry_mode: ["FLIP","JOIN"], trade_type: ["OPTIONS","FUTURES"], direction: ["BOTH","LONG_ONLY","SHORT_ONLY"], qty_mode: ["LOTS","UNITS"],
-  product_type: ["I","M"], exchange: ["NSE","BSE","MCX"], bias_source: ["COMPLETED","LIVE"], after_hours_flip: ["FIRST_CLOSE","OPEN"], entry_trigger: ["CLOSE","BREAKOUT"],
+  product_type: ["I","M"], exchange: ["NSE","BSE","MCX","DELTA"], bias_source: ["COMPLETED","LIVE"], after_hours_flip: ["FIRST_CLOSE","OPEN"], entry_trigger: ["CLOSE","BREAKOUT"],
   option_side: ["BUY","SELL"], expiry_flag: ["WEEK","MONTH"] };
 
 const $ = (id) => document.getElementById(id);
@@ -993,10 +1039,12 @@ function mcxClose(date) {
   return date >= nth(3, 2) && date < nth(11, 1) ? 1410 : 1435;
 }
 function marketOpenFor(seg) {
-  const n = istNow(); if (n.wd < 1 || n.wd > 5) return false;
+  const n = istNow();
+  if (isCrypto(seg)) return n.min >= 330; // crypto: every day, 05:30–24:00 IST
+  if (n.wd < 1 || n.wd > 5) return false;
   return isMcx(seg) ? n.min >= 540 && n.min < mcxClose(istDate(0)) : n.min >= 555 && n.min < 930;
 }
-function marketOpen() { return marketOpenFor("IDX_I") || marketOpenFor("MCX_COMM"); }
+function marketOpen() { return marketOpenFor("IDX_I") || marketOpenFor("MCX_COMM") || (state.strategies || []).some((s) => s.active && isCrypto(s.data_segment)); }
 function paintMarket() {
   const nse = marketOpenFor("IDX_I"), mcx = marketOpenFor("MCX_COMM");
   $("mktDot").classList.toggle("on", nse || mcx);
@@ -1400,7 +1448,8 @@ function readRules() {
 
 function applyKindVisibility() {
   const kind = $("f_kind").value, timed = kind === "TIMED", ha = kind === "HA", rules = kind === "RULES";
-  const mcx = isMcx($("f_data_segment").value);
+  const mcx = isMcx($("f_data_segment").value) || isCrypto($("f_data_segment").value);
+  const cry = isCrypto($("f_data_segment").value);
   document.querySelectorAll(".timed-only").forEach((el) => el.hidden = !timed);
   document.querySelectorAll(".flip-only").forEach((el) => el.hidden = timed);
   document.querySelectorAll(".st-only").forEach((el) => el.hidden = ha || rules);
@@ -1420,7 +1469,7 @@ function applyKindVisibility() {
   // Commodities trade as MCX futures here (Dhan has no expired commodity-option history to backtest with).
   if (mcx && $("f_trade_type").value === "OPTIONS") $("f_trade_type").value = "FUTURES";
   $("f_trade_type").querySelector('option[value="OPTIONS"]').disabled = mcx;
-  $("lotLabel").textContent = mcx ? "P&L multiplier per lot (price unit × lot)" : "Lot size (verify current)";
+  $("lotLabel").textContent = cry ? "Rupees per $1 move, per lot (coins in a lot × ₹ per $)" : mcx ? "P&L multiplier per lot (price unit × lot)" : "Lot size (verify current)";
   $("optSet").hidden = $("f_trade_type").value !== "OPTIONS";
   const dailyRules = rules && $("f_rules_daily").value === "true";
   $("f_timeframe_min").closest(".f").hidden = timed || dailyRules;
@@ -1747,8 +1796,8 @@ const IX = {
 };
 function istDay(t) { return new Date((t + 19800) * 1000).toISOString().slice(0, 10); }
 function istMinOf(t) { const d = new Date((t + 19800) * 1000); return d.getUTCHours() * 60 + d.getUTCMinutes(); }
-const sessOpen = () => isMcx(cx.seg) ? 540 : 555;
-const sessClose = (day) => isMcx(cx.seg) ? mcxClose(day) : 930;
+const sessOpen = () => isCrypto(cx.seg) ? 330 : isMcx(cx.seg) ? 540 : 555;
+const sessClose = (day) => isCrypto(cx.seg) ? 1440 : isMcx(cx.seg) ? mcxClose(day) : 930;
 function haCandlesJS(bars) { const h = heikinAshiJS(bars); return bars.map((b, i) => ({ ...b, o: h.hO[i], c: h.hC[i], h: Math.max(b.h, h.hO[i], h.hC[i]), l: Math.min(b.l, h.hO[i], h.hC[i]) })); }
 const REAL_PRICE_IND = new Set(["VWAP", "PDHL", "ORB", "SWEEP"]);
 function ruleConds(r) { return ["long", "short", "exitLong", "exitShort"].flatMap((k) => (r && r[k] && r[k].conds) || []); }
@@ -2413,6 +2462,7 @@ function renderBacktest(r) {
   box.append(stats);
   const notes = [];
   notes.push(`Priced with ${s.priced_with || "historical data"}.`);
+  if (s.funding) notes.push(`Crypto funding: ${rupees(s.funding)} charged on long positions (0.01% of the position every 8 hours held), included in charges.`);
   if (s.slippage != null) notes.push(`Slippage: ${rupees(s.slippage)} in total, already in the fill prices (${s.slip_rate ? `${(s.slip_rate.fut * 100).toFixed(3).replace(/0+$/, "")}% a futures order, ${(s.slip_rate.opt * 100).toFixed(1).replace(/\.0$/, "")}% of premium an option order` : "none"}).`);
   if (s.charges) notes.push(`Charges: brokerage ${rupees(s.charges.brokerage)}, STT ${rupees(s.charges.stt)}, exchange ${rupees(s.charges.exch)}, SEBI ${rupees(s.charges.sebi)}, GST ${rupees(s.charges.gst)}, stamp duty ${rupees(s.charges.stamp)}.`);
   const sk = s.skipped || {}; const skN = Object.values(sk).reduce((a, b) => a + b, 0);
@@ -2492,6 +2542,8 @@ const CHARGE_KEYS = ["brk_pct", "stt_fut", "stt_opt", "exch_fut", "exch_opt", "s
 function defaultCharges(exchange) {
   const bse = exchange === "BSE", mcx = exchange === "MCX";
   // MCX: commodity transaction tax (CTT) 0.01% on the sell side of non-agri futures in place of STT; exchange charge ~0.0021%.
+  // Delta Exchange India: 0.05% taker fee each side (entered as the exchange charge) plus 18% GST; no STT or stamp duty.
+  if (exchange === "DELTA") return { brk_pct: 0, stt_fut: 0, stt_opt: 0, exch_fut: 0.05, exch_opt: 0.03, sebi: 0, gst: 18, stamp_fut: 0, stamp_opt: 0 };
   if (mcx) return { brk_pct: 0.03, stt_fut: 0.01, stt_opt: 0.05, exch_fut: 0.0021, exch_opt: 0.0418, sebi: 0.0001, gst: 18, stamp_fut: 0.002, stamp_opt: 0.003 };
   return { brk_pct: 0.03, stt_fut: 0.05, stt_opt: 0.15, exch_fut: bse ? 0 : 0.00183, exch_opt: bse ? 0.0325 : 0.03553, sebi: 0.0001, gst: 18, stamp_fut: 0.002, stamp_opt: 0.003 };
 }
@@ -2575,16 +2627,17 @@ $("b_active").addEventListener("click", (e) => run(e.currentTarget, async () => 
 $("b_live").addEventListener("click", () => {
   const s = cur();
   if (s.live) return run($("b_live"), async () => { must(await db.rpc("set_live", { p_strategy: s.id, p_live: false })); await loadAll(); toast("Paper mode. Orders are logged, not sent."); });
-  if (!state.settings || !state.settings.has_url) { toast("Add your order webhook URL under Dhan connection first."); openConn(); return; }
+  if (isCrypto(s.data_segment)) { if (!deltaSt || !deltaSt.has_key || !deltaSt.has_secret) { toast("Add your Delta Exchange API key and secret under Connections first."); openConn(); return; } }
+  else if (!state.settings || !state.settings.has_url) { toast("Add your order webhook URL under Dhan connection first."); openConn(); return; }
   const bl = (me && me.billing) || {}, fee = Number(bl.deploy_fee || 0);
   const feeTxt = me && me.role !== "admin" && fee > 0 && !bl.trial_active && !(s.deploy_paid_until && s.deploy_paid_until >= istDate(0))
     ? `<br>A deployment fee of <strong>${rupees(fee)}</strong>${bl.deploy_fee_period === "ONE_TIME" ? " (once)" : " (for the next month)"} will be taken from your wallet.` : "";
-  askConfirm("<strong>Send real orders to Dhan?</strong><br>From the next signal, this strategy posts orders to your Dhan webhook, on your own account. Check the paper-mode log first. Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + feeTxt,
+  askConfirm((isCrypto(s.data_segment) ? "<strong>Send real orders to Delta Exchange?</strong><br>From the next signal, this strategy places market orders on Delta Exchange India with your API key. Crypto trades round the clock and moves fast; check the paper-mode log first." : "<strong>Send real orders to Dhan?</strong><br>From the next signal, this strategy posts orders to your Dhan webhook, on your own account. Check the paper-mode log first.") + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + feeTxt,
     "Go live", async () => run($("b_live"), async () => { must(await db.rpc("set_live", { p_strategy: s.id, p_live: true })); await loadAll(); await refreshMe(); toast("Live. Real orders will be sent."); }), true);
 });
 $("b_flat").addEventListener("click", () => {
   const s = cur();
-  askConfirm(`<strong>Exit the open position now?</strong><br>${s.live ? "A real exit order will be sent to Dhan." : "Paper mode: the exit is only logged."}`,
+  askConfirm(`<strong>Exit the open position now?</strong><br>${s.live ? `A real exit order will be sent to ${isCrypto(s.data_segment) ? "Delta Exchange" : "Dhan"}.` : "Paper mode: the exit is only logged."}`,
     "Exit now", async () => run($("b_flat"), async () => { await engine("flatten", 6000); toast("Exit processed. Check the log."); }), true);
 });
 const archiveCur = () => {
@@ -2646,7 +2699,13 @@ fillUnderlyingSelect($("f_underlying"), true);
 $("f_underlying").addEventListener("change", () => {
   const p = PRESETS[$("f_underlying").value]; if (!p) return;
   for (const [k, v] of Object.entries(p)) { const el = $("f_" + k); if (el && k !== "name") el.value = String(v); }
-  if (p.commodity) {
+  if (p.crypto) {
+    // Crypto: Delta perpetual futures, quantity in lots, every day 05:30–24:00 IST.
+    $("f_trade_type").value = "FUTURES"; $("f_qty_mode").value = "LOTS"; $("f_product_type").value = "M";
+    $("f_session_start").value = "05:30"; $("f_last_entry").value = "23:30"; $("f_square_off").value = "23:45";
+    const c = coinOf($("f_underlying").value) || {};
+    $("formMsg").textContent = `Filled ${p.name.replace(/\s*\(.*\)$/, "")} on Delta Exchange: perpetual futures, 1 lot = ${lotCoinsOf(c)} ${String(c.key || "").replace(/USD$/, "")} (₹${p.lot_size} per $1 move at ₹${USD_INR}/$), crypto day 05:30–24:00 IST every day (square-off 23:45 for intraday). Orders go through your Delta API key.`;
+  } else if (p.commodity) {
     // MCX futures: quantity in lots, evening session.
     $("f_trade_type").value = "FUTURES"; $("f_qty_mode").value = "LOTS";
     if ($("f_session_start").value < "09:00" || $("f_last_entry").value <= "15:30") { $("f_session_start").value = "09:15"; $("f_last_entry").value = "23:00"; $("f_square_off").value = "23:15"; }
@@ -2665,7 +2724,8 @@ function readForm() {
   for (const k of FIELDS) {
     const el = $("f_" + k); let v = el.value.trim();
     const name = el.closest(".f") ? el.closest(".f").querySelector("span").textContent : k;
-    if (INT_FIELDS.includes(k)) { const n = Number(v); if (v === "" || !Number.isInteger(n)) throw new Error(`“${name}” must be a whole number.`); v = n; }
+    if (k === "lot_size") { const n = Number(v); if (!(n > 0)) throw new Error("Lot size must be above 0."); v = n; }
+    else if (INT_FIELDS.includes(k)) { const n = Number(v); if (v === "" || !Number.isInteger(n)) throw new Error(`“${name}” must be a whole number.`); v = n; }
     else if (k === "factor") { const n = Number(v); if (!(n > 0)) throw new Error("Multiplier must be above 0."); v = n; }
     else if (k === "buffer_points") { const n = Number(v || 0); if (!(n >= 0)) throw new Error("Buffer must be 0 or more points."); v = n; }
     else if (BOOL_FIELDS.includes(k)) v = v === "true";
@@ -2681,9 +2741,9 @@ function readForm() {
     if (out.session_start >= out.last_entry) throw new Error("“First trade from” must be earlier than “No trades after”.");
     if (out.intraday && out.last_entry > out.square_off) throw new Error("“No trades after” must not be later than the square-off time.");
   } else {
-    const mcx = isMcx(out.data_segment);
-    const inMkt = (t) => mcx ? t >= "09:00" && t < "23:30" : t >= "09:15" && t < "15:30";
-    if (!inMkt(out.entry_time) || !inMkt(out.exit_time)) throw new Error(mcx ? "Buy and sell times must be between 09:00 and 23:29." : "Buy and sell times must be between 09:15 and 15:29.");
+    const mcx = isMcx(out.data_segment), cry = isCrypto(out.data_segment);
+    const inMkt = (t) => cry ? t >= "05:30" && t <= "23:59" : mcx ? t >= "09:00" && t < "23:30" : t >= "09:15" && t < "15:30";
+    if (!inMkt(out.entry_time) || !inMkt(out.exit_time)) throw new Error(cry ? "Buy and sell times must be between 05:30 and 23:59 (the crypto day)." : mcx ? "Buy and sell times must be between 09:00 and 23:29." : "Buy and sell times must be between 09:15 and 15:29.");
     if (!out.exit_next_day && out.exit_time <= out.entry_time) throw new Error("For a same-day exit, “Sell at” must be later than “Buy at”.");
     if (out.exit_next_day && out.trade_type === "OPTIONS" && !out.roll_on_expiry) throw new Error("For overnight option trades, set “On expiry day” to use next week's expiry; today's contract expires before your exit.");
     if (out.exit_next_day && out.product_type === "I") throw new Error("Overnight trades need product type M (carry forward); intraday positions get squared off by the broker.");
@@ -2732,6 +2792,78 @@ $("connForm").addEventListener("submit", (e) => {
     await loadAll(); renderConn(true); $("connMsg").textContent = "Saved."; toast(tok ? "Connection saved. The token will now be renewed automatically every day." : "Connection saved. Press Refresh chart to test it.");
   });
 });
+
+/* ---------- Delta Exchange connection and crypto coins ---------- */
+let deltaSt = null;
+async function loadDelta() { deltaSt = await db.rpc("delta_status").then(must).catch(() => null); renderDelta(); }
+function renderDelta() {
+  const d = deltaSt || {};
+  $("dkState").textContent = d.has_key ? `(saved, ends …${d.key_tail})` : "(not set)";
+  $("dsState").textContent = d.has_secret ? "(saved)" : "(not set)";
+  const box = $("dNote"); box.innerHTML = "";
+  if (d.note) { const b = document.createElement("div"); b.className = `banner ${/^Connected/.test(d.note) ? "ok" : "err"}`; b.textContent = `${d.note}${d.checked_at ? ` (checked ${istText(d.checked_at)} IST)` : ""}`; box.append(b); }
+  renderCoins();
+}
+$("deltaForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const key = $("d_key").value.trim(), sec = $("d_secret").value.trim();
+  if (!key && !sec) { $("dMsg").textContent = "Paste the API key and secret first."; return; }
+  run(e.submitter, async () => {
+    must(await db.rpc("save_delta", { p_key: key, p_secret: sec }));
+    $("d_key").value = ""; $("d_secret").value = ""; $("dMsg").textContent = "Saved. Checking it with Delta…";
+    await new Promise((r) => setTimeout(r, 5000)); await loadDelta(); $("dMsg").textContent = "Saved.";
+  });
+});
+$("d_check").addEventListener("click", (e) => run(e.currentTarget, async () => {
+  must(await db.rpc("desk_engine", { p_action: "delta_check", p_strategy: null }));
+  await new Promise((r) => setTimeout(r, 5000)); await loadDelta();
+}));
+function renderCoins() {
+  const body = $("coinRows"); if (!body || !isAdmin()) return;
+  body.innerHTML = "";
+  $("cn_fx").value = USD_INR;
+  for (const c of COINS) {
+    const tr = document.createElement("tr");
+    const coin = c.key.replace(/USD$/, "");
+    tr.innerHTML = `<td></td><td class="mono"></td><td class="n"><input class="lotin" inputmode="decimal" style="width:90px"></td><td class="n"><input class="slipin" inputmode="decimal" style="width:70px"></td><td><input type="checkbox" class="onin"></td><td class="hint"></td><td><button class="btn small" type="button">Save</button></td>`;
+    tr.children[0].textContent = c.name; tr.children[1].textContent = c.key;
+    tr.querySelector(".lotin").value = c.lot_coins ?? ""; tr.querySelector(".slipin").value = c.slip_pct; tr.querySelector(".onin").checked = !!c.enabled;
+    tr.children[5].textContent = [c.note, c.contract_value ? `1 lot = ${Math.round(lotCoinsOf(c) / Number(c.contract_value))} contracts of ${c.contract_value} ${coin}` : "", c.history_symbol ? `history before ${c.cutover || "listing"} from Binance ${c.history_symbol}` : ""].filter(Boolean).join(" · ");
+    tr.querySelector("button").addEventListener("click", (e) => run(e.currentTarget, async () => {
+      const lot = Number(tr.querySelector(".lotin").value), slip = Number(tr.querySelector(".slipin").value);
+      if (!(lot > 0)) throw new Error("Coins in a lot must be above 0.");
+      if (c.contract_value && Math.abs(lot / Number(c.contract_value) - Math.round(lot / Number(c.contract_value))) > 1e-6) throw new Error(`A lot must be a whole number of contracts (${c.contract_value} ${coin} each).`);
+      if (!(slip >= 0 && slip <= 2)) throw new Error("Slippage must be 0–2%.");
+      must(await db.from("crypto_assets").update({ lot_coins: lot, slip_pct: slip, enabled: tr.querySelector(".onin").checked }).eq("key", c.key));
+      await loadCryptoPresets(); renderCoins(); $("cn_msg").textContent = `${c.name} saved. New strategies use the new lot; existing ones keep theirs.`;
+    }));
+    body.append(tr);
+  }
+}
+$("cn_add").addEventListener("click", (e) => run(e.currentTarget, async () => {
+  const key = $("cn_key").value.trim().toUpperCase(), name = $("cn_name").value.trim(), hist = $("cn_hist").value.trim().toUpperCase();
+  if (!/^[A-Z0-9]{2,15}USD$/.test(key)) throw new Error("Use Delta's perpetual symbol, ending in USD (e.g. DOGEUSD).");
+  if (!name) throw new Error("Give the coin a name.");
+  if (hist && !/^[A-Z0-9]{2,15}USDT$/.test(hist)) throw new Error("The Binance pair ends in USDT (e.g. DOGEUSDT).");
+  if (COINS.some((c) => c.key === key)) throw new Error(`${key} is already in the list.`);
+  must(await db.from("crypto_assets").insert({ key, name, history_symbol: hist || null, sort: 100 + COINS.length }));
+  must(await db.rpc("desk_engine", { p_action: "crypto_sync", p_strategy: null }));
+  $("cn_msg").textContent = "Added. Reading its contract details from Delta…";
+  await new Promise((r) => setTimeout(r, 6000)); await loadCryptoPresets(); renderCoins();
+  const c = coinOf(key);
+  $("cn_msg").textContent = c && c.contract_value ? `${name} added: ${c.note}. Tick it under Lab settings to research it.` : `${name} added, but Delta didn't confirm it yet: ${(c && c.note) || "check the symbol"}.`;
+  ["cn_key", "cn_name", "cn_hist"].forEach((id) => $(id).value = "");
+}));
+$("cn_fx_save").addEventListener("click", (e) => run(e.currentTarget, async () => {
+  const fx = Number($("cn_fx").value);
+  if (!(fx >= 50 && fx <= 200)) throw new Error("Enter rupees per dollar (50–200).");
+  const old = USD_INR;
+  must(await db.from("lab_settings").update({ usd_inr: fx }).eq("id", 1));
+  // Crypto strategies' lot sizes are rupees per $1 per lot: re-price them at the new rate (same coins per lot).
+  const mine = state.strategies.filter((x) => x.data_segment === "DELTA" && !x.source_id);
+  for (const x of mine) must(await db.from("algo_strategies").update({ lot_size: +(Number(x.lot_size) * fx / old).toFixed(4) }).eq("id", x.id));
+  await loadCryptoPresets(); await loadAll(); renderCoins(); $("cn_msg").textContent = `Rate saved: ₹${fx} per $.${mine.length ? ` ${mine.length} crypto strateg${mine.length === 1 ? "y was" : "ies were"} re-priced.` : ""}`;
+}));
 
 /* ---------- stop loss & risk (strategy form) ---------- */
 const RISK_TYPES = [["NONE", "Off"], ["POINTS", "Points"], ["PCT", "%"], ["ATR", "× ATR"]];
@@ -2890,7 +3022,7 @@ function posLevels(s) {
 }
 
 /* ---------- position size (strategy form) ---------- */
-const defMarginPct = (seg) => isMcx(seg) ? 10 : 12;
+const defMarginPct = (seg) => isMcx(seg) || isCrypto(seg) ? 10 : 12;
 function sizeText(z) {
   if (!z || z.mode !== "AUTO") return "Fixed lots";
   return `Lots from capital: ${z.alloc_pct}% of equity, drawdown budget ${z.dd_pct}%` + (z.dd_per_lot ? ` (1 lot's worst drawdown ${rupees(z.dd_per_lot)} × ${z.dd_mult || 1.5})` : "") + `, margin ${z.margin_pct}%, max ${z.max_lots} lots`;
@@ -3671,7 +3803,8 @@ const VAR_INDEX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50",
 /** Form to ask the lab to test a strategy many more ways. src: { labId } or { strategyId }, plus asset and daily (null = unknown). */
 function variationForm(box, src) {
   // Every asset for every strategy: indices and MCX commodities alike.
-  const assets = [...VAR_INDEX, ...VAR_MCX].filter((k) => PRESETS[k]);
+  const VAR_CRYPTO = Object.keys(PRESETS).filter((k) => PRESETS[k].crypto);
+  const assets = [...VAR_INDEX, ...VAR_MCX, ...VAR_CRYPTO].filter((k) => PRESETS[k]);
   const isIdx = VAR_INDEX.includes(src.asset);
   box.innerHTML = `<div class="ued" style="margin-top:12px"><strong>${src.manual ? "Manual test" : "Run variations"} of ${esc(src.title)}</strong>
     <p class="hint" style="margin:0">The lab tests this strategy many more ways on the past year, ranks the results the same way as the nightly run, and shows them to you under “Variation runs”. Its settings stay private; you see results and trades. Runs one at a time after the lab's other work; it can take 10–60 minutes.</p>
@@ -3797,7 +3930,7 @@ async function promoteLab(r, v) {
   if (v.side) Object.assign(row, { trade_type: "OPTIONS", option_side: v.side === "SELL" ? "SELL" : "BUY", risk: v.risk || null, strike_offset: 0, structure: v.side === "SPREAD" ? v.structure || null : null });
   row.name = `Lab #${r.id} · ${v.key === "FUT" ? "Futures" : v.side === "SELL" ? "Option writing" : v.side === "SPREAD" ? (v.structure && STRUCTS[v.structure.preset] ? STRUCTS[v.structure.preset].name : "Spread") : "Option buying"} · ${r.label}`.slice(0, 80);
   // Lots stay fixed until you choose to size from capital; the tested worst drawdown for 1 lot is filled in for that.
-  row.sizing = { mode: "FIXED", alloc_pct: 20, dd_pct: 25, dd_per_lot: Math.trunc((v.metrics && v.metrics.full && v.metrics.full.max_dd) || 0) || null, dd_mult: 1.5, margin_pct: c.data_segment === "MCX_COMM" ? 10 : 12, max_lots: 10 };
+  row.sizing = { mode: "FIXED", alloc_pct: 20, dd_pct: 25, dd_per_lot: Math.trunc((v.metrics && v.metrics.full && v.metrics.full.max_dd) || 0) || null, dd_mult: 1.5, margin_pct: c.data_segment === "MCX_COMM" || c.data_segment === "DELTA" ? 10 : 12, max_lots: 10 };
   row.active = false; row.live = false;
   const created = must(await db.from("algo_strategies").insert(row).select("id").single());
   must(await db.from("lab_results").update({ promoted_id: created.id }).eq("id", r.id));
@@ -4486,6 +4619,8 @@ async function enterDesk(session) {
   if (!me.terms_accepted) { $("nav").hidden = true; showPage("terms"); return; }
   $("nav").hidden = false; page = "list";
   showPage("list");
+  try { await loadCryptoPresets(); } catch (e) { console.error("crypto coins", e); }
+  loadDelta().catch(() => null);
   try { await loadAll(); }
   catch (e) {
     $("emptyPane").hidden = false; $("emptyPane").innerHTML = "";

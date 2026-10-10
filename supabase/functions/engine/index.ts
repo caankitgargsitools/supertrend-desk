@@ -6,14 +6,15 @@ import { Dhan } from "./dhan.ts";
 import { type ChargeRates, newAcc, planBacktest, priceBatch, summarize, tradeCharges, validateParams, type Acc, type Plan } from "./backtest.ts";
 import { lotsFor, marginPerLot, normaliseSizing } from "./sizing.ts";
 import {
-  addDays, aggregate, type DayBar, fillTemplate, isCommodity, isComplete, ist, nextExpiry, nextMonthlyExpiry, partialDay,
+  addDays, aggregate, type DayBar, dayMinutes, fillTemplate, isCommodity, isComplete, isCrypto, ist, nextExpiry, nextMonthlyExpiry, partialDay,
   pickBaseInterval, sessionFor, signalSeries, strikeFor, supertrend, timeToMin,
 } from "./logic.ts";
 import { dataSecurity, syncMcx } from "./instruments.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
-import { LAB_ASSETS, labNext, labStart, labStep, periodWindows, TOKEN_ERR } from "./lab.ts";
+import { LAB_ASSETS, labNext, labStart, labStep, loadCryptoAssets, periodWindows, TOKEN_ERR } from "./lab.ts";
+import { contractsFor, cryptoLtp, cryptoProduct, deltaBalances, deltaOrder, niceLot } from "./crypto.ts";
 import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
 import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
@@ -45,7 +46,7 @@ async function intradaySpan(dhan: Dhan, s: Strategy, interval: number, days: num
   return [...out.values()].sort((x: any, y: any) => x.t - y.t) as { t: number; o: number; h: number; l: number; c: number }[];
 }
 function warmDays(tf: number, atr: number, seg = "IDX_I", bars = WARM_BARS) {
-  const dayMins = isCommodity(seg) ? 860 : 375;
+  const dayMins = dayMinutes(seg);
   return Math.min(400, Math.max(5, Math.ceil(((Math.max(bars, atr * 10) * tf) / dayMins) * 1.5) + 4));
 }
 const FLAT_STATE = { position: "FLAT", pos_legs: null, pos_option_type: null, pos_option_side: null, pos_strike: null, pos_expiry: null, pos_qty: null, pos_entry_date: null, pos_risk: null,
@@ -59,6 +60,8 @@ function fmtIst(epochSec: number, withTime: boolean): string {
 }
 
 function dhanFor(set: Settings): Dhan {
+  // Crypto strategies read Delta Exchange's public prices (the Dhan class routes the DELTA segment there).
+  if (set.broker === "DELTA") return new Dhan("-", "-");
   if (!set.dhan_access_token || !set.dhan_client_id) throw new Error("Add your Dhan client ID and access token under Dhan connection.");
   return new Dhan(set.dhan_client_id, set.dhan_access_token);
 }
@@ -167,7 +170,10 @@ async function multiPx(dhan: Dhan, s: Strategy, legs: MLeg[]): Promise<number[] 
 /** Net premium of the structure per unit of quantity: paid (+) or received (−). */
 const netPrem = (legs: MLeg[], px: number[]) => legs.reduce((a, l, i) => a + legSign(l) * (l.q ?? 1) * px[i], 0);
 
+/** A crypto order leg: contracts on Delta Exchange (sent through Delta's API, not a webhook). */
+const cryptoLeg = (s: Strategy, side: "B" | "S", qty: number, close: boolean) => ({ broker: "DELTA", symbol: s.futures_symbol || s.underlying, side, qty, reduce_only: close });
 function exitLeg(s: Strategy, sort: number): Record<string, unknown> | Record<string, unknown>[] {
+  if (isCrypto(String(s.data_segment))) return cryptoLeg(s, s.position === "LONG" ? "S" : "B", Number(s.pos_qty ?? qtyOf(s)), true);
   if (isMulti(s) && Array.isArray(s.pos_legs)) return orderLegs(s, s.pos_legs as MLeg[], true, sort);
   const opt = s.trade_type === "OPTIONS";
   return fillTemplate(opt ? s.leg_template_opt : s.leg_template_fut, {
@@ -186,7 +192,7 @@ function entryLeg(s: Strategy, want: Pos, close: number, sort: number, lots = Nu
   const today = ist(Date.now() / 1000);
   if (!opt) {
     return {
-      leg: fillTemplate(s.leg_template_fut, {
+      leg: isCrypto(String(s.data_segment)) ? cryptoLeg(s, want === "LONG" ? "B" : "S", qty, false) : fillTemplate(s.leg_template_fut, {
         side: want === "LONG" ? "B" : "S", qty, exchange: s.exchange, product: s.product_type, sort, symbol: s.futures_symbol,
       }),
       state: { pos_option_type: null, pos_option_side: null, pos_strike: null, pos_expiry: null, pos_qty: qty, pos_entry_date: today.date, _px: close },
@@ -255,6 +261,8 @@ async function armRisk(s: Strategy, set: Settings, st: Record<string, any>, px: 
 
 /* ---------- capital: equity, money deployed, lots per entry, ledger of closed trades ---------- */
 function ratesFor(s: Strategy): ChargeRates {
+  // Delta Exchange India: 0.05% taker fee each side plus 18% GST on it.
+  if (s.exchange === "DELTA" || isCrypto(String(s.data_segment))) return { brk_pct: 0, stt_fut: 0, stt_opt: 0, exch_fut: 0.05, exch_opt: 0.03, sebi: 0, gst: 18, stamp_fut: 0, stamp_opt: 0 };
   if (s.exchange === "MCX") return { brk_pct: 0.03, stt_fut: 0.01, stt_opt: 0.05, exch_fut: 0.0021, exch_opt: 0.0418, sebi: 0.0001, gst: 18, stamp_fut: 0.002, stamp_opt: 0.003 };
   const bse = s.exchange === "BSE";
   return { brk_pct: 0.03, stt_fut: 0.05, stt_opt: 0.15, exch_fut: bse ? 0 : 0.00183, exch_opt: bse ? 0.0325 : 0.03553, sebi: 0.0001, gst: 18, stamp_fut: 0.002, stamp_opt: 0.003 };
@@ -412,7 +420,8 @@ async function liveRisk(s: Strategy, set: Settings): Promise<Strategy> {
   const r = riskOf(s), pr = s.pos_risk as PosRisk | null;
   if (s.position === "FLAT" || !pr || !hasLevels(r) || pr.dir === undefined) return s;
   const nowSec = Date.now() / 1000, now = ist(nowSec), sess = sessionFor(s.data_segment, now.date);
-  if (now.min < sess.open || now.min >= sess.close) return s;
+  // Crypto never closes: an open position's stop is watched round the clock (other markets only in their hours).
+  if (!isCrypto(String(s.data_segment)) && (now.min < sess.open || now.min >= sess.close)) return s;
   const dhan = dhanFor(set);
   let rows: { t: number; o: number; h: number; l: number }[] = [];
   const minuteNow = Math.floor(nowSec / 60) * 60;
@@ -420,7 +429,8 @@ async function liveRisk(s: Strategy, set: Settings): Promise<Strategy> {
     const p = await premiumOf(dhan, s, s);
     if (p) rows = [{ t: minuteNow, o: p, h: p, l: p }];
   } else {
-    const mins = await dhan.intraday(s.data_security_id, s.data_segment, s.data_instrument, 1, `${now.date} 09:00:00`, fmtIst(nowSec + 120, true));
+    const from1 = isCrypto(String(s.data_segment)) ? fmtIst(Math.max(Number(pr.scanFrom) || 0, nowSec - 6 * 3600), true) : `${now.date} 09:00:00`;
+    const mins = await dhan.intraday(s.data_security_id, s.data_segment, s.data_instrument, 1, from1, fmtIst(nowSec + 120, true));
     rows = mins.filter((m) => m.t >= Number(pr.scanFrom) && m.t + 60 <= nowSec);
     try { const l = await dhan.ltp(s.data_segment, s.data_security_id); if (l) rows.push({ t: minuteNow, o: l, h: l, l }); } catch { /* LTP optional */ }
   }
@@ -437,7 +447,7 @@ async function liveRisk(s: Strategy, set: Settings): Promise<Strategy> {
   const under = pr.basis === "PREMIUM" ? undefined : hit.px;
   const ok = await sendOrders(s, set, event, asArr(exitLeg(s, 1)), `${hit.why}${pr.basis === "PREMIUM" ? " (premium)" : ""}: ${exitLabel(s)}`, { t: hit.t, c: under });
   if (!ok) {
-    update.last_error = "Stop-loss exit failed to send, so the strategy was paused. Close the position in Dhan.";
+    update.last_error = `Stop-loss exit failed to send, so the strategy was paused. Close the position in ${isCrypto(String(s.data_segment)) ? "Delta Exchange" : "Dhan"}.`;
     update.active = false;
     await sb.from("algo_strategies").update(update).eq("id", s.id);
     return { ...s, ...update };
@@ -450,6 +460,7 @@ async function liveRisk(s: Strategy, set: Settings): Promise<Strategy> {
 }
 
 async function sendOrders(s: Strategy, set: Settings, event: string, legs: Record<string, unknown>[], description: string, candle: Candle): Promise<boolean> {
+  if (isCrypto(String(s.data_segment))) return sendDelta(s, set, event, legs, description, candle);
   const payload = { secret: set.webhook_secret ?? "", alertType: "multi_leg_order", order_legs: legs };
   const mode = s.live ? "LIVE" : "PAPER";
   let status = "LOGGED";
@@ -470,6 +481,32 @@ async function sendOrders(s: Strategy, set: Settings, event: string, legs: Recor
         status = "FAILED";
         response = String(e);
       }
+    }
+  }
+  await logSignal(s, event, description, candle, status, payload, response);
+  return status !== "FAILED";
+}
+
+/** Crypto orders: market orders on Delta Exchange, one per leg, in order (a reversal closes first, then opens). */
+async function sendDelta(s: Strategy, set: Settings, event: string, legs: Record<string, unknown>[], description: string, candle: Candle): Promise<boolean> {
+  // Lots → Delta contracts (a lot is a set number of coins, e.g. 0.05 BTC = 50 contracts).
+  const payload = { broker: "DELTA", orders: legs.map((l) => ({ symbol: l.symbol, side: l.side === "B" ? "buy" : "sell", lots: l.qty, size: contractsFor(String(l.symbol), Number(s.lot_size), Number(l.qty)), reduce_only: !!l.reduce_only })) };
+  let status = "LOGGED", response: string | null = null;
+  if (s.live) {
+    if (!set.dhan_client_id || !set.dhan_access_token) { status = "FAILED"; response = "Add your Delta Exchange API key and secret under Delta Exchange connection."; }
+    else {
+      const out: string[] = [];
+      status = "SENT";
+      for (const o of payload.orders) {
+        try {
+          const r = await deltaOrder(set.dhan_client_id, set.dhan_access_token, { symbol: String(o.symbol), size: Number(o.size), side: o.side as "buy" | "sell", reduceOnly: o.reduce_only });
+          out.push(`${o.side} ${o.size} ${o.symbol}: order ${r?.id ?? "?"} ${r?.state ?? ""}${r?.average_fill_price ? ` filled at ${r.average_fill_price}` : ""}`);
+        } catch (e) {
+          status = "FAILED"; out.push(`${o.side} ${o.size} ${o.symbol}: ${e instanceof Error ? e.message : String(e)}`);
+          break; // don't open a new position if closing the old one failed
+        }
+      }
+      response = out.join(" | ").slice(0, 1000);
     }
   }
   await logSignal(s, event, description, candle, status, payload, response);
@@ -505,8 +542,9 @@ function fillOf(st: Strategy, leg: "Entry" | "Exit", px: number | null | undefin
   }
   const buy = leg === "Entry" ? buyEntry : !buyEntry;
   const lots = st.qty_mode === "LOTS" ? Number(st.pos_qty) : Math.round(Number(st.pos_qty) / Number(st.lot_size));
-  return { leg, side: buy ? "BUY" : "SELL", ref: brokerRef(st), qty: st.exchange === "MCX" ? lots : (st.qty_mode === "LOTS" ? Number(st.pos_qty) * Number(st.lot_size) : Number(st.pos_qty)),
-    px: px != null && Number(px) > 0 ? +Number(px).toFixed(2) : null, basis: opt ? "premium" : isCommodity(String(st.data_segment)) ? "futures" : "index" };
+  const cr = isCrypto(String(st.data_segment));
+  return { leg, side: buy ? "BUY" : "SELL", ref: brokerRef(st), qty: st.exchange === "MCX" || cr ? lots : (st.qty_mode === "LOTS" ? Number(st.pos_qty) * Number(st.lot_size) : Number(st.pos_qty)),
+    px: px != null && Number(px) > 0 ? +Number(px).toFixed(4) : null, basis: opt ? "premium" : cr ? "Delta perpetual" : isCommodity(String(st.data_segment)) ? "futures" : "index" };
 }
 async function saveFills(fills: Fill[]) {
   if (lastSignalId && fills.length) await sb.from("algo_signals").update({ fills }).eq("id", lastSignalId);
@@ -616,7 +654,7 @@ async function finish(s: Strategy, set: Settings, update: Record<string, unknown
     }
     if (ok) await saveFills(fills);
     if (ok) Object.assign(update, newState);
-    else Object.assign(update, { last_error: "Order failed to send, so the strategy was paused. Check the log and your Dhan positions.", active: false });
+    else Object.assign(update, { last_error: `Order failed to send, so the strategy was paused. Check the log and your ${isCrypto(String(s.data_segment)) ? "Delta Exchange" : "Dhan"} positions.`, active: false });
   } else if (event === "INFO") {
     await logSignal(s, event, notes.join(" "), candle);
   }
@@ -1015,6 +1053,44 @@ async function refreshFunds(userId: string) {
   return { ok: true };
 }
 
+/** Checks a user's Delta Exchange API key by reading the wallet; the result shows under the connection form. */
+async function deltaCheck(userId: string) {
+  const a = await accountFor(sb, userId, "DELTA");
+  if (!a?.dhan_client_id || !a?.dhan_access_token) return { ok: false };
+  let note: string, ok = false;
+  try {
+    const bal = await deltaBalances(a.dhan_client_id, a.dhan_access_token);
+    const main = bal.filter((b) => b.balance > 0 || b.asset === "USD" || b.asset === "INR");
+    note = `Connected. Wallet: ${main.length ? main.map((b) => `${b.asset} ${b.balance.toFixed(2)}${b.inr != null ? ` (₹${Math.trunc(b.inr).toLocaleString("en-IN")})` : ""}`).join(", ") : "empty"}.`;
+    ok = true;
+  } catch (e) { note = e instanceof Error ? e.message.slice(0, 300) : String(e); }
+  await sb.from("broker_accounts").update({ token_checked_at: new Date().toISOString(), token_note: note }).eq("user_id", userId).eq("broker", "DELTA");
+  return { ok, note };
+}
+/** Delta's contract details (product id, coins per contract, tick) for every coin in crypto_assets. */
+async function cryptoSync() {
+  const { data: rows } = await sb.from("crypto_assets").select("key, lot_coins, cutover");
+  let n = 0;
+  for (const r of rows ?? []) {
+    try {
+      const p = await cryptoProduct(r.key);
+      const ok = p.type === "perpetual_futures" && p.state === "live";
+      // A coin added without a lot gets a round amount worth about $5,000.
+      let lot: number | null = r.lot_coins == null ? null : Number(r.lot_coins);
+      if (lot == null) { const px = await cryptoLtp(r.key).catch(() => null); if (px) lot = niceLot(px, p.contract_value); }
+      await sb.from("crypto_assets").update({ product_id: p.product_id, contract_value: p.contract_value, tick_size: p.tick_size, synced_at: new Date().toISOString(), ...(lot ? { lot_coins: lot } : {}),
+        // Delta's own candles from a month after listing (thin trading at first); older days from the Binance pair.
+        ...(!r.cutover && /^\d{4}-\d{2}-\d{2}$/.test(p.launched) ? { cutover: addDays(p.launched, 30) } : {}),
+        note: ok ? `${p.name}; 1 contract = ${p.contract_value} ${p.underlying || r.key.replace(/USD$/, "")}; settles in ${p.settles}; on Delta India since ${p.launched}` : `Not a live perpetual on Delta India (${p.type}, ${p.state}).` }).eq("key", r.key);
+      n++;
+    } catch (e) {
+      await sb.from("crypto_assets").update({ note: e instanceof Error ? e.message.slice(0, 200) : String(e), synced_at: new Date().toISOString() }).eq("key", r.key);
+    }
+  }
+  await loadCryptoAssets(sb).catch(() => null);
+  return { synced: n };
+}
+
 const MAX_ROUNDS = 40; // safety stop for the self-chaining backtest
 const MAX_BUSY = 12; // after this many waits for Dhan, pause the backtest for a manual resume
 
@@ -1148,6 +1224,8 @@ Deno.serve(async (req) => {
   let body: { action?: string; strategy_id?: string; backtest_id?: number; user_id?: string } = {};
   try { body = await req.json(); } catch { /* empty body */ }
   const action = body.action ?? "tick";
+  // Coins from crypto_assets join the asset list (lab, backtests and live trading).
+  await loadCryptoAssets(sb).catch((e) => console.error("crypto assets", e));
 
   if (action === "backtest") {
     if (!body.backtest_id) return Response.json({ error: "backtest_id missing" }, { status: 400 });
@@ -1170,6 +1248,11 @@ Deno.serve(async (req) => {
     return Response.json({ action, accepted: true });
   }
 
+  if (action === "delta_check") {
+    if (!body.user_id) return Response.json({ error: "user_id missing" }, { status: 400 });
+    return Response.json({ action, ...(await deltaCheck(body.user_id)) });
+  }
+  if (action === "crypto_sync") return Response.json({ action, ...(await cryptoSync()) });
   if (action === "token" || action === "token_renew") return Response.json({ action, ...(await tokenCheck(action === "token_renew", body.user_id)) });
   if (action === "funds") {
     if (body.user_id) return Response.json({ action, ...(await refreshFunds(body.user_id)) });
@@ -1186,13 +1269,16 @@ Deno.serve(async (req) => {
     const { data: ls } = await sb.from("lab_settings").select("assets").eq("id", 1).maybeSingle();
     // The lab's assets plus every asset a strategy trades, checked each morning before the market opens.
     const { data: strats } = await sb.from("algo_strategies").select("underlying").eq("archived", false);
-    const keys: string[] = [...new Set([...(ls?.assets ?? []), ...(strats ?? []).map((x) => String(x.underlying))])].filter((k: string) => LAB_ASSETS[k]);
+    const keys: string[] = [...new Set([...(ls?.assets ?? []), ...(strats ?? []).map((x) => String(x.underlying))])].filter((k: string) => LAB_ASSETS[k] && !LAB_ASSETS[k].crypto);
+    await cryptoSync().catch(() => null); // Delta's contract details, once a day
     const n = await refreshMargins(sb, credsOf(admin), keys.map((k) => LAB_ASSETS[k]));
     return Response.json({ action, priced: n, of: keys.length });
   }
 
-  if (!["tick", "refresh", "flatten", "sync_instruments"].includes(action)) return Response.json({ error: `Unknown action ${action}` }, { status: 400 });
+  if (!["tick", "tick_crypto", "refresh", "flatten", "sync_instruments"].includes(action)) return Response.json({ error: `Unknown action ${action}` }, { status: 400 });
   const nowIst = ist(Date.now() / 1000);
+  // Crypto trades every day: its own minute tick (tick_crypto) runs round the clock, the market tick on weekdays.
+  const cryptoTick = action === "tick_crypto";
   if (action === "tick" && (nowIst.wd === 0 || nowIst.wd === 6)) return Response.json({ skipped: "weekend" });
 
   if (action === "sync_instruments") {
@@ -1215,13 +1301,30 @@ Deno.serve(async (req) => {
   for (const row of strategies) {
     let s = row;
     try {
-      // Each market has its own hours (NSE/BSE 09:15–15:30, MCX 09:00–23:30/23:55); ticks outside them are skipped.
+      const isCr = isCrypto(String(s.data_segment));
+      if (action === "tick" && isCr) continue; // crypto runs on tick_crypto
+      if (cryptoTick && !isCr) continue;
+      const tick = action === "tick" || cryptoTick;
+      // Each market has its own hours (NSE/BSE 09:15–15:30, MCX 09:00–23:30/23:55, crypto 05:30–24:00); ticks outside
+      // them are skipped (a crypto position's stop is still watched).
       const sess = sessionFor(s.data_segment, nowIst.date);
-      if (action === "tick" && (nowIst.min < sess.open || nowIst.min > sess.close + 5)) continue;
-      if (String(s.broker ?? "DHAN") !== "DHAN") throw new Error(`${s.broker} isn't supported yet.`);
+      const outside = nowIst.min < sess.open || nowIst.min > sess.close + 5;
+      if (action === "tick" && outside) continue;
       if (!s.owner_id) throw new Error("This strategy has no owner.");
-      const set = await accountFor(sb, s.owner_id, "DHAN", accounts);
-      if (!set?.dhan_access_token) throw new Error("Connect your Dhan account (client ID and access token) to run this strategy.");
+      const broker = isCr ? "DELTA" : "DHAN";
+      let set = await accountFor(sb, s.owner_id, broker, accounts);
+      if (isCr) {
+        // Paper trading on crypto needs no account (prices are public); live trading needs the Delta API key.
+        if (s.live && !(set?.dhan_client_id && set?.dhan_access_token)) throw new Error("Add your Delta Exchange API key and secret (Delta Exchange connection) to trade this strategy live.");
+        set = set ?? { user_id: s.owner_id, broker: "DELTA", dhan_client_id: null, dhan_access_token: null, webhook_url: null, webhook_secret: null, capital: null, capital_since: null, deploy_pct: null, funds_at: null };
+        if (cryptoTick && outside) {
+          s = await liveRisk(s, set);
+          s = await markPrice(s, set).catch(() => s);
+          results[s.id] = "ok (outside the crypto session: stops only)";
+          continue;
+        }
+      } else if (!set?.dhan_access_token) throw new Error("Connect your Dhan account (client ID and access token) to run this strategy.");
+      if (!set) throw new Error("No broker account.");
       // Dhan funds, every 10 minutes while the market ticks run.
       if (action === "tick" && !fundsDone.has(set.user_id) && (!set.funds_at || Date.now() - Date.parse(set.funds_at) > 600000)) {
         fundsDone.add(set.user_id); await refreshFunds(set.user_id).catch(() => {});
@@ -1232,12 +1335,13 @@ Deno.serve(async (req) => {
       }
       // New trades need the account in good standing; exits always go through.
       s = { ...s, _block: await entryGate(sb, s, gates).catch(() => null) };
-      if (action === "tick") s = await liveRisk(s, set);
-      if (action === "tick" || action === "refresh") s = await markPrice(s, set).catch(() => s);
+      if (tick) s = await liveRisk(s, set);
+      if (tick || action === "refresh") s = await markPrice(s, set).catch(() => s);
       if (s.live && action === "tick") liveIds.set(set.user_id, [...(liveIds.get(set.user_id) ?? []), s.id]);
-      if (s.strategy_kind === "TIMED") await processTimed(s, set, action);
-      else if (s.strategy_kind === "RULES") await processRules(s, set, action);
-      else await processFlip(s, set, action);
+      const act = cryptoTick ? "tick" : action;
+      if (s.strategy_kind === "TIMED") await processTimed(s, set, act);
+      else if (s.strategy_kind === "RULES") await processRules(s, set, act);
+      else await processFlip(s, set, act);
       results[s.id] = "ok";
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1246,6 +1350,6 @@ Deno.serve(async (req) => {
     }
   }
   // Actual fill prices from each account's Dhan trade book for recent live orders.
-  for (const [u, ids] of liveIds) { try { await brokerFills(accounts.get(`${u}|DHAN`)!, ids); } catch (e) { console.error("fills", e); } }
+  for (const [u, ids] of liveIds) { try { const a = accounts.get(`${u}|DHAN`); if (a) await brokerFills(a, ids); } catch (e) { console.error("fills", e); } }
   return Response.json({ action, results });
 });

@@ -11,7 +11,7 @@
 // Current equity = starting capital + realised P&L, so size grows after profits and shrinks after losses.
 export type Sizing = { mode: "FIXED" | "AUTO"; alloc_pct: number; dd_pct: number; dd_per_lot: number | null; dd_mult: number; margin_pct: number; max_lots: number };
 
-export function defaultMarginPct(seg: string): number { return seg === "MCX_COMM" ? 10 : 12; }
+export function defaultMarginPct(seg: string): number { return seg === "MCX_COMM" || seg === "DELTA" ? 10 : 12; }
 
 export function normaliseSizing(x: unknown, seg: string): Sizing | null {
   if (!x || typeof x !== "object") return null;

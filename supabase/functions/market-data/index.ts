@@ -2,7 +2,8 @@
 // timeframe and date range, plus the live price. Only the signed-in desk owner may call it.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { Dhan } from "./dhan.ts";
-import { addDays, aggregate, type DayBar, isCommodity, ist, partialDay, pickBaseInterval, sessionFor } from "./logic.ts";
+import { addDays, aggregate, type DayBar, isCommodity, isCrypto, ist, partialDay, pickBaseInterval, sessionFor } from "./logic.ts";
+import { loadCrypto } from "./crypto.ts";
 import { dataSecurity } from "./instruments.ts";
 
 const URL_ = Deno.env.get("SUPABASE_URL")!;
@@ -53,13 +54,16 @@ Deno.serve(async (req) => {
     const span = (Date.parse(to) - Date.parse(from)) / 86400000;
     if (span > maxDays(tf)) from = addDays(to, -maxDays(tf));
 
-    const { data: set } = await service.from("portal_settings").select("dhan_client_id, dhan_access_token").single();
+    // Crypto (Delta Exchange) prices are public; everything else is read with the Dhan connection.
+    const cr = isCrypto(seg);
+    if (cr) await loadCrypto(service);
+    const { data: set } = cr ? { data: { dhan_client_id: "-", dhan_access_token: "-" } } : await service.from("portal_settings").select("dhan_client_id, dhan_access_token").single();
     if (!set?.dhan_client_id || !set?.dhan_access_token) return reply(400, { error: "Add your Dhan client ID and access token under Dhan connection." });
     const dhan = new Dhan(set.dhan_client_id, set.dhan_access_token);
 
     const now = ist(nowSec);
     const sess = sessionFor(seg, today);
-    const marketOpen = now.wd >= 1 && now.wd <= 5 && now.min >= sess.open && now.min <= sess.close + 5;
+    const marketOpen = cr ? now.min >= sess.open : now.wd >= 1 && now.wd <= 5 && now.min >= sess.open && now.min <= sess.close + 5;
     // Commodities: candles come from the current near-month contract (daily history is Dhan's continuous series).
     const resolved = await dataSecurity(service, { client: set.dhan_client_id, token: set.dhan_access_token }, seg, sec, today);
     const secId = resolved.sec;
@@ -68,8 +72,9 @@ Deno.serve(async (req) => {
 
     if (tf === "D" || tf === "W") {
       const daily: DayBar[] = await dhan.daily(secId, seg, instr, tf === "W" ? mondayOf(from) : from, addDays(to, 1));
-      let days = daily.filter((d) => d.day < today || !wantLive);
-      if (wantLive) {
+      // Crypto: Delta's own daily candle for today is already live (its day starts 05:30 IST).
+      let days = cr ? daily : daily.filter((d) => d.day < today || !wantLive);
+      if (wantLive && !cr) {
         const intr = await dhan.intraday(secId, seg, instr, 1, `${today} 09:00:00`, fmtIst(nowSec + 60));
         const part = partialDay(intr.filter((r) => ist(r.t).date === today), today);
         const existing = daily.find((d) => d.day === today);
@@ -116,7 +121,7 @@ Deno.serve(async (req) => {
     }
     return reply(200, { bars, from, to, live: wantLive, ltp, fetched_at: new Date().toISOString(),
       contract: resolved.contract ? { name: resolved.contract.display, expiry: resolved.contract.expiry } : null,
-      session: sess, commodity: isCommodity(seg) });
+      session: sess, commodity: isCommodity(seg), crypto: cr });
   } catch (e) {
     return reply(502, { error: e instanceof Error ? e.message : String(e) });
   }

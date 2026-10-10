@@ -4,9 +4,10 @@
 //   2. priceBatch    – prices as many planned trades as fit in one invocation; the engine chains the rest
 //   3. summarize     – totals once every trade is priced
 import { legsFor, legSign, legText, structMargin, structName, structOf } from "./structures.ts";
+import { CRYPTO } from "./crypto.ts";
 import { Dhan, DhanBusyError, type OptBar } from "./dhan.ts";
 import {
-  addDays, aggregate, type Bar, type DayBar, isCommodity, isLastWeekdayOfMonth, ist, minToTime, partialDay, type Raw,
+  addDays, aggregate, type Bar, type DayBar, dayMinutes, isCommodity, isCrypto, isLastWeekdayOfMonth, ist, minToTime, partialDay, type Raw,
   sessionFor, signalSeries, strikeFor, supertrend, timeToMin, weekdayOf,
 } from "./logic.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, type Signals, validateRules, warmBarsFor } from "./rules.ts";
@@ -42,7 +43,7 @@ export const SLIPPAGE: Record<string, { fut: number; opt: number }> = {
   COPPER: { fut: 0.0002, opt: 0.01 }, ZINC: { fut: 0.0003, opt: 0.01 }, ZINCMINI: { fut: 0.0004, opt: 0.01 }, LEAD: { fut: 0.0003, opt: 0.01 }, LEADMINI: { fut: 0.0004, opt: 0.01 },
   ALUMINIUM: { fut: 0.0003, opt: 0.01 }, ALUMINI: { fut: 0.0004, opt: 0.01 }, NICKEL: { fut: 0.0004, opt: 0.01 },
 };
-export const slippageFor = (underlying: string) => SLIPPAGE[String(underlying)] ?? { fut: 0.0002, opt: 0.01 };
+export const slippageFor = (underlying: string) => SLIPPAGE[String(underlying)] ?? (CRYPTO[String(underlying)] ? { fut: CRYPTO[String(underlying)].slip_pct / 100, opt: 0.01 } : { fut: 0.0002, opt: 0.01 });
 /** A fill moved against the trade by the slippage: buys a little higher, sells a little lower. */
 export const slipped = (px: number, buy: boolean, frac: number, opt: boolean) => {
   const d = Math.max(opt ? 0.05 : 0, px * frac);
@@ -87,6 +88,7 @@ export type Acc = {
   dayNet?: Record<string, number>; // net ₹ of closed trades per exit day (daily loss limit)
   lots?: { min: number; max: number; sum: number; n: number }; // lots per trade when sized from capital
   slip?: number; // rupees lost to slippage (already inside the trades' prices)
+  funding?: number; // crypto perpetual funding paid (inside the charges)
 };
 
 /** Saved option series shared between runs (the strategy lab keeps them in the database). */
@@ -149,7 +151,8 @@ export function newAcc(capital: number): Acc {
 export async function planBacktest(
   s: Record<string, any>, creds: { client: string; token: string }, p: BtParams, progress: (msg: string) => Promise<void>,
 ): Promise<{ plans: Plan[]; calls: number; notes: string[] }> {
-  if (!creds.client || !creds.token) throw new Error("Add your Dhan client ID and access token under Dhan connection.");
+  // Crypto candles come from Delta Exchange (public data); everything else needs the Dhan connection.
+  if (!isCrypto(String(s.data_segment)) && (!creds.client || !creds.token)) throw new Error("Add your Dhan client ID and access token under Dhan connection.");
   validateParams(p);
   const dhan = new Dhan(creds.client, creds.token);
   const today = ist(Date.now() / 1000).date;
@@ -165,14 +168,16 @@ export async function planBacktest(
   const levels = hasLevels(risk) && risk!.basis === "UNDERLYING";
   const ruleTfs = rules ? ruleTimeframes(rules, s.timeframe_min) : null;
   const needsMinute = kind !== "TIMED" && (s.timeframe_min % 5 !== 0 || (ruleTfs?.intraday ?? []).some((tf) => tf % 5 !== 0));
-  const base = needsMinute ? 1 : 5;
+  // Crypto trades round the clock: 15-minute base candles when every timeframe allows it (a third of the downloads).
+  const all15 = s.timeframe_min % 15 === 0 && (ruleTfs?.intraday ?? []).every((tf) => tf % 15 === 0);
+  const base = needsMinute ? 1 : isCrypto(seg) && all15 ? 15 : 5;
   if (base === 1 && (Date.parse(p.to) - Date.parse(p.from)) / 86400000 > 366) {
     throw new Error("Timeframes that aren't a multiple of 5 minutes need 1-minute data; test those up to 1 year per run.");
   }
 
   // Long warm-up (500+ candles) so Supertrend has settled to the same values the chart shows.
   const warmBars = rules ? warmBarsFor(rules) : Math.max(500, s.atr_period * 10);
-  const dayMins = isCommodity(seg) ? 860 : 375; // trading minutes per day
+  const dayMins = dayMinutes(seg); // trading minutes per day
   const maxTf = rules ? Math.max(s.timeframe_min, ...ruleTfs!.intraday) : s.timeframe_min;
   let warm = 3;
   if (kind !== "TIMED") warm = Math.ceil(((warmBars * maxTf) / dayMins) * 1.5) + 5;
@@ -183,7 +188,7 @@ export async function planBacktest(
   const raw = dailyMode ? [] : await intradayRange(dhan, s, base, addDays(p.from, -warm), fetchTo, progress);
   if (!raw.length && !dailyMode) throw new Error(isCommodity(seg)
     ? "Dhan returned no candles for this period. For commodities Dhan only has intraday history for the current contract; try a recent period."
-    : "Dhan returned no index candles for this period.");
+    : isCrypto(seg) ? "Delta Exchange returned no candles for this period." : "Dhan returned no index candles for this period.");
   if (isCommodity(seg) && raw.length && raw[0].day > p.from) {
     notes.push(`Dhan has intraday history for the current ${s.underlying} contract only from ${raw[0].day}, so trades start there.`);
   }
@@ -697,7 +702,7 @@ export async function priceBatch(
         throw e;
       }
     } else {
-      contract = isCommodity(String(s.data_segment)) ? `${s.underlying} futures (near month)` : `${s.underlying} index (futures proxy)`;
+      contract = isCrypto(String(s.data_segment)) ? `${s.underlying} perpetual (Delta)` : isCommodity(String(s.data_segment)) ? `${s.underlying} futures (near month)` : `${s.underlying} index (futures proxy)`;
       inPx = t.spotIn;
       outPx = t.spotOut;
     }
@@ -723,11 +728,21 @@ export async function priceBatch(
     // Buy and sell legs: a long (or an option buy) buys at entry and sells at exit; a short (or an option write) the reverse.
     const buyVal = (dir === 1 ? inPx : outPx) * units, sellVal = (dir === 1 ? outPx : inPx) * units;
     const ch = tradeCharges(p, isOpt, buyVal, sellVal);
+    // Crypto perpetuals: funding, charged to longs at 0.01% of the position every 8 hours held (its usual level;
+    // shorts usually receive it, which the test leaves out to stay on the safe side).
+    let fundRs = 0;
+    if (isCrypto(String(s.data_segment)) && dir === 1 && !p.no_slippage) {
+      const at = (d: string, m: number) => Date.parse(`${d}T00:00:00+05:30`) / 1000 + m * 60;
+      const hrs = Math.max(0, (at(t.exitDay, t.exitMin) - at(t.entryDay, t.entryMin)) / 3600);
+      fundRs = rawIn * units * 0.0001 * (hrs / 8);
+      ch.total = Math.round((ch.total + fundRs) * 100) / 100;
+    }
     // Whole rupees only: paisa are dropped (not rounded up or down).
     const exact = (outPx - inPx) * dir * units;
     const g = Math.trunc(exact), c = Math.trunc(ch.total), net = Math.trunc(exact - ch.total);
     const slipRs = Math.trunc((Math.abs(inPx - rawIn) + Math.abs(outPx - rawOut)) * units);
     acc.slip = (acc.slip ?? 0) + slipRs;
+    if (fundRs) acc.funding = (acc.funding ?? 0) + fundRs;
     acc.chg = acc.chg ?? { brokerage: 0, stt: 0, exch: 0, sebi: 0, gst: 0, stamp: 0 };
     for (const k of ["brokerage", "stt", "exch", "sebi", "gst", "stamp"] as const) acc.chg[k] += ch[k];
     acc.gross += g; acc.costs += c; acc.equity += net;
@@ -736,7 +751,7 @@ export async function priceBatch(
     acc.lastDone = t.exitDay;
     acc.dayNet[t.exitDay] = (acc.dayNet[t.exitDay] ?? 0) + net;
     trades.push({
-      slip: slipRs,
+      slip: slipRs, ...(fundRs ? { funding: Math.trunc(fundRs) } : {}),
       entry: `${t.entryDay} ${minToTime(t.entryMin)}`, exit: `${t.exitDay} ${minToTime(t.exitMin)}`, side: t.side, contract,
       why: t.why, exit_why: t.exitWhy, entry_px: +inPx.toFixed(2), exit_px: +outPx.toFixed(2), units, lots,
       gross: g, costs: c, net, equity: Math.trunc(acc.equity),
@@ -760,10 +775,11 @@ export function summarize(s: Record<string, any>, p: BtParams, planned: number, 
     profit_factor: acc.grossLoss > 0 ? +(acc.grossWin / acc.grossLoss).toFixed(2) : null,
     avg_net: n ? Math.trunc(net / n) : 0,
     skipped: acc.skipped, notes: acc.notes ?? [],
-    priced_with: structOf(s) ? `Dhan expired-options data (5-minute), every leg of the ${structName(structOf(s)!)}` : s.trade_type === "OPTIONS" ? "Dhan expired-options data (5-minute)" : isCommodity(String(s.data_segment)) ? "Near-month futures prices" : "Index prices as a futures proxy",
+    priced_with: structOf(s) ? `Dhan expired-options data (5-minute), every leg of the ${structName(structOf(s)!)}` : s.trade_type === "OPTIONS" ? "Dhan expired-options data (5-minute)" : isCrypto(String(s.data_segment)) ? "Delta Exchange perpetual prices (Binance spot before the coin listed on Delta India)" : isCommodity(String(s.data_segment)) ? "Near-month futures prices" : "Index prices as a futures proxy",
     dhan_calls: acc.calls, last_day_done: acc.lastDone, partial,
     lots: acc.lots && acc.lots.n ? { min: acc.lots.min, max: acc.lots.max, avg: +(acc.lots.sum / acc.lots.n).toFixed(1) } : null,
     slippage: acc.slip != null ? Math.trunc(acc.slip) : null,
+    funding: acc.funding ? Math.trunc(acc.funding) : null,
     slip_rate: p.no_slippage ? null : slippageFor(s.underlying),
     charges: acc.chg ? Object.fromEntries(Object.entries(acc.chg).map(([k, v]) => [k, Math.trunc(v)])) : null,
   };

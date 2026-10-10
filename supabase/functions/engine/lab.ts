@@ -13,11 +13,12 @@ import { describeCond, type Cond, type Rules, validateRules } from "./rules.ts";
 import { dataSecurity } from "./instruments.ts";
 import { describeRisk, type Risk } from "./risk.ts";
 import { loadMarginRates, type MarginRate, refreshMargins } from "./margins.ts";
+import { CRYPTO, cryptoDaily, cryptoIntraday, cryptoLot, loadCrypto } from "./crypto.ts";
 
 /* ---------- assets ---------- */
 export type LabAsset = {
   key: string; name: string; seg: string; sec: string; instr: string; exchange: string; lot: number; commodity: boolean;
-  step?: number; wd?: number; flag?: "WEEK" | "MONTH";
+  step?: number; wd?: number; flag?: "WEEK" | "MONTH"; crypto?: boolean;
 };
 const IDX = (key: string, name: string, sec: string, exchange: string, step: number, wd: number, lot: number, flag: "WEEK" | "MONTH"): LabAsset =>
   ({ key, name, seg: "IDX_I", sec, instr: "INDEX", exchange, lot, commodity: false, step, wd, flag });
@@ -38,8 +39,42 @@ export const LAB_ASSETS: Record<string, LabAsset> = Object.fromEntries([
   MCX("NICKEL", "Nickel", 250),
 ].map((a) => [a.key, a]));
 
+/* ---------- crypto (Delta Exchange perpetuals) ---------- */
+/**
+ * Adds the enabled coins of crypto_assets to the asset list (and drops ones switched off). Their "lot" is the rupee
+ * P&L of one contract for a $1 move (coins per contract × rupees per dollar). Called at the start of every request.
+ */
+export async function loadCryptoAssets(sb: SupabaseClient) {
+  await loadCrypto(sb);
+  for (const [k, a] of Object.entries(LAB_ASSETS)) if (a.crypto && !CRYPTO[k]) delete LAB_ASSETS[k];
+  for (const c of Object.values(CRYPTO)) {
+    LAB_ASSETS[c.key] = { key: c.key, name: c.name, seg: "DELTA", sec: c.key, instr: "PERP", exchange: "DELTA", lot: cryptoLot(c), commodity: false, crypto: true };
+  }
+}
+/** Decision timeframes the lab uses per kind of asset. Crypto runs on 15-minute base candles (it trades 18½ hours a day). */
+export const TF_INDEX = [5, 10, 15, 25, 30, 45, 60, 75, 125], TF_CRYPTO = [15, 30, 45, 60, 120, 240];
+export const tfsFor = (key: string) => LAB_ASSETS[key]?.crypto ? TF_CRYPTO : TF_INDEX;
+/** The nearest timeframe in a list (a 25-minute idea becomes 30 minutes on crypto, 120 becomes 125 on an index). */
+const nearestTf = (tf: number, list: number[]) => list.reduce((b, x) => Math.abs(Math.log(x / tf)) < Math.abs(Math.log(b / tf)) ? x : b, list[0]);
+/** Moves every timeframe of a strategy into the target asset's set (decision candles and condition candles). */
+function fitTimeframes(cfg: LabConfig, key: string) {
+  if (cfg.rules?.daily) return;
+  const list = tfsFor(key);
+  const own = nearestTf(Number(cfg.timeframe_min), list);
+  cfg.timeframe_min = own;
+  for (const k of ["long", "short", "exitLong", "exitShort"] as const) {
+    for (const c of (cfg.rules?.[k]?.conds ?? []) as Cond[]) {
+      if (c.tf === "base" || c.tf === "D") continue;
+      const v = nearestTf(Number(c.tf), list.filter((x) => x > own));
+      c.tf = Number(c.tf) > own && list.some((x) => x > own) ? String(v) : "base";
+    }
+  }
+}
+
 /** Charge rates (%), the same defaults as the backtest form. */
 export function chargeRates(a: LabAsset): ChargeRates {
+  // Delta Exchange India: 0.05% taker fee on the contract value each side, plus 18% GST on it; no STT or stamp duty.
+  if (a.crypto) return { brk_pct: 0, stt_fut: 0, stt_opt: 0, exch_fut: 0.05, exch_opt: 0.03, sebi: 0, gst: 18, stamp_fut: 0, stamp_opt: 0 };
   if (a.commodity) return { brk_pct: 0.03, stt_fut: 0.01, stt_opt: 0.05, exch_fut: 0.0021, exch_opt: 0.0418, sebi: 0.0001, gst: 18, stamp_fut: 0.002, stamp_opt: 0.003 };
   const bse = a.exchange === "BSE";
   return { brk_pct: 0.03, stt_fut: 0.05, stt_opt: 0.15, exch_fut: bse ? 0 : 0.00183, exch_opt: bse ? 0.0325 : 0.03553, sebi: 0.0001, gst: 18, stamp_fut: 0.002, stamp_opt: 0.003 };
@@ -128,10 +163,11 @@ function randomRisk(r: R, daily: boolean, intraday: boolean, capital: number): R
 export function generate(assetKey: string, seed: number, capital = 500000): LabConfig {
   const a = LAB_ASSETS[assetKey];
   const r = rng(seed);
-  const daily = a.commodity || r() < 0.15;
+  const cr = !!a.crypto;
+  const daily = a.commodity || r() < (cr ? 0.3 : 0.15);
   const okTpl = (xs: [Tpl, boolean][]) => xs.filter(([, intra]) => !(daily && intra)).map(([t]) => t);
-  const tf = daily ? 375 : pick(r, [5, 10, 15, 15, 25, 30, 30, 45, 60, 75, 125]);
-  const higher = daily ? [] : [15, 25, 30, 60, 75, 125].filter((x) => x > tf && x % 5 === 0 && x !== tf).map(String).concat(["D"]);
+  const tf = daily ? 375 : pick(r, cr ? [15, 15, 30, 30, 45, 60, 60, 120, 240] : [5, 10, 15, 15, 25, 30, 30, 45, 60, 75, 125]);
+  const higher = daily ? [] : (cr ? [30, 60, 120, 240] : [15, 25, 30, 60, 75, 125]).filter((x) => x > tf && x % 5 === 0 && x !== tf).map(String).concat(["D"]);
   const ctf = (base: boolean) => daily ? "D" : base ? "base" : pick(r, higher);
   const candles = r() < 0.2 ? "HA" : "NORMAL";
   const sr = r();
@@ -199,9 +235,16 @@ export function generate(assetKey: string, seed: number, capital = 500000): LabC
   };
   if (cfg.intraday && cfg.last_entry > cfg.square_off) cfg.last_entry = "14:30";
   if (a.commodity) Object.assign(cfg, { session_start: "09:00", last_entry: "23:00", square_off: "23:15" });
+  if (cr) Object.assign(cfg, cryptoTimes(cfg, r), { futures_symbol: a.key });
   cfg.risk = randomRisk(r, daily, intraday, capital);
   validateRules(cfg.rules);
   return cfg;
+}
+
+/** Crypto session times: the crypto day runs 05:30–24:00 IST; intraday trades start at 05:30 or later and close by 23:45. */
+function cryptoTimes(cfg: LabConfig, r?: R) {
+  if (cfg.rules?.daily || !cfg.intraday) return { session_start: "05:30", last_entry: "23:30", square_off: "23:45" };
+  return { session_start: r ? pick(r, ["05:30", "05:30", "09:00", "13:30", "18:00"]) : "05:30", last_entry: r ? pick(r, ["21:00", "22:30", "23:30"]) : "23:30", square_off: "23:45" };
 }
 
 /* ---------- variations of winners ---------- */
@@ -248,7 +291,7 @@ export function mutate(parent: LabConfig, seed: number, capital = 500000): LabCo
         changes.push(`${c.ind} ${pk} ${old} → ${nv}`);
       }
     } else if (what < 0.55 && !daily) {
-      const old = cfg.timeframe_min, nv = neighbour([5, 10, 15, 25, 30, 45, 60, 75, 125], old, r);
+      const old = cfg.timeframe_min, nv = neighbour(tfsFor(cfg.underlying), old, r);
       if (nv === old) continue;
       // Condition timeframes must stay above the decision timeframe.
       const ok = sets.every((k) => (cfg.rules[k].conds as Cond[]).every((x) => x.tf === "base" || x.tf === "D" || Number(x.tf) > nv));
@@ -268,10 +311,12 @@ export function mutate(parent: LabConfig, seed: number, capital = 500000): LabCo
     } else if (what < 0.9) {
       cfg.entry_mode = cfg.entry_mode === "JOIN" ? "FLIP" : "JOIN"; changes.push(cfg.entry_mode === "JOIN" ? "enter whenever the rules are true" : "enter only when the rules newly become true");
     } else if (!daily && cfg.intraday) {
-      const old = cfg.session_start; cfg.session_start = pick(r, ["09:15", "09:20", "09:30", "09:45", "10:15"].filter((x) => x !== old)); changes.push(`first trade from ${old} → ${cfg.session_start}`);
+      const cr = !!LAB_ASSETS[cfg.underlying]?.crypto;
+      const old = cfg.session_start; cfg.session_start = pick(r, (cr ? ["05:30", "07:30", "09:00", "13:30", "18:00"] : ["09:15", "09:20", "09:30", "09:45", "10:15"]).filter((x) => x !== old)); changes.push(`first trade from ${old} → ${cfg.session_start}`);
     } else if (!daily && !LAB_ASSETS[cfg.underlying]?.commodity) {
       cfg.intraday = !cfg.intraday; cfg.product_type = cfg.intraday ? "I" : "M";
-      if (cfg.intraday) Object.assign(cfg, { last_entry: "14:30", square_off: "15:15" }); else Object.assign(cfg, { last_entry: "15:15", square_off: "15:20" });
+      if (LAB_ASSETS[cfg.underlying]?.crypto) Object.assign(cfg, cfg.intraday ? { last_entry: "23:00", square_off: "23:45" } : { session_start: "05:30", last_entry: "23:30", square_off: "23:45" });
+      else if (cfg.intraday) Object.assign(cfg, { last_entry: "14:30", square_off: "15:15" }); else Object.assign(cfg, { last_entry: "15:15", square_off: "15:20" });
       changes.push(cfg.intraday ? "positional → intraday (square off daily)" : "intraday → positional (carry overnight)");
     }
   }
@@ -342,9 +387,13 @@ export function transfer(parent: LabConfig, key: string): LabConfig | null {
   const daily = !!parent.rules?.daily;
   const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
   Object.assign(cfg, { underlying: a.key, data_security_id: a.sec, data_segment: a.seg, data_instrument: a.instr, exchange: a.exchange, dhan_symbol: a.key,
-    futures_symbol: a.key + "1!", lot_size: a.lot, strike_step: a.step ?? 1, expiry_weekday: a.wd ?? 4, expiry_flag: a.flag ?? "WEEK" });
+    futures_symbol: a.crypto ? a.key : a.key + "1!", lot_size: a.lot, strike_step: a.step ?? 1, expiry_weekday: a.wd ?? 4, expiry_flag: a.flag ?? "WEEK" });
+  const from = LAB_ASSETS[parent.underlying];
   if (a.commodity) Object.assign(cfg, { session_start: "09:00", last_entry: "23:00", square_off: "23:15", ...(daily ? { intraday: false, product_type: "M" } : {}) });
-  else if (LAB_ASSETS[parent.underlying]?.commodity) Object.assign(cfg, { session_start: "09:15", last_entry: "15:15", square_off: "15:20" });
+  else if (a.crypto) Object.assign(cfg, cryptoTimes(cfg));
+  else if (from?.commodity || from?.crypto) Object.assign(cfg, cfg.intraday ? { session_start: "09:15", last_entry: "14:30", square_off: "15:15" } : { session_start: "09:15", last_entry: "15:15", square_off: "15:20" });
+  // Timeframes the target's candles support (crypto: 15-minute steps; indices and MCX: 5-minute steps).
+  if (!!a.crypto !== !!from?.crypto) { fitTimeframes(cfg, key); try { validateRules(cfg.rules); } catch { return null; } }
   // A rupee daily loss limit sized for one contract means nothing on another.
   if (cfg.risk?.max_day_loss) cfg.risk.max_day_loss = null;
   cfg.lab_note = `Same rules on ${a.name}`;
@@ -402,7 +451,7 @@ export function recombine(parent: LabConfig, seed: number): LabConfig | null {
   const side = cfg.rules.long?.conds?.length ? "long" : "short";
   const conds: Cond[] = cfg.rules[side].conds;
   const tf = cfg.timeframe_min;
-  const higher = daily ? ["D"] : [15, 25, 30, 60, 75, 125].filter((x) => x > tf).map(String).concat(["D"]);
+  const higher = daily ? ["D"] : (LAB_ASSETS[cfg.underlying]?.crypto ? [30, 60, 120, 240] : [15, 25, 30, 60, 75, 125]).filter((x) => x > tf).map(String).concat(["D"]);
   const okState = STATE.filter(([, intra]) => !(daily && intra)).map(([t]) => t);
   const fresh = (): Cond => {
     const c = r() < 0.55 ? { ...pick(r, okState)(r), tf: pick(r, higher) } as Cond : { ...pick(r, FILTER)(r), tf: daily ? "D" : "base" } as Cond;
@@ -446,7 +495,7 @@ export function explore(parent: LabConfig, opts: { n: number; kinds: ExploreKind
   };
   const pools: Record<string, LabConfig[]> = {
     assets: opts.assets.map((k) => transfer(parent, k)).filter((x): x is LabConfig => !!x),
-    timeframes: [5, 10, 15, 25, 30, 45, 60, 75, 125].map((t) => retime(parent, t)).filter((x): x is LabConfig => !!x),
+    timeframes: tfsFor(parent.underlying).map((t) => retime(parent, t)).filter((x): x is LabConfig => !!x),
     stops: stopVariants(parent),
     trailing: trailVariants(parent),
     settings: settingVariants(parent),
@@ -559,6 +608,7 @@ export async function refreshAsset(sb: SupabaseClient, creds: { client: string; 
     const { data: d } = await sb.from("lab_candles").select("updated_at").eq("asset", key).eq("kind", "D").maybeSingle();
     if (d && Date.now() - Date.parse(d.updated_at) < freshHours * 3600000) return;
   }
+  if (a.crypto) return refreshCrypto(sb, a, today);
   const dhan = new Dhan(creds.client, creds.token);
   const sec = (await dataSecurity(sb, creds, a.seg, a.sec, today)).sec;
   // 11 years of daily candles: the year-by-year test covers 10 years (plus warm-up for the indicators).
@@ -601,6 +651,39 @@ async function refreshYearChunks(sb: SupabaseClient, dhan: Dhan, a: LabAsset, to
     const rows = [...map.values()].sort((x, z) => x.t - z.t);
     if (!rows.length) continue;
     await sb.from("lab_candles").upsert({ asset: a.key, kind: `I5Y:${y}`, from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, false), updated_at: new Date().toISOString() });
+  }
+}
+
+/**
+ * A coin's candles: 11 years of daily candles, the latest 17 months of 15-minute candles ("I5", kept up to date), and
+ * one row of 15-minute candles per earlier calendar year for the year-by-year test (two missing years per run, so a
+ * first download is spread over a couple of runs). Only the desk's crypto session (05:30–24:00 IST) is kept.
+ */
+async function refreshCrypto(sb: SupabaseClient, a: LabAsset, today: string) {
+  const daily = await cryptoDaily(a.sec, addDays(today, -4100), addDays(today, 1));
+  await sb.from("lab_candles").upsert({ asset: a.key, kind: "D", from_day: daily[0]?.day ?? today, to_day: daily.at(-1)?.day ?? today, bars: toCol(daily, true), updated_at: new Date().toISOString() });
+  const inSess = (t: number) => { const p = ist(t), ss = sessionFor(a.seg, p.date); return p.min >= ss.open && p.min < ss.close; };
+  const want = addDays(today, -(YEAR_DAYS + WARM_DAYS));
+  const { data: cached } = await sb.from("lab_candles").select("from_day, to_day, bars").eq("asset", a.key).eq("kind", "I5").maybeSingle();
+  const map = new Map<number, { t: number; o: number; h: number; l: number; c: number; v?: number }>();
+  let start = want;
+  if (cached && cached.from_day <= addDays(want, 5)) { for (const r of fromCol(cached.bars)) map.set(r.t, r); start = addDays(cached.to_day, -2); }
+  for (const r of await cryptoIntraday(a.sec, 15, `${start} 00:00:00`, `${today} 23:59:00`)) if (inSess(r.t)) map.set(r.t, r);
+  const lo = Date.parse(`${want}T00:00:00+05:30`) / 1000, nowSec = Date.now() / 1000;
+  // Only finished candles are kept (the one still forming would be stored half-done).
+  const rows = [...map.values()].filter((r) => r.t >= lo && r.t + 900 <= nowSec).sort((x, y) => x.t - y.t);
+  if (rows.length) await sb.from("lab_candles").upsert({ asset: a.key, kind: "I5", from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, true), updated_at: new Date().toISOString() });
+  const first = addDays(today, -5 * 365 + 2), y0 = Number(first.slice(0, 4)), y1 = Number(today.slice(0, 4)) - 1;
+  const { data: have } = await sb.from("lab_candles").select("kind").eq("asset", a.key).like("kind", "I5Y:%");
+  const got = new Set((have ?? []).map((h) => h.kind));
+  let fetched = 0;
+  for (let y = y1; y >= y0 && fetched < 2; y--) {
+    if (got.has(`I5Y:${y}`)) continue;
+    const from = `${y}-01-01` < first ? first : `${y}-01-01`;
+    const yr = (await cryptoIntraday(a.sec, 15, `${from} 00:00:00`, `${y}-12-31 23:59:00`)).filter((r) => inSess(r.t));
+    fetched++;
+    if (!yr.length) continue;
+    await sb.from("lab_candles").upsert({ asset: a.key, kind: `I5Y:${y}`, from_day: ist(yr[0].t).date, to_day: ist(yr.at(-1)!.t).date, bars: toCol(yr, true), updated_at: new Date().toISOString() });
   }
 }
 
@@ -710,6 +793,7 @@ export function marginRate(cfg: LabConfig, kind: "FUT" | "SELL", rates: Record<s
   const r = rates[cfg.underlying];
   const v = r ? (kind === "SELL" ? (cfg.intraday ? r.sellI ?? r.sell : r.sell ?? r.sellI) : (cfg.intraday ? r.futI ?? r.fut : r.fut ?? r.futI)) : null;
   if (v) return { pct: v, src: "Dhan" };
+  if (cfg.data_segment === "DELTA") return { pct: 0.10, src: "10× leverage (Delta allows more; the lab stays at 10×)" };
   return { pct: cfg.data_segment === "MCX_COMM" ? 0.10 : 0.12, src: "estimate" };
 }
 /** Strike from a priced option trade's contract text ("NIFTY 24500 CE"). */
@@ -875,7 +959,7 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
       if (i === 0 && !counts.margins_checked) {
         // Today's margin rates from Dhan's margin calculator (used for each trade's margin and the return on margin).
         await patch({ progress: "Checking margin rates with Dhan" });
-        const n = await refreshMargins(sb, ctx.creds, assets.map((k) => LAB_ASSETS[k]));
+        const n = await refreshMargins(sb, ctx.creds, assets.map((k) => LAB_ASSETS[k]).filter((a) => !a.crypto));
         counts.margins_checked = n || -1; await patch({ counts });
       }
       while (i < assets.length && Date.now() - ctx.started < WALL_BUDGET - 20000) {
@@ -905,7 +989,7 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
         // Options are priced for index strategies on intraday candles; positional once-a-day trades run across expiries.
         const { data: best } = await sb.from("lab_results").select("id, asset, mode").eq("run_id", run.id).eq("stage", "screened").eq("passed", true)
           .order("score", { ascending: false }).limit(400);
-        const pickIds = (best ?? []).filter((b) => !LAB_ASSETS[b.asset]?.commodity && b.mode === "INTRADAY").slice(0, top).map((b) => b.id);
+        const pickIds = (best ?? []).filter((b) => !LAB_ASSETS[b.asset]?.commodity && !LAB_ASSETS[b.asset]?.crypto && b.mode === "INTRADAY").slice(0, top).map((b) => b.id);
         if (pickIds.length) await sb.from("lab_results").update({ stage: "opt_queue" }).in("id", pickIds);
         const { count: passed } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).eq("passed", true);
         await patch({ phase: "options", progress: `Pricing the best ${pickIds.length} with real option prices`, counts: { ...counts, passed, to_price: pickIds.length } });
@@ -1097,7 +1181,7 @@ async function forgetOld(sb: SupabaseClient, limit = 400) {
 }
 
 /* ---------- robustness: other assets, other timeframes, buy & hold ---------- */
-const ROBUST_TFS = [5, 10, 15, 25, 30, 45, 60, 75, 125];
+const clsOf = (a?: LabAsset) => a?.crypto ? "C" : a?.commodity ? "M" : "I";
 /** Mini and micro contracts follow the same commodity, so they don't count as another asset. */
 export const assetRoot = (k: string) => /^GOLD/.test(k) ? "GOLD" : /^SILVER/.test(k) ? "SILVER" : /^CRUDE/.test(k) ? "CRUDE" : /^NAT/.test(k) ? "NATGAS" : /^ZINC/.test(k) ? "ZINC" : /^LEAD/.test(k) ? "LEAD" : /^ALUMIN/.test(k) ? "ALUMINIUM" : k;
 type Check = { kind: "self" | "asset" | "tf" | "year" | "step"; asset: string; tf: number | null; config: LabConfig };
@@ -1107,10 +1191,11 @@ export const yearsFor = (cfg: LabConfig) => cfg.rules?.daily ? 10 : 5;
 export function robustChecks(cfg: LabConfig, haveD: Set<string>, haveI5: Set<string>): Check[] {
   const out: Check[] = [{ kind: "self", asset: cfg.underlying, tf: null, config: cfg }];
   const daily = !!cfg.rules?.daily, me = LAB_ASSETS[cfg.underlying];
-  // Other assets: the same family first (indices for an index strategy, commodities for a commodity one), up to 6.
+  // Other assets: the same family first (indices for an index strategy, commodities for a commodity one, coins for a
+  // coin), up to 6.
   const roots = new Set([assetRoot(cfg.underlying)]);
   const pool = Object.keys(LAB_ASSETS).filter((k) => { const r = assetRoot(k); if (roots.has(r) || !haveD.has(k) || !(daily || haveI5.has(k))) return false; roots.add(r); return true; })
-    .sort((a, b) => Number(LAB_ASSETS[a].commodity !== me?.commodity) - Number(LAB_ASSETS[b].commodity !== me?.commodity));
+    .sort((a, b) => Number(clsOf(LAB_ASSETS[a]) !== clsOf(me)) - Number(clsOf(LAB_ASSETS[b]) !== clsOf(me)));
   for (const k of pool) {
     if (out.filter((c) => c.kind === "asset").length >= 6) break;
     const c = transfer(cfg, k);
@@ -1119,7 +1204,7 @@ export function robustChecks(cfg: LabConfig, haveD: Set<string>, haveI5: Set<str
   // Other timeframes: the nearest decision timeframes that keep the rules valid (up to 4).
   if (!daily && haveI5.has(cfg.underlying)) {
     const own = Number(cfg.timeframe_min);
-    const tfs = ROBUST_TFS.filter((t) => t !== own).sort((a, b) => Math.abs(Math.log(a / own)) - Math.abs(Math.log(b / own)));
+    const tfs = tfsFor(cfg.underlying).filter((t) => t !== own).sort((a, b) => Math.abs(Math.log(a / own)) - Math.abs(Math.log(b / own)));
     for (const t of tfs) {
       if (out.filter((c) => c.kind === "tf").length >= 4) break;
       const c = retime(cfg, t);
@@ -1127,7 +1212,7 @@ export function robustChecks(cfg: LabConfig, haveD: Set<string>, haveI5: Set<str
     }
   } else if (daily && haveI5.has(cfg.underlying)) {
     // A once-a-day index strategy, decided instead at the close of 60- and 125-minute candles (daily conditions stay daily).
-    for (const t of [60, 125]) {
+    for (const t of me?.crypto ? [60, 240] : [60, 125]) {
       const c: LabConfig = JSON.parse(JSON.stringify(cfg));
       delete c.rules.daily; c.timeframe_min = t; c.lab_note = `Decided on ${t}-minute candles instead of once a day`;
       try { validateRules(c.rules); out.push({ kind: "tf", asset: cfg.underlying, tf: t, config: c }); } catch { /* skip */ }

@@ -1,5 +1,6 @@
 // Thin Dhan v2 data client with pacing and retry on rate limits.
 import { type DayBar, ist, normaliseTimestamps, type Raw } from "./logic.ts";
+import { cryptoDaily, cryptoIntraday, cryptoLtp } from "./crypto.ts";
 
 export type OptBar = { t: number; o: number; h?: number; l?: number; c: number; strike: number | null; spot: number | null };
 
@@ -70,6 +71,7 @@ export class Dhan {
 
   /** Minute candles (interval 1/5/15/25/60). Dates as "YYYY-MM-DD HH:mm:ss" IST, max ~90 days per call. */
   async intraday(sec: string, seg: string, instr: string, interval: number, fromDate: string, toDate: string): Promise<Raw[]> {
+    if (seg === "DELTA") return cryptoIntraday(sec, interval, fromDate, toDate); // crypto: Delta Exchange (no Dhan call)
     const j = await this.post("/charts/intraday", {
       securityId: String(sec), exchangeSegment: seg, instrument: instr, interval: String(interval), oi: false, fromDate, toDate,
     });
@@ -80,6 +82,7 @@ export class Dhan {
 
   /** Daily candles; toDate is exclusive. */
   async daily(sec: string, seg: string, instr: string, fromDate: string, toDate: string): Promise<DayBar[]> {
+    if (seg === "DELTA") return cryptoDaily(sec, fromDate, toDate);
     // For futures, expiryCode 0 returns Dhan's continuous near-month series (years of history).
     const j = await this.post("/charts/historical", {
       securityId: String(sec), exchangeSegment: seg, instrument: instr, expiryCode: 0, oi: false, fromDate, toDate,
@@ -142,6 +145,7 @@ export class Dhan {
 
   /** Last traded price for one instrument (Data API; 1 request per second). */
   async ltp(seg: string, sec: string): Promise<number | null> {
+    if (seg === "DELTA") return cryptoLtp(sec);
     const j = await this.post("/marketfeed/ltp", { [seg]: [Number(sec)] });
     const v = j?.data?.[seg]?.[String(sec)]?.last_price;
     return typeof v === "number" ? v : v != null ? Number(v) : null;
