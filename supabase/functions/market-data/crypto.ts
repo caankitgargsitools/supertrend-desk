@@ -167,19 +167,13 @@ export async function cryptoProduct(symbol: string) {
 /* ---------- signed requests (orders, balances) ---------- */
 /**
  * Delta only accepts trading API calls from whitelisted IP addresses, and this server's own address changes from call
- * to call. So signed requests go out from the database (public.delta_private), whose address is fixed: it signs with
- * the user's stored secret (which never leaves the database), sends the request, and the answer is read back here.
+ * to call. So signed requests go out from the database (public.delta_send, synchronous), whose address is fixed: it
+ * signs with the user's stored secret (which never leaves the database) and returns Delta's answer.
  */
 export async function deltaPrivate(sb: SupabaseClient, userId: string, method: "GET" | "POST", path: string, query = "", body?: unknown): Promise<any> {
-  const { data: id, error } = await sb.rpc("delta_private", { p_user: userId, p_method: method, p_path: path, p_query: query, p_body: body === undefined ? "" : JSON.stringify(body) });
-  if (error || !id) throw new Error(`Delta ${path}: couldn't send (${error?.message ?? "no request id"}).`);
-  let res: { status: number | null; body: string | null; error: string | null } | null = null;
-  for (let i = 0; i < 40 && !res; i++) {
-    await sleep(i < 10 ? 300 : 700);
-    const { data } = await sb.rpc("delta_result", { p_id: id });
-    if (data) res = data as typeof res;
-  }
-  if (!res) throw new Error(`Delta ${path}: no answer within 20 seconds (the order may still have gone through; check Delta).`);
+  const { data, error } = await sb.rpc("delta_send", { p_user: userId, p_method: method, p_path: path, p_query: query, p_body: body === undefined ? "" : JSON.stringify(body) });
+  if (error || !data) throw new Error(`Delta ${path}: couldn't send (${error?.message ?? "no answer"}).`);
+  const res = { ...(data as { status: number | null; body: string | null }), error: null as string | null };
   if (res.error && !res.status) throw new Error(`Delta ${path}: ${res.error}`);
   const text = res.body ?? "";
   let j: any = null; try { j = JSON.parse(text); } catch { /* not JSON */ }

@@ -73,3 +73,6 @@ grant execute on function public.usd_inr() to authenticated;
 -- Delta only accepts whitelisted IPs; edge functions have no fixed address, the database does. Signed requests are
 -- made here (delta_private: signs with the stored secret via pgcrypto hmac, sends with pg_net) and read back with
 -- delta_result(id). Both are for the engine (service_role) only. See the live definitions for the full text.
+-- Replaced by delta_send (http extension, synchronous): pg_net only sends after the calling engine request ends,
+-- which let the 5-second signature expire. create extension http with schema extensions; delta_send(user, method,
+-- path, query, body) returns {status, body}; service_role only.
