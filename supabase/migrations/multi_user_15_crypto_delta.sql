@@ -69,3 +69,7 @@ create or replace function public.usd_inr() returns numeric language sql stable 
 grant execute on function public.usd_inr() to authenticated;
 -- cron: every minute, every day, while a crypto strategy is active
 -- select cron.schedule('crypto-tick', '* * * * *', $$select public.engine_call('tick_crypto') where exists (select 1 from public.algo_strategies where active and data_segment = 'DELTA')$$);
+
+-- Delta only accepts whitelisted IPs; edge functions have no fixed address, the database does. Signed requests are
+-- made here (delta_private: signs with the stored secret via pgcrypto hmac, sends with pg_net) and read back with
+-- delta_result(id). Both are for the engine (service_role) only. See the live definitions for the full text.

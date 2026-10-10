@@ -499,7 +499,7 @@ async function sendDelta(s: Strategy, set: Settings, event: string, legs: Record
       status = "SENT";
       for (const o of payload.orders) {
         try {
-          const r = await deltaOrder(set.dhan_client_id, set.dhan_access_token, { symbol: String(o.symbol), size: Number(o.size), side: o.side as "buy" | "sell", reduceOnly: o.reduce_only });
+          const r = await deltaOrder(sb, set.user_id, { symbol: String(o.symbol), size: Number(o.size), side: o.side as "buy" | "sell", reduceOnly: o.reduce_only });
           out.push(`${o.side} ${o.size} ${o.symbol}: order ${r?.id ?? "?"} ${r?.state ?? ""}${r?.average_fill_price ? ` filled at ${r.average_fill_price}` : ""}`);
         } catch (e) {
           status = "FAILED"; out.push(`${o.side} ${o.size} ${o.symbol}: ${e instanceof Error ? e.message : String(e)}`);
@@ -1059,7 +1059,7 @@ async function deltaCheck(userId: string) {
   if (!a?.dhan_client_id || !a?.dhan_access_token) return { ok: false };
   let note: string, ok = false;
   try {
-    const bal = await deltaBalances(a.dhan_client_id, a.dhan_access_token);
+    const bal = await deltaBalances(sb, userId);
     const main = bal.filter((b) => b.balance > 0 || b.asset === "USD" || b.asset === "INR");
     note = `Connected. Wallet: ${main.length ? main.map((b) => `${b.asset} ${b.balance.toFixed(2)}${b.inr != null ? ` (₹${Math.trunc(b.inr).toLocaleString("en-IN")})` : ""}`).join(", ") : "empty"}.`;
     ok = true;

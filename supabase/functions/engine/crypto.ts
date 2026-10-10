@@ -165,39 +165,44 @@ export async function cryptoProduct(symbol: string) {
 }
 
 /* ---------- signed requests (orders, balances) ---------- */
-async function hmacHex(secret: string, msg: string): Promise<string> {
-  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(msg)));
-  return [...sig].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-export async function deltaPrivate(key: string, secret: string, method: "GET" | "POST" | "DELETE", path: string, query = "", body?: unknown): Promise<any> {
-  const ts = String(Math.floor(Date.now() / 1000));
-  const b = body === undefined ? "" : JSON.stringify(body), q = query ? `?${query}` : "";
-  const signature = await hmacHex(secret, method + ts + path + q + b);
-  const r = await fetch(DELTA + path + q, {
-    method, body: b || undefined, signal: AbortSignal.timeout(15000),
-    headers: { "api-key": key, timestamp: ts, signature, "User-Agent": "supertrend-desk", "Content-Type": "application/json", Accept: "application/json" },
-  });
-  const text = await r.text();
+/**
+ * Delta only accepts trading API calls from whitelisted IP addresses, and this server's own address changes from call
+ * to call. So signed requests go out from the database (public.delta_private), whose address is fixed: it signs with
+ * the user's stored secret (which never leaves the database), sends the request, and the answer is read back here.
+ */
+export async function deltaPrivate(sb: SupabaseClient, userId: string, method: "GET" | "POST", path: string, query = "", body?: unknown): Promise<any> {
+  const { data: id, error } = await sb.rpc("delta_private", { p_user: userId, p_method: method, p_path: path, p_query: query, p_body: body === undefined ? "" : JSON.stringify(body) });
+  if (error || !id) throw new Error(`Delta ${path}: couldn't send (${error?.message ?? "no request id"}).`);
+  let res: { status: number | null; body: string | null; error: string | null } | null = null;
+  for (let i = 0; i < 40 && !res; i++) {
+    await sleep(i < 10 ? 300 : 700);
+    const { data } = await sb.rpc("delta_result", { p_id: id });
+    if (data) res = data as typeof res;
+  }
+  if (!res) throw new Error(`Delta ${path}: no answer within 20 seconds (the order may still have gone through; check Delta).`);
+  if (res.error && !res.status) throw new Error(`Delta ${path}: ${res.error}`);
+  const text = res.body ?? "";
   let j: any = null; try { j = JSON.parse(text); } catch { /* not JSON */ }
-  if (!r.ok || j?.success === false) {
+  if (!(Number(res.status) >= 200 && Number(res.status) < 300) || j?.success === false) {
     const code = j?.error?.code ?? "";
-    const hint = /invalid_api_key|unauthorized|Signature|expired_signature|ip_not_whitelisted/i.test(text) ? " Check the Delta API key and secret (and that the key allows trading from any IP or this server's IP)." : "";
-    throw new Error(`Delta ${path}: HTTP ${r.status}${code ? ` ${code}` : ""}.${hint} ${text.slice(0, 200)}`);
+    const ip = j?.error?.context?.client_ip;
+    const hint = code === "ip_not_whitelisted_for_api_key" ? ` Whitelist this IP on the Delta API key: ${ip}.`
+      : /invalid_api_key|unauthorized|Signature|expired_signature/i.test(text) ? " Check the Delta API key and secret." : "";
+    throw new Error(`Delta ${path}: HTTP ${res.status}${code ? ` ${code}` : ""}.${hint}${hint ? "" : ` ${text.slice(0, 200)}`}`);
   }
   return j;
 }
 /** A market order for a number of contracts. */
-export async function deltaOrder(key: string, secret: string, o: { symbol: string; size: number; side: "buy" | "sell"; reduceOnly?: boolean }) {
+export async function deltaOrder(sb: SupabaseClient, userId: string, o: { symbol: string; size: number; side: "buy" | "sell"; reduceOnly?: boolean }) {
   const a = CRYPTO[o.symbol];
   const body: Record<string, unknown> = { product_symbol: o.symbol, size: Math.trunc(o.size), side: o.side, order_type: "market_order" };
   if (a?.product_id) body.product_id = a.product_id;
   if (o.reduceOnly) body.reduce_only = true;
-  return (await deltaPrivate(key, secret, "POST", "/v2/orders", "", body))?.result ?? null;
+  return (await deltaPrivate(sb, userId, "POST", "/v2/orders", "", body))?.result ?? null;
 }
 /** Wallet balances (for the connection check). */
-export async function deltaBalances(key: string, secret: string) {
-  const j = await deltaPrivate(key, secret, "GET", "/v2/wallet/balances");
+export async function deltaBalances(sb: SupabaseClient, userId: string) {
+  const j = await deltaPrivate(sb, userId, "GET", "/v2/wallet/balances");
   const rows: any[] = Array.isArray(j?.result) ? j.result : [];
   return rows.map((x) => ({ asset: String(x.asset_symbol ?? x.asset?.symbol ?? ""), balance: Number(x.balance ?? 0), available: Number(x.available_balance ?? 0),
     inr: x.balance_inr != null ? Number(x.balance_inr) : null })).filter((x) => x.asset);
