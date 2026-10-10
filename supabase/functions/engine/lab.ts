@@ -206,8 +206,8 @@ export function generate(assetKey: string, seed: number, capital = 500000): LabC
 
 /* ---------- variations of winners ---------- */
 const NEAR: Record<string, number[]> = {
-  atr: ST_ATR, factor: ST_FAC, len: [5, 7, 9, 13, 14, 20, 21, 30, 34, 50, 100, 200], len2: [13, 21, 34, 50, 100, 200],
-  mult: BB_MULT, mins: [15, 30, 45, 60], fast: [5, 8, 12], slow: [21, 26, 35], sig: [5, 9],
+  atr: ST_ATR, factor: ST_FAC, len: [5, 7, 9, 10, 13, 14, 20, 21, 30, 34, 50, 100, 200], len2: [13, 21, 34, 50, 100, 200],
+  mult: BB_MULT, mins: [15, 30, 45, 60], fast: [5, 8, 12], slow: [21, 26, 35], sig: [5, 9], within: [1, 2, 3, 5],
 };
 /** The next value up or down in a list (never the value itself). */
 const neighbour = (xs: number[], v: number, r: R) => {
@@ -282,8 +282,54 @@ export function mutate(parent: LabConfig, seed: number, capital = 500000): LabCo
 }
 
 /* ---------- exploring a winner: other assets, timeframes, stops, trailing, indicator combinations ---------- */
-export type ExploreKind = "assets" | "timeframes" | "stops" | "trailing" | "indicators" | "tweaks";
-export const EXPLORE_KINDS: ExploreKind[] = ["assets", "timeframes", "stops", "trailing", "indicators", "tweaks"];
+export type ExploreKind = "assets" | "timeframes" | "stops" | "trailing" | "indicators" | "tweaks" | "settings";
+/**
+ * Small steps on every indicator setting of a strategy, one setting at a time: lengths ±1, ±2 and ±10%, Supertrend
+ * factor / Bollinger width ±0.25 and ±0.5, levels (RSI, ADX …) ±2 and ±5. The same change is made to the matching
+ * condition on the other side, so buy and sell rules stay mirrors of each other.
+ */
+export function settingVariants(parent: LabConfig): LabConfig[] {
+  const out: LabConfig[] = [];
+  const sets = (["long", "short", "exitLong", "exitShort"] as const).filter((k) => parent.rules[k]?.conds?.length);
+  const seenCond = new Set<string>();
+  const INT = new Set(["len", "len2", "atr", "fast", "slow", "sig", "mins", "within"]);
+  for (const k of sets) for (const c of parent.rules[k].conds as Cond[]) {
+    const key = `${c.ind}|${c.tf}|${JSON.stringify(c.p ?? {})}`;
+    if (seenCond.has(key)) continue;
+    seenCond.add(key);
+    const same = (x: Cond) => x.ind === c.ind && x.tf === c.tf && JSON.stringify(x.p ?? {}) === JSON.stringify(c.p ?? {});
+    for (const [pk, pv] of Object.entries(c.p ?? {})) {
+      if (pk === "src") continue;
+      const v0 = Number(pv);
+      const steps = INT.has(pk)
+        ? [...new Set([v0 - 2, v0 - 1, v0 + 1, v0 + 2, Math.round(v0 * 0.9), Math.round(v0 * 1.1)])].filter((x) => x !== v0 && x >= (pk === "within" ? 1 : 2) && x <= 300)
+        : [v0 - 0.5, v0 - 0.25, v0 + 0.25, v0 + 0.5].map((x) => +x.toFixed(2)).filter((x) => x > 0);
+      for (const nv of steps) {
+        const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
+        for (const s2 of sets) for (const x of cfg.rules[s2].conds as Cond[]) if (same(x)) x.p = { ...x.p, [pk]: nv };
+        // EMA/SMA pairs: the fast length must stay below the slow one; MACD fast below slow.
+        const bad = (cfg.rules[k].conds as Cond[]).some((x) => (x.p?.len2 && x.p.len && x.p.len >= x.p.len2) || (x.p?.fast && x.p.slow && x.p.fast >= x.p.slow));
+        if (bad) continue;
+        cfg.lab_note = `Variation of a winner: ${c.ind} ${pk} ${v0} → ${nv}`;
+        out.push(cfg);
+      }
+    }
+    if (c.v !== undefined) {
+      const ov = Number(c.v);
+      for (const d of [-5, -2, 2, 5]) {
+        const nv = ov + d;
+        if (c.ind === "RSI" && (nv <= 0 || nv >= 100)) continue;
+        if (nv < 0) continue;
+        const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
+        for (const s2 of sets) for (const x of cfg.rules[s2].conds as Cond[]) if (same(x) && x.v !== undefined) x.v = x.v === ov ? nv : c.ind === "RSI" && x.v === 100 - ov ? 100 - nv : x.v;
+        cfg.lab_note = `Variation of a winner: ${c.ind} level ${ov} → ${nv}`;
+        out.push(cfg);
+      }
+    }
+  }
+  return out;
+}
+export const EXPLORE_KINDS: ExploreKind[] = ["settings", "assets", "timeframes", "stops", "trailing", "indicators", "tweaks"];
 const INTRA_ONLY = new Set(["VWAP", "ORB"]);
 const condsOf = (cfg: LabConfig): Cond[] => (["long", "short", "exitLong", "exitShort"] as const).flatMap((k) => cfg.rules?.[k]?.conds ?? []);
 /** Same rules on another asset (indices take intraday or daily strategies; commodities daily ones). */
@@ -401,6 +447,7 @@ export function explore(parent: LabConfig, opts: { n: number; kinds: ExploreKind
     timeframes: [5, 10, 15, 25, 30, 45, 60, 75, 125].map((t) => retime(parent, t)).filter((x): x is LabConfig => !!x),
     stops: stopVariants(parent),
     trailing: trailVariants(parent),
+    settings: settingVariants(parent),
   };
   const per = Math.max(1, Math.ceil(opts.n / kinds.length));
   let seed = opts.seed >>> 0;
@@ -409,7 +456,9 @@ export function explore(parent: LabConfig, opts: { n: number; kinds: ExploreKind
   const order = [...kinds.slice(rot), ...kinds.slice(0, rot)];
   for (const k of order) {
     let made = 0;
-    if (pools[k]) { const r0 = rng(seed + k.length); const list = [...pools[k]].sort(() => r0() - 0.5); for (const c of list) { if (made >= per || out.length >= opts.n) break; if (add(c)) made++; } }
+    // Small setting steps get a double share: the cheapest way to see whether a winner depends on one exact setting.
+    const quota = k === "settings" ? per * 2 : per;
+    if (pools[k]) { const r0 = rng(seed + k.length); const list = [...pools[k]].sort(() => r0() - 0.5); for (const c of list) { if (made >= quota || out.length >= opts.n) break; if (add(c)) made++; } }
     else {
       for (let tries = 0; made < per && tries < per * 8 && out.length < opts.n; tries++) {
         seed = (seed + 104729) >>> 0;
