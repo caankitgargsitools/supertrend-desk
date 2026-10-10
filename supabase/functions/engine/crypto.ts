@@ -143,6 +143,11 @@ export async function cryptoDaily(symbol: string, fromDate: string, toDate: stri
   const from = Date.parse(`${fromDate}T00:00:00Z`) / 1000, to = Date.parse(`${toDate}T00:00:00Z`) / 1000 - 1;
   return (await coinRange(symbol, 1440, from, to)).map((r) => ({ ...r, day: ist(r.t).date }));
 }
+/** Delta India's own daily candles only (no Binance history), for the liquidity check of a newly added coin. */
+export async function cryptoDailyDelta(symbol: string, fromDate: string, toDate: string): Promise<DayBar[]> {
+  const from = Date.parse(`${fromDate}T00:00:00Z`) / 1000, to = Date.parse(`${toDate}T00:00:00Z`) / 1000 - 1;
+  return (await deltaRange(symbol, 1440, from, to)).map((r) => ({ ...r, day: ist(r.t).date }));
+}
 /** Last traded price on Delta India. */
 export async function cryptoLtp(symbol: string): Promise<number | null> {
   const j = await getJson(`${DELTA}/v2/tickers/${encodeURIComponent(symbol)}`);

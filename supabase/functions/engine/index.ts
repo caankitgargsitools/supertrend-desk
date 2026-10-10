@@ -14,7 +14,7 @@ import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules
 import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
 import { LAB_ASSETS, labNext, labStart, labStep, loadCryptoAssets, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
-import { contractsFor, cryptoLtp, cryptoProduct, deltaBalances, deltaOrder, niceLot } from "./crypto.ts";
+import { contractsFor, cryptoDailyDelta, cryptoLtp, cryptoProduct, deltaBalances, deltaOrder, niceLot } from "./crypto.ts";
 import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
 import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
@@ -1067,6 +1067,21 @@ async function deltaCheck(userId: string) {
   await sb.from("broker_accounts").update({ token_checked_at: new Date().toISOString(), token_note: note }).eq("user_id", userId).eq("broker", "DELTA");
   return { ok, note };
 }
+/**
+ * The first day a coin traded properly on Delta India: the 30-day average turnover reaches $5 million a day (newly
+ * listed contracts trade thinly, with flat candles that would mislead a backtest). Today if it never has.
+ */
+async function liquidFrom(symbol: string, launched: string, cv: number): Promise<string> {
+  const today = ist(Date.now() / 1000).date;
+  const days = await cryptoDailyDelta(symbol, launched, addDays(today, 1));
+  const usd = days.map((d) => (d.v ?? 0) * d.c); // volume is already in coins
+  for (let i = 29; i < days.length; i++) {
+    const avg = usd.slice(i - 29, i + 1).reduce((a, b) => a + b, 0) / 30;
+    if (avg >= 5e6) return days[i - 29].day;
+  }
+  void cv;
+  return today;
+}
 /** Delta's contract details (product id, coins per contract, tick) for every coin in crypto_assets. */
 async function cryptoSync() {
   const { data: rows } = await sb.from("crypto_assets").select("key, lot_coins, cutover");
@@ -1079,8 +1094,8 @@ async function cryptoSync() {
       let lot: number | null = r.lot_coins == null ? null : Number(r.lot_coins);
       if (lot == null) { const px = await cryptoLtp(r.key).catch(() => null); if (px) lot = niceLot(px, p.contract_value); }
       await sb.from("crypto_assets").update({ product_id: p.product_id, contract_value: p.contract_value, tick_size: p.tick_size, synced_at: new Date().toISOString(), ...(lot ? { lot_coins: lot } : {}),
-        // Delta's own candles from a month after listing (thin trading at first); older days from the Binance pair.
-        ...(!r.cutover && /^\d{4}-\d{2}-\d{2}$/.test(p.launched) ? { cutover: addDays(p.launched, 30) } : {}),
+        // Delta's own candles once the coin trades properly there; older days from the Binance pair.
+        ...(!r.cutover && /^\d{4}-\d{2}-\d{2}$/.test(p.launched) ? { cutover: await liquidFrom(r.key, p.launched, p.contract_value).catch(() => addDays(p.launched, 30)) } : {}),
         note: ok ? `${p.name}; 1 contract = ${p.contract_value} ${p.underlying || r.key.replace(/USD$/, "")}; settles in ${p.settles}; on Delta India since ${p.launched}` : `Not a live perpetual on Delta India (${p.type}, ${p.state}).` }).eq("key", r.key);
       n++;
     } catch (e) {
@@ -1253,10 +1268,12 @@ Deno.serve(async (req) => {
     return Response.json({ action, ...(await deltaCheck(body.user_id)) });
   }
   if (action === "crypto_sync") return Response.json({ action, ...(await cryptoSync()) });
-  if (action === "crypto_candles") {
+  if (action === "crypto_candles" || action === "crypto_rebuild") {
     // The lab's candle cache for every coin (the lab also does this at the start of each run), in the background.
+    // crypto_rebuild first clears the coins' cached candles (after a change of history source or cutover day).
     const keys = Object.values(LAB_ASSETS).filter((x) => x.crypto).map((x) => x.key);
     const today = ist(Date.now() / 1000).date;
+    if (action === "crypto_rebuild" && keys.length) await sb.from("lab_candles").delete().in("asset", keys);
     EdgeRuntime.waitUntil((async () => {
       for (const k of keys) {
         const t0 = Date.now();
