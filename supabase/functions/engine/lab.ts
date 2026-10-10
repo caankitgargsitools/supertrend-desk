@@ -332,16 +332,18 @@ export function settingVariants(parent: LabConfig): LabConfig[] {
 export const EXPLORE_KINDS: ExploreKind[] = ["settings", "assets", "timeframes", "stops", "trailing", "indicators", "tweaks"];
 const INTRA_ONLY = new Set(["VWAP", "ORB"]);
 const condsOf = (cfg: LabConfig): Cond[] => (["long", "short", "exitLong", "exitShort"] as const).flatMap((k) => cfg.rules?.[k]?.conds ?? []);
-/** Same rules on another asset (indices take intraday or daily strategies; commodities daily ones). */
+/**
+ * Same rules on another asset. Intraday strategies can move to MCX too (5-minute MCX candles go back as far as the
+ * listed contracts have traded, so the test there is shorter); MCX sessions run 09:00–23:30.
+ */
 export function transfer(parent: LabConfig, key: string): LabConfig | null {
   const a = LAB_ASSETS[key];
   if (!a || key === parent.underlying) return null;
   const daily = !!parent.rules?.daily;
-  if (a.commodity && !daily) return null;
   const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
   Object.assign(cfg, { underlying: a.key, data_security_id: a.sec, data_segment: a.seg, data_instrument: a.instr, exchange: a.exchange, dhan_symbol: a.key,
     futures_symbol: a.key + "1!", lot_size: a.lot, strike_step: a.step ?? 1, expiry_weekday: a.wd ?? 4, expiry_flag: a.flag ?? "WEEK" });
-  if (a.commodity) Object.assign(cfg, { session_start: "09:00", last_entry: "23:00", square_off: "23:15", intraday: false, product_type: "M" });
+  if (a.commodity) Object.assign(cfg, { session_start: "09:00", last_entry: "23:00", square_off: "23:15", ...(daily ? { intraday: false, product_type: "M" } : {}) });
   else if (LAB_ASSETS[parent.underlying]?.commodity) Object.assign(cfg, { session_start: "09:15", last_entry: "15:15", square_off: "15:20" });
   // A rupee daily loss limit sized for one contract means nothing on another.
   if (cfg.risk?.max_day_loss) cfg.risk.max_day_loss = null;
@@ -822,7 +824,7 @@ export async function labNext(sb: SupabaseClient): Promise<number | null> {
   const parentAsset = String(q.config?.underlying ?? "");
   const daily = !!q.config?.rules?.daily;
   const wantAssets: string[] = (q.kinds ?? []).includes("assets")
-    ? ((q.assets?.length ? q.assets : set.assets) ?? []).filter((k: string) => LAB_ASSETS[k] && (daily || !LAB_ASSETS[k].commodity))
+    ? ((q.assets?.length ? q.assets : set.assets) ?? []).filter((k: string) => LAB_ASSETS[k])
     : [];
   const assets = [...new Set([parentAsset, ...wantAssets])].filter((k) => LAB_ASSETS[k]);
   if (!assets.length) { await sb.from("lab_requests").update({ status: "failed", error: "This strategy's asset isn't one the lab can test.", finished_at: new Date().toISOString() }).eq("id", q.id); return null; }

@@ -3666,11 +3666,11 @@ async function openLabDetailPublic(id) {
 }
 /* ---------- variation runs ---------- */
 const VAR_KINDS = [["settings", "Small steps on each indicator setting (lengths ±1/±2/±10%, levels ±2/±5)"], ["assets", "Other assets"], ["timeframes", "Other decision timeframes"], ["stops", "Stop loss & target settings"], ["trailing", "Profit trailing (trailing stops)"], ["indicators", "Other indicator combinations"], ["tweaks", "Random tweaks (one or two settings, session, entry style)"]];
-const VAR_INDEX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX"], VAR_MCX = ["GOLD", "SILVER", "CRUDEOIL", "NATURALGAS", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL"];
+const VAR_INDEX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX"], VAR_MCX = ["GOLD", "GOLDM", "SILVER", "SILVERM", "SILVERMIC", "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "COPPER", "ZINC", "ZINCMINI", "ALUMINIUM", "ALUMINI", "LEAD", "LEADMINI", "NICKEL"];
 /** Form to ask the lab to test a strategy many more ways. src: { labId } or { strategyId }, plus asset and daily (null = unknown). */
 function variationForm(box, src) {
-  const idxOnly = src.daily === false;
-  const assets = [...VAR_INDEX, ...(idxOnly ? [] : VAR_MCX)].filter((k) => PRESETS[k]);
+  // Every asset for every strategy: indices and MCX commodities alike.
+  const assets = [...VAR_INDEX, ...VAR_MCX].filter((k) => PRESETS[k]);
   const isIdx = VAR_INDEX.includes(src.asset);
   box.innerHTML = `<div class="ued" style="margin-top:12px"><strong>${src.manual ? "Manual test" : "Run variations"} of ${esc(src.title)}</strong>
     <p class="hint" style="margin:0">The lab tests this strategy many more ways on the past year, ranks the results the same way as the nightly run, and shows them to you under “Variation runs”. Its settings stay private; you see results and trades. Runs one at a time after the lab's other work; it can take 10–60 minutes.</p>
@@ -3679,7 +3679,7 @@ function variationForm(box, src) {
     <div class="f vf-tfs" hidden><span>On these decision timeframes (minutes)</span><div class="assetpick">${[5, 10, 15, 25, 30, 45, 60, 75, 125].map((t) => `<label><input type="checkbox" data-t="${t}"> ${t} min</label>`).join("")}</div>
       <span class="hint">Once-a-day strategies stay on daily candles; timeframes that don't fit the rules are skipped.</span></div>
     <div class="f"><span>On these assets (for “Other assets”)</span><div class="assetpick">${assets.map((k) => `<label><input type="checkbox" data-a="${k}" ${(isIdx ? VAR_INDEX.includes(k) : true) ? "checked" : ""}> ${esc(PRESETS[k].name)}</label>`).join("")}</div>
-      <span class="hint">Commodities are tested on daily candles, so only once-a-day strategies move to them.</span></div>
+      <span class="hint">Intraday strategies on MCX are tested on 5-minute candles from the contracts Dhan still lists (a few months to a year, growing every night), so those results cover a shorter period. A strategy moved to MCX trades the MCX session (09:00–23:30).</span></div>
     <div class="grid"><label class="f"><span>How many versions</span><select id="vf_n"><option value="50">50 (quicker)</option><option value="100" selected>100</option><option value="150">150</option>${isAdmin() ? '<option value="300">300</option>' : ""}</select></label></div>
     <div class="formbar"><button class="btn primary" id="vf_go" type="button">Start variation run</button><button class="btn" id="vf_no" type="button">Cancel</button></div></div>`;
   $("vf_no").addEventListener("click", () => box.innerHTML = "");
