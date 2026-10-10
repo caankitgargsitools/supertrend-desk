@@ -22,7 +22,33 @@ export type ChargeRates = {
 };
 /** sizing: work out lots per trade from equity with the strategy's sizing settings; deploy_pct: portfolio deployment cap (%). */
 /** margin_rate: Dhan's margin rate (share of contract value) for this asset when the run started; used for lots from capital. */
-export type BtParams = { from: string; to: string; capital: number; brokerage: number; other_pct?: number; charges?: ChargeRates; near_code: number; sizing?: boolean; deploy_pct?: number; margin_rate?: number | null; sell_rate?: number | null };
+/**
+ * Slippage per order, as a share of the price, by underlying: what a market order typically loses against the price the
+ * test uses (the candle's index / futures price or option close). Based on each contract's liquidity: the bid-ask
+ * spread of the near-month future, how much trades there, and (for indices) how far the index line can run ahead of a
+ * thinly traded future. Futures (fut) and option premiums (opt; never less than one 0.05 tick).
+ *  NIFTY 0.01% (~2.5 pts)  BANKNIFTY 0.015% (~8 pts)  SENSEX 0.015% (~12 pts)  FINNIFTY 0.025% (~6 pts)
+ *  MIDCPNIFTY 0.04% (~5 pts)  NIFTYNXT50 / BANKEX 0.05%   options: 0.5% of premium on Nifty, Bank Nifty, Sensex;
+ *  1% Fin Nifty; 2% Midcap Select, Nifty Next 50, Bankex.
+ *  MCX: GOLD 0.01%, SILVER 0.015%, CRUDEOIL / COPPER 0.02%, NATURALGAS / ZINC / LEAD / ALUMINIUM 0.03%, NICKEL 0.04%;
+ *  mini and micro contracts (thinner books) 0.01–0.02% more than their big contract.
+ */
+export const SLIPPAGE: Record<string, { fut: number; opt: number }> = {
+  NIFTY: { fut: 0.0001, opt: 0.005 }, BANKNIFTY: { fut: 0.00015, opt: 0.005 }, SENSEX: { fut: 0.00015, opt: 0.005 },
+  FINNIFTY: { fut: 0.00025, opt: 0.01 }, MIDCPNIFTY: { fut: 0.0004, opt: 0.02 }, NIFTYNXT50: { fut: 0.0005, opt: 0.02 }, BANKEX: { fut: 0.0005, opt: 0.02 },
+  GOLD: { fut: 0.0001, opt: 0.01 }, GOLDM: { fut: 0.00015, opt: 0.01 }, GOLDTEN: { fut: 0.0003, opt: 0.01 }, GOLDGUINEA: { fut: 0.0003, opt: 0.01 }, GOLDPETAL: { fut: 0.0003, opt: 0.01 },
+  SILVER: { fut: 0.00015, opt: 0.01 }, SILVERM: { fut: 0.0002, opt: 0.01 }, SILVERMIC: { fut: 0.0003, opt: 0.01 },
+  CRUDEOIL: { fut: 0.0002, opt: 0.01 }, CRUDEOILM: { fut: 0.0003, opt: 0.01 }, NATURALGAS: { fut: 0.0003, opt: 0.015 }, NATGASMINI: { fut: 0.0004, opt: 0.015 },
+  COPPER: { fut: 0.0002, opt: 0.01 }, ZINC: { fut: 0.0003, opt: 0.01 }, ZINCMINI: { fut: 0.0004, opt: 0.01 }, LEAD: { fut: 0.0003, opt: 0.01 }, LEADMINI: { fut: 0.0004, opt: 0.01 },
+  ALUMINIUM: { fut: 0.0003, opt: 0.01 }, ALUMINI: { fut: 0.0004, opt: 0.01 }, NICKEL: { fut: 0.0004, opt: 0.01 },
+};
+export const slippageFor = (underlying: string) => SLIPPAGE[String(underlying)] ?? { fut: 0.0002, opt: 0.01 };
+/** A fill moved against the trade by the slippage: buys a little higher, sells a little lower. */
+export const slipped = (px: number, buy: boolean, frac: number, opt: boolean) => {
+  const d = Math.max(opt ? 0.05 : 0, px * frac);
+  return buy ? px + d : Math.max(opt ? 0.05 : 0, px - d);
+};
+export type BtParams = { no_slippage?: boolean; from: string; to: string; capital: number; brokerage: number; other_pct?: number; charges?: ChargeRates; near_code: number; sizing?: boolean; deploy_pct?: number; margin_rate?: number | null; sell_rate?: number | null };
 export type ChargeBreakdown = { brokerage: number; stt: number; exch: number; sebi: number; gst: number; stamp: number; total: number };
 
 /** Charges for one round trip (one buy and one sell order), the way the broker's calculator works them out. */
@@ -60,6 +86,7 @@ export type Acc = {
   notes?: string[]; // caveats found while planning (e.g. limited commodity history)
   dayNet?: Record<string, number>; // net ₹ of closed trades per exit day (daily loss limit)
   lots?: { min: number; max: number; sum: number; n: number }; // lots per trade when sized from capital
+  slip?: number; // rupees lost to slippage (already inside the trades' prices)
 };
 
 /** Saved option series shared between runs (the strategy lab keeps them in the database). */
@@ -585,15 +612,16 @@ export async function priceBatch(
       const gone = expiriesBetween(t.entryDay, t.exitDay);
       const legs = legsFor(struct, t.side, t.spotIn, step);
       if (legs.some((l) => l.opt !== "FUT" && inCode + (l.x ?? 0) - gone < p.near_code)) { skip("Contract expired before the exit (turn on next-week expiry)"); continue; }
-      const priced: (typeof legs[number] & { px: number; out: number })[] = [];
+      const priced: (typeof legs[number] & { px: number; out: number; ri?: number; ro?: number })[] = [];
       let bad = false;
       try {
         for (const l of legs) {
-          if (l.opt === "FUT") { priced.push({ ...l, px: t.spotIn, out: t.spotOut ?? t.spotIn }); continue; }
+          const sl = p.no_slippage ? { fut: 0, opt: 0 } : slippageFor(s.underlying), buy = l.act === "B";
+          if (l.opt === "FUT") { priced.push({ ...l, px: slipped(t.spotIn, buy, sl.fut, false), out: slipped(t.spotOut ?? t.spotIn, !buy, sl.fut, false), ri: t.spotIn, ro: t.spotOut ?? t.spotIn }); continue; }
           const a = await optPrice(t.entryDay, inMin, t.spotIn, l.opt, l.strike!, inCode + (l.x ?? 0));
           const b = a == null ? null : await optPrice(t.exitDay, outMin, t.spotOut ?? t.spotIn, l.opt, l.strike!, inCode + (l.x ?? 0) - gone);
           if (a == null || b == null) { bad = true; break; }
-          priced.push({ ...l, px: a, out: b });
+          priced.push({ ...l, px: slipped(a, buy, sl.opt, true), out: slipped(b, !buy, sl.opt, true), ri: a, ro: b });
         }
       } catch (e) {
         if (e instanceof DhanBusyError) { acc.busy = (acc.busy ?? 0) + 1; break; }
@@ -622,6 +650,8 @@ export async function priceBatch(
       // Net premium of the position per unit (paid when positive, received when negative), at entry and exit.
       const netIn = priced.reduce((a2, l) => a2 + legSign(l) * l.px * (l.q ?? 1), 0), netOut = priced.reduce((a2, l) => a2 + legSign(l) * l.out * (l.q ?? 1), 0);
       const g = Math.trunc(exact), c = Math.trunc(ch.total), net = Math.trunc(exact - ch.total);
+      const slipRs = Math.trunc(priced.reduce((a2, l) => a2 + (Math.abs(l.px - (l.ri ?? l.px)) + Math.abs(l.out - (l.ro ?? l.out))) * units * (l.q ?? 1), 0));
+      acc.slip = (acc.slip ?? 0) + slipRs;
       acc.chg = acc.chg ?? { brokerage: 0, stt: 0, exch: 0, sebi: 0, gst: 0, stamp: 0 };
       for (const k of ["brokerage", "stt", "exch", "sebi", "gst", "stamp"] as const) acc.chg[k] += ch[k];
       acc.gross += g; acc.costs += c; acc.equity += net;
@@ -633,7 +663,7 @@ export async function priceBatch(
         entry: `${t.entryDay} ${minToTime(t.entryMin)}`, exit: `${t.exitDay} ${minToTime(t.exitMin)}`, side: t.side,
         contract: `${structName(struct)}: ${priced.map((l) => legText(l, s.dhan_symbol)).join(" · ")}`,
         legs: priced.map((l) => ({ opt: l.opt, act: l.act, strike: l.strike, x: l.x ?? 0, q: l.q ?? 1, in: +l.px.toFixed(2), out: +l.out.toFixed(2) })),
-        why: t.why, exit_why: t.exitWhy, entry_px: +netIn.toFixed(2), exit_px: +netOut.toFixed(2), units, lots, margin: Math.trunc(mLot),
+        slip: slipRs, why: t.why, exit_why: t.exitWhy, entry_px: +netIn.toFixed(2), exit_px: +netOut.toFixed(2), units, lots, margin: Math.trunc(mLot),
         spot_in: t.spotIn, gross: g, costs: c, net, equity: Math.trunc(acc.equity),
         chg: { brokerage: ch.brokerage, stt: ch.stt, exch: ch.exch, sebi: ch.sebi, gst: ch.gst, stamp: ch.stamp, total: ch.total },
       });
@@ -672,6 +702,13 @@ export async function priceBatch(
       outPx = t.spotOut;
     }
     if (inPx == null || outPx == null) { skip("No historical price for that contract and time"); continue; }
+    // Slippage: entry and exit filled a little worse than the test price (see SLIPPAGE).
+    const slipFrac = p.no_slippage ? 0 : (isOpt ? slippageFor(s.underlying).opt : slippageFor(s.underlying).fut);
+    const rawIn = inPx, rawOut = outPx;
+    {
+      const buyIn = isOpt ? s.option_side !== "SELL" : t.side === "LONG";
+      inPx = slipped(inPx, buyIn, slipFrac, isOpt); outPx = slipped(outPx, !buyIn, slipFrac, isOpt);
+    }
     // Lots from the equity at the time of the trade (grows after profits, shrinks after losses).
     let units = fixedUnits, lots = Number(s.lots);
     if (sz) {
@@ -689,6 +726,8 @@ export async function priceBatch(
     // Whole rupees only: paisa are dropped (not rounded up or down).
     const exact = (outPx - inPx) * dir * units;
     const g = Math.trunc(exact), c = Math.trunc(ch.total), net = Math.trunc(exact - ch.total);
+    const slipRs = Math.trunc((Math.abs(inPx - rawIn) + Math.abs(outPx - rawOut)) * units);
+    acc.slip = (acc.slip ?? 0) + slipRs;
     acc.chg = acc.chg ?? { brokerage: 0, stt: 0, exch: 0, sebi: 0, gst: 0, stamp: 0 };
     for (const k of ["brokerage", "stt", "exch", "sebi", "gst", "stamp"] as const) acc.chg[k] += ch[k];
     acc.gross += g; acc.costs += c; acc.equity += net;
@@ -697,6 +736,7 @@ export async function priceBatch(
     acc.lastDone = t.exitDay;
     acc.dayNet[t.exitDay] = (acc.dayNet[t.exitDay] ?? 0) + net;
     trades.push({
+      slip: slipRs,
       entry: `${t.entryDay} ${minToTime(t.entryMin)}`, exit: `${t.exitDay} ${minToTime(t.exitMin)}`, side: t.side, contract,
       why: t.why, exit_why: t.exitWhy, entry_px: +inPx.toFixed(2), exit_px: +outPx.toFixed(2), units, lots,
       gross: g, costs: c, net, equity: Math.trunc(acc.equity),
@@ -723,6 +763,8 @@ export function summarize(s: Record<string, any>, p: BtParams, planned: number, 
     priced_with: structOf(s) ? `Dhan expired-options data (5-minute), every leg of the ${structName(structOf(s)!)}` : s.trade_type === "OPTIONS" ? "Dhan expired-options data (5-minute)" : isCommodity(String(s.data_segment)) ? "Near-month futures prices" : "Index prices as a futures proxy",
     dhan_calls: acc.calls, last_day_done: acc.lastDone, partial,
     lots: acc.lots && acc.lots.n ? { min: acc.lots.min, max: acc.lots.max, avg: +(acc.lots.sum / acc.lots.n).toFixed(1) } : null,
+    slippage: acc.slip != null ? Math.trunc(acc.slip) : null,
+    slip_rate: p.no_slippage ? null : slippageFor(s.underlying),
     charges: acc.chg ? Object.fromEntries(Object.entries(acc.chg).map(([k, v]) => [k, Math.trunc(v)])) : null,
   };
 }

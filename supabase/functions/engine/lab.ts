@@ -974,12 +974,13 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   // so one strong idea can't take over every run with tiny variations of itself.
   const famOf = (c: LabConfig) => { const sig = (x?: { conds?: Cond[] }) => (x?.conds ?? []).map((q) => `${q.ind}:${q.op}`).sort().join("+") || "-";
     return [c.underlying, c.rules?.daily ? "D" : "I", c.direction, sig(c.rules?.long), sig(c.rules?.short)].join("|"); };
-  const perFam = new Map<string, number>();
+  // And at most 6 per asset, so one asset with many winners (Midcap Select, say) can't fill the variation runs.
+  const perFam = new Map<string, number>(), perAsset = new Map<string, number>();
   const pSeen = new Set<string>(), pool = (parents ?? []).filter((x) => {
     if (!assets.includes(x.config?.underlying) || pSeen.has(x.fingerprint)) return false;
-    const f = famOf(x.config), k = perFam.get(f) ?? 0;
-    if (k >= 2) return false;
-    perFam.set(f, k + 1); pSeen.add(x.fingerprint); return true;
+    const f = famOf(x.config), k = perFam.get(f) ?? 0, a = String(x.config?.underlying), ka = perAsset.get(a) ?? 0;
+    if (k >= 2 || ka >= 6) return false;
+    perFam.set(f, k + 1); perAsset.set(a, ka + 1); pSeen.add(x.fingerprint); return true;
   }).slice(0, 40);
   const nVar = pool.length ? Math.round(n * 0.4) : 0;
   const weight = pool.map((p, i) => Math.sqrt(passes.get(p.fingerprint) ?? 1) * (1 + (pool.length - i) / pool.length));
@@ -1169,6 +1170,16 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   else why.push("could not be tested on another timeframe yet (not enough 5-minute candles for this asset; MCX history grows every night)");
   if (yrs.length < 3) why.push(`only ${yrs.length} year${yrs.length === 1 ? "" : "s"} of history to test year by year (needs 3)`);
   else if (okY < yrs.length) why.push(`profitable in ${okY} of the past ${yrs.length} years (needs every year; lost or flat in ${yrs.filter((x) => !x.ok).map((x) => `year ${x.y}`).join(", ")})`);
+  // 5-minute strategies trade often for small moves, so costs decide them: they must still make money in total and in
+  // every year with costs doubled plus an extra 0.01% a side (on top of the asset's normal slippage).
+  if (!daily && yrs.length >= 3) {
+    const st = yrs.map((y) => ({ y: y.y, v: (Number(y.net) || 0) - (Number(y.xcost) || 0), has: y.xcost != null }));
+    if (st.every((x) => x.has)) {
+      const tot = st.reduce((a, x) => a + x.v, 0), bad = st.filter((x) => !(x.v > 0));
+      if (!(tot > 0)) why.push(`loses money once costs and slippage are doubled (₹${Math.trunc(tot).toLocaleString("en-IN")} over ${st.length} years)`);
+      else if (bad.length) why.push(`with costs and slippage doubled it lost money in ${bad.map((x) => `year ${x.y}`).join(", ")}`);
+    }
+  }
   const bh = self?.bh ?? null;
   const sRatio = self && self.max_dd > 0 ? self.net / self.max_dd : self?.net > 0 ? 99 : 0;
   let vsBh: number | null = null, riskVsBh: number | null = null;
@@ -1370,7 +1381,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
           const { metrics, trades } = await screenOne(c.config, data, memo, { from, split: from, to: hi }, capital, rates);
           const f = metrics.full;
           // Cost stress: charges paid a second time plus slippage of 0.01% of the price on every order (entry and exit).
-          const xcost = Math.trunc(trades.reduce((a: number, t: any) => a + (Number(t.costs) || 0) + 0.0001 * ((Number(t.entry_px) || 0) + (Number(t.exit_px) || 0)) * (Number(t.units) || 0), 0));
+          const xcost = Math.trunc(trades.reduce((a: number, t: any) => a + (Number(t.costs) || 0) + (Number(t.slip) || 0) + 0.0001 * ((Number(t.entry_px) || 0) + (Number(t.exit_px) || 0)) * (Number(t.units) || 0), 0));
           // How the asset itself moved in that year (for the up-years / down-years check).
           const dd0 = data.daily.filter((d) => d.day >= from && d.day <= hi);
           const under = dd0.length > 1 ? +(((dd0[dd0.length - 1].c - dd0[0].c) / dd0[0].c) * 100).toFixed(2) : null;
