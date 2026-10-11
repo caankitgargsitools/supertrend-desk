@@ -1946,14 +1946,19 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
 
 /** Moves unfinished strategies of runs that are no longer running into this run. Returns how many still need a backtest. */
 export async function adoptLeftovers(sb: SupabaseClient, run: Run, assets: string[], max: number): Promise<number> {
-  const want = new Set(assets);
-  const { data: rows } = await sb.from("lab_results").select("id, run_id, asset, stage").in("stage", ["pending", "opt_queue", "pricing"])
+  // A focused run keeps to its own assets; any other run takes leftovers of every asset the lab knows (their candles are
+  // already stored), so a strategy never waits because its asset was later unticked.
+  const focused = run.settings?.focus === true, want = new Set(assets);
+  const { data: rows, error } = await sb.from("lab_results").select("id, run_id, asset, stage").in("stage", ["pending", "opt_queue", "pricing"])
     .neq("run_id", run.id).order("id").limit(5000);
+  // A failed look-up must not quietly skip the leftovers: fail this instalment so it is retried.
+  if (error) throw new Error(`Couldn't look up unfinished strategies: ${error.message}`);
   if (!rows?.length) return 0;
   const runIds = [...new Set(rows.map((r) => r.run_id))];
-  const { data: live } = await sb.from("lab_runs").select("id").in("id", runIds).eq("status", "running");
+  const { data: live, error: e2 } = await sb.from("lab_runs").select("id").in("id", runIds).eq("status", "running");
+  if (e2) throw new Error(`Couldn't look up unfinished strategies: ${e2.message}`);
   const busy = new Set((live ?? []).map((r) => r.id));
-  const orphans = rows.filter((r) => !busy.has(r.run_id) && want.has(r.asset));
+  const orphans = rows.filter((r) => !busy.has(r.run_id) && LAB_ASSETS[r.asset] && (!focused || want.has(r.asset)));
   const pend = orphans.filter((r) => r.stage === "pending").slice(0, max).map((r) => r.id);
   const opt = orphans.filter((r) => r.stage !== "pending").map((r) => r.id);
   const ids = [...pend, ...opt];
