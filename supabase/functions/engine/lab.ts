@@ -9,7 +9,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { Dhan, DhanBusyError, type OptBar } from "./dhan.ts";
 import { type Acc, type BtParams, type ChargeRates, type MBar, newAcc, type OptStore, type Plan, priceBatch, simulateRules, type SimData } from "./backtest.ts";
 import { addDays, type DayBar, ist, sessionFor } from "./logic.ts";
-import { describeCond, type Cond, type Rules, validateRules } from "./rules.ts";
+import { describeCond, HAS_WEIGHTS, type Cond, type Rules, validateRules } from "./rules.ts";
 import { dataSecurity } from "./instruments.ts";
 import { describeRisk, type Risk } from "./risk.ts";
 import { loadMarginRates, type MarginRate, refreshMargins } from "./margins.ts";
@@ -94,7 +94,7 @@ for (const [a, b] of [["up", "down"], ["turns_up", "turns_down"], ["green", "red
   ["cross_above_signal", "cross_below_signal"], ["hist_pos", "hist_neg"], ["above_zero", "below_zero"], ["close_above_upper", "close_below_lower"],
   ["cross_above_upper", "cross_below_lower"], ["price_above_mid", "price_below_mid"], ["plus_above_minus", "minus_above_plus"], ["above_pdh", "below_pdl"],
   ["cross_above_pdh", "cross_below_pdl"], ["above_orh", "below_orl"], ["cross_above_orh", "cross_below_orl"], ["bull_sweep", "bear_sweep"],
-  ["new_high", "new_low"], ["above_mid", "below_mid"], ["btc_up", "btc_down"]]) { MIRROR[a] = b; MIRROR[b] = a; }
+  ["new_high", "new_low"], ["above_mid", "below_mid"], ["btc_up", "btc_down"], ["has_buy", "has_sell"]]) { MIRROR[a] = b; MIRROR[b] = a; }
 
 /** The same condition for the other direction (RSI 60 ↔ 40; ADX and ATR are non-directional and stay as they are). */
 export function mirror(c: Cond): Cond {
@@ -165,8 +165,10 @@ function randomRisk(r: R, daily: boolean, intraday: boolean, capital: number): R
 }
 
 /** One random strategy for an asset. Index strategies are intraday-candle based (85%) or once-a-day; commodities once-a-day. */
-export function generate(assetKey: string, seed: number, capital = 500000): LabConfig {
+export function generate(assetKey: string, seed: number, capital = 500000, hasPct = 8): LabConfig {
   const a = LAB_ASSETS[assetKey];
+  // A set share of new strategies (lab_settings.ha_strength_pct, default 8%) trade on Heikin Ashi strength.
+  if (((Math.imul(seed, 2654435761) >>> 0) % 1000) < hasPct * 10) return generateHAS(a, seed, capital);
   if (a.crypto) return generateCrypto(a, seed, capital);
   const r = rng(seed);
   const cr = !!a.crypto;
@@ -251,6 +253,62 @@ export function generate(assetKey: string, seed: number, capital = 500000): LabC
 function cryptoTimes(cfg: LabConfig, r?: R) {
   if (cfg.rules?.daily || !cfg.intraday) return { session_start: "00:00", last_entry: "23:59", square_off: "23:59" };
   return { session_start: r ? pick(r, ["00:00", "00:00", "05:30", "13:30", "18:00"]) : "00:00", last_entry: r ? pick(r, ["21:00", "22:30", "23:30"]) : "23:30", square_off: "23:45" };
+}
+
+/* ---------- Heikin Ashi strength generator ---------- */
+/**
+ * Buy on a green Heikin Ashi candle, sell on a red one, hold through dojis, and act only when the candle is strong
+ * enough: each side gets its own minimum strength (say buy at 60+, sell at 70+), drawn at random, as are the strength
+ * recipe (balanced / candle shape / trend / momentum), the ADX length and the doji size. Some also exit early on a
+ * weaker opposite candle instead of waiting for a strong one, and some add a higher-timeframe trend filter.
+ */
+export function generateHAS(a: LabAsset, seed: number, capital = 500000): LabConfig {
+  const r = rng(seed ^ 0x5a17);
+  const cr = !!a.crypto;
+  const daily = a.commodity || r() < (cr ? 0.6 : 0.25);
+  const tf = daily ? 375 : pick(r, cr ? [60, 120, 240, 240] : [15, 25, 30, 60, 75, 125]);
+  const ctf = daily ? (cr && r() < 0.25 ? "W" : "D") : "base";
+  const p = { len: pick(r, [10, 14, 20]), w: pick(r, [0, 1, 2, 3]), doji: pick(r, [5, 10, 10, 15, 20]) };
+  const lv = [40, 50, 55, 60, 65, 70, 75, 80];
+  const buyAt = pick(r, lv), sellAt = pick(r, lv);
+  const conds: Cond[] = [{ ind: "HAS", tf: ctf, p, op: "has_buy", v: buyAt }];
+  const short: Cond[] = [{ ind: "HAS", tf: ctf, p, op: "has_sell", v: sellAt }];
+  if (r() < 0.35) {
+    // Only in the direction of a slower trend (higher timeframe, or daily/weekly for a daily strategy).
+    const htf = daily ? (ctf === "W" ? "W" : pick(r, ["D", "W"])) : pick(r, (cr ? ["240", "D"] : ["60", "125", "D"]).filter((x) => x === "D" || Number(x) > tf));
+    const f: Cond = r() < 0.5 ? { ind: "ST", tf: htf, p: st(r), op: "up" } : { ind: "EMA", tf: htf, p: { len: pick(r, [20, 50, 100, 200]) }, op: "price_above" };
+    if (!(f.tf === ctf && daily)) { conds.push(f); short.push(mirror(f)); }
+  }
+  const dir = r();
+  const direction = dir < 0.7 ? "BOTH" : dir < 0.9 ? "LONG_ONLY" : "SHORT_ONLY";
+  // Exits: wait for a strong opposite candle (stop and reverse), or get out on any opposite candle above a lower level.
+  const early = direction !== "BOTH" || r() < 0.4;
+  const exitAt = pick(r, [0, 20, 30, 40, 50]);
+  const rules: Rules = {
+    long: { mode: "ALL", conds: direction === "SHORT_ONLY" ? [] : conds },
+    short: { mode: "ALL", conds: direction === "LONG_ONLY" ? [] : short },
+    exitLong: { mode: "ANY", conds: early ? [{ ind: "HAS", tf: ctf, p, op: "has_sell", v: exitAt }] : [] },
+    exitShort: { mode: "ANY", conds: early ? [{ ind: "HAS", tf: ctf, p, op: "has_buy", v: exitAt }] : [] },
+    ...(daily ? { daily: true } : {}),
+  };
+  const intraday = !daily && !cr && r() < 0.6;
+  const cfg: LabConfig = {
+    strategy_kind: "RULES", underlying: a.key, data_security_id: a.sec, data_segment: a.seg, data_instrument: a.instr,
+    exchange: a.exchange, dhan_symbol: a.key, futures_symbol: cr ? a.key : a.key + "1!", timeframe_min: tf, rules, direction,
+    entry_mode: r() < 0.5 ? "FLIP" : "JOIN", intraday, lots: 1, lot_size: a.lot, qty_mode: "LOTS",
+    session_start: daily ? "09:15" : intraday ? pick(r, ["09:15", "09:30", "10:15"]) : "09:15",
+    last_entry: daily ? "15:15" : intraday ? pick(r, ["14:30", "15:00"]) : "15:15", square_off: intraday ? "15:15" : "15:20",
+    trade_type: "FUTURES", option_side: "BUY", product_type: intraday ? "I" : "M", strike_step: a.step ?? 1, strike_offset: 0,
+    expiry_weekday: a.wd ?? 4, expiry_flag: a.flag ?? "WEEK", roll_on_expiry: true, atr_period: 10, factor: 3, entry_trigger: "CLOSE",
+    buffer_points: 0, after_hours_flip: "FIRST_CLOSE",
+    lab_note: `Heikin Ashi strength: buy ≥ ${buyAt}, sell ≥ ${sellAt}${early ? `, exit on an opposite candle ≥ ${exitAt}` : ""}, ${HAS_WEIGHTS[p.w].name} recipe`,
+  };
+  if (a.commodity) Object.assign(cfg, { session_start: "09:00", last_entry: "23:00", square_off: "23:15" });
+  if (cr) Object.assign(cfg, cryptoTimes(cfg, r));
+  cfg.risk = cr ? (r() < 0.5 ? null : { basis: "UNDERLYING", atr_len: 14, sl: null, tgt: null, trail: { type: "ATR", value: pick(r, [2, 3, 4]) }, max_day_loss: null })
+    : randomRisk(r, daily, intraday, capital);
+  validateRules(cfg.rules);
+  return cfg;
 }
 
 /* ---------- crypto generator ---------- */
@@ -454,7 +512,7 @@ export function settingVariants(parent: LabConfig): LabConfig[] {
     for (const [pk, pv] of Object.entries(c.p ?? {})) {
       if (pk === "src") continue;
       const v0 = Number(pv);
-      const steps = INT.has(pk)
+      const steps = pk === "w" ? [0, 1, 2, 3].filter((x) => x !== v0) : pk === "doji" ? [5, 10, 15, 20].filter((x) => x !== v0) : INT.has(pk)
         ? [...new Set([v0 - 2, v0 - 1, v0 + 1, v0 + 2, Math.round(v0 * 0.9), Math.round(v0 * 1.1)])].filter((x) => x !== v0 && x >= (pk === "within" ? 1 : 2) && x <= 300)
         : [v0 - 0.5, v0 - 0.25, v0 + 0.25, v0 + 0.5].map((x) => +x.toFixed(2)).filter((x) => x > 0);
       for (const nv of steps) {
@@ -471,7 +529,7 @@ export function settingVariants(parent: LabConfig): LabConfig[] {
       const ov = Number(c.v);
       for (const d of [-5, -2, 2, 5]) {
         const nv = ov + d;
-        if (c.ind === "RSI" && (nv <= 0 || nv >= 100)) continue;
+        if ((c.ind === "RSI" || c.ind === "HAS") && (nv <= 0 || nv >= 100)) continue;
         if (nv < 0) continue;
         const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
         for (const s2 of sets) for (const x of cfg.rules[s2].conds as Cond[]) if (same(x) && x.v !== undefined) x.v = x.v === ov ? nv : c.ind === "RSI" && x.v === 100 - ov ? 100 - nv : x.v;
@@ -1270,7 +1328,7 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
     while (made < want && tries < want * 5) {
       tries++; seed = (seed + 7919) >>> 0;
       let cfg: LabConfig;
-      try { cfg = generate(k, seed, capital); } catch { continue; }
+      try { cfg = generate(k, seed, capital, Number(run.settings?.ha_strength_pct ?? 8)); } catch { continue; }
       const fp = fingerprint(cfg);
       if (seen.has(fp)) continue;
       seen.add(fp); made++;

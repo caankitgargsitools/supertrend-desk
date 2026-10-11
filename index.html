@@ -781,6 +781,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
               <option value="night">Non-stop, nights only: 11:30 PM – 8:30 AM</option>
               <option value="nightly">Once a day at 16:05 IST</option></select></label>
             <label class="f"><span>New strategies per run</span><input id="ls_per_night" type="number" min="10" max="1000" step="10"></label>
+            <label class="f"><span>Heikin Ashi strength share (% of new strategies)</span><input id="ls_has_pct" type="number" min="0" max="50" step="1"></label>
             <label class="f"><span>Best ones priced with real options</span><input id="ls_top" type="number" min="0" max="60" step="1"></label>
             <label class="f"><span>Capital for return % (₹)</span><input id="ls_capital" type="number" min="10000" step="10000"></label>
             <label class="f"><span>Winners long-tested each night (00:30 IST)</span><input id="ls_long" type="number" min="0" max="40" step="1"></label>
@@ -1350,6 +1351,8 @@ function renderStratSummary(s) {
 const IND_DEFS = {
   ST: { name: "Supertrend", params: [["atr", "ATR", 10], ["factor", "Factor", 3]], ops: [["up", "is up (green)"], ["down", "is down (red)"], ["turns_up", "turns up"], ["turns_down", "turns down"]] },
   HA: { name: "Heikin Ashi", params: [], ops: [["green", "is green"], ["red", "is red"], ["turns_green", "turns green"], ["turns_red", "turns red"]] },
+  HAS: { name: "Heikin Ashi strength (0–100)", params: [["w", "Strength recipe", 0], ["len", "ADX length", 14], ["doji", "Doji if body under (% of candle)", 10]],
+    ops: [["has_buy", "is green (buy) with strength at least"], ["has_sell", "is red (sell) with strength at least"], ["has_doji", "is a doji (hold)"]], value: 60 },
   RSI: { name: "RSI", params: [["len", "Length", 14]], ops: [["gt", "is above"], ["lt", "is below"], ["cross_above", "crosses above"], ["cross_below", "crosses below"]], value: 60 },
   EMA: { name: "EMA", params: [["len", "Length", 20], ["len2", "Slow (fast/slow)", 50]], ops: [["price_above", "price above EMA"], ["price_below", "price below EMA"], ["price_cross_above", "price crosses above EMA"], ["price_cross_below", "price crosses below EMA"], ["fast_above_slow", "fast EMA above slow"], ["fast_below_slow", "fast EMA below slow"], ["fast_cross_above", "fast crosses above slow"], ["fast_cross_below", "fast crosses below slow"]] },
   SMA: { name: "SMA", params: [["len", "Length", 20], ["len2", "Slow (fast/slow)", 50]], ops: [["price_above", "price above SMA"], ["price_below", "price below SMA"], ["price_cross_above", "price crosses above SMA"], ["price_cross_below", "price crosses below SMA"], ["fast_above_slow", "fast SMA above slow"], ["fast_below_slow", "fast SMA below slow"], ["fast_cross_above", "fast crosses above slow"], ["fast_cross_below", "fast crosses below slow"]] },
@@ -1369,8 +1372,8 @@ const IND_DEFS = {
   FUND: { name: "Funding rate (crypto, % per 8h)", params: [], ops: [["gt", "is above"], ["lt", "is below"]], value: 0.01 },
 };
 // Parameters that may be 0 (an hour of the day, Sunday).
-const ZERO_OK = new Set(["from", "d"]);
-const VALUE_OPS = new Set(["gt", "lt", "cross_above", "cross_below"]);
+const ZERO_OK = new Set(["from", "d", "w"]);
+const VALUE_OPS = new Set(["gt", "lt", "cross_above", "cross_below", "has_buy", "has_sell"]);
 const COND_TFS = [["base", "Strategy timeframe"], ["1", "1 min"], ["3", "3 min"], ["5", "5 min"], ["15", "15 min"], ["25", "25 min"], ["30", "30 min"], ["45", "45 min"], ["60", "1 hour"], ["75", "75 min"], ["120", "2 hours"], ["125", "125 min"], ["240", "4 hours"], ["D", "Daily"], ["W", "Weekly"]];
 const RULE_SETS = [
   ["long", "buy", "Buy (go long / bullish options) when", true],
@@ -1405,6 +1408,11 @@ function condRow(setKey, idx, c) {
   row.append(wrapLabel("Timeframe", tf));
   const slowWraps = [];
   for (const [k, label, dv] of def.params) {
+    if (k === "w") { // Heikin Ashi strength: what counts as "strong"
+      const sel = mkSel([["0", "Balanced"], ["1", "Candle shape (body, no wick)"], ["2", "Trend (streak + ADX)"], ["3", "Momentum (growing bodies)"]], String(c.p && c.p.w !== undefined ? c.p.w : dv));
+      sel.addEventListener("change", () => { c.p = c.p || {}; c.p.w = Number(sel.value); formDirty = true; });
+      row.append(wrapLabel(label, sel)); continue;
+    }
     if (k === "src") { // liquidity sweep: which levels
       const sel = mkSel([["0", "Swing high / low"], ["1", "Previous day high / low"]], String(c.p && c.p.src !== undefined ? c.p.src : dv));
       sel.addEventListener("change", () => { c.p = c.p || {}; c.p.src = Number(sel.value); formDirty = true; });
@@ -3245,8 +3253,9 @@ function condText(c) {
   const def = IND_DEFS[c.ind] || { name: c.ind, ops: [] };
   const p = c.p || {};
   const params = c.ind === "ST" ? `(${p.atr ?? 10}, ${p.factor ?? 3})` : c.ind === "MACD" ? `(${p.fast ?? 12}, ${p.slow ?? 26}, ${p.sig ?? 9})` : c.ind === "BB" ? `(${p.len ?? 20}, ${p.mult ?? 2})`
-    : (c.ind === "EMA" || c.ind === "SMA") ? (p.len2 && /fast/.test(c.op) ? `(${p.len ?? 9}/${p.len2})` : `(${p.len ?? 20})`) : c.ind === "ORB" ? `(${p.mins ?? 15} min)` : c.ind === "SWEEP" ? (Number(p.src) === 1 ? "(prev-day H/L)" : `(${p.len ?? 20}-candle swing${(p.within ?? 1) > 1 ? `, ${p.within} candles` : ""})`) : p.len ? `(${p.len})` : "";
-  const tf = c.tf === "D" ? "daily" : c.tf === "base" ? "decision candles" : `${c.tf}-min`;
+    : (c.ind === "EMA" || c.ind === "SMA") ? (p.len2 && /fast/.test(c.op) ? `(${p.len ?? 9}/${p.len2})` : `(${p.len ?? 20})`) : c.ind === "ORB" ? `(${p.mins ?? 15} min)` : c.ind === "SWEEP" ? (Number(p.src) === 1 ? "(prev-day H/L)" : `(${p.len ?? 20}-candle swing${(p.within ?? 1) > 1 ? `, ${p.within} candles` : ""})`)
+    : c.ind === "HAS" ? `(${["balanced", "candle shape", "trend", "momentum"][Number(p.w ?? 0)] ?? "balanced"}, ADX ${p.len ?? 14}, doji < ${p.doji ?? 10}%)` : p.len ? `(${p.len})` : "";
+  const tf = c.tf === "D" ? "daily" : c.tf === "W" ? "weekly" : c.tf === "base" ? "decision candles" : `${c.tf}-min`;
   const op = (def.ops.find(([v]) => v === c.op) || [c.op, c.op])[1];
   return `${def.name}${params} on ${tf} ${op}${c.v !== undefined && VALUE_OPS.has(c.op) ? " " + c.v : ""}`;
 }
@@ -4048,7 +4057,7 @@ async function promoteLab(r, v) {
 }
 function renderLabSettings() {
   const s = lab.settings || {};
-  $("ls_enabled").value = s.enabled === false ? "false" : "true"; $("ls_mode").value = s.schedule_mode || "nightly"; $("ls_per_night").value = s.per_night ?? 300; $("ls_top").value = s.top_options ?? 20; $("ls_capital").value = s.capital ?? 500000; $("ls_long").value = s.long_per_night ?? 10;
+  $("ls_enabled").value = s.enabled === false ? "false" : "true"; $("ls_mode").value = s.schedule_mode || "nightly"; $("ls_per_night").value = s.per_night ?? 300; $("ls_top").value = s.top_options ?? 20; $("ls_capital").value = s.capital ?? 500000; $("ls_long").value = s.long_per_night ?? 10; $("ls_has_pct").value = s.ha_strength_pct ?? 8;
   const box = $("ls_assets"); box.innerHTML = "";
   for (const [k, p] of Object.entries(PRESETS)) {
     const l = document.createElement("label"); const i = document.createElement("input"); i.type = "checkbox"; i.value = k; i.checked = (s.assets || []).includes(k);
@@ -4066,7 +4075,7 @@ $("labSetForm").addEventListener("submit", (e) => {
   if (!(top >= 0 && top <= 60)) { $("ls_msg").textContent = "Option pricing count must be 0–60."; return; }
   if (!(cap >= 10000)) { $("ls_msg").textContent = "Capital must be at least ₹10,000."; return; }
   run(e.submitter, async () => {
-    must(await db.from("lab_settings").update({ enabled: $("ls_enabled").value === "true", schedule_mode: $("ls_mode").value, per_night: Math.trunc(per), top_options: Math.trunc(top), capital: cap, assets, long_per_night: Math.max(0, Math.min(40, Math.trunc(Number($("ls_long").value) || 0))), updated_at: new Date().toISOString() }).eq("id", 1));
+    must(await db.from("lab_settings").update({ enabled: $("ls_enabled").value === "true", schedule_mode: $("ls_mode").value, per_night: Math.trunc(per), top_options: Math.trunc(top), capital: cap, assets, long_per_night: Math.max(0, Math.min(40, Math.trunc(Number($("ls_long").value) || 0))), ha_strength_pct: Math.max(0, Math.min(50, Number($("ls_has_pct").value) || 0)), updated_at: new Date().toISOString() }).eq("id", 1));
     $("ls_msg").textContent = "Saved. Changes apply from the next run."; await loadLab();
   });
 });

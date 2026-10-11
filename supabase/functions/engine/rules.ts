@@ -20,7 +20,51 @@ export function haCandles<T extends { o: number; h: number; l: number; c: number
   const { ho, hc } = heikinAshi(bars);
   return bars.map((b, i) => ({ ...b, o: ho[i], c: hc[i], h: Math.max(b.h, ho[i], hc[i]), l: Math.min(b.l, ho[i], hc[i]) }));
 }
-const REAL_PRICE = new Set(["VWAP", "PDHL", "ORB", "SWEEP", "TIME", "BTC", "FUND"]);
+const REAL_PRICE = new Set(["VWAP", "PDHL", "ORB", "SWEEP", "TIME", "BTC", "FUND", "HAS"]);
+
+/**
+ * Heikin Ashi strength ("HAS"): each Heikin Ashi candle is green (buy), red (sell) or a doji (hold: body smaller than
+ * doji% of the candle's range), and gets a strength score from 0 to 100 in its own direction, made of five parts:
+ *   body   — body as a share of the whole candle (a full-bodied candle is decisive);
+ *   wick   — no wick on the "wrong" side (a green candle with no lower wick, a red one with no upper wick);
+ *   streak — how many candles of the same colour in a row (up to 5);
+ *   growth — this body against the average of the last 10 bodies (a growing candle is accelerating);
+ *   adx    — trend strength, ADX(len) up to 40, counted only when +DI/−DI agree with the colour.
+ * The weights of the parts come from one of four presets, so the lab tries different ideas of "strong":
+ *   0 balanced, 1 candle shape, 2 trend (streak + ADX), 3 momentum (growth).
+ */
+export const HAS_WEIGHTS: Record<number, { name: string; w: [number, number, number, number, number] }> = {
+  0: { name: "balanced", w: [25, 20, 15, 15, 25] },
+  1: { name: "candle shape", w: [35, 30, 15, 20, 0] },
+  2: { name: "trend", w: [15, 10, 25, 15, 35] },
+  3: { name: "momentum", w: [20, 15, 20, 35, 10] },
+};
+export function haStrength(bars: { o: number; h: number; l: number; c: number }[], len = 14, preset = 0, dojiPct = 10) {
+  const n = bars.length, { ho, hc } = heikinAshi(bars), d = adx(bars, len);
+  const W = (HAS_WEIGHTS[preset] ?? HAS_WEIGHTS[0]).w;
+  const col = new Array<number>(n).fill(0), score = new Array<number>(n).fill(0), body = new Array<number>(n).fill(0);
+  let streak = 0;
+  for (let i = 0; i < n; i++) {
+    const top = Math.max(ho[i], hc[i]), bot = Math.min(ho[i], hc[i]);
+    const hh = Math.max(bars[i].h, top), ll = Math.min(bars[i].l, bot), range = hh - ll;
+    body[i] = top - bot;
+    const c = range <= 0 || body[i] / range < dojiPct / 100 ? 0 : hc[i] > ho[i] ? 1 : -1;
+    col[i] = c;
+    streak = c !== 0 && i > 0 && col[i - 1] === c ? streak + 1 : c !== 0 ? 1 : 0;
+    if (c === 0 || range <= 0) continue;
+    let avg = 0, m = 0;
+    for (let j = Math.max(0, i - 10); j < i; j++) { avg += body[j]; m++; }
+    avg = m ? avg / m : 0;
+    const sBody = body[i] / range;
+    const sWick = 1 - (c > 0 ? bot - ll : hh - top) / range;
+    const sStreak = Math.min(streak, 5) / 5;
+    const sGrowth = avg > 0 ? Math.min(body[i] / (2 * avg), 1) : 0.5;
+    const agree = c > 0 ? d.plus[i] > d.minus[i] : d.minus[i] > d.plus[i];
+    const sAdx = isNaN(d.adx[i]) || !agree ? 0 : Math.min(d.adx[i] / 40, 1);
+    score[i] = Math.round(W[0] * sBody + W[1] * sWick + W[2] * sStreak + W[3] * sGrowth + W[4] * sAdx);
+  }
+  return { col, score };
+}
 /** Monday of a date's week (weeks run Monday–Sunday). */
 export const mondayOf = (day: string) => addDays(day, -((weekdayOf(day) + 6) % 7));
 /** Weekly candles from daily ones, each dated by its Monday. */
@@ -67,8 +111,8 @@ export function warmBarsFor(r: Rules): number {
     const p = c.p ?? {};
     const len = Math.max(p.len ?? 0, p.len2 ?? 0, p.slow ?? 0, (p.slow ?? 0) + (p.sig ?? 0), p.atr ?? 0);
     const lk = c.ind === "VOL" ? (p.look ?? 250) + (p.len ?? 20) : 0;
-    n = Math.max(n, c.ind === "ST" || c.ind === "HA" ? 500 : Math.max(len * 10 + 50, lk + 20));
-    if (c.tf === "W") n = Math.max(n, Math.min(1500, (c.ind === "ST" || c.ind === "HA" ? 120 : len * 4 + 10) * 7));
+    n = Math.max(n, c.ind === "ST" || c.ind === "HA" || c.ind === "HAS" ? 500 : Math.max(len * 10 + 50, lk + 20));
+    if (c.tf === "W") n = Math.max(n, Math.min(1500, (c.ind === "ST" || c.ind === "HA" || c.ind === "HAS" ? 120 : len * 4 + 10) * 7));
   }
   return Math.min(n, 1500);
 }
@@ -99,10 +143,10 @@ export function describeCond(c: Cond): string {
     new_high: "close above the highest high (breakout)", new_low: "close below the lowest low (breakdown)", above_mid: "price above the channel middle", below_mid: "price below the channel middle",
     high_vol: "is high (above its usual level)", low_vol: "is low (below its usual level)",
     in_hours: `between ${String(p.from ?? 0).padStart(2, "0")}:00 and ${String(p.to ?? 24).padStart(2, "0")}:00 IST`, on_weekday: `is a ${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][Number(p.d ?? 5)] ?? "?"}`,
-    not_weekend: "is a weekday (Mon–Fri)", btc_up: `is up (daily close above its ${p.len ?? 50}-day EMA)`, btc_down: `is down (daily close below its ${p.len ?? 50}-day EMA)`,
+    not_weekend: "is a weekday (Mon–Fri)", has_buy: `is green (buy) with strength ≥ ${v}`, has_sell: `is red (sell) with strength ≥ ${v}`, has_doji: "is a doji (hold)", btc_up: `is up (daily close above its ${p.len ?? 50}-day EMA)`, btc_down: `is down (daily close below its ${p.len ?? 50}-day EMA)`,
   };
   const name: Record<string, string> = {
-    ST: `Supertrend(${p.atr ?? 10},${p.factor ?? 3})`, HA: "Heikin Ashi", RSI: `RSI(${p.len ?? 14})`,
+    ST: `Supertrend(${p.atr ?? 10},${p.factor ?? 3})`, HA: "Heikin Ashi", HAS: `HA strength (${(HAS_WEIGHTS[Number(p.w ?? 0)] ?? HAS_WEIGHTS[0]).name}, ADX ${p.len ?? 14}, doji < ${p.doji ?? 10}%)`, RSI: `RSI(${p.len ?? 14})`,
     EMA: p.len2 ? `EMA(${p.len ?? 9}/${p.len2})` : `EMA(${p.len ?? 20})`, SMA: p.len2 ? `SMA(${p.len ?? 9}/${p.len2})` : `SMA(${p.len ?? 20})`,
     MACD: `MACD(${p.fast ?? 12},${p.slow ?? 26},${p.sig ?? 9})`, VWAP: "VWAP", BB: `Bollinger(${p.len ?? 20},${p.mult ?? 2})`,
     ADX: `ADX(${p.len ?? 14})`, ATR: `ATR(${p.len ?? 14})`, PDHL: "Prev-day H/L", ORB: `Opening range (${p.mins ?? 15}m)`,
@@ -192,6 +236,13 @@ export class RuleBook {
         const tr = M("HA", () => heikinAshi(b).trend);
         check = (k) => c.op === "green" ? tr[k] === 1 : c.op === "red" ? tr[k] === -1
           : c.op === "turns_green" ? k > 0 && tr[k] === 1 && tr[k - 1] === -1 : c.op === "turns_red" ? k > 0 && tr[k] === -1 && tr[k - 1] === 1 : false;
+        break;
+      }
+      case "HAS": {
+        const len = Math.max(2, Math.trunc(p.len ?? 14)), w = Math.trunc(p.w ?? 0), dj = Number(p.doji ?? 10);
+        const hs = M(`HAS${len},${w},${dj}`, () => haStrength(b, len, w, dj));
+        check = (k) => c.op === "has_buy" ? hs.col[k] === 1 && hs.score[k] >= v : c.op === "has_sell" ? hs.col[k] === -1 && hs.score[k] >= v
+          : c.op === "has_doji" ? hs.col[k] === 0 : false;
         break;
       }
       case "RSI": case "ADX": case "ATR": {
@@ -442,7 +493,7 @@ export function decide(pos: "FLAT" | Side, now: Signals, prev: Signals | null, c
 /** Validates a rule book from the strategy form / database. */
 export function validateRules(r: unknown): Rules {
   const rules = (r ?? {}) as Rules;
-  const IND = new Set(["ST", "HA", "RSI", "EMA", "SMA", "MACD", "VWAP", "BB", "ADX", "ATR", "PDHL", "ORB", "SWEEP", "DON", "VOL", "TIME", "BTC", "FUND"]);
+  const IND = new Set(["ST", "HA", "RSI", "EMA", "SMA", "MACD", "VWAP", "BB", "ADX", "ATR", "PDHL", "ORB", "SWEEP", "DON", "VOL", "TIME", "BTC", "FUND", "HAS"]);
   const TF = new Set(["base", "1", "3", "5", "15", "25", "30", "45", "60", "75", "120", "125", "240", "D", "W"]);
   for (const k of ["long", "short", "exitLong", "exitShort"] as const) {
     const set = rules[k];
