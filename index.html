@@ -377,6 +377,10 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 @keyframes beat { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); } 100% { box-shadow: 0 0 0 9px transparent; } }
 @keyframes labstripes { to { background-position: 16px 0; } }
 @media (prefers-reduced-motion: reduce) { .labprog.live .fill, .beat i { animation: none; } }
+  .bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line, #d0d7de); border-radius: 8px; background: var(--panel, transparent); position: sticky; top: var(--barH, 0); z-index: 3; }
+  .bulkbar #lp_bulk_n { font-weight: 600; margin-right: 4px; }
+  td.ck, th.ck { width: 34px; text-align: center; }
+  td.ck input, th.ck input { width: 18px; height: 18px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -857,6 +861,14 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
         <label class="f"><span>Instrument</span><select id="lf_inst"><option value="">All</option><option>Futures</option><option>Option buying</option><option>Option writing</option></select></label>
         <label class="f" id="lf_owner_w" data-admin hidden><span>Owner</span><select id="lf_owner"><option value="ME">Mine</option><option value="">Everyone</option></select></label>
         <label class="showtr"><input type="checkbox" id="lf_arch"> Archived</label>
+      </div>
+      <div class="bulkbar" id="lp_bulk" hidden>
+        <span id="lp_bulk_n"></span>
+        <button class="btn small" type="button" data-bulk="on">Activate</button>
+        <button class="btn small" type="button" data-bulk="off">Pause</button>
+        <button class="btn small danger" type="button" data-bulk="live">Go live</button>
+        <button class="btn small" type="button" data-bulk="paper">Back to paper</button>
+        <button class="btn small" type="button" data-bulk="clear">Clear selection</button>
       </div>
       <div class="scroll"><table class="big-table"><thead id="lp_head"></thead><tbody id="lp_body"></tbody></table></div>
       <p class="hint" id="lp_foot" style="margin:8px 0 0"></p>
@@ -4333,6 +4345,71 @@ function listRows() {
     return true;
   });
 }
+/* ---------- several strategies at once: tick them, then activate / pause / go live / back to paper ---------- */
+const lsel = new Set();
+function renderBulkBar() {
+  const n = lsel.size;
+  $("lp_bulk").hidden = !n;
+  if (!n) return;
+  const sel = state.strategies.filter((s) => lsel.has(s.id));
+  const act = sel.filter((s) => s.active).length, live = sel.filter((s) => s.live).length;
+  $("lp_bulk_n").textContent = `${n} selected (${act} active, ${live} live)`;
+}
+async function bulkAction(kind) {
+  if (kind === "clear") { lsel.clear(); renderList(); return; }
+  const sel = state.strategies.filter((s) => lsel.has(s.id) && !s.archived);
+  if (!sel.length) return;
+  const names = (xs) => xs.slice(0, 8).map((s) => esc(s.name)).join(", ") + (xs.length > 8 ? ` and ${xs.length - 8} more` : "");
+  const btn = document.querySelector(`#lp_bulk [data-bulk="${kind}"]`);
+  if (kind === "on" || kind === "off") {
+    const todo = sel.filter((s) => !!s.active !== (kind === "on"));
+    if (!todo.length) { toast(kind === "on" ? "They are all active already." : "They are all paused already."); return; }
+    const go = () => run(btn, async () => {
+      for (let i = 0; i < todo.length; i += 100) must(await db.from("algo_strategies").update({ active: kind === "on" }).in("id", todo.slice(i, i + 100).map((s) => s.id)));
+      await loadAll();
+      toast(kind === "on" ? `${todo.length} strateg${todo.length === 1 ? "y" : "ies"} active. Each acts on its next signal.` : `${todo.length} strateg${todo.length === 1 ? "y" : "ies"} paused.`);
+    });
+    if (kind === "off" && todo.some((s) => s.position !== "FLAT")) {
+      askConfirm(`<strong>Pause ${todo.length} strateg${todo.length === 1 ? "y" : "ies"}?</strong><br>Some have an open position (${names(todo.filter((s) => s.position !== "FLAT"))}). Pausing doesn't exit it; use “Exit now” on a strategy to close its position.`, "Pause", go);
+    } else go();
+    return;
+  }
+  if (kind === "paper") {
+    const todo = sel.filter((s) => s.live);
+    if (!todo.length) { toast("They are all in paper mode already."); return; }
+    run(btn, async () => {
+      const bad = [];
+      for (const s of todo) { const { error } = await db.rpc("set_live", { p_strategy: s.id, p_live: false }); if (error) bad.push(`${s.name}: ${errorText(error)}`); }
+      await loadAll();
+      toast(bad.length ? `${todo.length - bad.length} back to paper; ${bad.length} not changed (${bad[0]})` : `${todo.length} strateg${todo.length === 1 ? "y" : "ies"} back to paper mode. Orders are logged, not sent.`);
+    });
+    return;
+  }
+  if (kind === "live") {
+    const todo = sel.filter((s) => !s.live);
+    if (!todo.length) { toast("They are all live already."); return; }
+    // The same checks as the single “Go live” button: a Dhan webhook for Dhan strategies, a Delta key for crypto.
+    const needDelta = todo.filter((s) => isCrypto(s.data_segment)), needDhan = todo.filter((s) => !isCrypto(s.data_segment));
+    const noDelta = needDelta.length && !(deltaSt && deltaSt.has_key && deltaSt.has_secret), noDhan = needDhan.length && !(state.settings && state.settings.has_url);
+    const ready = todo.filter((s) => isCrypto(s.data_segment) ? !noDelta : !noDhan), skipped = todo.length - ready.length;
+    if (!ready.length) { toast(noDhan ? "Add your order webhook URL under Dhan connection first." : "Add your Delta Exchange API key and secret under Connections first."); openConn(); return; }
+    const bl = (me && me.billing) || {}, fee = Number(bl.deploy_fee || 0);
+    const feeN = me && me.role !== "admin" && fee > 0 && !bl.trial_active ? ready.filter((s) => !(s.deploy_paid_until && s.deploy_paid_until >= istDate(0))).length : 0;
+    const paused = ready.filter((s) => !s.active).length;
+    askConfirm(`<strong>Send real orders for ${ready.length} strateg${ready.length === 1 ? "y" : "ies"}?</strong><br>${names(ready)}.<br>From each one's next signal, real orders go to ${needDelta.length && needDhan.length ? "Dhan (your webhook) and Delta Exchange" : needDelta.length ? "Delta Exchange" : "Dhan (your webhook)"} on your own account. Check the paper-mode logs first.`
+      + (paused ? `<br>${paused} of them ${paused === 1 ? "is" : "are"} paused; ${paused === 1 ? "it" : "they"} won't trade until activated.` : "")
+      + (skipped ? `<br>${skipped} can't go live yet (${noDhan ? "no Dhan webhook" : "no Delta API key"}) and will be left in paper mode.` : "")
+      + (feeN ? `<br>A deployment fee of <strong>${rupees(fee)}</strong> each${bl.deploy_fee_period === "ONE_TIME" ? " (once)" : " (for the next month)"} will be taken from your wallet for ${feeN} of them (${rupees(fee * feeN)} in all).` : "")
+      + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns.",
+      "Go live", async () => run(btn, async () => {
+        const bad = [];
+        for (const s of ready) { const { error } = await db.rpc("set_live", { p_strategy: s.id, p_live: true }); if (error) bad.push(`${s.name}: ${errorText(error)}`); }
+        await loadAll(); await refreshMe();
+        toast(bad.length ? `${ready.length - bad.length} live; ${bad.length} not changed (${bad[0]})` : `${ready.length} strateg${ready.length === 1 ? "y" : "ies"} live. Real orders will be sent.`);
+      }), true);
+  }
+}
+document.querySelectorAll("#lp_bulk [data-bulk]").forEach((b) => b.addEventListener("click", () => bulkAction(b.dataset.bulk)));
 function renderList() {
   if (!me) return;
   const cols = listCols();
@@ -4342,8 +4419,12 @@ function renderList() {
   sel.value = assets.includes(keep) ? keep : "";
   $("lf_src").querySelector('option[value="MASTER"]').hidden = !isAdmin();
   $("newFlip2").hidden = !(isAdmin() || me.can_build);
-  $("lp_head").innerHTML = "<tr>" + cols.map(([k, label, , t]) => `<th class="sort${t === "num" || t === "int" || t === "pct" ? " n" : ""}" data-k="${k}" aria-sort="${lsort.key === k ? (lsort.dir > 0 ? "ascending" : "descending") : "none"}" tabindex="0">${esc(label)}</th>`).join("") + "</tr>";
-  $("lp_head").querySelectorAll("th").forEach((th) => {
+  const allIds = listRows().filter((s) => !s.archived).map((s) => s.id);
+  for (const id of [...lsel]) if (!state.strategies.some((s) => s.id === id)) lsel.delete(id);
+  const allOn = allIds.length > 0 && allIds.every((id) => lsel.has(id));
+  $("lp_head").innerHTML = `<tr><th class="ck"><input type="checkbox" id="lp_all" aria-label="Select all strategies shown" ${allOn ? "checked" : ""} ${allIds.length ? "" : "disabled"}></th>` + cols.map(([k, label, , t]) => `<th class="sort${t === "num" || t === "int" || t === "pct" ? " n" : ""}" data-k="${k}" aria-sort="${lsort.key === k ? (lsort.dir > 0 ? "ascending" : "descending") : "none"}" tabindex="0">${esc(label)}</th>`).join("") + "</tr>";
+  $("lp_all").addEventListener("change", (e) => { for (const id of allIds) e.target.checked ? lsel.add(id) : lsel.delete(id); renderList(); });
+  $("lp_head").querySelectorAll("th.sort").forEach((th) => {
     const go = () => { lsort.dir = lsort.key === th.dataset.k ? -lsort.dir : 1; lsort.key = th.dataset.k; renderList(); };
     th.addEventListener("click", go); th.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
   });
@@ -4354,10 +4435,19 @@ function renderList() {
     return (typeof x === "number" ? x - y : String(x).localeCompare(String(y))) * lsort.dir;
   });
   const tb = $("lp_body"); tb.innerHTML = "";
-  if (!rows.length) tb.innerHTML = `<tr><td colspan="${cols.length}" class="hint">${state.strategies.length ? "No strategies match these filters." : (me.can_build || isAdmin()) ? "No strategies yet. Create one with “+ New strategy”, or buy one from the Marketplace." : "No strategies yet. Buy one from the Marketplace."}</td></tr>`;
+  if (!rows.length) tb.innerHTML = `<tr><td colspan="${cols.length + 1}" class="hint">${state.strategies.length ? "No strategies match these filters." : (me.can_build || isAdmin()) ? "No strategies yet. Create one with “+ New strategy”, or buy one from the Marketplace." : "No strategies yet. Buy one from the Marketplace."}</td></tr>`;
   let tl = 0, tp = 0;
   for (const s of rows) {
     const tr = document.createElement("tr"); tr.className = "pick"; tr.tabIndex = 0;
+    const ck = document.createElement("td"); ck.className = "ck";
+    if (!s.archived) {
+      const box = document.createElement("input"); box.type = "checkbox"; box.checked = lsel.has(s.id); box.setAttribute("aria-label", `Select ${s.name}`);
+      box.addEventListener("click", (e) => e.stopPropagation());
+      box.addEventListener("change", () => { box.checked ? lsel.add(s.id) : lsel.delete(s.id); renderList(); });
+      ck.addEventListener("click", (e) => { if (e.target === ck) { e.stopPropagation(); box.click(); } });
+      ck.append(box);
+    }
+    tr.append(ck);
     for (const [k, , f, t] of cols) {
       const td = document.createElement("td"); const v = f(s);
       if (k === "name") { td.className = "nm"; td.textContent = v; if (s.last_error) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Error"; td.append(e); } }
@@ -4375,6 +4465,7 @@ function renderList() {
     tr.addEventListener("keydown", (e) => { if (e.key === "Enter") openStrat(s.id); });
     tb.append(tr);
   }
+  renderBulkBar();
   $("lp_foot").textContent = rows.length ? `${rows.length} strateg${rows.length === 1 ? "y" : "ies"} · live P&L ${rupees(tl)} · paper P&L ${rupees(tp)} (closed trades, after estimated charges). Click a column title to sort; click a row to open it.` : "";
 }
 ["lf_q", "lf_src", "lf_act", "lf_mode", "lf_asset", "lf_inst", "lf_owner", "lf_arch"].forEach((id) => $(id).addEventListener(id === "lf_q" ? "input" : "change", renderList));
