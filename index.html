@@ -3289,6 +3289,8 @@ function openLab() {
 function closeLab() { document.body.classList.remove("wide"); if (!lab.open) return; lab.open = false; $("labPane").hidden = true; $("openLab").classList.remove("primary"); stopLabPoll(); }
 function stopLabPoll() { if (lab.poll) { clearTimeout(lab.poll); lab.poll = null; } }
 async function loadLab() {
+  // Today's margin for one lot of every asset (Dhan's margin calculator; crypto: Delta at 10× leverage), refreshed each run.
+  lab.marg = await db.from("lab_margins").select("asset, detail, checked_at").then((x) => Object.fromEntries((x.data || []).map((m) => [m.asset, { ...(m.detail || {}), at: m.checked_at }]))).catch(() => lab.marg || {});
   if (!isAdmin()) {
     // Users: results and trades only, from a server view that leaves out every parameter.
     const res = must(await db.rpc("lab_feed", { p_view: lab.view, p_asset: lab.asset, p_period: lab.period, p_only: lab.only, p_request: lab.request || null }));
@@ -3638,6 +3640,8 @@ const LAB_COLS = [
   { k: "net", w: 72, t: "Net (1 yr)", f: "num", n: true, v: (g) => g.m.full.net },
   { k: "margin", w: 66, t: "Avg margin / lot", f: "num", n: true, v: (g) => g.m.margin_lot ?? null, tip: "Average over the trades of the margin one lot needed at each trade's entry price" },
   { k: "rom", w: 58, t: "Return on margin %", f: "num", n: true, v: (g) => g.m.ret_margin ?? null },
+  { k: "mtoday", w: 74, t: "Margin today (1 lot)", f: "num", n: true, v: (g) => marginToday(g.r), tip: "Money needed today to trade one lot: futures margin from Dhan's margin calculator (crypto: Delta at 10× leverage); option writing margin; or today's at-the-money premium for option buying" },
+  { k: "rtoday", w: 66, t: "1-yr net on today's margin %", f: "num", n: true, v: (g) => returnToday(g), tip: "The strategy's last-year net profit (1 lot) ÷ today's margin for one lot" },
   { k: "test", w: 70, t: "Last 3 mo", f: "num", n: true, v: (g) => g.m.test.net },
   { k: "dd", w: 66, t: "Max DD", f: "num", n: true, v: (g) => g.m.full.max_dd },
   { k: "pf", w: 44, t: "PF", f: "num", n: true, v: (g) => g.m.full.pf ?? null },
@@ -3675,6 +3679,21 @@ function deskScore(r) {
 }
 const deskTip = (d) => d ? `Steady returns ${d.steady}/35 · low drawdown ${d.dd}/25 · other assets ${d.assets}/20 · other timeframes ${d.tfs}/20` : "";
 const deskCell = (d) => d ? `<b class="${d.score >= 70 ? "pos-num" : d.score < 40 ? "neg-num" : ""}" title="${esc(deskTip(d))}">${d.score}</b>` : "–";
+/**
+ * Money needed today for one lot of the strategy, in the view picked above: futures margin (intraday or overnight, as the
+ * strategy trades), option-writing margin, or the at-the-money premium for option buying. Spreads: not shown.
+ */
+function marginToday(r) {
+  const d = lab.marg && lab.marg[r.asset]; if (!d) return null;
+  const intra = !!(r.config && r.config.intraday);
+  const v = lab.view === "FUT" ? (intra ? d.fut_margin_intraday ?? d.margin_intraday ?? d.fut_margin ?? d.margin : d.fut_margin ?? d.margin ?? d.fut_margin_intraday ?? d.margin_intraday)
+    : lab.view === "SELL" ? (intra ? d.sell_margin_intraday ?? d.sell_margin : d.sell_margin ?? d.sell_margin_intraday)
+    : lab.view === "BUY" ? (d.opt_premium && d.lot_dhan ? d.opt_premium * d.lot_dhan : null) : null;
+  return v > 0 ? Math.trunc(v) : null;
+}
+/** The strategy's 1-year net as a share of today's margin for one lot (whole %). */
+function returnToday(g) { const mt = marginToday(g.r); return mt ? Math.trunc((g.m.full.net / mt) * 100) : null; }
+const marginTip = (r) => { const d = lab.marg && lab.marg[r.asset]; return d ? `${d.contract || [d.fut_expiry && "future " + d.fut_expiry, d.opt_strike && "ATM " + d.opt_strike].filter(Boolean).join(", ") || ""} · checked ${d.at ? istText(d.at) : ""}` : ""; };
 /** The latest nightly long test of a lab strategy (futures version): its longest period and how many periods made money. */
 function longOf(r) {
   const L = lab.long && lab.long[r.fingerprint];
@@ -3793,7 +3812,8 @@ function renderLabTable() {
     const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} twins / similar</button>` : "";
     tr.innerHTML = `<td class="n">${num}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
       <td style="white-space:nowrap">${esc(labAssetName(r.asset))}</td><td>${esc(labStyle(r))}</td><td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}${longNetLine(r)}</td><td class="n">${m.margin_lot ? rs(m.margin_lot) : "–"}</td>
-      <td class="n">${m.ret_margin == null ? "–" : `<span class="${m.ret_margin > 0 ? "pos-num" : m.ret_margin < 0 ? "neg-num" : ""}">${m.ret_margin}%</span>`}</td><td class="n">${pc(m.test.net)}</td>
+      <td class="n">${m.ret_margin == null ? "–" : `<span class="${m.ret_margin > 0 ? "pos-num" : m.ret_margin < 0 ? "neg-num" : ""}">${m.ret_margin}%</span>`}</td>${(() => { const mt = marginToday(r), rt = returnToday(g);
+        return `<td class="n" title="${esc(marginTip(r))}">${mt ? rupeesShort(mt) : "–"}</td><td class="n">${rt == null ? "–" : `<span class="${rt > 0 ? "pos-num" : rt < 0 ? "neg-num" : ""}">${rt}%</span>`}</td>`; })()}<td class="n">${pc(m.test.net)}</td>
       <td class="n">${rs(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${deskCell(deskScore(r))}</td>${(() => { const x = robOf(r), q = x && x.quality; return q ? `<td class="n"><b class="${q.score >= 70 ? "pos-num" : q.score < 40 ? "neg-num" : ""}">${q.score}</b></td>` : '<td class="n hint">–</td>'; })()}<td class="n">${m.score}</td>${robCells(r)}<td class="n">${g.passes}/${g.nights}</td>${(() => { const L = longOf(r); return L ? `<td class="n"><span class="${L.net > 0 ? "pos-num" : L.net < 0 ? "neg-num" : ""}" title="${rupees(L.net)} over ${L.key}">${rupeesShort(L.net)}</span><div class="hint sm">${L.key}</div></td><td class="n">${L.pos}/${L.n}</td>` : '<td class="n hint">–</td><td class="n hint">–</td>'; })()}`;
     tr.querySelector(".t").textContent = r.label;
     tr.addEventListener("click", (e) => {
@@ -3846,7 +3866,7 @@ function renderLabCards(fams, pc, rs) {
       <div class="chips">${status}${g.rechecking ? '<span class="chip blue">Re-checking today</span>' : ""}${r.champion ? '<span class="chip green">Re-tested</span>' : ""}${r.starred ? '<span class="chip yellow">★</span>' : ""}</div>
       <div class="mg">${cell("Net (1 yr)", pc(m.full.net) + longNetLine(r))}${cell("Win %", m.full.win_rate)}${cell("Trades", m.full.n)}
         ${cell("Max DD", rs(m.full.max_dd))}${cell("PF", m.full.pf ?? "–")}${cell("Months +", `${m.pos_months}/${m.months_n}`)}
-        ${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Desk score", deskCell(deskScore(r)))}${cell("Quality", x && x.quality ? `<span class="${x.quality.score >= 70 ? "pos-num" : x.quality.score < 40 ? "neg-num" : ""}">${x.quality.score}</span>` : "–")}
+        ${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Margin today (1 lot)", marginToday(r) ? rupees(marginToday(r)) : "–")}${cell("1-yr net on today's margin", returnToday(g) == null ? "–" : returnToday(g) + "%")}${cell("Desk score", deskCell(deskScore(r)))}${cell("Quality", x && x.quality ? `<span class="${x.quality.score >= 70 ? "pos-num" : x.quality.score < 40 ? "neg-num" : ""}">${x.quality.score}</span>` : "–")}
         ${done ? cell("Assets +", ratio(x.assets_ok, x.assets_n)) + cell("Timeframes +", x.tfs_n ? ratio(x.tfs_ok, x.tfs_n) : "n/a") + cell("Years +", x.years_n == null ? "–" : `<span class="${x.years_n >= 3 && x.years_ok === x.years_n ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span>`) : ""}</div>
       ${!sub && f.members.length > 1 ? `<button type="button" class="btn small fam">${lab.openFam.has(f.key) ? "Hide similar" : `+${f.members.length - 1} similar`}</button>` : ""}`;
     el.querySelector(".nm").textContent = r.label;

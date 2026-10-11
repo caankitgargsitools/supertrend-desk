@@ -1010,6 +1010,24 @@ export function marginRate(cfg: LabConfig, kind: "FUT" | "SELL", rates: Record<s
   if (cfg.data_segment === "DELTA") return { pct: 0.10, src: "10× leverage (Delta allows more; the lab stays at 10×)" };
   return { pct: cfg.data_segment === "MCX_COMM" ? 0.10 : 0.12, src: "estimate" };
 }
+/**
+ * Today's margin for one lot of each coin (Delta perpetual at the lab's 10× leverage, the same rate its backtests use),
+ * stored with Dhan's index and MCX margins so the Lab page can show "Margin today (1 lot)" for every asset.
+ * One lot's value in rupees = latest daily close (USD) × the coin's lot (rupees per $1 per lot).
+ */
+export async function refreshCryptoMargins(sb: SupabaseClient, keys: string[]) {
+  for (const k of keys) {
+    const a = LAB_ASSETS[k]; if (!a?.crypto) continue;
+    try {
+      const d = (await readCandles(sb, k, ["D"]))[0];
+      const px = Number(d?.bars?.c?.at(-1));
+      if (!(px > 0)) continue;
+      const value = px * a.lot, margin = Math.trunc(value * 0.10);
+      await sb.from("lab_margins").upsert({ asset: k, price: px, fut_pct: 0.10, fut_pct_i: 0.10, sell_pct: null, sell_pct_i: null, error: null, checked_at: new Date().toISOString(),
+        detail: { price: px, value: Math.trunc(value), margin, margin_intraday: margin, contract: `${a.name} perpetual on Delta (10× leverage)` } });
+    } catch (e) { console.error("crypto margin", k, e); }
+  }
+}
 /** Strike from a priced option trade's contract text ("NIFTY 24500 CE"). */
 const strikeOf = (t: Record<string, unknown>) => { const m = / (\d+(?:\.\d+)?) (?:CE|PE)\b/.exec(String(t.contract ?? "")); return m ? Number(m[1]) : 0; };
 /**
@@ -1223,6 +1241,7 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
         await refreshAsset(sb, ctx.creds, assets[i], win.to, run.trigger === "continuous" ? 6 : 0);
         i++;
       }
+      if (i >= assets.length) await refreshCryptoMargins(sb, assets.filter((k) => LAB_ASSETS[k]?.crypto));
       await patch(i < assets.length ? { cursor: i } : { cursor: 0, phase: "generate", progress: "Writing tonight's strategies" });
     } else if (run.phase === "generate") {
       const carried = await generatePhase(sb, run, assets, win);

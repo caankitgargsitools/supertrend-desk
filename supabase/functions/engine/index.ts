@@ -13,7 +13,7 @@ import { dataSecurity, syncMcx } from "./instruments.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
-import { LAB_ASSETS, labNext, labOptStep, labStart, labStep, loadCryptoAssets, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
+import { LAB_ASSETS, labNext, labOptStep, labStart, labStep, loadCryptoAssets, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
 import { contractsFor, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaOrder, niceLot } from "./crypto.ts";
 import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
@@ -1302,6 +1302,7 @@ Deno.serve(async (req) => {
         try { await refreshAsset(sb, { client: "-", token: "-" }, k, today); console.log("crypto candles", k, Date.now() - t0, "ms"); }
         catch (e) { console.error("crypto candles", k, e); }
       }
+      await refreshCryptoMargins(sb, keys);
     })());
     return Response.json({ action, coins: keys });
   }
