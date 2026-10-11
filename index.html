@@ -3306,16 +3306,27 @@ async function loadLab() {
   lab.settings = settings; lab.runs = runs;
   lab.optLeft = await labOptCount();
   lab.loadedAt = Date.now();
-  let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary")
-    .in("stage", ["screened", "opt_queue", "pricing", "priced"]);
-  if (lab.request) q = q.eq("request_id", lab.request);
-  else if (lab.period === "run") q = q.eq("run_id", runs[0] ? runs[0].id : -1);
-  else q = q.gte("created_at", new Date(Date.now() - Number(lab.period) * 86400000).toISOString());
-  // "Passed only" also lists first-round winners still waiting for the tougher test (marked "Being checked").
-  if (lab.only && lab.view === "FUT") q = q.or("passed.eq.true,and(basic_passed.eq.true,robust_status.is.null),and(basic_passed.eq.true,robust_status.eq.queued)");
-  if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : lab.view === "SPREAD" ? "opt_struct" : "opt_sell", "is", null);
-  if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
-  lab.rows = must(await q.order("score", { ascending: false }).limit(2000)).map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
+  // The database hands out at most 1,000 rows per request, so the list is read in pages of 1,000 (up to 8,000 rows),
+  // ordered by score and then id so no row is skipped or repeated between pages.
+  const build = () => {
+    let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary")
+      .in("stage", ["screened", "opt_queue", "pricing", "priced"]);
+    if (lab.request) q = q.eq("request_id", lab.request);
+    else if (lab.period === "run") q = q.eq("run_id", runs[0] ? runs[0].id : -1);
+    else q = q.gte("created_at", new Date(Date.now() - Number(lab.period) * 86400000).toISOString());
+    // "Passed only" also lists first-round winners still waiting for the tougher test (marked "Being checked").
+    if (lab.only && lab.view === "FUT") q = q.or("passed.eq.true,and(basic_passed.eq.true,robust_status.is.null),and(basic_passed.eq.true,robust_status.eq.queued)");
+    if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : lab.view === "SPREAD" ? "opt_struct" : "opt_sell", "is", null);
+    if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
+    return q.order("score", { ascending: false }).order("id", { ascending: false });
+  };
+  const all = [];
+  for (let from = 0; from < 8000; from += 1000) {
+    const page = must(await build().range(from, from + 999));
+    all.push(...page);
+    if (page.length < 1000) break;
+  }
+  lab.rows = all.map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
   lab.long = await db.rpc("lab_long_map").then((x) => x.data || {}).catch(() => ({}));
   renderLabStatus(); renderLabTable(); loadLabRequests().catch(() => {});
   scheduleLabPoll();
