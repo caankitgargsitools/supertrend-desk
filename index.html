@@ -814,6 +814,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
             <tbody id="lab_body"></tbody>
           </table>
         </div>
+        <p id="lab_more_wrap" style="margin:8px 0 0" hidden><button class="btn small" id="lab_more" type="button">Show more</button></p>
         <p class="hint" style="margin:8px 0 0">Score = net profit of the first 9 months ÷ the worst drawdown in them × the share of those months that made money. Figures are for 1 lot after brokerage and statutory charges, in whole rupees. Avg margin / lot = for each trade, the margin one lot needed at that trade's entry price (futures: price × lot × Dhan's margin rate; option writing: strike × lot × Dhan's writing margin rate; option buying: premium paid × lot), averaged over the trades. Margin rates come from Dhan's margin calculator, checked each night. Return on margin = the year's net ÷ that average. Similar strategies (same asset, same indicators and conditions, only settings such as lengths, levels, timeframe, stops or session differ) are grouped into one line showing the best of them; open “similar” to see the rest. Nights = how many runs tested this exact strategy (it passed in how many).<br><strong>Passed</strong> needs two rounds. Round 1: profitable in the ranked 9 months and in the 3 months after. Round 2 (the tougher test, on the latest year): the same rules must work on at least 2 other assets (same family first) and on other candle timeframes (at least 2 of them, or 1 when fewer than 3 could be tried; a strategy that can't be tried on another timeframe doesn't pass; once-a-day strategies are tried at the close of 60- and 125-minute candles. MCX 5-minute candles come from the contracts Dhan still lists, so they go back as far as the current contracts have traded and grow every night). Buy &amp; hold (1 lot held for the year) is shown alongside for comparison but isn't part of the pass, because strategies trade short as well as long. “Works” = makes money with a profit factor of 1.1 or more and enough trades. Every earlier result has been put through round 2 as well.</p>
       </section>
 
@@ -3713,6 +3714,7 @@ function renderLabHead() {
   requestAnimationFrame(() => { setBarH(); const tr = head.querySelector("tr.t"); if (tr) $("lab_grid").style.setProperty("--labhead", `${tr.getBoundingClientRect().height}px`); fitLabGrid(); });
 }
 function renderLabTable() {
+  if ($("lab_more_wrap")) $("lab_more_wrap").hidden = true;
   requestAnimationFrame(fitLabGrid);
   const hd = $("lab_head");
   if (!hd.children.length || (renderLabTable.rowsFor !== lab.rows && !hd.contains(document.activeElement))) { renderLabTable.rowsFor = lab.rows; renderLabHead(); }
@@ -3721,7 +3723,7 @@ function renderLabTable() {
   lab.openFam = lab.openFam || new Set();
   const nStrat = fams.reduce((a, f) => a + f.members.length, 0);
   const nf = Object.values(lab.filters).filter(Boolean).length;
-  $("lab_count").textContent = fams.length ? `${fams.length} groups of similar strategies (${nStrat} strategies)${nf ? `, ${nf} column filter${nf === 1 ? "" : "s"} on` : ""}${fams.length > 150 ? "; showing the first 150 groups" : ""}.${labPhone() ? " Tap a card to open it." : " Click a column title to sort; type in the boxes under the titles to filter (numbers: 50 = at least 50, >50, <0, 10-20)."}` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
+  $("lab_count").textContent = fams.length ? `${fams.length} groups of similar strategies (${nStrat} strategies)${nf ? `, ${nf} column filter${nf === 1 ? "" : "s"} on` : ""}${fams.length > (lab.showN || 150) ? `; showing the first ${lab.showN || 150} groups (type in the boxes under the titles to find one, e.g. “HA strength” under Strategy, or press “Show more”)` : ""}.${labPhone() ? " Tap a card to open it." : " Click a column title to sort; type in the boxes under the titles to filter (numbers: 50 = at least 50, >50, <0, 10-20)."}` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
   const pc = (v) => `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}" title="${rupees(v)}">${rupeesShort(v)}</span>`;
   const rs = (v) => v == null ? "–" : `<span title="${rupees(v)}">${rupeesShort(v)}</span>`;
   const rowFor = (g, num, f, sub) => {
@@ -3747,10 +3749,18 @@ function renderLabTable() {
   };
   if (labPhone()) { renderLabCards(fams, pc, rs); return; }
   $("lab_cards").innerHTML = "";
-  fams.slice(0, 150).forEach((f, i) => {
+  const shown = lab.showN || 150;
+  labMoreButton(fams.length, shown);
+  fams.slice(0, shown).forEach((f, i) => {
     body.append(rowFor(f.best, i + 1, f, false));
     if (lab.openFam.has(f.key)) f.members.slice(1).forEach((g, j) => body.append(rowFor(g, `${i + 1}.${j + 2}`, f, true)));
   });
+}
+/** "Show more" under the list: nothing is cut off, the list just grows 150 groups at a time. */
+function labMoreButton(total, shown) {
+  const w = $("lab_more_wrap"); if (!w) return;
+  w.hidden = total <= shown;
+  $("lab_more").textContent = `Show more (${Math.min(150, total - shown)} of the ${total - shown} not shown yet)`;
 }
 function labPhone() { return matchMedia("(max-width: 760px)").matches; }
 matchMedia("(max-width: 760px)").addEventListener("change", () => { if (lab.open) renderLabTable(); });
@@ -3791,7 +3801,9 @@ function renderLabCards(fams, pc, rs) {
     });
     return el;
   };
-  fams.slice(0, 100).forEach((f, i) => {
+  const shownC = lab.showN || 100;
+  labMoreButton(fams.length, shownC);
+  fams.slice(0, shownC).forEach((f, i) => {
     box.append(card(f.best, i + 1, f, false));
     if (lab.openFam.has(f.key)) f.members.slice(1).forEach((g, j) => box.append(card(g, `${i + 1}.${j + 2}`, f, true)));
   });
@@ -4128,6 +4140,7 @@ $("lab_view").querySelectorAll("button").forEach((b) => b.addEventListener("clic
   const sel = $("lab_asset");
   for (const [k, p] of Object.entries(PRESETS)) { const o = document.createElement("option"); o.value = k; o.textContent = p.name; sel.append(o); }
   sel.addEventListener("change", () => { lab.asset = sel.value; loadLab().catch((e) => toast(errorText(e))); });
+  $("lab_more").addEventListener("click", () => { lab.showN = (lab.showN || 150) + 150; renderLabTable(); });
   $("lab_period").addEventListener("change", () => { lab.period = $("lab_period").value; loadLab().catch((e) => toast(errorText(e))); });
   $("lab_only").addEventListener("change", () => { lab.only = $("lab_only").value === "true"; loadLab().catch((e) => toast(errorText(e))); });
   $("lab_stopf").addEventListener("change", () => { lab.stopf = $("lab_stopf").value; renderLabTable(); });
