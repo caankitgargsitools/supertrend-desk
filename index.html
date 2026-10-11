@@ -3657,13 +3657,27 @@ function numTest(expr) {
   }
   return null;
 }
+/** Other names a strategy can be searched by (indicator names written out, common spellings). */
+function labAliases(r) {
+  const inds = new Set(((r.config && r.config.rules) ? ["long", "short", "exitLong", "exitShort"].flatMap((k) => ((r.config.rules[k] || {}).conds || []).map((c) => c.ind)) : []));
+  const out = [];
+  if (inds.has("HAS")) out.push("heikin ashi strength heikinashi haikanashi hs strength has weighted score");
+  if (inds.has("HA") || (r.config && r.config.rules && r.config.rules.candles === "HA")) out.push("heikin ashi heikinashi haikanashi");
+  if (inds.has("ST")) out.push("supertrend"); if (inds.has("SWEEP")) out.push("liquidity sweep");
+  if (inds.has("DON")) out.push("donchian breakout"); if (inds.has("BB")) out.push("bollinger");
+  return out.join(" ");
+}
 function labPassFilters(g) {
   for (const c of LAB_COLS) {
     const f = lab.filters[c.k]; if (!f || !c.v) continue;
     const v = c.v(g);
     if (c.f === "num") { const t = numTest(f); if (t && !(v != null && t(Number(v)))) return false; }
     else if (c.f === "select") { if (v !== f) return false; }
-    else if (!String(v).toLowerCase().includes(String(f).toLowerCase())) return false;
+    else {
+      // Every word typed must appear somewhere (in any order); the Strategy box also knows other names of the indicators.
+      const hay = (String(v) + (c.k === "name" ? " " + labAliases(g.r) : "")).toLowerCase();
+      if (!String(f).toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w))) return false;
+    }
   }
   return true;
 }
