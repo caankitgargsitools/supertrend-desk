@@ -862,7 +862,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
       <div id="lp_live_box" hidden>
         <p class="hint" style="margin:0 0 8px">Strategies that are live now (archived ones and ones back on paper are left out, along with their trades). Capital = the capital you gave the strategy, or else its lots × today's margin for one lot (Dhan's margin calculator; crypto: Delta at 10×). Profits are real closed trades after charges, in whole rupees. CAGR = the yearly growth rate that turns the capital into capital + profit over the days since the strategy first went live. Click a strategy to see every trade.</p>
         <div class="scroll"><table class="big-table" id="lv_table"><thead><tr>
-          <th>Strategy</th><th>Asset</th><th>Live since</th><th class="n">Days</th><th class="n">Capital deployed</th><th class="n">Net profit</th><th class="n">Return</th><th class="n">CAGR</th>
+          <th>Strategy</th><th>Asset</th><th>Live since</th><th class="n">Days</th><th class="n">Capital deployed</th><th class="n">Margin required</th><th class="n">Margin deployed</th><th class="n">Net profit</th><th class="n">Return</th><th class="n">CAGR</th>
           <th class="n">Trades</th><th class="n">Win %</th><th class="n">Profit factor</th><th class="n">Max drawdown</th><th class="n">Open position P&amp;L</th></tr></thead>
           <tbody id="lv_body"></tbody><tfoot id="lv_foot"></tfoot></table></div>
         <p class="hint" id="lv_note" style="margin:8px 0 0"></p>
@@ -1119,7 +1119,9 @@ function errorText(e) {
 }
 function must(res) { if (res.error) throw res.error; return res.data; }
 
+let todayMarg = {};
 async function loadAll() {
+  db.from("lab_margins").select("asset, detail").then((x) => { if (x.data) { todayMarg = Object.fromEntries(x.data.map((m) => [m.asset, m.detail || {}])); if (!$("listPane").hidden) renderList(); } }).catch(() => {});
   const [settings, strategies] = await Promise.all([
     db.rpc("broker_status").then(must),
     db.from("algo_strategies").select("*").order("created_at").then(must),
@@ -4337,6 +4339,9 @@ function listCols() {
     ["live", "Mode", (s) => s.live ? "Live" : "Paper"],
     ["pos", "Position", (s) => s.position === "FLAT" ? "Flat" : `${s.position === "LONG" ? "Long" : "Short"}${s.pos_lots ? ` · ${s.pos_lots} lot${s.pos_lots === 1 ? "" : "s"}` : ""}${s.pos_upnl != null ? ` · ${Number(s.pos_upnl) >= 0 ? "+" : ""}${rupees(s.pos_upnl)} open` : ""}`],
     ["size", "Size", (s) => s.sizing && s.sizing.mode === "CAPITAL" ? `${rupees(s.capital)} · max ${s.sizing.max_lots}` : s.sizing && s.sizing.mode === "AUTO" ? `Auto ${s.sizing.alloc_pct}%` : `${s.lots} lot${Number(s.lots) === 1 ? "" : "s"}`],
+    ["capital", "Capital", (s) => capitalOf(s), "money"],
+    ["mreq", "Margin required (today)", (s) => marginRequired(s).v, "money"],
+    ["mdep", "Margin deployed (open)", (s) => marginDeployed(s), "money"],
     ["livepnl", "Live P&L", (s) => (pnl.get(s.id) || {}).live || 0, "num"],
     ["paperpnl", "Paper P&L", (s) => (pnl.get(s.id) || {}).paper || 0, "num"],
     ["trades", "Trades", (s) => (pnl.get(s.id) || {}).n || 0, "int"],
@@ -4363,6 +4368,35 @@ function listRows() {
     return true;
   });
 }
+/* ---------- capital and margin of a strategy (today's margin for one lot from Dhan's margin calculator; crypto: Delta at 10×) ---------- */
+function perLotToday(s, marg = todayMarg) {
+  const d = marg[s.underlying]; if (!d) return null;
+  const opt = s.trade_type === "OPTIONS", sell = opt && s.option_side === "SELL";
+  const v = !opt ? (s.intraday ? d.fut_margin_intraday ?? d.margin_intraday ?? d.fut_margin ?? d.margin : d.fut_margin ?? d.margin ?? d.fut_margin_intraday ?? d.margin_intraday)
+    : sell ? (s.intraday ? d.sell_margin_intraday ?? d.sell_margin : d.sell_margin ?? d.sell_margin_intraday) : (d.opt_premium && d.lot_dhan ? d.opt_premium * d.lot_dhan : null);
+  return v > 0 ? { v, what: !opt ? "futures margin" : sell ? "option-writing margin" : "at-the-money premium" } : null;
+}
+/** Lots the strategy would trade today: fixed lots; with its own capital, as many as the capital covers (up to its maximum). */
+function lotsToday(s, per) {
+  if (s.sizing && s.sizing.mode === "CAPITAL" && Number(s.capital) > 0 && per) return Math.max(0, Math.min(Number(s.sizing.max_lots) || 1, Math.floor(Number(s.capital) / per)));
+  if (s.sizing && s.sizing.mode === "AUTO") return null;
+  return Math.max(1, Number(s.lots) || 1);
+}
+/** Margin needed today for the lots it trades. */
+function marginRequired(s, marg = todayMarg) {
+  const p = perLotToday(s, marg); if (!p) return { v: null, tip: "No margin figure for this asset yet" };
+  const n = lotsToday(s, p.v);
+  return n == null ? { v: Math.trunc(p.v), tip: `1 lot × today's ${p.what} (auto-sized: lots depend on your capital page)` }
+    : { v: Math.trunc(p.v * n), tip: `${n} lot${n === 1 ? "" : "s"} × today's ${p.what} (${rupees(p.v)} a lot)` };
+}
+/** Margin tied up right now by the open position (recorded at entry); 0 when flat. */
+function marginDeployed(s) {
+  if (s.position === "FLAT") return 0;
+  if (Number(s.pos_margin) > 0) return Math.trunc(Number(s.pos_margin));
+  const p = perLotToday(s); return p ? Math.trunc(p.v * Math.max(1, Number(s.pos_lots) || Number(s.lots) || 1)) : null;
+}
+const capitalOf = (s) => s.sizing && s.sizing.mode === "CAPITAL" && Number(s.capital) > 0 ? Math.trunc(Number(s.capital)) : null;
+
 /* ---------- live performance: capital, profit, CAGR and drawdown of every strategy that is live now ---------- */
 let lpTab = "all";
 const lvOpen = new Set();
@@ -4375,13 +4409,8 @@ function setLpTab(t) {
 document.querySelectorAll("#lp_tabs [data-t]").forEach((b) => b.addEventListener("click", () => setLpTab(b.dataset.t)));
 /** Money one strategy ties up: its own capital if it has one, else lots × today's margin for one lot. */
 function liveCapital(s, marg) {
-  if (s.sizing && s.sizing.mode === "CAPITAL" && Number(s.capital) > 0) return { v: Math.trunc(Number(s.capital)), src: "capital you set" };
-  const d = marg[s.underlying], lots = Math.max(1, Number(s.lots) || 1);
-  if (!d) return { v: null, src: "no margin data yet" };
-  const opt = s.trade_type === "OPTIONS", sell = opt && s.option_side === "SELL";
-  const per = !opt ? (s.intraday ? d.fut_margin_intraday ?? d.margin_intraday ?? d.fut_margin ?? d.margin : d.fut_margin ?? d.margin)
-    : sell ? (s.intraday ? d.sell_margin_intraday ?? d.sell_margin : d.sell_margin) : (d.opt_premium && d.lot_dhan ? d.opt_premium * d.lot_dhan : null);
-  return per > 0 ? { v: Math.trunc(per * lots), src: `${lots} lot${lots === 1 ? "" : "s"} × today's ${!opt ? "futures margin" : sell ? "option-writing margin" : "at-the-money premium"}` } : { v: null, src: "no margin data yet" };
+  const c = capitalOf(s); if (c) return { v: c, src: "capital you set" };
+  const m = marginRequired(s, marg); return m.v ? { v: m.v, src: m.tip } : { v: null, src: "no margin data yet" };
 }
 /** Figures from a list of closed trades (oldest first). */
 function tradeStats(ts) {
@@ -4404,7 +4433,7 @@ async function renderLive() {
   const live = state.strategies.filter((s) => s.live && !s.archived && !s.is_master && (owner !== "ME" || s.owner_id === me.user_id));
   const body = $("lv_body"), foot = $("lv_foot");
   if (!live.length) {
-    body.innerHTML = `<tr><td colspan="13" class="hint">No strategy is live right now. Switch one to live (on its page, or tick several under “All strategies” and press “Go live”) and its real trades will appear here.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="15" class="hint">No strategy is live right now. Switch one to live (on its page, or tick several under “All strategies” and press “Go live”) and its real trades will appear here.</td></tr>`;
     foot.innerHTML = ""; $("lv_note").textContent = ""; return;
   }
   const ids = live.map((s) => s.id);
@@ -4412,7 +4441,7 @@ async function renderLive() {
     db.from("lab_margins").select("asset, detail").then((x) => Object.fromEntries((x.data || []).map((m) => [m.asset, m.detail || {}]))).catch(() => ({})),
     (async () => { const out = []; for (let i = 0; i < ids.length; i += 50) out.push(...must(await db.from("algo_trades").select("id, strategy_id, entry_day, exit_at, side, contract, lots, entry_px, exit_px, gross, costs, net, exit_why").eq("mode", "LIVE").in("strategy_id", ids.slice(i, i + 50)).order("exit_at", { ascending: true }).limit(10000))); return out; })(),
   ]);
-  const now = Date.now(); let totCap = 0, totNet = 0, capDays = 0, allTrades = [], totOpen = 0, missing = 0;
+  const now = Date.now(); let totCap = 0, totNet = 0, capDays = 0, allTrades = [], totOpen = 0, missing = 0, totReq = 0, totDep = 0;
   body.innerHTML = "";
   for (const s of live) {
     const ts = trades.filter((t) => t.strategy_id === s.id), st = tradeStats(ts), cap = liveCapital(s, marg);
@@ -4421,9 +4450,11 @@ async function renderLive() {
     const open = s.position !== "FLAT" && s.pos_upnl != null ? Number(s.pos_upnl) : null;
     if (cap.v) { totCap += cap.v; capDays += cap.v * days; } else missing++;
     totNet += st.net; allTrades = allTrades.concat(ts); if (open) totOpen += open;
+    const mReq = marginRequired(s, marg), mDep = marginDeployed(s);
+    if (mReq.v) totReq += mReq.v; if (mDep) totDep += mDep;
     const tr = document.createElement("tr"); tr.className = "lvrow"; tr.tabIndex = 0;
     tr.innerHTML = `<td class="nm">${lvOpen.has(s.id) ? "▾" : "▸"} ${esc(s.name)}</td><td>${esc(assetLabel(s.underlying))}</td><td class="when">${esc(istText(since))}</td><td class="n">${days}</td>
-      <td class="n" title="${esc(cap.src)}">${cap.v ? rupees(cap.v) : "–"}</td><td class="n">${lvRs(st.net)}</td><td class="n">${lvPct(cap.v ? (st.net / cap.v) * 100 : null)}</td>
+      <td class="n" title="${esc(cap.src)}">${cap.v ? rupees(cap.v) : "–"}</td><td class="n" title="${esc(mReq.tip)}">${mReq.v ? rupees(mReq.v) : "–"}</td><td class="n">${mDep == null ? "–" : rupees(mDep)}</td><td class="n">${lvRs(st.net)}</td><td class="n">${lvPct(cap.v ? (st.net / cap.v) * 100 : null)}</td>
       <td class="n">${lvPct(cap.v ? cagrOf(cap.v, st.net, days) : null)}${days < 30 && st.n ? '<div class="hint sm">short record</div>' : ""}</td>
       <td class="n">${st.n}</td><td class="n">${st.winPct == null ? "–" : st.winPct.toFixed(0) + "%"}</td><td class="n">${st.pf == null ? "–" : st.pf === Infinity ? "∞" : st.pf.toFixed(2)}</td>
       <td class="n">${st.n ? `${rupees(st.maxDD)}${cap.v ? `<div class="hint sm">${((st.maxDD / cap.v) * 100).toFixed(1)}% of capital</div>` : ""}` : "–"}</td><td class="n">${open == null ? "–" : lvRs(open)}</td>`;
@@ -4433,7 +4464,7 @@ async function renderLive() {
     if (lvOpen.has(s.id)) {
       const det = document.createElement("tr"); det.className = "lvdet";
       const stat = (k, v) => `<span>${k}<b>${v}</b></span>`;
-      det.innerHTML = `<td colspan="13"><div class="lvstats">${stat("Capital:", cap.v ? `${rupees(cap.v)} (${esc(cap.src)})` : esc(cap.src))}${stat("Trades:", st.n)}${stat("Winners:", st.wins)}
+      det.innerHTML = `<td colspan="15"><div class="lvstats">${stat("Capital:", cap.v ? `${rupees(cap.v)} (${esc(cap.src)})` : esc(cap.src))}${stat("Trades:", st.n)}${stat("Winners:", st.wins)}
         ${stat("Average win:", st.avgWin == null ? "–" : rupees(st.avgWin))}${stat("Average loss:", st.avgLoss == null ? "–" : rupees(st.avgLoss))}${stat("Best trade:", st.best == null ? "–" : rupees(st.best))}${stat("Worst trade:", st.worst == null ? "–" : rupees(st.worst))}
         ${stat("Longest losing streak:", st.lossStreak)}${stat("Position now:", s.position === "FLAT" ? "Flat" : `${s.position === "LONG" ? "Long" : "Short"}${s.pos_lots ? ` ${s.pos_lots} lot${s.pos_lots === 1 ? "" : "s"}` : ""}`)}</div>
         ${st.n ? `<div class="scroll" style="max-height:420px;overflow-y:auto"><table class="mini"><thead><tr><th>#</th><th>Entry day</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">Lots</th><th class="n">In</th><th class="n">Out</th><th class="n">Gross</th><th class="n">Charges</th><th class="n">Net</th><th class="n">Running total</th><th class="n">Below peak</th><th>Exit reason</th></tr></thead><tbody>
@@ -4446,7 +4477,7 @@ async function renderLive() {
   // Total: all live strategies together (capital added up; days weighted by each one's capital).
   allTrades.sort((a, b) => String(a.exit_at).localeCompare(String(b.exit_at)));
   const tot = tradeStats(allTrades), avgDays = totCap ? capDays / totCap : 0;
-  foot.innerHTML = `<tr><td>Total (${live.length} live)</td><td></td><td></td><td class="n">${avgDays ? Math.round(avgDays) : "–"}</td><td class="n">${totCap ? rupees(totCap) : "–"}</td><td class="n">${lvRs(totNet)}</td>
+  foot.innerHTML = `<tr><td>Total (${live.length} live)</td><td></td><td></td><td class="n">${avgDays ? Math.round(avgDays) : "–"}</td><td class="n">${totCap ? rupees(totCap) : "–"}</td><td class="n">${totReq ? rupees(totReq) : "–"}</td><td class="n">${rupees(totDep)}</td><td class="n">${lvRs(totNet)}</td>
     <td class="n">${lvPct(totCap ? (totNet / totCap) * 100 : null)}</td><td class="n">${lvPct(totCap ? cagrOf(totCap, totNet, avgDays) : null)}</td><td class="n">${tot.n}</td><td class="n">${tot.winPct == null ? "–" : tot.winPct.toFixed(0) + "%"}</td>
     <td class="n">${tot.pf == null ? "–" : tot.pf === Infinity ? "∞" : tot.pf.toFixed(2)}</td><td class="n">${tot.n ? `${rupees(tot.maxDD)}${totCap ? `<div class="hint sm">${((tot.maxDD / totCap) * 100).toFixed(1)}% of capital</div>` : ""}` : "–"}</td><td class="n">${totOpen ? lvRs(totOpen) : "–"}</td></tr>`;
   $("lv_note").textContent = `Total CAGR uses the combined capital and the capital-weighted average days live${missing ? `; ${missing} strateg${missing === 1 ? "y has" : "ies have"} no capital figure yet and ${missing === 1 ? "is" : "are"} left out of the capital and CAGR` : ""}. Total max drawdown is on all live trades together, in the order they closed. Open positions aren't in the profit until they close.`;
@@ -4530,7 +4561,7 @@ function renderList() {
   const allIds = listRows().filter((s) => !s.archived).map((s) => s.id);
   for (const id of [...lsel]) if (!state.strategies.some((s) => s.id === id)) lsel.delete(id);
   const allOn = allIds.length > 0 && allIds.every((id) => lsel.has(id));
-  $("lp_head").innerHTML = `<tr><th class="ck"><input type="checkbox" id="lp_all" aria-label="Select all strategies shown" ${allOn ? "checked" : ""} ${allIds.length ? "" : "disabled"}></th>` + cols.map(([k, label, , t]) => `<th class="sort${t === "num" || t === "int" || t === "pct" ? " n" : ""}" data-k="${k}" aria-sort="${lsort.key === k ? (lsort.dir > 0 ? "ascending" : "descending") : "none"}" tabindex="0">${esc(label)}</th>`).join("") + "</tr>";
+  $("lp_head").innerHTML = `<tr><th class="ck"><input type="checkbox" id="lp_all" aria-label="Select all strategies shown" ${allOn ? "checked" : ""} ${allIds.length ? "" : "disabled"}></th>` + cols.map(([k, label, , t]) => `<th class="sort${t === "num" || t === "int" || t === "pct" || t === "money" ? " n" : ""}" data-k="${k}" aria-sort="${lsort.key === k ? (lsort.dir > 0 ? "ascending" : "descending") : "none"}" tabindex="0">${esc(label)}</th>`).join("") + "</tr>";
   $("lp_all").addEventListener("change", (e) => { for (const id of allIds) e.target.checked ? lsel.add(id) : lsel.delete(id); renderList(); });
   $("lp_head").querySelectorAll("th.sort").forEach((th) => {
     const go = () => { lsort.dir = lsort.key === th.dataset.k ? -lsort.dir : 1; lsort.key = th.dataset.k; renderList(); };
@@ -4544,7 +4575,7 @@ function renderList() {
   });
   const tb = $("lp_body"); tb.innerHTML = "";
   if (!rows.length) tb.innerHTML = `<tr><td colspan="${cols.length + 1}" class="hint">${state.strategies.length ? "No strategies match these filters." : (me.can_build || isAdmin()) ? "No strategies yet. Create one with “+ New strategy”, or buy one from the Marketplace." : "No strategies yet. Buy one from the Marketplace."}</td></tr>`;
-  let tl = 0, tp = 0;
+  let tl = 0, tp = 0, tReq = 0, tDep = 0, tCap = 0;
   for (const s of rows) {
     const tr = document.createElement("tr"); tr.className = "pick"; tr.tabIndex = 0;
     const ck = document.createElement("td"); ck.className = "ck";
@@ -4561,6 +4592,7 @@ function renderList() {
       if (k === "name") { td.className = "nm"; td.textContent = v; if (s.last_error) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Error"; td.append(e); } }
       else if (t === "num") { td.className = "n " + (v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""); td.textContent = rupees(v); }
       else if (t === "int") { td.className = "n"; td.textContent = String(v); }
+      else if (t === "money") { td.className = "n"; td.textContent = v == null ? "–" : rupees(v); if (k === "mreq") td.title = marginRequired(s).tip; }
       else if (t === "pct") { td.className = "n"; td.textContent = v === null ? "–" : `${v.toFixed(0)}%`; }
       else if (t === "when") { td.className = "when"; td.textContent = v ? istText(v) : "–"; }
       else if (k === "active") td.innerHTML = s.archived ? '<span class="chip">Archived</span>' : s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>';
@@ -4569,12 +4601,13 @@ function renderList() {
       tr.append(td);
     }
     const a = pnl.get(s.id) || {}; tl += a.live || 0; tp += a.paper || 0;
+    if (!s.archived) { const r = marginRequired(s).v, d = marginDeployed(s), c = capitalOf(s); if (r) tReq += r; if (d) tDep += d; if (c) tCap += c; }
     tr.addEventListener("click", () => openStrat(s.id));
     tr.addEventListener("keydown", (e) => { if (e.key === "Enter") openStrat(s.id); });
     tb.append(tr);
   }
   renderBulkBar();
-  $("lp_foot").textContent = rows.length ? `${rows.length} strateg${rows.length === 1 ? "y" : "ies"} · live P&L ${rupees(tl)} · paper P&L ${rupees(tp)} (closed trades, after estimated charges). Click a column title to sort; click a row to open it.` : "";
+  $("lp_foot").textContent = rows.length ? `${rows.length} strateg${rows.length === 1 ? "y" : "ies"} · live P&L ${rupees(tl)} · paper P&L ${rupees(tp)} (closed trades, after estimated charges) · capital set ${rupees(tCap)} · margin required today ${rupees(tReq)} · margin deployed now ${rupees(tDep)}. Click a column title to sort; click a row to open it.` : "";
 }
 ["lf_q", "lf_src", "lf_act", "lf_mode", "lf_asset", "lf_inst", "lf_owner", "lf_arch"].forEach((id) => $(id).addEventListener(id === "lf_q" ? "input" : "change", renderList));
 
