@@ -1198,8 +1198,9 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
       }
       await patch(i < assets.length ? { cursor: i } : { cursor: 0, phase: "generate", progress: "Writing tonight's strategies" });
     } else if (run.phase === "generate") {
-      await generatePhase(sb, run, assets, win);
-      await patch({ phase: "screen", progress: "Backtesting strategies", counts: { ...counts, generated: (await countRows(sb, run.id)) } });
+      const carried = await generatePhase(sb, run, assets, win);
+      await patch({ phase: "screen", progress: carried ? `Backtesting strategies (${carried} carried over from stopped runs)` : "Backtesting strategies",
+        counts: { ...counts, generated: (await countRows(sb, run.id)), ...(carried ? { carried } : {}) } });
     } else if (run.phase === "screen") {
       const left = await screenPhase(ctx, run, win);
       if (!left) {
@@ -1221,7 +1222,10 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
         const pickIds = (best ?? []).filter((b) => !LAB_ASSETS[b.asset]?.commodity && !LAB_ASSETS[b.asset]?.crypto && b.mode === "INTRADAY").slice(0, top).map((b) => b.id);
         if (pickIds.length) await sb.from("lab_results").update({ stage: "opt_queue" }).in("id", pickIds);
         const { count: passed } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).eq("passed", true);
-        await patch({ phase: "options", progress: `Pricing the best ${pickIds.length} with real option prices`, counts: { ...counts, passed, to_price: pickIds.length } });
+        // (includes any carried over from a stopped run that was waiting for its option prices)
+        const { count: queued } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).in("stage", ["opt_queue", "pricing"]);
+        const nq = queued ?? pickIds.length;
+        await patch({ phase: "options", progress: `Pricing the best ${nq} with real option prices`, counts: { ...counts, passed, to_price: nq } });
       }
     } else if (run.phase === "options") {
       const left = await optionsPhase(ctx, run, win, patch);
@@ -1252,11 +1256,16 @@ async function countRows(sb: SupabaseClient, runId: number) {
   return count ?? 0;
 }
 
-async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _win: { from: string }) {
+async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _win: { from: string }): Promise<number> {
   const set = run.settings ?? {};
-  const n = Math.max(10, Math.min(1000, Number(set.per_night ?? 300)));
-  if ((await countRows(sb, run.id)) > 0) return; // already written (instalment repeated)
-  if (set.request_id) return requestPhase(sb, run, assets);
+  let n = Math.max(10, Math.min(1000, Number(set.per_night ?? 300)));
+  if ((await countRows(sb, run.id)) > 0) return 0; // already written (instalment repeated)
+  if (set.request_id) { await requestPhase(sb, run, assets); return 0; }
+  // Nothing is left half-way: strategies that a stopped or failed run hadn't backtested yet, or that were waiting for
+  // option pricing, move into this run first (oldest first, only for this run's assets). They count towards this run's
+  // size, so a big backlog is cleared over a few runs without making any one run heavier.
+  const carried = await adoptLeftovers(sb, run, assets, n);
+  n -= carried;
   const since = new Date(Date.now() - 14 * 86400000).toISOString();
   const { data: recent } = await sb.from("lab_results").select("fingerprint").gte("created_at", since).limit(20000);
   const seen = new Set((recent ?? []).map((x) => x.fingerprint));
@@ -1323,7 +1332,7 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   const w = assets.map((k) => LAB_ASSETS[k].commodity ? 1 : 2), wsum = w.reduce((a, b) => a + b, 0);
   const nNew = Math.max(0, n - nMade);
   assets.forEach((k, i) => {
-    const want = Math.max(1, Math.round((nNew * w[i]) / wsum));
+    const want = nNew ? Math.max(1, Math.round((nNew * w[i]) / wsum)) : 0;
     let made = 0, tries = 0;
     while (made < want && tries < want * 5) {
       tries++; seed = (seed + 7919) >>> 0;
@@ -1339,6 +1348,7 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
     const { error } = await sb.from("lab_results").insert(rows.slice(i, i + 200));
     if (error) throw new Error(error.message);
   }
+  return carried;
 }
 
 /** A variation run for one strategy: the strategy itself as the baseline, plus its relatives of the kinds asked for. */
@@ -1734,13 +1744,26 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     await Promise.all(ups);
   }
   // 3. Verdicts for winners whose checks are all done.
-  const { data: queued } = await sb.from("lab_results").select("id, config, fingerprint, asset, label, mode, score, metrics, starred, promoted_id, request_id").eq("robust_status", "queued").order("id", { ascending: false }).limit(20);
+  // Any run's winners, not just the newest: pick those with no check still waiting (so nothing finished sits undecided).
+  const { data: qAll } = await sb.from("lab_results").select("id").eq("robust_status", "queued").order("id", { ascending: false }).limit(1000);
+  const qIds = (qAll ?? []).map((r) => r.id);
+  const waiting = new Set<number>();
+  for (let i = 0; i < qIds.length; i += 200) {
+    const { data: pw } = await sb.from("lab_checks").select("lab_id").in("lab_id", qIds.slice(i, i + 200)).eq("status", "pending").limit(10000);
+    for (const x of pw ?? []) waiting.add(x.lab_id);
+  }
+  const ready = qIds.filter((id) => !waiting.has(id)).slice(0, 20);
+  const { data: queued } = ready.length
+    ? await sb.from("lab_results").select("id, config, fingerprint, asset, label, mode, score, metrics, starred, promoted_id, request_id").in("id", ready).order("id", { ascending: false })
+    : { data: [] as any[] };
   let decided = 0;
   const ids = (queued ?? []).map((r) => r.id);
-  const { data: allCs } = ids.length ? await sb.from("lab_checks").select("lab_id, kind, asset, tf, status, result").in("lab_id", ids).neq("status", "void").limit(1000) : { data: [] };
+  const { data: allCs } = ids.length ? await sb.from("lab_checks").select("lab_id, kind, asset, tf, status, result").in("lab_id", ids).neq("status", "void").limit(5000) : { data: [] };
   for (const r of queued ?? []) {
     const cs = (allCs ?? []).filter((c) => c.lab_id === r.id);
-    if (!cs.length || cs.some((c) => c.status === "pending")) continue;
+    // A winner whose checks went missing goes back in the queue to get a fresh set (never stuck as "queued").
+    if (!cs.length) { await sb.from("lab_results").update({ robust_status: null }).eq("id", r.id).eq("robust_status", "queued"); continue; }
+    if (cs.some((c) => c.status === "pending")) continue;
     const v = robustVerdict(r.config, cs);
     // Every trade of the year-by-year test is kept with the result (packed in columns to stay small).
     const longTrades = joinTrades(cs.filter((c) => c.kind === "year" && !c.result?.skip).map((c) => c.result?.tr).filter(Boolean));
@@ -1921,11 +1944,32 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
   return true;
 }
 
+/** Moves unfinished strategies of runs that are no longer running into this run. Returns how many still need a backtest. */
+export async function adoptLeftovers(sb: SupabaseClient, run: Run, assets: string[], max: number): Promise<number> {
+  const want = new Set(assets);
+  const { data: rows } = await sb.from("lab_results").select("id, run_id, asset, stage").in("stage", ["pending", "opt_queue", "pricing"])
+    .neq("run_id", run.id).order("id").limit(5000);
+  if (!rows?.length) return 0;
+  const runIds = [...new Set(rows.map((r) => r.run_id))];
+  const { data: live } = await sb.from("lab_runs").select("id").in("id", runIds).eq("status", "running");
+  const busy = new Set((live ?? []).map((r) => r.id));
+  const orphans = rows.filter((r) => !busy.has(r.run_id) && want.has(r.asset));
+  const pend = orphans.filter((r) => r.stage === "pending").slice(0, max).map((r) => r.id);
+  const opt = orphans.filter((r) => r.stage !== "pending").map((r) => r.id);
+  const ids = [...pend, ...opt];
+  for (let i = 0; i < ids.length; i += 200) {
+    const { error } = await sb.from("lab_results").update({ run_id: run.id }).in("id", ids.slice(i, i + 200));
+    if (error) throw new Error(error.message);
+  }
+  return pend.length;
+}
+
 /** Keep the tables small: strategies that didn't pass for 7 days, everything else for 45 days unless starred or turned into a strategy. */
 async function prune(sb: SupabaseClient) {
   const d = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
   // Losers go after a week; first-round winners stay (45 days) so the tougher test's verdict can be seen.
-  await sb.from("lab_results").delete().eq("passed", false).or("basic_passed.is.null,basic_passed.eq.false").eq("starred", false).is("promoted_id", null).lt("created_at", d(7));
+  // (Strategies still waiting for their backtest are never cleared here: the next run takes them over.)
+  await sb.from("lab_results").delete().eq("passed", false).or("basic_passed.is.null,basic_passed.eq.false").neq("stage", "pending").eq("starred", false).is("promoted_id", null).lt("created_at", d(7));
   await sb.from("lab_results").delete().eq("starred", false).is("promoted_id", null).lt("created_at", d(45));
   await sb.from("lab_opt_cache").delete().lt("created_at", d(420));
   await sb.from("lab_runs").delete().lt("created_at", d(90));
