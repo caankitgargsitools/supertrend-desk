@@ -377,6 +377,12 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 @keyframes beat { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); } 100% { box-shadow: 0 0 0 9px transparent; } }
 @keyframes labstripes { to { background-position: 16px 0; } }
 @media (prefers-reduced-motion: reduce) { .labprog.live .fill, .beat i { animation: none; } }
+  #lv_table tr.lvrow { cursor: pointer; }
+  #lv_table tr.lvrow:hover td { background: var(--hover, rgba(127,127,127,.08)); }
+  #lv_table tr.lvdet > td { padding: 10px 12px 14px; }
+  #lv_table tfoot td { font-weight: 700; border-top: 2px solid var(--line, #d0d7de); }
+  .lvstats { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 8px; }
+  .lvstats span b { margin-left: 4px; }
   .bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line, #d0d7de); border-radius: 8px; background: var(--panel, transparent); position: sticky; top: var(--barH, 0); z-index: 3; }
   .bulkbar #lp_bulk_n { font-weight: 600; margin-right: 4px; }
   td.ck, th.ck { width: 34px; text-align: center; }
@@ -851,6 +857,17 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
     <section class="card" id="listPane" hidden>
       <div class="head"><h2 id="lp_title">Strategies</h2>
         <div class="actions"><button class="btn primary" id="newFlip2" type="button">+ New strategy</button></div></div>
+      <div class="seg" id="lp_tabs" role="tablist" aria-label="Strategies view" style="margin:4px 0 10px">
+        <button type="button" role="tab" data-t="all" aria-pressed="true">All strategies</button><button type="button" role="tab" data-t="live" aria-pressed="false">Live performance</button></div>
+      <div id="lp_live_box" hidden>
+        <p class="hint" style="margin:0 0 8px">Strategies that are live now (archived ones and ones back on paper are left out, along with their trades). Capital = the capital you gave the strategy, or else its lots × today's margin for one lot (Dhan's margin calculator; crypto: Delta at 10×). Profits are real closed trades after charges, in whole rupees. CAGR = the yearly growth rate that turns the capital into capital + profit over the days since the strategy first went live. Click a strategy to see every trade.</p>
+        <div class="scroll"><table class="big-table" id="lv_table"><thead><tr>
+          <th>Strategy</th><th>Asset</th><th>Live since</th><th class="n">Days</th><th class="n">Capital deployed</th><th class="n">Net profit</th><th class="n">Return</th><th class="n">CAGR</th>
+          <th class="n">Trades</th><th class="n">Win %</th><th class="n">Profit factor</th><th class="n">Max drawdown</th><th class="n">Open position P&amp;L</th></tr></thead>
+          <tbody id="lv_body"></tbody><tfoot id="lv_foot"></tfoot></table></div>
+        <p class="hint" id="lv_note" style="margin:8px 0 0"></p>
+      </div>
+      <div id="lp_all_box">
       <button class="btn small mob-only" id="lf_toggle" type="button" aria-expanded="false">Filters</button>
       <div class="filters" id="lf_box">
         <label class="f grow"><span>Search</span><input id="lf_q" type="search" placeholder="Name, asset, owner…" autocomplete="off"></label>
@@ -872,6 +889,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
       </div>
       <div class="scroll"><table class="big-table"><thead id="lp_head"></thead><tbody id="lp_body"></tbody></table></div>
       <p class="hint" id="lp_foot" style="margin:8px 0 0"></p>
+      </div>
     </section>
 
     <section class="card" id="marketPane" hidden>
@@ -4345,6 +4363,95 @@ function listRows() {
     return true;
   });
 }
+/* ---------- live performance: capital, profit, CAGR and drawdown of every strategy that is live now ---------- */
+let lpTab = "all";
+const lvOpen = new Set();
+function setLpTab(t) {
+  lpTab = t;
+  document.querySelectorAll("#lp_tabs [data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === t)));
+  $("lp_all_box").hidden = t !== "all"; $("lp_live_box").hidden = t !== "live";
+  if (t === "live") renderLive().catch((e) => toast(errorText(e)));
+}
+document.querySelectorAll("#lp_tabs [data-t]").forEach((b) => b.addEventListener("click", () => setLpTab(b.dataset.t)));
+/** Money one strategy ties up: its own capital if it has one, else lots × today's margin for one lot. */
+function liveCapital(s, marg) {
+  if (s.sizing && s.sizing.mode === "CAPITAL" && Number(s.capital) > 0) return { v: Math.trunc(Number(s.capital)), src: "capital you set" };
+  const d = marg[s.underlying], lots = Math.max(1, Number(s.lots) || 1);
+  if (!d) return { v: null, src: "no margin data yet" };
+  const opt = s.trade_type === "OPTIONS", sell = opt && s.option_side === "SELL";
+  const per = !opt ? (s.intraday ? d.fut_margin_intraday ?? d.margin_intraday ?? d.fut_margin ?? d.margin : d.fut_margin ?? d.margin)
+    : sell ? (s.intraday ? d.sell_margin_intraday ?? d.sell_margin : d.sell_margin) : (d.opt_premium && d.lot_dhan ? d.opt_premium * d.lot_dhan : null);
+  return per > 0 ? { v: Math.trunc(per * lots), src: `${lots} lot${lots === 1 ? "" : "s"} × today's ${!opt ? "futures margin" : sell ? "option-writing margin" : "at-the-money premium"}` } : { v: null, src: "no margin data yet" };
+}
+/** Figures from a list of closed trades (oldest first). */
+function tradeStats(ts) {
+  let eq = 0, peak = 0, dd = 0, gw = 0, gl = 0, wins = 0, best = null, worst = null, streak = 0, maxLoss = 0;
+  const rows = ts.map((t) => {
+    const v = Number(t.net) || 0; eq += v; peak = Math.max(peak, eq); dd = Math.max(dd, peak - eq);
+    if (v > 0) { gw += v; wins++; streak = 0; } else { gl += -v; streak++; maxLoss = Math.max(maxLoss, streak); }
+    best = best === null ? v : Math.max(best, v); worst = worst === null ? v : Math.min(worst, v);
+    return { t, run: eq, dd: peak - eq };
+  });
+  const n = ts.length;
+  return { n, net: eq, wins, winPct: n ? (wins / n) * 100 : null, pf: gl > 0 ? gw / gl : gw > 0 ? Infinity : null, maxDD: dd, best, worst,
+    avgWin: wins ? gw / wins : null, avgLoss: n - wins ? -gl / (n - wins) : null, lossStreak: maxLoss, rows };
+}
+const cagrOf = (cap, net, days) => cap > 0 && days > 0 && cap + net > 0 ? (Math.pow((cap + net) / cap, 365 / days) - 1) * 100 : null;
+const lvPct = (v) => v == null || !isFinite(v) ? "–" : `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${v >= 0 ? "" : "−"}${Math.abs(v).toFixed(1)}%</span>`;
+const lvRs = (v) => v == null ? "–" : `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${rupees(v)}</span>`;
+async function renderLive() {
+  const owner = isAdmin() ? $("lf_owner").value : "ME";
+  const live = state.strategies.filter((s) => s.live && !s.archived && !s.is_master && (owner !== "ME" || s.owner_id === me.user_id));
+  const body = $("lv_body"), foot = $("lv_foot");
+  if (!live.length) {
+    body.innerHTML = `<tr><td colspan="13" class="hint">No strategy is live right now. Switch one to live (on its page, or tick several under “All strategies” and press “Go live”) and its real trades will appear here.</td></tr>`;
+    foot.innerHTML = ""; $("lv_note").textContent = ""; return;
+  }
+  const ids = live.map((s) => s.id);
+  const [marg, trades] = await Promise.all([
+    db.from("lab_margins").select("asset, detail").then((x) => Object.fromEntries((x.data || []).map((m) => [m.asset, m.detail || {}]))).catch(() => ({})),
+    (async () => { const out = []; for (let i = 0; i < ids.length; i += 50) out.push(...must(await db.from("algo_trades").select("id, strategy_id, entry_day, exit_at, side, contract, lots, entry_px, exit_px, gross, costs, net, exit_why").eq("mode", "LIVE").in("strategy_id", ids.slice(i, i + 50)).order("exit_at", { ascending: true }).limit(10000))); return out; })(),
+  ]);
+  const now = Date.now(); let totCap = 0, totNet = 0, capDays = 0, allTrades = [], totOpen = 0, missing = 0;
+  body.innerHTML = "";
+  for (const s of live) {
+    const ts = trades.filter((t) => t.strategy_id === s.id), st = tradeStats(ts), cap = liveCapital(s, marg);
+    const since = s.live_since || (ts[0] && (ts[0].entry_day || ts[0].exit_at)) || s.updated_at || s.created_at;
+    const days = Math.max(1, Math.round((now - Date.parse(since)) / 86400000));
+    const open = s.position !== "FLAT" && s.pos_upnl != null ? Number(s.pos_upnl) : null;
+    if (cap.v) { totCap += cap.v; capDays += cap.v * days; } else missing++;
+    totNet += st.net; allTrades = allTrades.concat(ts); if (open) totOpen += open;
+    const tr = document.createElement("tr"); tr.className = "lvrow"; tr.tabIndex = 0;
+    tr.innerHTML = `<td class="nm">${lvOpen.has(s.id) ? "▾" : "▸"} ${esc(s.name)}</td><td>${esc(assetLabel(s.underlying))}</td><td class="when">${esc(istText(since))}</td><td class="n">${days}</td>
+      <td class="n" title="${esc(cap.src)}">${cap.v ? rupees(cap.v) : "–"}</td><td class="n">${lvRs(st.net)}</td><td class="n">${lvPct(cap.v ? (st.net / cap.v) * 100 : null)}</td>
+      <td class="n">${lvPct(cap.v ? cagrOf(cap.v, st.net, days) : null)}${days < 30 && st.n ? '<div class="hint sm">short record</div>' : ""}</td>
+      <td class="n">${st.n}</td><td class="n">${st.winPct == null ? "–" : st.winPct.toFixed(0) + "%"}</td><td class="n">${st.pf == null ? "–" : st.pf === Infinity ? "∞" : st.pf.toFixed(2)}</td>
+      <td class="n">${st.n ? `${rupees(st.maxDD)}${cap.v ? `<div class="hint sm">${((st.maxDD / cap.v) * 100).toFixed(1)}% of capital</div>` : ""}` : "–"}</td><td class="n">${open == null ? "–" : lvRs(open)}</td>`;
+    const toggle = () => { lvOpen.has(s.id) ? lvOpen.delete(s.id) : lvOpen.add(s.id); renderLive().catch((e) => toast(errorText(e))); };
+    tr.addEventListener("click", toggle); tr.addEventListener("keydown", (e) => { if (e.key === "Enter") toggle(); });
+    body.append(tr);
+    if (lvOpen.has(s.id)) {
+      const det = document.createElement("tr"); det.className = "lvdet";
+      const stat = (k, v) => `<span>${k}<b>${v}</b></span>`;
+      det.innerHTML = `<td colspan="13"><div class="lvstats">${stat("Capital:", cap.v ? `${rupees(cap.v)} (${esc(cap.src)})` : esc(cap.src))}${stat("Trades:", st.n)}${stat("Winners:", st.wins)}
+        ${stat("Average win:", st.avgWin == null ? "–" : rupees(st.avgWin))}${stat("Average loss:", st.avgLoss == null ? "–" : rupees(st.avgLoss))}${stat("Best trade:", st.best == null ? "–" : rupees(st.best))}${stat("Worst trade:", st.worst == null ? "–" : rupees(st.worst))}
+        ${stat("Longest losing streak:", st.lossStreak)}${stat("Position now:", s.position === "FLAT" ? "Flat" : `${s.position === "LONG" ? "Long" : "Short"}${s.pos_lots ? ` ${s.pos_lots} lot${s.pos_lots === 1 ? "" : "s"}` : ""}`)}</div>
+        ${st.n ? `<div class="scroll" style="max-height:420px;overflow-y:auto"><table class="mini"><thead><tr><th>#</th><th>Entry day</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">Lots</th><th class="n">In</th><th class="n">Out</th><th class="n">Gross</th><th class="n">Charges</th><th class="n">Net</th><th class="n">Running total</th><th class="n">Below peak</th><th>Exit reason</th></tr></thead><tbody>
+          ${st.rows.map((x, i) => `<tr><td>${i + 1}</td><td class="when">${esc(x.t.entry_day || "")}</td><td class="when">${esc(x.t.exit_at ? istText(x.t.exit_at) : "")}</td><td>${esc(x.t.side || "")}</td><td>${esc(x.t.contract || "")}</td><td class="n">${x.t.lots ?? "–"}</td>
+            <td class="n">${x.t.entry_px ?? "–"}</td><td class="n">${x.t.exit_px ?? "–"}</td><td class="n">${lvRs(x.t.gross == null ? null : Number(x.t.gross))}</td><td class="n">${x.t.costs == null ? "–" : rupees(x.t.costs)}</td><td class="n">${lvRs(Number(x.t.net) || 0)}</td>
+            <td class="n">${lvRs(x.run)}</td><td class="n">${x.dd > 0 ? `<span class="neg-num">${rupees(-x.dd)}</span>` : "–"}</td><td>${esc(x.t.exit_why || "")}</td></tr>`).join("")}</tbody></table></div>` : '<p class="hint" style="margin:0">No closed live trades yet.</p>'}</td>`;
+      body.append(det);
+    }
+  }
+  // Total: all live strategies together (capital added up; days weighted by each one's capital).
+  allTrades.sort((a, b) => String(a.exit_at).localeCompare(String(b.exit_at)));
+  const tot = tradeStats(allTrades), avgDays = totCap ? capDays / totCap : 0;
+  foot.innerHTML = `<tr><td>Total (${live.length} live)</td><td></td><td></td><td class="n">${avgDays ? Math.round(avgDays) : "–"}</td><td class="n">${totCap ? rupees(totCap) : "–"}</td><td class="n">${lvRs(totNet)}</td>
+    <td class="n">${lvPct(totCap ? (totNet / totCap) * 100 : null)}</td><td class="n">${lvPct(totCap ? cagrOf(totCap, totNet, avgDays) : null)}</td><td class="n">${tot.n}</td><td class="n">${tot.winPct == null ? "–" : tot.winPct.toFixed(0) + "%"}</td>
+    <td class="n">${tot.pf == null ? "–" : tot.pf === Infinity ? "∞" : tot.pf.toFixed(2)}</td><td class="n">${tot.n ? `${rupees(tot.maxDD)}${totCap ? `<div class="hint sm">${((tot.maxDD / totCap) * 100).toFixed(1)}% of capital</div>` : ""}` : "–"}</td><td class="n">${totOpen ? lvRs(totOpen) : "–"}</td></tr>`;
+  $("lv_note").textContent = `Total CAGR uses the combined capital and the capital-weighted average days live${missing ? `; ${missing} strateg${missing === 1 ? "y has" : "ies have"} no capital figure yet and ${missing === 1 ? "is" : "are"} left out of the capital and CAGR` : ""}. Total max drawdown is on all live trades together, in the order they closed. Open positions aren't in the profit until they close.`;
+}
+
 /* ---------- several strategies at once: tick them, then activate / pause / go live / back to paper ---------- */
 const lsel = new Set();
 function renderBulkBar() {
@@ -4412,6 +4519,7 @@ async function bulkAction(kind) {
 document.querySelectorAll("#lp_bulk [data-bulk]").forEach((b) => b.addEventListener("click", () => bulkAction(b.dataset.bulk)));
 function renderList() {
   if (!me) return;
+  if (lpTab === "live" && !$("listPane").hidden) renderLive().catch(() => {});
   const cols = listCols();
   // asset filter options
   const sel = $("lf_asset"), keep = sel.value, assets = [...new Set(state.strategies.map((s) => s.underlying))].sort();
