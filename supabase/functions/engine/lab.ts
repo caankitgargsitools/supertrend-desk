@@ -1175,7 +1175,12 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
       }
     } else more = false;
   } catch (e) {
-    await patch({ status: "failed", progress: "Failed", error: e instanceof Error ? e.message : String(e), finished_at: new Date().toISOString(), lease_until: null });
+    const msg = e instanceof Error ? e.message : String(e);
+    // A slow database (statement timeouts, dropped connections) is not the run's fault: give the database an hour's rest
+    // instead of starting the next run straight away, which only made it slower and kept logins timing out.
+    const overloaded = /statement timeout|timed? ?out|connection|503|504|ECONNRESET|fetch failed/i.test(msg);
+    await patch({ status: "failed", progress: overloaded ? "Stopped: the database was too slow; the lab rests for an hour" : "Failed", error: msg, finished_at: new Date().toISOString(), lease_until: null });
+    if (overloaded) await sb.from("lab_settings").update({ paused_until: new Date(Date.now() + 3600_000).toISOString() }).eq("id", 1);
     await logTime();
     return false;
   }
