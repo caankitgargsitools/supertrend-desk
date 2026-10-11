@@ -13,7 +13,7 @@ import { dataSecurity, syncMcx } from "./instruments.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
-import { LAB_ASSETS, labNext, labStart, labStep, loadCryptoAssets, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
+import { LAB_ASSETS, labNext, labOptStep, labStart, labStep, loadCryptoAssets, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
 import { contractsFor, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaOrder, niceLot } from "./crypto.ts";
 import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
@@ -1263,6 +1263,14 @@ Deno.serve(async (req) => {
     return Response.json({ accepted: true });
   }
 
+  // Option-pricing queue: one instalment per call (the schedule paces it), only while no lab run is going.
+  if (action === "lab_opt") {
+    EdgeRuntime.waitUntil((async () => {
+      const creds = credsOf(await adminAccount(sb));
+      await labOptStep({ sb, creds, started: Date.now(), chain: async () => {} });
+    })().catch((e) => console.error("lab_opt", e)));
+    return Response.json({ action, accepted: true });
+  }
   if (action === "lab_next") {
     const id = await labNext(sb);
     if (id) EdgeRuntime.waitUntil(labLoop().catch((e) => console.error("lab", e)));

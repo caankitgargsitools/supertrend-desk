@@ -13,6 +13,8 @@ import { describeCond, HAS_WEIGHTS, type Cond, type Rules, validateRules } from 
 import { dataSecurity } from "./instruments.ts";
 import { describeRisk, type Risk } from "./risk.ts";
 import { loadMarginRates, type MarginRate, refreshMargins } from "./margins.ts";
+import { readCandles, saveCandles } from "./candles.ts";
+export { readCandles, saveCandles };
 import { CRYPTO, cryptoDaily, cryptoFunding, cryptoIntraday, cryptoLot, loadCrypto } from "./crypto.ts";
 
 /* ---------- assets ---------- */
@@ -779,10 +781,10 @@ export async function refreshAsset(sb: SupabaseClient, creds: { client: string; 
   const sec = (await dataSecurity(sb, creds, a.seg, a.sec, today)).sec;
   // 11 years of daily candles: the year-by-year test covers 10 years (plus warm-up for the indicators).
   const daily = await dhan.daily(sec, a.seg, a.instr, addDays(today, -4100), addDays(today, 1));
-  await sb.from("lab_candles").upsert({ asset: key, kind: "D", from_day: daily[0]?.day ?? today, to_day: daily.at(-1)?.day ?? today, bars: toCol(daily, false), updated_at: new Date().toISOString() });
+  await saveCandles(sb, { asset: key, kind: "D", from_day: daily[0]?.day ?? today, to_day: daily.at(-1)?.day ?? today, bars: toCol(daily, false) });
   const want = addDays(today, -(YEAR_DAYS + WARM_DAYS));
   if (a.commodity) return refreshMcxIntraday(sb, dhan, a, today, want);
-  const { data: cached } = await sb.from("lab_candles").select("from_day, to_day, bars").eq("asset", key).eq("kind", "I5").maybeSingle();
+  const cached = (await readCandles(sb, key, ["I5"]))[0];
   const map = new Map<number, { t: number; o: number; h: number; l: number; c: number }>();
   let start = want;
   if (cached && cached.from_day <= addDays(want, 5)) {
@@ -795,7 +797,7 @@ export async function refreshAsset(sb: SupabaseClient, creds: { client: string; 
   }
   const lo = Date.parse(`${want}T00:00:00+05:30`) / 1000;
   const rows = [...map.values()].filter((r) => r.t >= lo).sort((x, y) => x.t - y.t);
-  await sb.from("lab_candles").upsert({ asset: key, kind: "I5", from_day: ist(rows[0]?.t ?? lo).date, to_day: ist(rows.at(-1)?.t ?? lo).date, bars: toCol(rows, false), updated_at: new Date().toISOString() });
+  await saveCandles(sb, { asset: key, kind: "I5", from_day: ist(rows[0]?.t ?? lo).date, to_day: ist(rows.at(-1)?.t ?? lo).date, bars: toCol(rows, false) });
   await refreshYearChunks(sb, dhan, a, today);
 }
 /**
@@ -816,7 +818,7 @@ async function refreshYearChunks(sb: SupabaseClient, dhan: Dhan, a: LabAsset, to
     }
     const rows = [...map.values()].sort((x, z) => x.t - z.t);
     if (!rows.length) continue;
-    await sb.from("lab_candles").upsert({ asset: a.key, kind: `I5Y:${y}`, from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, false), updated_at: new Date().toISOString() });
+    await saveCandles(sb, { asset: a.key, kind: `I5Y:${y}`, from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, false) });
   }
 }
 
@@ -830,12 +832,12 @@ async function refreshCrypto(sb: SupabaseClient, a: LabAsset, today: string) {
   try {
     const fm = await cryptoFunding(a.sec, "2023-12-01", addDays(today, 1));
     const d = [...fm.keys()].sort();
-    if (d.length) await sb.from("lab_candles").upsert({ asset: a.key, kind: "F", from_day: d[0], to_day: d.at(-1), bars: { d, r: d.map((x) => +fm.get(x)!.toFixed(6)) }, updated_at: new Date().toISOString() });
+    if (d.length) await saveCandles(sb, { asset: a.key, kind: "F", from_day: d[0], to_day: d.at(-1)!, bars: { d, r: d.map((x) => +fm.get(x)!.toFixed(6)) } });
   } catch (e) { console.error("funding", a.key, e); }
-  await sb.from("lab_candles").upsert({ asset: a.key, kind: "D", from_day: daily[0]?.day ?? today, to_day: daily.at(-1)?.day ?? today, bars: toCol(daily, true), updated_at: new Date().toISOString() });
+  await saveCandles(sb, { asset: a.key, kind: "D", from_day: daily[0]?.day ?? today, to_day: daily.at(-1)?.day ?? today, bars: toCol(daily, true) });
   const inSess = (t: number) => { const p = ist(t), ss = sessionFor(a.seg, p.date); return p.min >= ss.open && p.min < ss.close; };
   const want = addDays(today, -(YEAR_DAYS + WARM_DAYS));
-  const { data: cached } = await sb.from("lab_candles").select("from_day, to_day, bars").eq("asset", a.key).eq("kind", "I5").maybeSingle();
+  const cached = (await readCandles(sb, a.key, ["I5"]))[0];
   const map = new Map<number, { t: number; o: number; h: number; l: number; c: number; v?: number }>();
   let start = want;
   if (cached && cached.from_day <= addDays(want, 5)) { for (const r of fromCol(cached.bars)) map.set(r.t, r); start = addDays(cached.to_day, -2); }
@@ -843,7 +845,7 @@ async function refreshCrypto(sb: SupabaseClient, a: LabAsset, today: string) {
   const lo = Date.parse(`${want}T00:00:00+05:30`) / 1000, nowSec = Date.now() / 1000;
   // Only finished candles are kept (the one still forming would be stored half-done).
   const rows = [...map.values()].filter((r) => r.t >= lo && r.t + 900 <= nowSec).sort((x, y) => x.t - y.t);
-  if (rows.length) await sb.from("lab_candles").upsert({ asset: a.key, kind: "I5", from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, true), updated_at: new Date().toISOString() });
+  if (rows.length) await saveCandles(sb, { asset: a.key, kind: "I5", from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, true) });
   const first = addDays(today, -5 * 365 + 2), y0 = Number(first.slice(0, 4)), y1 = Number(today.slice(0, 4)) - 1;
   const { data: have } = await sb.from("lab_candles").select("kind").eq("asset", a.key).like("kind", "I5Y:%");
   const got = new Set((have ?? []).map((h) => h.kind));
@@ -854,7 +856,7 @@ async function refreshCrypto(sb: SupabaseClient, a: LabAsset, today: string) {
     const yr = (await cryptoIntraday(a.sec, 15, `${from} 00:00:00`, `${y}-12-31 23:59:00`)).filter((r) => inSess(r.t));
     fetched++;
     if (!yr.length) continue;
-    await sb.from("lab_candles").upsert({ asset: a.key, kind: `I5Y:${y}`, from_day: ist(yr[0].t).date, to_day: ist(yr.at(-1)!.t).date, bars: toCol(yr, true), updated_at: new Date().toISOString() });
+    await saveCandles(sb, { asset: a.key, kind: `I5Y:${y}`, from_day: ist(yr[0].t).date, to_day: ist(yr.at(-1)!.t).date, bars: toCol(yr, true) });
   }
 }
 
@@ -865,7 +867,7 @@ async function refreshCrypto(sb: SupabaseClient, a: LabAsset, today: string) {
  * grows into a true near-month series and is kept after contracts expire.
  */
 async function refreshMcxIntraday(sb: SupabaseClient, dhan: Dhan, a: LabAsset, today: string, want: string) {
-  const { data: cached } = await sb.from("lab_candles").select("from_day, to_day, bars").eq("asset", a.key).eq("kind", "I5").maybeSingle();
+  const cached = (await readCandles(sb, a.key, ["I5"]))[0];
   const map = new Map<number, { t: number; o: number; h: number; l: number; c: number }>();
   let start = want;
   if (cached) { for (const r of fromCol(cached.bars)) map.set(r.t, r); start = addDays(cached.to_day, -3); }
@@ -908,17 +910,14 @@ async function refreshMcxIntraday(sb: SupabaseClient, dhan: Dhan, a: LabAsset, t
   const lo = Date.parse(`${want}T00:00:00+05:30`) / 1000;
   const rows = [...map.values()].filter((r) => r.t >= lo).sort((x, y) => x.t - y.t);
   if (!rows.length) return;
-  await sb.from("lab_candles").upsert({ asset: a.key, kind: "I5", from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, false), updated_at: new Date().toISOString() });
+  await saveCandles(sb, { asset: a.key, kind: "I5", from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, false) });
 }
 
 /** Cached candles in the shape the simulator wants. */
 export async function loadAsset(sb: SupabaseClient, key: string, long = false): Promise<SimData> {
   const a = LAB_ASSETS[key];
   // The year-by-year test also loads the older yearly 5-minute chunks.
-  let q = sb.from("lab_candles").select("kind, bars").eq("asset", key);
-  q = long ? q.or("kind.eq.D,kind.eq.I5,kind.eq.F,kind.like.I5Y*") : q.in("kind", ["D", "I5", "F"]);
-  const { data: rows, error } = await q;
-  if (error) throw new Error(error.message);
+  const rows = await readCandles(sb, key, long ? "long" : ["D", "I5", "F"]);
   const d = rows?.find((r) => r.kind === "D");
   if (!d) throw new Error(`No cached candles for ${key} yet.`);
   const daily: DayBar[] = fromCol(d.bars).map((r) => ({ ...r, day: ist(r.t).date }));
@@ -944,7 +943,7 @@ export async function loadAsset(sb: SupabaseClient, key: string, long = false): 
     const f = rows?.find((r) => r.kind === "F")?.bars as { d?: string[]; r?: number[] } | undefined;
     if (f?.d) out.funding = new Map(f.d.map((d, i) => [d, Number(f.r![i])]));
     if (key !== "BTCUSD") {
-      const { data: b } = await sb.from("lab_candles").select("bars").eq("asset", "BTCUSD").eq("kind", "D").maybeSingle();
+      const b = (await readCandles(sb, "BTCUSD", ["D"]))[0];
       if (b) out.btc = fromCol(b.bars).map((r) => ({ ...r, day: ist(r.t).date }));
     }
   }
@@ -1149,8 +1148,36 @@ export async function labNext(sb: SupabaseClient): Promise<number | null> {
 }
 
 /** One instalment of the current lab run. Returns true when another instalment should follow. */
+/**
+ * The lab gives way to everything else. Before any work it times a tiny query: if the database answers slowly
+ * (over 2 seconds; normally ~50 ms) the lab rests for 20 minutes, so logins and live trading always come first.
+ * Returns true when the lab may work now.
+ */
+const SLOW_MS = 2000;
+export async function labMayWork(sb: SupabaseClient, allowDuringRest = false): Promise<boolean> {
+  const t0 = Date.now();
+  const { data, error } = await sb.from("lab_settings").select("paused_until, pause_reason").eq("id", 1).maybeSingle();
+  const lag = Date.now() - t0;
+  if (error || lag > SLOW_MS) { await labRest(sb, 20, "slow"); return false; }
+  const paused = data?.paused_until && Date.parse(data.paused_until) > Date.now();
+  return !paused || (allowDuringRest && data?.pause_reason === "rest");
+}
+/** Pauses the lab for some minutes (never shortens a longer pause). reason: "rest" between runs, "slow" database. */
+export async function labRest(sb: SupabaseClient, minutes: number, reason: "rest" | "slow") {
+  const until = new Date(Date.now() + minutes * 60000).toISOString();
+  await sb.from("lab_settings").update({ paused_until: until, pause_reason: reason }).eq("id", 1).or(`paused_until.is.null,paused_until.lt.${until}`)
+    .then(() => {}, () => {});
+}
+/** After a run: rest as long as the run worked (at least 10, at most 45 minutes), so the database's daily allowance lasts. */
+async function restAfterRun(sb: SupabaseClient, run: Run, extraMs: number) {
+  const t = run.timings ?? {};
+  const work = Object.entries(t).filter(([k]) => k !== "steps").reduce((a, [, v]) => a + Number(v || 0), 0) + extraMs;
+  await labRest(sb, Math.min(45, Math.max(10, Math.round(work / 60000))), "rest");
+}
+
 export async function labStep(ctx: Ctx): Promise<boolean> {
   const { sb } = ctx;
+  if (!(await labMayWork(sb))) return false;
   const now = new Date();
   // Take the run's lease so two instalments never work on it at the same time.
   const { data: claimed } = await sb.from("lab_runs").update({ lease_until: new Date(now.getTime() + 240000).toISOString(), updated_at: now.toISOString() })
@@ -1213,36 +1240,42 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
       const left = await robustPhase(ctx, run, win, patch);
       if (!left && run.trigger === "robust") {
         await patch({ status: "done", phase: "done", progress: "Finished re-checking earlier winners", finished_at: new Date().toISOString(), lease_until: null });
+        await restAfterRun(sb, run, Date.now() - stepT0);
         more = false;
       } else if (!left) {
-        const top = Number(set.top_options ?? 20);
-        // Options are priced for index strategies on intraday candles; positional once-a-day trades run across expiries.
-        const { data: best } = await sb.from("lab_results").select("id, asset, mode").eq("run_id", run.id).eq("stage", "screened").eq("passed", true)
-          .order("score", { ascending: false }).limit(400);
-        const pickIds = (best ?? []).filter((b) => !LAB_ASSETS[b.asset]?.commodity && !LAB_ASSETS[b.asset]?.crypto && b.mode === "INTRADAY").slice(0, top).map((b) => b.id);
-        if (pickIds.length) await sb.from("lab_results").update({ stage: "opt_queue" }).in("id", pickIds);
+        // Every passed index strategy on intraday candles joins the option-pricing queue, which works in the background
+        // (one strategy at a time, oldest first, only while no run is going); the run itself is finished here.
+        // (Positional once-a-day trades run across expiries, and commodities and crypto have no listed index options.)
+        const { data: won } = await sb.from("lab_results").select("id, asset, mode").eq("run_id", run.id).eq("stage", "screened").eq("passed", true).limit(1000);
+        const ids = (won ?? []).filter((b) => !LAB_ASSETS[b.asset]?.commodity && !LAB_ASSETS[b.asset]?.crypto && b.mode === "INTRADAY").map((b) => b.id);
+        for (let i = 0; i < ids.length; i += 200) await sb.from("lab_results").update({ stage: "opt_queue" }).in("id", ids.slice(i, i + 200));
         const { count: passed } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).eq("passed", true);
-        // (includes any carried over from a stopped run that was waiting for its option prices)
-        const { count: queued } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).in("stage", ["opt_queue", "pricing"]);
-        const nq = queued ?? pickIds.length;
-        await patch({ phase: "options", progress: `Pricing the best ${nq} with real option prices`, counts: { ...counts, passed, to_price: nq } });
-      }
-    } else if (run.phase === "options") {
-      const left = await optionsPhase(ctx, run, win, patch);
-      if (!left) {
         await prune(sb);
-        const { count: priced } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).eq("stage", "priced");
-        await patch({ status: "done", phase: "done", progress: "Finished", finished_at: new Date().toISOString(), lease_until: null, counts: { ...counts, priced } });
+        await patch({ status: "done", phase: "done", progress: ids.length ? `Finished; ${ids.length} sent to the option-pricing queue` : "Finished",
+          finished_at: new Date().toISOString(), lease_until: null, counts: { ...counts, passed, to_price: ids.length } });
+        await restAfterRun(sb, run, Date.now() - stepT0);
         more = false;
       }
+    } else if (run.phase === "options") {
+      // Runs from before option pricing moved to the background queue: their strategies are already queued.
+      await patch({ status: "done", phase: "done", progress: "Finished; option pricing continues in the background queue", finished_at: new Date().toISOString(), lease_until: null });
+      await restAfterRun(sb, run, Date.now() - stepT0);
+      more = false;
     } else more = false;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     // A slow database (statement timeouts, dropped connections) is not the run's fault: give the database an hour's rest
     // instead of starting the next run straight away, which only made it slower and kept logins timing out.
     const overloaded = /statement timeout|timed? ?out|connection|503|504|ECONNRESET|fetch failed/i.test(msg);
-    await patch({ status: "failed", progress: overloaded ? "Stopped: the database was too slow; the lab rests for an hour" : "Failed", error: msg, finished_at: new Date().toISOString(), lease_until: null });
-    if (overloaded) await sb.from("lab_settings").update({ paused_until: new Date(Date.now() + 3600_000).toISOString() }).eq("id", 1);
+    const slowTries = Number(counts.slow_tries ?? 0) + 1;
+    if (overloaded && slowTries <= 6) {
+      // The run waits and carries on where it was once the database has recovered (it is only failed if this keeps happening).
+      await patch({ progress: `Resting: the database was slow; carrying on in 30 minutes (${run.progress ?? ""})`.slice(0, 300), lease_until: null, counts: { ...counts, slow_tries: slowTries } });
+      await labRest(sb, 30, "slow");
+    } else {
+      await patch({ status: "failed", progress: "Failed", error: msg, finished_at: new Date().toISOString(), lease_until: null });
+      await labRest(sb, 30, "rest");
+    }
     await logTime();
     return false;
   }
@@ -1865,15 +1898,47 @@ function optVariants(cfg: LabConfig) {
     { side: "SPREAD", label: `Futures + protective option 2 strikes out · ${own}`, risk: cfg.risk ?? null, structure: { preset: "FUT_HEDGED", d: 2 } },
   ] as { side: "BUY" | "SELL" | "SPREAD"; label: string; risk: any; structure?: Record<string, unknown> }[];
 }
-async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: string; to: string }, patch: (f: Record<string, unknown>) => unknown): Promise<boolean> {
+/**
+ * Option pricing queue, worked in the background: every passed index strategy waits here (stage "opt_queue"), and one
+ * instalment at a time prices the oldest one (a strategy already half-priced first), version by version. It works only
+ * while no lab run is going (also during the rest between runs) and the database is answering quickly, so it never
+ * competes with a run or with logins. Progress is shown on the Lab page (lab_settings.opt_status).
+ */
+export async function labOptStep(ctx: Ctx): Promise<boolean> {
   const { sb } = ctx;
-  const capital = Number(run.settings?.capital ?? 500000);
+  if (!(await labMayWork(sb, true))) return false;
+  const { count: busyRuns } = await sb.from("lab_runs").select("id", { count: "exact", head: true }).eq("status", "running");
+  if ((busyRuns ?? 0) > 0) return false;
+  // One worker at a time.
+  const now = new Date();
+  const { data: lease } = await sb.from("lab_settings").update({ opt_lease_until: new Date(now.getTime() + 240000).toISOString() }).eq("id", 1)
+    .or(`opt_lease_until.is.null,opt_lease_until.lt.${now.toISOString()}`).select("capital");
+  if (!lease?.length) return false;
+  const capital = Number(lease[0].capital ?? 500000);
+  try {
+    if (!ctx.creds.client || !ctx.creds.token) return false;
+    return await optionQueueWork(ctx, capital);
+  } finally {
+    await sb.from("lab_settings").update({ opt_lease_until: null }).eq("id", 1);
+  }
+}
+async function optionQueueWork(ctx: Ctx, capital: number): Promise<boolean> {
+  const { sb } = ctx;
   const store = dbStore(sb);
+  const wins = new Map<number, { from: string; split: string; to: string }>();
+  const report = (f: Record<string, unknown>) => sb.from("lab_settings").update({ opt_status: { ...f, at: new Date().toISOString() } }).eq("id", 1).then(() => {}, () => {});
   while (Date.now() - ctx.started < WALL_BUDGET - 15000) {
-    const { data: rows } = await sb.from("lab_results").select("id, asset, config, opt_job, opt_buy, opt_sell, opt_struct, label").eq("run_id", run.id).in("stage", ["pricing", "opt_queue"])
-      .order("stage", { ascending: false }).order("score", { ascending: false }).limit(1);
+    const { data: rows } = await sb.from("lab_results").select("id, run_id, asset, config, opt_job, opt_buy, opt_sell, opt_struct, label").in("stage", ["pricing", "opt_queue"])
+      .order("stage", { ascending: false }).order("id", { ascending: true }).limit(1);
     const row = rows?.[0];
-    if (!row) return false;
+    if (!row) { await report({ idle: true }); return false; }
+    // The strategy is priced over the same year its own run tested.
+    if (!wins.has(row.run_id)) {
+      const { data: r } = await sb.from("lab_runs").select("from_day, split_day, to_day").eq("id", row.run_id).maybeSingle();
+      if (!r) { await sb.from("lab_results").update({ stage: "error", error: "Its run is gone", opt_job: null }).eq("id", row.id); continue; }
+      wins.set(row.run_id, { from: String(r.from_day), split: String(r.split_day), to: String(r.to_day) });
+    }
+    const win = wins.get(row.run_id)!;
     const a = LAB_ASSETS[row.asset];
     const job = row.opt_job ?? { v: 0 };
     const variants = optVariants(row.config);
@@ -1893,9 +1958,8 @@ async function optionsPhase(ctx: Ctx, run: Run, win: { from: string; split: stri
       job.plans = simulateRules(s, data, win.from, win.to);
       job.cursor = 0; job.acc = newAcc(capital); job.trades = [];
     }
-    const { count: left } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).in("stage", ["pricing", "opt_queue"]);
-    await patch({ progress: `Real option prices: ${row.label.slice(0, 60)}… (${vr.label}; ${left} strategies to go)`,
-      counts: { ...(run.counts ?? {}), opt_left: left ?? 0, opt_v: job.v, opt_vn: variants.length } });
+    const { count: left } = await sb.from("lab_results").select("id", { count: "exact", head: true }).in("stage", ["pricing", "opt_queue"]);
+    await report({ id: row.id, label: row.label.slice(0, 90), version: vr.label, v: job.v, vn: variants.length, left: left ?? null, done: job.cursor ?? 0, of: (job.plans as unknown[] | undefined)?.length ?? null });
     const busyBefore = job.acc.busy ?? 0;
     let res: { trades: Record<string, unknown>[]; next: number; acc: Acc };
     try {
@@ -1949,7 +2013,7 @@ export async function adoptLeftovers(sb: SupabaseClient, run: Run, assets: strin
   // A focused run keeps to its own assets; any other run takes leftovers of every asset the lab knows (their candles are
   // already stored), so a strategy never waits because its asset was later unticked.
   const focused = run.settings?.focus === true, want = new Set(assets);
-  const { data: rows, error } = await sb.from("lab_results").select("id, run_id, asset, stage").in("stage", ["pending", "opt_queue", "pricing"])
+  const { data: rows, error } = await sb.from("lab_results").select("id, run_id, asset, stage").eq("stage", "pending")
     .neq("run_id", run.id).order("id").limit(5000);
   // A failed look-up must not quietly skip the leftovers: fail this instalment so it is retried.
   if (error) throw new Error(`Couldn't look up unfinished strategies: ${error.message}`);
@@ -1959,9 +2023,8 @@ export async function adoptLeftovers(sb: SupabaseClient, run: Run, assets: strin
   if (e2) throw new Error(`Couldn't look up unfinished strategies: ${e2.message}`);
   const busy = new Set((live ?? []).map((r) => r.id));
   const orphans = rows.filter((r) => !busy.has(r.run_id) && LAB_ASSETS[r.asset] && (!focused || want.has(r.asset)));
-  const pend = orphans.filter((r) => r.stage === "pending").slice(0, max).map((r) => r.id);
-  const opt = orphans.filter((r) => r.stage !== "pending").map((r) => r.id);
-  const ids = [...pend, ...opt];
+  const pend = orphans.slice(0, max).map((r) => r.id);
+  const ids = pend;
   for (let i = 0; i < ids.length; i += 200) {
     const { error } = await sb.from("lab_results").update({ run_id: run.id }).in("id", ids.slice(i, i + 200));
     if (error) throw new Error(error.message);

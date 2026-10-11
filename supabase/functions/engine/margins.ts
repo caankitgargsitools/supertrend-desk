@@ -2,6 +2,7 @@
 // For each asset the near-month future and an at-the-money option are priced with Dhan's calculator (SPAN + exposure),
 // and stored as a share of contract value. The lab then works out each trade's margin from the price at that trade's
 // entry × lot size × that share, so the capital a strategy needs follows the price it actually traded at.
+import { readCandles } from "./candles.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { Dhan } from "./dhan.ts";
 import { ist } from "./logic.ts";
@@ -52,8 +53,9 @@ export async function refreshMargins(sb: SupabaseClient, creds: { client: string
   if (!creds.client || !creds.token) return 0;
   const dhan = new Dhan(creds.client, creds.token);
   const today = ist(Date.now() / 1000).date;
-  const { data: daily } = await sb.from("lab_candles").select("asset, bars").eq("kind", "D").in("asset", assets.map((a) => a.key));
-  const lastClose = new Map((daily ?? []).map((d) => [d.asset, Number(d.bars?.c?.at(-1))]));
+  // Latest close of each asset from the lab's stored daily candles (file storage).
+  const daily = (await Promise.all(assets.map((a) => readCandles(sb, a.key, ["D"]).catch(() => [])))).flat();
+  const lastClose = new Map(daily.map((d) => [d.asset, Number(d.bars?.c?.at(-1))]));
   const lists = new Map<string, Row[]>();
   for (const seg of ["NSE_FNO", "BSE_FNO"]) {
     const keys = new Set(assets.filter((a) => !a.commodity && (seg === "BSE_FNO") === (a.exchange === "BSE")).map((a) => a.key));
