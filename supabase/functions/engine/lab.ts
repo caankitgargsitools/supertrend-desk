@@ -1801,6 +1801,8 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     // Every trade of the year-by-year test is kept with the result (packed in columns to stay small).
     const longTrades = joinTrades(cs.filter((c) => c.kind === "year" && !c.result?.skip).map((c) => c.result?.tr).filter(Boolean));
     await sb.from("lab_results").update({ robust_status: "done", robust: v, passed: v.passed, trades_long: longTrades }).eq("id", r.id);
+    // Winners are grouped with their twins (same asset, 80%+ of trades opened on the same day in the same direction).
+    if (v.passed) await sb.rpc("lab_assign_twin", { p_id: r.id }).then(() => {}, () => {});
     await sb.from("lab_checks").delete().eq("lab_id", r.id);
     if (!v.passed && keepable(r)) await forget(sb, [{ ...r, round: v.why.some((w: string) => /year/.test(w)) && v.why.length === 1 ? 3 : 2, why: v.why }]);
     decided++;

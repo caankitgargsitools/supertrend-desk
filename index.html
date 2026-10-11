@@ -799,6 +799,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
           <label class="f"><span>From</span><select id="lab_period"><option value="run">Latest run only</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option></select></label>
           <label class="f"><span>Stop loss</span><select id="lab_stopf"><option value="ANY">With or without</option><option value="WITH">With stop / target</option><option value="WITHOUT">Without</option></select></label>
           <label class="f"><span>Show</span><select id="lab_only"><option value="true">Passed only</option><option value="false">Everything kept</option></select></label>
+          <label class="f"><span>Per asset</span><select id="lab_per"><option value="5" selected>Best 5 per asset</option><option value="10">Best 10 per asset</option><option value="0">All</option></select></label>
         </div>
         <div id="lab_reqfilter" class="banner info" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center" hidden></div>
         <p class="hint" id="lab_count" style="margin:10px 0 0"></p>
@@ -3247,7 +3248,7 @@ $("capForm").addEventListener("submit", (e) => {
 });
 
 /* ---------- strategy lab ---------- */
-const lab = { open: false, settings: null, runs: [], rows: [], view: "FUT", asset: "ALL", period: "30", stopf: "ANY", only: true, sort: "score", poll: null, sel: null };
+const lab = { open: false, settings: null, runs: [], rows: [], view: "FUT", asset: "ALL", period: "30", stopf: "ANY", only: true, per: 5, sort: "score", poll: null, sel: null };
 const LAB_IND = { ST: "Supertrend", HA: "Heikin Ashi", RSI: "RSI", EMA: "EMA", SMA: "SMA", MACD: "MACD", VWAP: "VWAP", BB: "Bollinger", ADX: "ADX", ATR: "ATR", PDHL: "Prev-day H/L", ORB: "Opening range", SWEEP: "Liquidity sweep" };
 function condText(c) {
   const def = IND_DEFS[c.ind] || { name: c.ind, ops: [] };
@@ -3309,7 +3310,7 @@ async function loadLab() {
   // The database hands out at most 1,000 rows per request, so the list is read in pages of 1,000 (up to 8,000 rows),
   // ordered by score and then id so no row is skipped or repeated between pages.
   const build = () => {
-    let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary")
+    let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, twin_of, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary")
       .in("stage", ["screened", "opt_queue", "pricing", "priced"]);
     if (lab.request) q = q.eq("request_id", lab.request);
     else if (lab.period === "run") q = q.eq("run_id", runs[0] ? runs[0].id : -1);
@@ -3593,10 +3594,16 @@ function labGroup() {
     const f = fam.get(k); if (f) f.members.push(g); else fam.set(k, { key: k, members: [g] });
   }
   const cmp = (a, b) => { const x = key(a), y = key(b); return (typeof x === "string" ? x.localeCompare(y) : x - y) * dir; };
-  const out = [...fam.values()].map((f) => { f.members.sort(cmp); f.best = f.members[0]; return f; });
-  return out.sort((a, b) => cmp(a.best, b.best));
+  const out = [...fam.values()].map((f) => { f.members.sort(cmp); f.best = f.members[0]; return f; }).sort((a, b) => cmp(a.best, b.best));
+  // "Best N per asset": only the top groups of each asset, in the order picked above.
+  lab.perHidden = 0;
+  if (!lab.per) return out;
+  const seen = new Map();
+  return out.filter((f) => { const a = f.best.r.asset, k = (seen.get(a) || 0) + 1; seen.set(a, k); if (k > lab.per) { lab.perHidden++; return false; } return true; });
 }
 function familyKey(r) {
+  // Twins (same asset, 80%+ of trades opened on the same day in the same direction) are one group.
+  if (r.twin_of) return "T" + r.twin_of;
   if (r.family) return r.family;
   const c = r.config || {}, ru = c.rules || {};
   const sig = (set) => ((set && set.conds) || []).map((x) => `${x.ind}:${x.op}`).sort().join("+") || "-";
@@ -3635,6 +3642,7 @@ const LAB_COLS = [
   { k: "dd", w: 66, t: "Max DD", f: "num", n: true, v: (g) => g.m.full.max_dd },
   { k: "pf", w: 44, t: "PF", f: "num", n: true, v: (g) => g.m.full.pf ?? null },
   { k: "months", w: 54, t: "Months +", f: "num", n: true, v: (g) => g.m.pos_months, tip: "Profitable months out of the months traded" },
+  { k: "desk", w: 58, t: "Desk score (0–100)", f: "num", n: true, v: (g) => { const d = deskScore(g.r); return d ? d.score : null; }, tip: "Steady returns 35 + low drawdown 25 + works on other assets 20 + works on other timeframes 20 (hover a score for its parts)" },
   { k: "quality", w: 58, t: "Quality (0–100)", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.quality ? x.quality.score : null; }, tip: "Quality score from the whole year-by-year test (up to 10 years): unbroken runs of profitable years, profitable months, yearly profit ÷ worst drawdown, profit factor, how even the yearly profits are, other assets and timeframes, and enough trades. Open a strategy to see the breakdown." },
   { k: "score", w: 50, t: "Rank score (9 mo)", f: "num", n: true, v: (g) => g.m.score, tip: "The first-round ranking: net of the first 9 months ÷ their worst drawdown × share of profitable months" },
   { k: "oassets", w: 56, t: "Other assets +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.assets_ok : null; }, tip: "Of the other assets the same rules were tried on (same family first: indices for index strategies, commodities for commodity ones), how many made money with a profit factor of 1.1 or more" },
@@ -3645,6 +3653,28 @@ const LAB_COLS = [
   { k: "longnet", w: 74, t: "Long test net", f: "num", n: true, v: (g) => { const L = longOf(g.r); return L ? L.net : null; }, tip: "Net profit over the longest period tested in the nightly long test (up to 10 years for daily strategies, 5 years for intraday), 1 lot after charges" },
   { k: "longpos", w: 60, t: "Long test periods +", f: "num", n: true, v: (g) => { const L = longOf(g.r); return L ? L.pos : null; }, tip: "Of the periods tested (3M, 6M, 1Y … 10Y), how many made money" },
 ];
+/**
+ * Desk score, 0–100, from the tougher test's results, built on the four things that matter most:
+ *  steady returns 35 — unbroken profitable years 15, even yearly profits 8, profitable months 7, worst year vs average year 5
+ *  low drawdown 25   — yearly profit ÷ worst drawdown (2 or more = full) 15, time under water 5, risk-adjusted vs buy & hold 5
+ *  other assets 20   — share of other assets that worked 14, plus up to 6 for working on 4 or more
+ *  other timeframes 20 — share of other timeframes that worked 14, plus up to 6 for working on 3 or more
+ */
+function deskScore(r) {
+  if (r._desk !== undefined) return r._desk;
+  const x = r.robust;
+  if (!x || !x.quality || !x.assets) return (r._desk = null);
+  const q = x.quality, p = q.parts || {}, cl = (v) => Math.max(0, Math.min(1, Number(v) || 0));
+  const steady = 15 * cl((p.continuity ?? 0) / 16) + 8 * cl((p.steadiness ?? 0) / 8) + 7 * cl(q.months ? q.pos_months / q.months : 0) + 5 * cl(q.per_year > 0 ? q.worst_year / q.per_year : 0);
+  const bhLost = x.bh && x.bh.net != null && x.bh.net <= 0;
+  const dd = 15 * cl((q.calmar ?? 0) / 2) + 5 * cl(1 - (q.underwater_days ?? 365) / 365) + 5 * (bhLost ? 1 : cl((x.risk_vs_bh ?? 0) / 2));
+  const aN = x.assets.n || 0, aOk = x.assets.ok || 0, tN = (x.tfs && x.tfs.n) || 0, tOk = (x.tfs && x.tfs.ok) || 0;
+  const assets = aN ? 14 * cl(aOk / aN) + 6 * cl(aOk / 4) : 0;
+  const tfs = tN ? 14 * cl(tOk / tN) + 6 * cl(tOk / 3) : 0;
+  return (r._desk = { score: Math.round(steady + dd + assets + tfs), steady: Math.round(steady), dd: Math.round(dd), assets: Math.round(assets), tfs: Math.round(tfs) });
+}
+const deskTip = (d) => d ? `Steady returns ${d.steady}/35 · low drawdown ${d.dd}/25 · other assets ${d.assets}/20 · other timeframes ${d.tfs}/20` : "";
+const deskCell = (d) => d ? `<b class="${d.score >= 70 ? "pos-num" : d.score < 40 ? "neg-num" : ""}" title="${esc(deskTip(d))}">${d.score}</b>` : "–";
 /** The latest nightly long test of a lab strategy (futures version): its longest period and how many periods made money. */
 function longOf(r) {
   const L = lab.long && lab.long[r.fingerprint];
@@ -3655,7 +3685,7 @@ function longOf(r) {
   const longest = ks.sort((a, b) => order.indexOf(b) - order.indexOf(a))[0];
   return { key: longest, net: L.windows[longest].net, pos: ks.filter((k) => L.windows[k].net > 0).length, n: ks.length };
 }
-lab.filters = lab.filters || {}; lab.sortKey = lab.sortKey || "quality"; lab.sortDir = lab.sortDir || -1;
+lab.filters = lab.filters || {}; lab.sortKey = lab.sortKey || "desk"; lab.sortDir = lab.sortDir || -1;
 /** Number filter: "50" (at least 50), ">50", ">=50", "<0", "<=2", "=10", "10-20" (between), "!0" (not 0); 2l = 2 lakh, 1cr, 5k. */
 function numTest(expr) {
   const e = String(expr).replace(/[,₹%\s]/g, "");
@@ -3748,7 +3778,7 @@ function renderLabTable() {
   lab.openFam = lab.openFam || new Set();
   const nStrat = fams.reduce((a, f) => a + f.members.length, 0);
   const nf = Object.values(lab.filters).filter(Boolean).length;
-  $("lab_count").textContent = fams.length ? `${fams.length} groups of similar strategies (${nStrat} strategies)${nf ? `, ${nf} column filter${nf === 1 ? "" : "s"} on` : ""}${fams.length > (lab.showN || 150) ? `; showing the first ${lab.showN || 150} groups (type in the boxes under the titles to find one, e.g. “HA strength” under Strategy, or press “Show more”)` : ""}.${labPhone() ? " Tap a card to open it." : " Click a column title to sort; type in the boxes under the titles to filter (numbers: 50 = at least 50, >50, <0, 10-20)."}` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
+  $("lab_count").textContent = fams.length ? `${fams.length} groups of twins / similar strategies (${nStrat} strategies)${lab.perHidden ? `, best ${lab.per} per asset (${lab.perHidden} more groups under “Per asset: All”)` : ""}${nf ? `, ${nf} column filter${nf === 1 ? "" : "s"} on` : ""}${fams.length > (lab.showN || 150) ? `; showing the first ${lab.showN || 150} groups (type in the boxes under the titles to find one, e.g. “HA strength” under Strategy, or press “Show more”)` : ""}.${labPhone() ? " Tap a card to open it." : " Click a column title to sort; type in the boxes under the titles to filter (numbers: 50 = at least 50, >50, <0, 10-20)."}` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
   const pc = (v) => `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}" title="${rupees(v)}">${rupeesShort(v)}</span>`;
   const rs = (v) => v == null ? "–" : `<span title="${rupees(v)}">${rupeesShort(v)}</span>`;
   const rowFor = (g, num, f, sub) => {
@@ -3760,11 +3790,11 @@ function renderLabTable() {
       r.starred ? '<span class="chip yellow">★</span>' : "", r.promoted_id ? '<span class="chip green">Saved as strategy</span>' : "",
       labPassed(r, m) ? '<span class="chip green">Passed</span>' : labChecking(r, m) ? '<span class="chip blue">Being checked</span>' : m.passed && robDone(r) ? '<span class="chip red">Failed tougher test</span>' : '<span class="chip red">Not passed</span>'].join("");
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : lab.view === "SPREAD" ? r.osp : r.os) : null;
-    const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} similar</button>` : "";
+    const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} twins / similar</button>` : "";
     tr.innerHTML = `<td class="n">${num}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
       <td style="white-space:nowrap">${esc(labAssetName(r.asset))}</td><td>${esc(labStyle(r))}</td><td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}${longNetLine(r)}</td><td class="n">${m.margin_lot ? rs(m.margin_lot) : "–"}</td>
       <td class="n">${m.ret_margin == null ? "–" : `<span class="${m.ret_margin > 0 ? "pos-num" : m.ret_margin < 0 ? "neg-num" : ""}">${m.ret_margin}%</span>`}</td><td class="n">${pc(m.test.net)}</td>
-      <td class="n">${rs(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td>${(() => { const x = robOf(r), q = x && x.quality; return q ? `<td class="n"><b class="${q.score >= 70 ? "pos-num" : q.score < 40 ? "neg-num" : ""}">${q.score}</b></td>` : '<td class="n hint">–</td>'; })()}<td class="n">${m.score}</td>${robCells(r)}<td class="n">${g.passes}/${g.nights}</td>${(() => { const L = longOf(r); return L ? `<td class="n"><span class="${L.net > 0 ? "pos-num" : L.net < 0 ? "neg-num" : ""}" title="${rupees(L.net)} over ${L.key}">${rupeesShort(L.net)}</span><div class="hint sm">${L.key}</div></td><td class="n">${L.pos}/${L.n}</td>` : '<td class="n hint">–</td><td class="n hint">–</td>'; })()}`;
+      <td class="n">${rs(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${deskCell(deskScore(r))}</td>${(() => { const x = robOf(r), q = x && x.quality; return q ? `<td class="n"><b class="${q.score >= 70 ? "pos-num" : q.score < 40 ? "neg-num" : ""}">${q.score}</b></td>` : '<td class="n hint">–</td>'; })()}<td class="n">${m.score}</td>${robCells(r)}<td class="n">${g.passes}/${g.nights}</td>${(() => { const L = longOf(r); return L ? `<td class="n"><span class="${L.net > 0 ? "pos-num" : L.net < 0 ? "neg-num" : ""}" title="${rupees(L.net)} over ${L.key}">${rupeesShort(L.net)}</span><div class="hint sm">${L.key}</div></td><td class="n">${L.pos}/${L.n}</td>` : '<td class="n hint">–</td><td class="n hint">–</td>'; })()}`;
     tr.querySelector(".t").textContent = r.label;
     tr.addEventListener("click", (e) => {
       if (e.target.closest(".famBtn")) { if (lab.openFam.has(f.key)) lab.openFam.delete(f.key); else lab.openFam.add(f.key); renderLabTable(); return; }
@@ -3816,7 +3846,7 @@ function renderLabCards(fams, pc, rs) {
       <div class="chips">${status}${g.rechecking ? '<span class="chip blue">Re-checking today</span>' : ""}${r.champion ? '<span class="chip green">Re-tested</span>' : ""}${r.starred ? '<span class="chip yellow">★</span>' : ""}</div>
       <div class="mg">${cell("Net (1 yr)", pc(m.full.net) + longNetLine(r))}${cell("Win %", m.full.win_rate)}${cell("Trades", m.full.n)}
         ${cell("Max DD", rs(m.full.max_dd))}${cell("PF", m.full.pf ?? "–")}${cell("Months +", `${m.pos_months}/${m.months_n}`)}
-        ${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Quality", x && x.quality ? `<span class="${x.quality.score >= 70 ? "pos-num" : x.quality.score < 40 ? "neg-num" : ""}">${x.quality.score}</span>` : "–")}
+        ${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Desk score", deskCell(deskScore(r)))}${cell("Quality", x && x.quality ? `<span class="${x.quality.score >= 70 ? "pos-num" : x.quality.score < 40 ? "neg-num" : ""}">${x.quality.score}</span>` : "–")}
         ${done ? cell("Assets +", ratio(x.assets_ok, x.assets_n)) + cell("Timeframes +", x.tfs_n ? ratio(x.tfs_ok, x.tfs_n) : "n/a") + cell("Years +", x.years_n == null ? "–" : `<span class="${x.years_n >= 3 && x.years_ok === x.years_n ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span>`) : ""}</div>
       ${!sub && f.members.length > 1 ? `<button type="button" class="btn small fam">${lab.openFam.has(f.key) ? "Hide similar" : `+${f.members.length - 1} similar`}</button>` : ""}`;
     el.querySelector(".nm").textContent = r.label;
@@ -4165,6 +4195,7 @@ $("lab_view").querySelectorAll("button").forEach((b) => b.addEventListener("clic
   const sel = $("lab_asset");
   for (const [k, p] of Object.entries(PRESETS)) { const o = document.createElement("option"); o.value = k; o.textContent = p.name; sel.append(o); }
   sel.addEventListener("change", () => { lab.asset = sel.value; loadLab().catch((e) => toast(errorText(e))); });
+  $("lab_per").addEventListener("change", () => { lab.per = Number($("lab_per").value); lab.showN = 0; renderLabTable(); });
   $("lab_more").addEventListener("click", () => { lab.showN = (lab.showN || 150) + 150; renderLabTable(); });
   $("lab_period").addEventListener("change", () => { lab.period = $("lab_period").value; loadLab().catch((e) => toast(errorText(e))); });
   $("lab_only").addEventListener("change", () => { lab.only = $("lab_only").value === "true"; loadLab().catch((e) => toast(errorText(e))); });
