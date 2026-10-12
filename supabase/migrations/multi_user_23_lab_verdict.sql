@@ -1,0 +1,7 @@
+-- Lab verdict on desk strategies (applied 12 Oct 2026).
+-- algo_strategies.lab_status ('passed'/'failed'), lab_note (why it failed), lab_checked_at.
+-- lab_verdict_sync(fingerprint, asset, notify): the latest finished tougher test of that strategy decides; on a change
+--   to 'failed' the owner gets an 'error' notification "Failed lab test · <name>" (tag labfail-<strategy id>).
+-- Trigger lab_verdict on lab_results (insert, update of robust_status/passed): re-tests and re-checks later update it.
+-- Trigger strategy_lab_link on algo_strategies (insert, update of lab_id): a new desk copy gets the current verdict.
+-- lab_adopt refuses a lab result whose tougher test isn't finished.

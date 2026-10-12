@@ -1283,14 +1283,16 @@ function renderStrategy() {
   $("archBanner").hidden = !s.archived;
   ["b_active", "b_live", "b_flat", "b_archive"].forEach((id) => $(id).hidden = !!s.archived);
   const eb = $("errBox"); eb.hidden = !s.last_error; eb.textContent = s.last_error || "";
-  const ll = $("labLink"), labOk = s.lab_id && !s.is_master && !$("openLab").hidden;
-  ll.hidden = !labOk;
-  if (labOk) {
-    ll.innerHTML = `<span>From the Strategy Lab, result #${esc(String(s.lab_id))}, added ${esc(istText(s.created_at))}.</span>
+  const ll = $("labLink"), labOk = s.lab_id && !s.is_master && !$("openLab").hidden, failed = s.lab_status === "failed";
+  ll.hidden = !s.lab_id || s.is_master;
+  ll.className = `banner ${failed ? "err" : "info"} labfrom`;
+  if (s.lab_id && !s.is_master) {
+    ll.innerHTML = `${failed ? `<span class="chip red">Failed lab test</span><span><b>The lab's tougher test failed this strategy</b>${s.lab_checked_at ? ` (${esc(istText(s.lab_checked_at))})` : ""}: ${esc(s.lab_note || "")}. Consider pausing or archiving it.</span>` : ""}
+      <span>From the Strategy Lab, result #${esc(String(s.lab_id))}, added ${esc(istText(s.created_at))}${s.lab_status === "passed" ? " · passed the tougher test" : ""}.</span>`
+      + (labOk ? `
       <button class="btn small" type="button" id="ll_open">Open its lab result</button>
-      <button class="btn small primary" type="button" id="ll_cmp">Compare with the lab's ${esc(assetLabel(s.underlying))} strategies</button>`;
-    $("ll_open").addEventListener("click", () => openLabFor(s, "open"));
-    $("ll_cmp").addEventListener("click", () => openLabFor(s, "compare"));
+      <button class="btn small primary" type="button" id="ll_cmp">Compare with the lab's ${esc(assetLabel(s.underlying))} strategies</button>` : "");
+    if (labOk) { $("ll_open").addEventListener("click", () => openLabFor(s, "open")); $("ll_cmp").addEventListener("click", () => openLabFor(s, "compare")); }
   }
   const tr = $("st_trend");
   tr.textContent = s.last_trend === 1 ? (isTimed(s) ? "▲ Up → calls" : "▲ Up") : s.last_trend === -1 ? (isTimed(s) ? "▼ Down → puts" : "▼ Down") : "–";
@@ -3381,6 +3383,9 @@ function labFocus() {
     else toast("Its lab result isn't in this list any more (lab results are kept 45 days unless starred).");
   });
 }
+/** A lab result still waiting for (or going through) the tougher test: it can't be added to a desk yet. */
+function labPending(r) { const st = r.robust_status ?? (r.robust && r.robust.status); return !!r.basic_passed && st !== "done"; }
+const LAB_PEND_TXT = "Still going through the tougher test (other assets, other timeframes, every past year profitable). It can be added once it shows Passed; many strategies fail this step.";
 /** Banner on a lab result that is already on my desk. */
 function labDeskBanner(id) {
   const list = labDeskMap().get(Number(id)); if (!list) return "";
@@ -4085,8 +4090,8 @@ async function openLabDetail(id) {
     const mk = labKind(v), tm = (t) => t.margin ?? labTradeMargin(r.config, mk, t, m.margin_pct);
     const mMax = m.margin_max ?? (v.trades.length ? Math.max(...v.trades.map(tm)) : null);
     box.innerHTML = `<div class="head"><div><span class="label">Lab strategy #${r.id}</span><h2 style="font-size:18px"></h2></div>
-      <div class="actions"><button class="btn small" id="ld_star" type="button">${r.starred ? "★ Starred" : "☆ Star (keep)"}</button><button class="btn small" id="ld_xlsx" type="button">Download Excel</button><button class="btn primary small" id="ld_save" type="button">Save as strategy</button><button class="btn small" id="ld_mtest" type="button">Manual test</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
-      ${labDeskBanner(r.id)}
+      <div class="actions"><button class="btn small" id="ld_star" type="button">${r.starred ? "★ Starred" : "☆ Star (keep)"}</button><button class="btn small" id="ld_xlsx" type="button">Download Excel</button><button class="btn primary small" id="ld_save" type="button" ${labPending(r) ? `disabled title="${esc(LAB_PEND_TXT)}"` : ""}>${labPending(r) ? "Save as strategy (after the tougher test)" : "Save as strategy"}</button><button class="btn small" id="ld_mtest" type="button">Manual test</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
+      ${labDeskBanner(r.id)}${labPending(r) ? `<div class="banner warn" style="margin-top:12px">${esc(LAB_PEND_TXT)}</div>` : ""}
       <div id="ld_form"></div>
       <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.key === "FUT" ? "Futures" : x.label)}</button>`).join("")}</div>
       ${v.key === "FUT" ? robustHTML(r, m, true) : m.passed ? '<div class="banner ok" style="margin-top:12px">This option version passed the walk-forward check. The tougher test (other assets, timeframes, buy &amp; hold) is on the Futures tab.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc(m.why.join("; "))}.</div>`}
@@ -4115,7 +4120,7 @@ async function openLabDetail(id) {
     $("ld_close").addEventListener("click", () => { box.hidden = true; lab.sel = null; renderLabTable(); });
     $("ld_star").addEventListener("click", (e) => run(e.currentTarget, async () => { must(await db.from("lab_results").update({ starred: !r.starred }).eq("id", r.id)); r.starred = !r.starred; draw(); toast(r.starred ? "Starred: kept beyond 45 days." : "Star removed."); }));
     $("ld_xlsx").addEventListener("click", (e) => run(e.currentTarget, () => downloadLabExcel(r, versions[pickI], kv)));
-    $("ld_save").addEventListener("click", (e) => run(e.currentTarget, () => promoteLab(r, versions[pickI])));
+    $("ld_save").addEventListener("click", (e) => { if (labPending(r)) { toast(LAB_PEND_TXT); return; } run(e.currentTarget, () => promoteLab(r, versions[pickI])); });
     $("ld_var").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: !!(r.config.rules && r.config.rules.daily), title: `Lab #${r.id}` }));
     $("ld_mtest").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: !!(r.config.rules && r.config.rules.daily), title: `Lab #${r.id}`, manual: true }));
     renderLongTests(r.id); wireLongTrades(box, r);
@@ -4138,8 +4143,8 @@ async function openLabDetailPublic(id) {
     const mk = labKind(v), tm = (t) => t.margin ?? labTradeMargin(r.cfg || {}, mk, t, m.margin_pct);
     const mMax = m.margin_max ?? (v.trades.length ? Math.max(...v.trades.map(tm)) : null);
     box.innerHTML = `<div class="head"><div><span class="label">Lab strategy #${r.id}</span><h2 style="font-size:18px"></h2></div>
-      <div class="actions"><button class="btn primary small" id="ld_use" type="button">Use this strategy</button><button class="btn small" id="ld_mtest" type="button">Manual test</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
-      ${labDeskBanner(r.id)}
+      <div class="actions"><button class="btn primary small" id="ld_use" type="button" ${labPending(r) ? `disabled title="${esc(LAB_PEND_TXT)}"` : ""}>${labPending(r) ? "Use this strategy (after the tougher test)" : "Use this strategy"}</button><button class="btn small" id="ld_mtest" type="button">Manual test</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
+      ${labDeskBanner(r.id)}${labPending(r) ? `<div class="banner warn" style="margin-top:12px">${esc(LAB_PEND_TXT)}</div>` : ""}
       <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.label)}</button>`).join("")}</div>
       <div id="ld_form"></div>
       ${v.key === "FUT" ? robustHTML(r, m, false) : m.passed ? '<div class="banner ok" style="margin-top:12px">This option version passed the walk-forward check. The tougher test (other assets, timeframes, buy &amp; hold) is on the first tab.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc((m.why || []).join("; "))}.</div>`}
@@ -4168,6 +4173,7 @@ async function openLabDetailPublic(id) {
     $("ld_mtest").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: r.cfg && r.cfg.data_segment === "MCX_COMM" ? true : null, title: `Lab #${r.id}`, manual: true }));
     renderLongTests(r.id); wireLongTrades(box, r);
     $("ld_use").addEventListener("click", () => {
+      if (labPending(r)) { toast(LAB_PEND_TXT); return; }
       const f = $("ld_form");
       f.innerHTML = `<div class="ued" style="margin-top:12px"><strong>Add “${esc(v.label)}” to my strategies</strong>
         <div class="grid"><label class="f"><span>Name</span><input id="lu_name"></label>
@@ -4803,7 +4809,7 @@ function renderList() {
     tr.append(ck);
     for (const [k, , f, t] of cols) {
       const td = document.createElement("td"); const v = f(s);
-      if (k === "name") { td.className = "nm"; td.textContent = v; td.title = s.name; if (s.last_error) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Error"; td.append(e); } }
+      if (k === "name") { td.className = "nm"; td.textContent = v; td.title = s.name; if (s.lab_status === "failed") { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Failed lab test"; e.title = s.lab_note || "Its lab result did not pass the tougher test"; td.append(e); } if (s.last_error) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Error"; td.append(e); } }
       else if (t === "num") { td.className = "n " + (v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""); td.textContent = rupees(v); }
       else if (t === "int") { td.className = "n"; td.textContent = String(v); }
       else if (t === "wrap") { td.className = "wr"; td.textContent = v; }
