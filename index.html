@@ -814,7 +814,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
           <div class="grid">
             <label class="f"><span>Lab</span><select id="ls_enabled"><option value="true">On</option><option value="false">Off (only “Run now”)</option></select></label>
             <label class="f wide"><span>When it runs</span><select id="ls_mode">
-              <option value="auto">Non-stop: around the clock while nothing trades live; 11:30 PM – 8:30 AM once anything is live</option>
+              <option value="auto">Non-stop while no strategy is running; 11:30 PM – 8:30 AM only once any strategy is active (paper or live)</option>
               <option value="night">Non-stop, nights only: 11:30 PM – 8:30 AM</option>
               <option value="nightly">Once a day at 16:05 IST</option></select></label>
             <label class="f"><span>New strategies per run</span><input id="ls_per_night" type="number" min="10" max="1000" step="10"></label>
@@ -823,7 +823,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
             <label class="f"><span>Winners long-tested each night (00:30 IST)</span><input id="ls_long" type="number" min="0" max="40" step="1"></label>
           </div>
           <div class="f"><span>Assets to research</span><div class="assetpick" id="ls_assets"></div></div>
-          <p class="hint">Indices are tested on 5-minute candles (and once-a-day); commodities on daily candles, with MCX 5-minute candles (from the contracts Dhan still lists, growing every night) used for the timeframe test. Mini contracts move like their big contracts, so testing both mostly repeats work. In non-stop mode, back-to-back runs reuse candles fetched in the last 6 hours, and a run stops by itself if a strategy goes live outside 11:30 PM – 8:30 AM.</p>
+          <p class="hint">Indices are tested on 5-minute candles (and once-a-day); commodities on daily candles, with MCX 5-minute candles (from the contracts Dhan still lists, growing every night) used for the timeframe test. Mini contracts move like their big contracts, so testing both mostly repeats work. In non-stop mode, back-to-back runs reuse candles fetched in the last 6 hours, and while any strategy is active (paper or live) the lab, including option pricing, works only 11:30 PM – 8:30 AM; a run going outside that window stops by itself. Runs you start yourself (“Run now”, variations, manual tests) still run when you ask.</p>
           <div class="formbar"><button class="btn primary" type="submit">Save lab settings</button><span class="hint" id="ls_msg"></span></div>
         </form>
       </section>

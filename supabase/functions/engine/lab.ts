@@ -1066,13 +1066,14 @@ const WALL_BUDGET = 100000; // ms of wall time per instalment
 
 /**
  * When the lab may run. "nightly": one run a day at 16:05 IST. "auto": back-to-back runs around the clock while no
- * strategy trades live, and only 23:30–08:30 IST once any does. "night": back-to-back runs 23:30–08:30 IST only.
+ * strategy is running (active, in paper or live mode), and only 23:30–08:30 IST once any is. "night": back-to-back
+ * runs 23:30–08:30 IST only.
  */
 export async function labWindowOpen(sb: SupabaseClient, mode: string): Promise<boolean> {
   if (mode !== "auto" && mode !== "night") return false;
   const m = ist(Date.now() / 1000).min, night = m >= 23 * 60 + 30 || m < 8 * 60 + 30;
   if (night || mode === "night") return night;
-  const { count } = await sb.from("algo_strategies").select("id", { count: "exact", head: true }).eq("live", true).eq("active", true).eq("archived", false).eq("is_master", false);
+  const { count } = await sb.from("algo_strategies").select("id", { count: "exact", head: true }).eq("active", true).eq("archived", false).eq("is_master", false);
   return (count ?? 0) === 0;
 }
 
@@ -1224,7 +1225,7 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
     const win = { from: String(run.from_day), split: String(run.split_day), to: String(run.to_day) };
 
     if (run.trigger === "continuous" && !(await labWindowOpen(sb, (await sb.from("lab_settings").select("schedule_mode").eq("id", 1).maybeSingle()).data?.schedule_mode ?? "nightly"))) {
-      await patch({ status: "stopped", phase: "done", progress: "Stopped: outside the lab's hours (a strategy is trading live, or back-to-back runs were switched off)", finished_at: new Date().toISOString(), lease_until: null });
+      await patch({ status: "stopped", phase: "done", progress: "Stopped: outside the lab's hours (strategies are running, in paper or live, so the lab works 11:30 PM – 8:30 AM only)", finished_at: new Date().toISOString(), lease_until: null });
       return false;
     }
     if (run.phase === "data") {
@@ -1928,6 +1929,9 @@ function optVariants(cfg: LabConfig) {
 export async function labOptStep(ctx: Ctx): Promise<boolean> {
   const { sb } = ctx;
   if (!(await labMayWork(sb, true))) return false;
+  // Option pricing is lab work too: with strategies running it waits for the night window like the runs do.
+  const mode = (await sb.from("lab_settings").select("schedule_mode").eq("id", 1).maybeSingle()).data?.schedule_mode ?? "nightly";
+  if ((mode === "auto" || mode === "night") && !(await labWindowOpen(sb, mode))) return false;
   const { count: busyRuns } = await sb.from("lab_runs").select("id", { count: "exact", head: true }).eq("status", "running");
   if ((busyRuns ?? 0) > 0) return false;
   // One worker at a time.
