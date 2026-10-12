@@ -1,0 +1,8 @@
+-- Phone notifications (web push) and the notifications list.
+--  push_keys (1 row, server only), push_subs (one row per phone, own rows only), notifications (own rows only).
+--  notify_tagged()/notify_admins(): add a notification and ask the engine to push it.
+--  Triggers: algo_signals (entries, exits, skipped entries, failed orders), algo_trades (closed trade with P&L, replaces the exit alert),
+--  algo_strategies (errors, live/paper), lab_runs (runs with new passes, to admins), lab_settings (lab paused: slow database),
+--  broker_accounts (Dhan token expired / renewal failed).
+--  notify_test() for "Send a test"; claim_notifications() so two senders never send one twice; cron every minute as a safety net.
+--  inr(): rupees in Indian format, whole rupees.

@@ -1,6 +1,7 @@
 // Supertrend Algo Portal engine.
 // Actions: "tick" (pg_cron, every minute in market hours), "refresh" and "flatten" (portal),
 // "backtest" (portal; runs in the background). Every call must carry the x-engine-secret header.
+import webpush from "npm:web-push@3.6.7";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { Dhan } from "./dhan.ts";
 import { type ChargeRates, newAcc, planBacktest, priceBatch, summarize, tradeCharges, validateParams, type Acc, type Plan } from "./backtest.ts";
@@ -1245,8 +1246,91 @@ async function runBacktestJob(id: number) {
   }
 }
 
+/**
+ * Prices of open positions for the signed-in app, every few seconds while it is open: price now and unrealised P&L of
+ * each open position (own strategies; the admin also sees clients'). Prices are read here with the broker connection,
+ * so no broker token ever reaches the browser. Each position is re-priced at most every 3 seconds, whoever asks.
+ */
+async function liveMarks(userId: string, admin: boolean) {
+  let q = sb.from("algo_strategies").select("*").neq("position", "FLAT").eq("archived", false);
+  if (!admin) q = q.eq("owner_id", userId);
+  const { data: rows0 } = await q;
+  const rows = await withMasters(sb, rows0 ?? []);
+  const accounts = new Map<string, Account | null>(), today = ist(Date.now() / 1000).date;
+  const out: Record<string, { ltp: number | null; upnl: number | null; at: string | null }> = {};
+  await Promise.all(rows.map(async (row: Strategy) => {
+    try {
+      let s = row;
+      const isCr = isCrypto(String(s.data_segment));
+      let set = s.owner_id ? await accountFor(sb, s.owner_id, isCr ? "DELTA" : "DHAN", accounts) : null;
+      if (isCr) set = set ?? { user_id: s.owner_id, broker: "DELTA", dhan_client_id: null, dhan_access_token: null, webhook_url: null, webhook_secret: null, capital: null, capital_since: null, deploy_pct: null, funds_at: null };
+      else if (!set?.dhan_access_token) { out[s.id] = { ltp: s.pos_ltp ?? null, upnl: s.pos_upnl ?? null, at: s.pos_ltp_at ?? null }; return; }
+      if (isCommodity(String(s.data_segment))) s = { ...s, data_security_id: (await dataSecurity(sb, credsOf(set!), s.data_segment, String(s.data_security_id), today)).sec };
+      const fresh = s.pos_ltp_at && Date.now() - Date.parse(s.pos_ltp_at) < 3000;
+      const m = fresh ? s : await markPrice({ ...s, pos_ltp_at: null }, set!).catch(() => s);
+      out[s.id] = { ltp: m.pos_ltp ?? null, upnl: m.pos_upnl ?? null, at: m.pos_ltp_at ?? null };
+    } catch { /* leave this one out */ }
+  }));
+  return out;
+}
+/**
+ * Phone notifications: sends every notification not yet sent (entries, exits with P&L, errors, going live, lab results,
+ * token problems) to the user's registered phones. Each phone keeps its own choice of kinds; phones that the push
+ * service says are gone are forgotten. Notifications are claimed first, so two senders never send the same one twice.
+ */
+async function pushOut() {
+  const { data: keys } = await sb.from("push_keys").select("public_key, private_key, subject").eq("id", 1).maybeSingle();
+  if (!keys) return { sent: 0, why: "no keys" };
+  webpush.setVapidDetails(keys.subject, keys.public_key, keys.private_key);
+  const { data: list } = await sb.rpc("claim_notifications", { p_limit: 50 });
+  const ns = (list ?? []) as { id: number; user_id: string; kind: string; title: string; body: string | null; url: string | null; tag: string | null }[];
+  if (!ns.length) return { sent: 0 };
+  const users = [...new Set(ns.map((n) => n.user_id))];
+  const { data: subs } = await sb.from("push_subs").select("id, user_id, endpoint, p256dh, auth, prefs").in("user_id", users);
+  let sent = 0;
+  for (const n of ns) {
+    const mine = (subs ?? []).filter((x) => x.user_id === n.user_id && (n.kind === "test" || (x.prefs ?? {})[n.kind] !== false));
+    const notes: string[] = [];
+    await Promise.all(mine.map(async (x) => {
+      try {
+        await webpush.sendNotification({ endpoint: x.endpoint, keys: { p256dh: x.p256dh, auth: x.auth } },
+          JSON.stringify({ title: n.title, body: n.body ?? "", url: n.url ?? "/", tag: n.tag ?? `n${n.id}`, kind: n.kind }),
+          { TTL: 6 * 3600, urgency: n.kind === "error" || n.kind === "account" ? "high" : "normal" });
+        sent++; notes.push("ok");
+        await sb.from("push_subs").update({ last_ok_at: new Date().toISOString(), fail_count: 0 }).eq("id", x.id);
+      } catch (e) {
+        const code = (e as { statusCode?: number })?.statusCode ?? 0;
+        notes.push(String(code || (e instanceof Error ? e.message : e)).slice(0, 60));
+        // 404 / 410: the phone unsubscribed or the app was removed.
+        if (code === 404 || code === 410) await sb.from("push_subs").delete().eq("id", x.id);
+        else await sb.from("push_subs").update({ fail_count: 1 }).eq("id", x.id);
+      }
+    }));
+    await sb.from("notifications").update({ push_note: mine.length ? notes.join(", ") : "no phone registered" }).eq("id", n.id);
+  }
+  return { sent, notifications: ns.length };
+}
+const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
+
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   const secret = req.headers.get("x-engine-secret");
+  // The signed-in app may ask for one thing only: current prices of its open positions.
+  if (!secret && req.headers.get("Authorization")) {
+    const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+    const { data: u } = await sb.auth.getUser(jwt);
+    const reply = (status: number, b: unknown) => new Response(JSON.stringify(b), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+    if (!u?.user) return reply(401, { error: "Sign in again." });
+    const b = await req.json().catch(() => ({}));
+    if (b.action !== "marks") return reply(403, { error: "Not allowed." });
+    const [{ data: prof }, { data: own }] = await Promise.all([
+      sb.from("profiles").select("role, status").eq("user_id", u.user.id).maybeSingle(),
+      sb.from("app_owner").select("user_id").eq("user_id", u.user.id).maybeSingle(),
+    ]);
+    const admin = (prof?.role === "admin" && prof?.status === "active") || !!own;
+    await loadCryptoAssets(sb).catch(() => {});
+    return reply(200, { marks: await liveMarks(u.user.id, admin), at: new Date().toISOString() });
+  }
   const { data: sec } = await sb.from("engine_secret").select("secret").single();
   if (!secret || !sec || secret !== sec.secret) return new Response("Forbidden", { status: 403 });
 
@@ -1264,6 +1348,8 @@ Deno.serve(async (req) => {
   }
 
   // Option-pricing queue: one instalment per call (the schedule paces it), only while no lab run is going.
+  if (action === "push") return Response.json({ action, ...(await pushOut()) });
+  if (action === "marks" && body.user_id) return Response.json({ action, marks: await liveMarks(body.user_id, false) });
   if (action === "lab_opt") {
     EdgeRuntime.waitUntil((async () => {
       const creds = credsOf(await adminAccount(sb));
