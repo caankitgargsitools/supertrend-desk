@@ -1069,7 +1069,15 @@ async function loadCryptoPresets() {
   // The chart's asset list and the strategy form's underlying list.
   ASSETS.splice(0, ASSETS.length, ...Object.entries(PRESETS).map(([k, p]) => ({ key: p.data_security_id, name: p.name, group: p.group, sec: p.data_security_id, seg: p.data_segment, instr: p.data_instrument })), { key: "custom", name: "Other instrument…", group: "Other" });
   const keep = $("f_underlying").value; fillUnderlyingSelect($("f_underlying"), true); if (keep) $("f_underlying").value = keep;
-  buildCxControls(); paintCx();
+  buildCxControls(); paintCx(); fillLabAssetSelect();
+}
+/** The lab's Asset list: every index, MCX commodity and crypto coin, grouped. Refilled once the coins have loaded. */
+function fillLabAssetSelect() {
+  const sel = $("lab_asset"); if (!sel) return;
+  const keep = sel.value || "ALL", groups = {};
+  for (const [k, p] of Object.entries(PRESETS)) (groups[p.group || "Other"] = groups[p.group || "Other"] || []).push([k, p]);
+  sel.innerHTML = '<option value="ALL">All assets</option>' + Object.entries(groups).map(([g, list]) => `<optgroup label="${esc(g)}">${list.map(([k, p]) => `<option value="${esc(k)}">${esc(p.name)}</option>`).join("")}</optgroup>`).join("");
+  sel.value = [...sel.options].some((o) => o.value === keep) ? keep : "ALL";
 }
 function fillUnderlyingSelect(sel, withCustom) {
   sel.innerHTML = "";
@@ -4371,7 +4379,7 @@ $("lab_view").querySelectorAll("button").forEach((b) => b.addEventListener("clic
 }));
 {
   const sel = $("lab_asset");
-  for (const [k, p] of Object.entries(PRESETS)) { const o = document.createElement("option"); o.value = k; o.textContent = p.name; sel.append(o); }
+  fillLabAssetSelect();
   sel.addEventListener("change", () => { lab.asset = sel.value; lab.cmp = null; loadLab().catch((e) => toast(errorText(e))); });
   $("lab_per").addEventListener("change", () => { lab.per = Number($("lab_per").value); lab.showN = 0; renderLabTable(); });
   $("lab_more").addEventListener("click", () => { lab.showN = (lab.showN || 150) + 150; renderLabTable(); });
