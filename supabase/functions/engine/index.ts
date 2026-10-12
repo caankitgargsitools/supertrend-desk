@@ -313,8 +313,8 @@ async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknow
     const per = (newState.pos_legs as MLeg[]).map((l, i) => ({ opt: l.opt, act: l.act, k: 0, x: (l.x ?? 0) as 0 | 1, q: l.q, strike: l.strike, px: mpx ? mpx[i] : 0 }));
     mLot = structMargin(per, entryPx, Number(s.lot_size), fr, sr);
   }
-  if ((sz || capMode) && rate) notes.push(`Margin ${(rate * 100).toFixed(1)}% of contract value (Dhan, today)`);
   const capMode = s.sizing?.mode === "CAPITAL" && Number(s.capital) > 0;
+  if ((sz || capMode) && rate) notes.push(`Margin ${(rate * 100).toFixed(1)}% of contract value (Dhan, today)`);
   if (capMode) {
     // A bought strategy: the capital the user gave it, plus what it has made or lost since, decides the lots.
     const { data: own } = await sb.from("algo_trades").select("net").eq("strategy_id", s.id).eq("mode", s.live ? "LIVE" : "PAPER");
