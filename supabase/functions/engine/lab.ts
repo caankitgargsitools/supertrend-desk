@@ -569,7 +569,17 @@ export function transfer(parent: LabConfig, key: string): LabConfig | null {
 }
 /** Same rules decided on a different candle timeframe (conditions on the strategy's own timeframe move with it). */
 export function retime(parent: LabConfig, tf: number): LabConfig | null {
-  if (parent.rules?.daily || tf === parent.timeframe_min) return null;
+  if (!(tf > 0)) return null;
+  if (parent.rules?.daily) {
+    // A once-a-day strategy decided instead at the close of every tf-minute candle; its daily conditions stay daily
+    // (the same change the tougher test makes for its "other timeframes" check).
+    const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
+    delete cfg.rules.daily; cfg.timeframe_min = tf;
+    cfg.lab_note = `Decided on ${tf}-minute candles instead of once a day`;
+    try { validateRules(cfg.rules); } catch { return null; }
+    return cfg;
+  }
+  if (tf === parent.timeframe_min) return null;
   const ok = condsOf(parent).every((x) => x.tf === "base" || x.tf === "D" || Number(x.tf) > tf);
   if (!ok) return null;
   const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
