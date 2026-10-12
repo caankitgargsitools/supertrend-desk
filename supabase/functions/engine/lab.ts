@@ -1071,8 +1071,17 @@ const WALL_BUDGET = 100000; // ms of wall time per instalment
  */
 export async function labWindowOpen(sb: SupabaseClient, mode: string): Promise<boolean> {
   if (mode !== "auto" && mode !== "night") return false;
-  const m = ist(Date.now() / 1000).min, night = m >= 23 * 60 + 30 || m < 8 * 60 + 30;
-  if (night || mode === "night") return night;
+  if (mode === "night") return labNight();
+  return await labQuiet(sb);
+}
+const labNight = () => { const m = ist(Date.now() / 1000).min; return m >= 23 * 60 + 30 || m < 8 * 60 + 30; };
+/**
+ * Lab work that nobody asked for just now (new runs, the 16:05 run, re-checks of earlier winners, option pricing)
+ * waits for the night (23:30–08:30 IST) while any strategy is running: active, in paper or live mode.
+ * Runs you start yourself (Run now, focused runs, variations, manual tests) are not held back.
+ */
+export async function labQuiet(sb: SupabaseClient): Promise<boolean> {
+  if (labNight()) return true;
   const { count } = await sb.from("algo_strategies").select("id", { count: "exact", head: true }).eq("active", true).eq("archived", false).eq("is_master", false);
   return (count ?? 0) === 0;
 }
@@ -1082,6 +1091,8 @@ export async function labStart(sb: SupabaseClient, manual: boolean, trigger?: st
   if (!set || (!set.enabled && !manual)) return null;
   // With back-to-back runs on, the 16:05 schedule has nothing extra to do.
   if (!manual && !trigger && (set.schedule_mode ?? "nightly") !== "nightly") return null;
+  // The 16:05 run waits for the night while strategies are running.
+  if (!manual && !trigger && !(await labQuiet(sb))) { await sb.from("lab_settings").update({ nightly_due: true }).eq("id", 1); return null; }
   // A focused run (one or a few assets, new strategies only), asked for from the Lab page.
   const focus = manual && trigger === "focus" ? set.focus as { assets?: string[]; n?: number } | null : null;
   if (trigger === "focus" && !focus?.assets?.length) return null;
@@ -1126,14 +1137,15 @@ export async function labNext(sb: SupabaseClient): Promise<number | null> {
   const { data: set } = await sb.from("lab_settings").select("*").eq("id", 1).maybeSingle();
   // A run stopped by hand pauses the lab for an hour; after that it carries on by itself.
   if (set?.paused_until && Date.parse(set.paused_until) > Date.now()) return null;
-  if (set?.nightly_due) {
+  const quiet = await labQuiet(sb);
+  if (set?.nightly_due && quiet) {
     await sb.from("lab_settings").update({ nightly_due: false }).eq("id", 1);
     const id = await labStart(sb, false);
     if (id) return id;
   }
   const { data: reqs } = await sb.from("lab_requests").select("*").eq("status", "pending").order("id").limit(1);
   const q = reqs?.[0];
-  if (!q && set) {
+  if (!q && set && quiet) {
     // Nothing else to do: re-check earlier first-round winners against the tougher test.
     const { count } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("basic_passed", true).is("robust_status", null);
     const { count: open } = await sb.from("lab_checks").select("id", { count: "exact", head: true }).eq("status", "pending");
@@ -1224,6 +1236,11 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
     if (!assets.length) throw new Error("Pick at least one asset in the lab settings.");
     const win = { from: String(run.from_day), split: String(run.split_day), to: String(run.to_day) };
 
+    if (run.trigger === "robust" && !(await labQuiet(sb))) {
+      // Picks up where it left off at night (the checks still to do stay queued).
+      await patch({ status: "done", phase: "done", progress: "Paused: strategies are running, so the re-check carries on at 11:30 PM", finished_at: new Date().toISOString(), lease_until: null });
+      return false;
+    }
     if (run.trigger === "continuous" && !(await labWindowOpen(sb, (await sb.from("lab_settings").select("schedule_mode").eq("id", 1).maybeSingle()).data?.schedule_mode ?? "nightly"))) {
       await patch({ status: "stopped", phase: "done", progress: "Stopped: outside the lab's hours (strategies are running, in paper or live, so the lab works 11:30 PM – 8:30 AM only)", finished_at: new Date().toISOString(), lease_until: null });
       return false;
@@ -1930,8 +1947,7 @@ export async function labOptStep(ctx: Ctx): Promise<boolean> {
   const { sb } = ctx;
   if (!(await labMayWork(sb, true))) return false;
   // Option pricing is lab work too: with strategies running it waits for the night window like the runs do.
-  const mode = (await sb.from("lab_settings").select("schedule_mode").eq("id", 1).maybeSingle()).data?.schedule_mode ?? "nightly";
-  if ((mode === "auto" || mode === "night") && !(await labWindowOpen(sb, mode))) return false;
+  if (!(await labQuiet(sb))) return false;
   const { count: busyRuns } = await sb.from("lab_runs").select("id", { count: "exact", head: true }).eq("status", "running");
   if ((busyRuns ?? 0) > 0) return false;
   // One worker at a time.
