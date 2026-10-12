@@ -1346,6 +1346,21 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   // size, so a big backlog is cleared over a few runs without making any one run heavier.
   const carried = await adoptLeftovers(sb, run, assets, n);
   n -= carried;
+  // Re-test of every saved strategy with the current rules (queued in lab_refresh, strategies on desks first): while
+  // any is left, runs re-test those and write no new strategies or variations. A focused run is new strategies only.
+  if (!set.focus) {
+    const { data: rq, error: rqe } = await sb.from("lab_refresh").select("fingerprint, asset, config").is("run_id", null).in("asset", assets)
+      .order("prio").order("score", { ascending: false, nullsFirst: false }).limit(Math.max(0, Math.min(n, 200)));
+    if (rqe) throw new Error(rqe.message);
+    if (rq?.length) {
+      const rows = rq.map((c) => ({ run_id: run.id, asset: c.asset, mode: c.config.rules?.daily ? "DAILY" : "INTRADAY", label: labelFor(c.config), fingerprint: c.fingerprint,
+        champion: true, refresh: true, config: { ...c.config, lab_note: "Re-test of a saved strategy with the current rules" }, stage: "pending" }));
+      for (let i = 0; i < rows.length; i += 100) { const { error } = await sb.from("lab_results").insert(rows.slice(i, i + 100)); if (error) throw new Error(error.message); }
+      const { error: ue } = await sb.from("lab_refresh").update({ run_id: run.id, queued_at: new Date().toISOString() }).in("fingerprint", rq.map((x) => x.fingerprint));
+      if (ue) throw new Error(ue.message);
+      return carried;
+    }
+  }
   const since = new Date(Date.now() - 14 * 86400000).toISOString();
   const { data: recent } = await sb.from("lab_results").select("fingerprint").gte("created_at", since).limit(20000);
   const seen = new Set((recent ?? []).map((x) => x.fingerprint));
@@ -1873,7 +1888,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
 
 async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: string; to: string }): Promise<boolean> {
   const { sb } = ctx;
-  const { data: pend } = await sb.from("lab_results").select("id, asset, config, fingerprint, label, mode, request_id").eq("run_id", run.id).eq("stage", "pending").order("asset").order("id").limit(300);
+  const { data: pend } = await sb.from("lab_results").select("id, asset, config, fingerprint, label, mode, request_id, refresh").eq("run_id", run.id).eq("stage", "pending").order("asset").order("id").limit(300);
   if (!pend?.length) return false;
   const asset = pend[0].asset;
   const capital = Number(run.settings?.capital ?? 500000);
@@ -1891,6 +1906,15 @@ async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     let fields: Record<string, unknown>;
     try {
       const { metrics, trades } = await screenOne(row.config, data, memo, win, capital, rates);
+      if (!metrics.passed && row.refresh) {
+        // A saved strategy re-tested with the current rules that now fails the first round: kept, with the verdict,
+        // so it replaces its older (passing) result instead of quietly disappearing.
+        fields = { stage: "screened", basic_passed: false, passed: false, robust_status: "done", score: metrics.score, metrics, trades: slim(trades), error: null,
+          robust: { status: "done", passed: false, why: (metrics.why ?? []).map((w: string) => `first round (latest year): ${w}`), checked_at: new Date().toISOString() } };
+        cpu += performance.now() - t1;
+        updates.push(sb.from("lab_results").update(fields).eq("id", row.id).then(() => {}));
+        continue;
+      }
       if (!metrics.passed && !row.request_id) {
         // Failed the first round: keep only the short record.
         failed.push({ id: row.id, fingerprint: row.fingerprint, asset: row.asset, label: row.label, mode: row.mode, score: metrics.score, metrics, round: 1, why: metrics.why });

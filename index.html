@@ -3404,6 +3404,7 @@ function labDeskBanner(id) {
 function wireDeskBanner(box) { box.querySelectorAll("[data-open-strat]").forEach((b) => b.addEventListener("click", () => { closeLab(); openStrat(b.dataset.openStrat); })); }
 function closeLab() { document.body.classList.remove("wide"); if (!lab.open) return; lab.open = false; $("labPane").hidden = true; $("openLab").classList.remove("primary"); stopLabPoll(); }
 function stopLabPoll() { if (lab.poll) { clearTimeout(lab.poll); lab.poll = null; } }
+const LAB_ROW_COLS = "id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, twin_of, refresh, superseded_by, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary";
 async function loadLab() {
   // Today's margin for one lot of every asset (Dhan's margin calculator; crypto: Delta at 10× leverage), refreshed each run.
   lab.marg = await db.from("lab_margins").select("asset, detail, checked_at").then((x) => Object.fromEntries((x.data || []).map((m) => [m.asset, { ...(m.detail || {}), at: m.checked_at }]))).catch(() => lab.marg || {});
@@ -3424,12 +3425,14 @@ async function loadLab() {
   ]);
   lab.settings = settings; lab.runs = runs;
   lab.optLeft = await labOptCount();
+  lab.refreshSt = await db.rpc("lab_refresh_status").then((x) => x.data).catch(() => null);
   lab.loadedAt = Date.now();
   // The database hands out at most 1,000 rows per request, so the list is read in pages of 1,000 (up to 8,000 rows),
   // ordered by score and then id so no row is skipped or repeated between pages.
   const build = () => {
-    let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, twin_of, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary")
+    let q = db.from("lab_results").select(LAB_ROW_COLS)
       .in("stage", ["screened", "opt_queue", "pricing", "priced"]);
+    if (!lab.request) q = q.is("superseded_by", null); // a saved strategy re-tested with the current rules shows only its newest result
     if (lab.request) q = q.eq("request_id", lab.request);
     else if (lab.period === "run") q = q.eq("run_id", runs[0] ? runs[0].id : -1);
     else q = q.gte("created_at", new Date(Date.now() - Number(lab.period) * 86400000).toISOString());
@@ -3450,10 +3453,14 @@ async function loadLab() {
     const have = new Set(all.map((r) => Number(r.id)));
     const miss = [...labDeskMap().keys()].filter((id) => !have.has(id));
     if (miss.length) {
-      let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, twin_of, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary").in("id", miss.slice(0, 200));
+      let q = db.from("lab_results").select(LAB_ROW_COLS).in("id", miss.slice(0, 200));
       if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
       if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : lab.view === "SPREAD" ? "opt_struct" : "opt_sell", "is", null);
-      all.push(...((await q.then((x) => x.data).catch(() => null)) || []));
+      const got = (await q.then((x) => x.data).catch(() => null)) || [];
+      all.push(...got);
+      // A desk strategy re-tested since: its newest result is shown with it.
+      const newer = [...new Set(got.map((r) => r.superseded_by).filter((id) => id && !have.has(Number(id))))];
+      if (newer.length) all.push(...((await db.from("lab_results").select(LAB_ROW_COLS).in("id", newer.slice(0, 200)).then((x) => x.data).catch(() => null)) || []));
     }
   }
   lab.rows = all.map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
@@ -3483,6 +3490,13 @@ async function pollLabStatus() {
   if (moved || Date.now() - (lab.loadedAt || 0) > 180000) return loadLab();
   renderLabStatus(); scheduleLabPoll();
 }
+/** Progress of the re-test of every saved strategy with the current rules (new strategies wait until it's done). */
+function labRefreshHTML() {
+  const x = lab.refreshSt; if (!x || !x.total) return "";
+  const left = x.total - x.done;
+  if (left <= 0) return `<div class="banner ok" style="margin-top:8px">All ${x.total} saved strategies were re-tested with the current rules: ${x.passed} still pass. New strategies are being written again.</div>`;
+  return `<div class="banner info" style="margin-top:8px"><b>Re-testing every saved strategy with the current rules</b> (latest year, then the tougher test), strategies on desks first: ${x.done} of ${x.total} done${x.done ? `, ${x.passed} still pass` : ""}; ${x.queued - x.done > 0 ? `${x.queued - x.done} in the current run, ` : ""}${x.total - x.queued} waiting. No new strategies are written until this is finished. It runs 11:30 PM – 8:30 AM while strategies are active, so it may take a few nights.</div>`;
+}
 function renderLabStatus() {
   const box = $("lab_status"); const r = lab.runs[0];
   $("lab_stop").hidden = !(r && r.status === "running");
@@ -3507,6 +3521,7 @@ function renderLabStatus() {
       : why === "slow" ? `The database was answering slowly, so the lab is giving way (logins and live trading come first). It carries on by itself at ${esc(istText(pausedTill))} IST.`
       : `Stopped by hand. The lab starts again by itself at ${esc(istText(pausedTill))} IST, or press “Run now”.`;
     return r.status === "running" && why !== "slow" ? "" : `<div class="banner ${why === "rest" ? "info" : "warn"}" style="margin-top:8px">${t}</div>`; })() : ""}
+  ${labRefreshHTML()}
   ${labOptHTML()}
   ${r.status === "running" ? labProgressHTML(r) : ""}
   ${labTimingsHTML(r)}
@@ -3729,7 +3744,7 @@ function labGroup() {
     if (!mine && lab.stopf === "WITH" && !risk && lab.view === "FUT") continue;
     if (!mine && lab.stopf === "WITHOUT" && risk && lab.view === "FUT") continue;
     let g = by.get(r.fingerprint);
-    const ok = labPassed(r, m), checking = labChecking(r, m), born = Date.parse(r.created_at) || null;
+    const ok = labPassed(r, m), checking = labChecking(r, m), born = r.refresh ? null : Date.parse(r.created_at) || null; // a re-test of an old strategy is not a new find
     if (g && mine) g.deskS = [...(g.deskS || []), ...mine];
     if (g && born && (!g.first || born < g.first)) g.first = born;
     if (!g) by.set(r.fingerprint, { r, m, nights: 1, passes: ok ? 1 : 0, done: checking ? null : { r, m }, deskS: mine ? [...mine] : null, first: born });
@@ -3967,7 +3982,7 @@ function renderLabTable() {
     if (g.deskS) tr.dataset.desk = g.deskS.map((x) => x.id).join(" ");
     const chips = [pub ? "" : `<span class="chip">${c.rules && c.rules.daily ? "Daily" : (c.timeframe_min + "m · " + (c.intraday ? "intraday" : "positional"))}</span>`,
       c.rules && c.rules.candles === "HA" ? '<span class="chip">HA candles</span>' : "",
-      c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.champion ? '<span class="chip green">Re-tested</span>' : "", g.rechecking ? `<span class="chip blue" title="Showing the result from run #${g.r.run_id}; today's re-test (run #${g.rechecking.run_id}) is still being checked">Re-checking today</span>` : "",
+      c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.refresh ? '<span class="chip blue" title="A saved strategy re-tested with the current rules">Re-tested (current rules)</span>' : r.champion ? '<span class="chip green">Re-tested</span>' : "", g.rechecking ? `<span class="chip blue" title="Showing the result from run #${g.r.run_id}; today's re-test (run #${g.rechecking.run_id}) is still being checked">Re-checking today</span>` : "",
       r.starred ? '<span class="chip yellow">★</span>' : "", labDeskChip(g, f, sub),
       labPassed(r, m) ? '<span class="chip green">Passed</span>' : labChecking(r, m) ? '<span class="chip blue">Being checked</span>' : m.passed && robDone(r) ? '<span class="chip red">Failed tougher test</span>' : '<span class="chip red">Not passed</span>'].join("");
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : lab.view === "SPREAD" ? r.osp : r.os) : null;
@@ -4026,7 +4041,7 @@ function renderLabCards(fams, pc, rs) {
     const done = x && x.status === "done";
     el.innerHTML = `<div class="tt"><span class="no">${num}</span><span class="nm"></span></div>
       <div class="sub">${esc(labAssetName(r.asset))} · ${esc(labStyle(r))}${g.passes ? ` · passed ${g.passes} of ${g.nights} run${g.nights === 1 ? "" : "s"}` : ""}</div>
-      <div class="chips">${labDeskChip(g, f, sub)}${status}${g.rechecking ? '<span class="chip blue">Re-checking today</span>' : ""}${r.champion ? '<span class="chip green">Re-tested</span>' : ""}${r.starred ? '<span class="chip yellow">★</span>' : ""}</div>
+      <div class="chips">${labDeskChip(g, f, sub)}${status}${g.rechecking ? '<span class="chip blue">Re-checking today</span>' : ""}${r.refresh ? '<span class="chip blue">Re-tested (current rules)</span>' : r.champion ? '<span class="chip green">Re-tested</span>' : ""}${r.starred ? '<span class="chip yellow">★</span>' : ""}</div>
       <div class="mg">${cell("Net (1 yr)", pc(m.full.net) + longNetLine(r))}${cell("Win %", m.full.win_rate)}${cell("Trades", m.full.n)}
         ${cell("Max DD", rs(m.full.max_dd))}${cell("PF", m.full.pf ?? "–")}${cell("Months +", `${m.pos_months}/${m.months_n}`)}
         ${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Margin today (1 lot)", marginToday(r) ? rupees(marginToday(r)) : "–")}${cell("1-yr net on today's margin", returnToday(g) == null ? "–" : returnToday(g) + "%")}${cell("Desk score", deskCell(deskScore(r)))}${cell("Quality", x && x.quality ? `<span class="${x.quality.score >= 70 ? "pos-num" : x.quality.score < 40 ? "neg-num" : ""}">${x.quality.score}</span>` : "–")}

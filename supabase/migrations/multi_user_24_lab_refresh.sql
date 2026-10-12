@@ -1,0 +1,7 @@
+-- Re-test every saved lab strategy with the current rules (applied 12 Oct 2026).
+-- lab_refresh: one row per saved strategy (fingerprint), prio 0 = on a desk, 1 starred, 2 passed, 3 first-round winner, 4 other.
+--   run_id is set when a run takes it. While any is left (for the run's assets), runs re-test those and write nothing new.
+-- lab_results.refresh marks those re-test rows; a re-test that fails the first round is kept with robust_status 'done'.
+-- lab_results.superseded_by: set on older results of the same strategy once its re-test has a verdict (trigger lab_supersede);
+--   the Lab list and lab_feed leave superseded rows out.
+-- lab_refresh_status(): progress for the Lab page (admin).
