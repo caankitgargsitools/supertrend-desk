@@ -352,6 +352,16 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 @keyframes tickUp { from { background: rgba(26, 127, 55, .22); } to { background: transparent; } }
 @keyframes tickDown { from { background: rgba(207, 34, 46, .22); } to { background: transparent; } }
 .big-table tr.pick td.nm { color: var(--blue); }
+.big-table tfoot td { position: sticky; bottom: 0; background: var(--panel); border-top: 2px solid var(--ink, #1f2328); font-weight: 700; white-space: normal; vertical-align: top; font-variant-numeric: tabular-nums; }
+.big-table tfoot td .hint.sm { font-weight: 400; }
+.chip.desk { background: var(--green); color: #fff; font-weight: 700; }
+.chip.desk2 { background: var(--green-soft); color: var(--green); border: 1px dashed var(--green); }
+.lab-table tr.ondesk td, .lab-table tr.ondesk td:nth-child(1), .lab-table tr.ondesk td:nth-child(2) { background: var(--green-soft); }
+.lab-table tr.ondesk td:nth-child(1) { box-shadow: inset 4px 0 0 var(--green); }
+.lcd.ondesk { border-color: var(--green); box-shadow: inset 4px 0 0 var(--green); }
+.labfocus { animation: labFocus 2.4s ease-out; }
+@keyframes labFocus { 0%, 40% { outline: 3px solid var(--blue); outline-offset: -3px; } 100% { outline: 3px solid transparent; outline-offset: -3px; } }
+.labfrom { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
 .lcard { border: 1px solid var(--line); border-radius: var(--r); padding: 14px; display: grid; gap: 10px; background: var(--panel); align-content: start; }
 .lcard h3 { font-size: 17px; }
@@ -510,6 +520,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
           <span class="actions"><button class="btn small" id="b_restore" type="button">Restore</button><button class="btn small danger" id="b_purge" type="button">Delete permanently</button></span>
         </div>
         <div id="errBox" class="banner err" style="margin-top:12px" hidden></div>
+        <div id="labLink" class="banner info labfrom" style="margin-top:12px" hidden></div>
         <div id="lockedBox" style="margin-top:12px" hidden></div>
         <div id="publishBox" style="margin-top:12px" hidden></div>
         <div class="stats" style="margin-top:14px">
@@ -826,6 +837,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
           <label class="f"><span>Stop loss</span><select id="lab_stopf"><option value="ANY">With or without</option><option value="WITH">With stop / target</option><option value="WITHOUT">Without</option></select></label>
           <label class="f"><span>Show</span><select id="lab_only"><option value="true">Passed only</option><option value="false">Everything kept</option></select></label>
           <label class="f"><span>Per asset</span><select id="lab_per"><option value="1">Best 1 per asset</option><option value="5" selected>Best 5 per asset</option><option value="10">Best 10 per asset</option><option value="0">All</option></select></label>
+          <label class="f"><span>My desk</span><select id="lab_mine"><option value="">Mark mine among all</option><option value="only">Only those on my desk</option></select></label>
         </div>
         <div id="lab_reqfilter" class="banner info" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center" hidden></div>
         <p class="hint" id="lab_count" style="margin:10px 0 0"></p>
@@ -903,7 +915,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
         <button class="btn small" type="button" data-bulk="paper">Back to paper</button>
         <button class="btn small" type="button" data-bulk="clear">Clear selection</button>
       </div>
-      <div class="scroll"><table class="big-table"><thead id="lp_head"></thead><tbody id="lp_body"></tbody></table></div>
+      <div class="scroll"><table class="big-table"><thead id="lp_head"></thead><tbody id="lp_body"></tbody><tfoot id="lp_tfoot"></tfoot></table></div>
       <p class="hint" id="lp_foot" style="margin:8px 0 0"></p>
       </div>
     </section>
@@ -1271,6 +1283,15 @@ function renderStrategy() {
   $("archBanner").hidden = !s.archived;
   ["b_active", "b_live", "b_flat", "b_archive"].forEach((id) => $(id).hidden = !!s.archived);
   const eb = $("errBox"); eb.hidden = !s.last_error; eb.textContent = s.last_error || "";
+  const ll = $("labLink"), labOk = s.lab_id && !s.is_master && !$("openLab").hidden;
+  ll.hidden = !labOk;
+  if (labOk) {
+    ll.innerHTML = `<span>From the Strategy Lab, result #${esc(String(s.lab_id))}, added ${esc(istText(s.created_at))}.</span>
+      <button class="btn small" type="button" id="ll_open">Open its lab result</button>
+      <button class="btn small primary" type="button" id="ll_cmp">Compare with the lab's ${esc(assetLabel(s.underlying))} strategies</button>`;
+    $("ll_open").addEventListener("click", () => openLabFor(s, "open"));
+    $("ll_cmp").addEventListener("click", () => openLabFor(s, "compare"));
+  }
   const tr = $("st_trend");
   tr.textContent = s.last_trend === 1 ? (isTimed(s) ? "▲ Up → calls" : "▲ Up") : s.last_trend === -1 ? (isTimed(s) ? "▼ Down → puts" : "▼ Down") : "–";
   tr.className = "v " + (s.last_trend === 1 ? "up" : s.last_trend === -1 ? "down" : "");
@@ -3337,6 +3358,37 @@ function openLab() {
   $("openLab").classList.add("primary");
   loadLab().catch((e) => toast(errorText(e)));
 }
+/** From a strategy on my desk: open the lab on its asset and instrument, either on its own result or to compare. */
+function openLabFor(s, how) {
+  lab.asset = PRESETS[s.underlying] ? s.underlying : "ALL"; $("lab_asset").value = lab.asset;
+  lab.view = s.trade_type === "OPTIONS" ? (s.structure ? "SPREAD" : s.option_side === "SELL" ? "SELL" : "BUY") : "FUT";
+  $("lab_view").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x.dataset.v === lab.view ? "true" : "false")); $("lab_stopf").disabled = lab.view !== "FUT";
+  lab.filters = {}; lab.mine = ""; $("lab_mine").value = ""; lab.showN = 0; lab.request = null;
+  if (how === "compare") { lab.per = 10; $("lab_per").value = "10"; lab.cmp = s.name; } else lab.cmp = null;
+  lab.focus = { strat: s.id, labId: Number(s.lab_id), open: how === "open" };
+  openLab();
+}
+/** After the lab list loads: open or scroll to the strategy asked for (its twin group opened if needed). */
+function labFocus() {
+  const f = lab.focus; if (!f) return; lab.focus = null;
+  if (f.open) { openLabDetail(f.labId).catch((e) => toast(errorText(e))); return; }
+  const fam = labGroup().find((x) => x.members.some((g) => g.deskS && g.deskS.some((s) => s.id === f.strat)));
+  if (fam && !(fam.best.deskS && fam.best.deskS.some((s) => s.id === f.strat))) { lab.openFam = lab.openFam || new Set(); lab.openFam.add(fam.key); }
+  renderLabTable();
+  requestAnimationFrame(() => {
+    const el = [...document.querySelectorAll("#lab_body [data-desk], #lab_cards [data-desk]")].find((x) => x.offsetParent && x.dataset.desk.split(" ").includes(String(f.strat)));
+    if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); el.classList.add("labfocus"); }
+    else toast("Its lab result isn't in this list any more (lab results are kept 45 days unless starred).");
+  });
+}
+/** Banner on a lab result that is already on my desk. */
+function labDeskBanner(id) {
+  const list = labDeskMap().get(Number(id)); if (!list) return "";
+  const open = list.filter((s) => !s.archived);
+  return `<div class="banner ${open.length ? "ok" : "info"} labfrom" style="margin-top:12px"><span>${open.length ? "✓ On your desk as" : "You added this earlier (now archived):"} ${list.map((s) => `<b>${esc(s.name)}</b> (${s.archived ? "archived" : `${s.active ? "active" : "paused"} · ${s.live ? "live" : "paper"}`})`).join(", ")}</span>
+    ${list.map((s) => `<button class="btn small" type="button" data-open-strat="${s.id}">Open ${list.length > 1 ? esc(s.name.slice(0, 24)) : "it"}</button>`).join("")}</div>`;
+}
+function wireDeskBanner(box) { box.querySelectorAll("[data-open-strat]").forEach((b) => b.addEventListener("click", () => { closeLab(); openStrat(b.dataset.openStrat); })); }
 function closeLab() { document.body.classList.remove("wide"); if (!lab.open) return; lab.open = false; $("labPane").hidden = true; $("openLab").classList.remove("primary"); stopLabPoll(); }
 function stopLabPoll() { if (lab.poll) { clearTimeout(lab.poll); lab.poll = null; } }
 async function loadLab() {
@@ -3348,7 +3400,7 @@ async function loadLab() {
     lab.settings = null; lab.runs = res.run ? [res.run] : [];
     lab.long = await db.rpc("lab_long_map").then((x) => x.data || {}).catch(() => ({}));
     lab.rows = (res.rows || []).map((r) => ({ ...r, config: null, label: `Lab #${r.id} · ${(PRESETS[r.asset] && PRESETS[r.asset].name) || r.asset}` }));
-    renderLabStatus(); renderLabTable(); $("lab_stop").hidden = true; $("lab_run").hidden = true; loadLabRequests().catch(() => {});
+    renderLabStatus(); renderLabTable(); $("lab_stop").hidden = true; $("lab_run").hidden = true; loadLabRequests().catch(() => {}); labFocus();
     stopLabPoll();
     if (lab.open && lab.runs[0] && lab.runs[0].status === "running") lab.poll = setTimeout(() => loadLab().catch(() => {}), 30000);
     return;
@@ -3380,10 +3432,21 @@ async function loadLab() {
     all.push(...page);
     if (page.length < 1000) break;
   }
+  // Lab results behind strategies on my desk are always read, even when older than the period or no longer passing.
+  if (!lab.request) {
+    const have = new Set(all.map((r) => Number(r.id)));
+    const miss = [...labDeskMap().keys()].filter((id) => !have.has(id));
+    if (miss.length) {
+      let q = db.from("lab_results").select("id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, twin_of, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary").in("id", miss.slice(0, 200));
+      if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
+      if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : lab.view === "SPREAD" ? "opt_struct" : "opt_sell", "is", null);
+      all.push(...((await q.then((x) => x.data).catch(() => null)) || []));
+    }
+  }
   lab.rows = all.map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
   lab.long = await db.rpc("lab_long_map").then((x) => x.data || {}).catch(() => ({}));
   renderLabStatus(); renderLabTable(); loadLabRequests().catch(() => {});
-  scheduleLabPoll();
+  scheduleLabPoll(); labFocus();
 }
 const labOptCount = () => db.from("lab_results").select("id", { count: "exact", head: true }).in("stage", ["opt_queue", "pricing"]).then((x) => x.count || 0).catch(() => 0);
 /**
@@ -3613,18 +3676,50 @@ function robustHTML(r, m, admin) {
     ${admin ? list(x.assetList, "Asset") + list(x.tfList, "Timeframe") : ""}
     ${admin && x.stepList && x.stepList.length ? `<table class="mini" style="margin-top:6px"><thead><tr><th>Setting step (latest year)</th><th class="n">Trades</th><th class="n">Net</th><th class="n">PF</th><th>Works?</th></tr></thead><tbody>${x.stepList.map((y) => `<tr><td>${esc(y.note || "")}</td><td class="n">${y.n ?? "–"}</td><td class="n">${pc(y.net)}</td><td class="n">${y.pf ?? "–"}</td><td>${y.ok ? '<span class="chip green">Yes</span>' : '<span class="chip red">No</span>'}</td></tr>`).join("")}</tbody></table>` : ""}`;
 }
+/** My strategies made from lab results: lab result id → my strategies (archived ones too). */
+function labDeskMap() {
+  const out = new Map();
+  for (const s of (typeof state !== "undefined" && state.strategies) || []) {
+    if (!me || s.is_master || s.owner_id !== me.user_id || !s.lab_id) continue;
+    const k = Number(s.lab_id), a = out.get(k); if (a) a.push(s); else out.set(k, [s]);
+  }
+  return out;
+}
+/** For each asset, when I last added a lab strategy of it to my desk (lab results found after that are marked "New"). */
+function labDeskSince(desk) {
+  const out = new Map();
+  for (const list of desk.values()) for (const s of list) if (!s.archived) { const t = Date.parse(s.created_at); if (!(out.get(s.underlying) >= t)) out.set(s.underlying, t); }
+  return out;
+}
+const deskOpen = (g) => !!(g && g.deskS && g.deskS.some((s) => !s.archived));
+function labDeskChip(g, f, sub) {
+  if (g.deskS) {
+    const open = g.deskS.filter((s) => !s.archived);
+    if (!open.length) return '<span class="chip" title="You added this one earlier and archived it">Was on my desk</span>';
+    return `<span class="chip desk" title="${esc(open.map((s) => `${s.name} · ${s.active ? "active" : "paused"} · ${s.live ? "live" : "paper"}`).join("\n"))}">✓ On my desk${open.length > 1 ? ` ×${open.length}` : ""}${open.some((s) => s.live) ? " · live" : ""}</span>`;
+  }
+  if (!sub && f && f.members.some((x) => x !== g && deskOpen(x))) return '<span class="chip desk2" title="A twin or similar version in this group is on your desk; open the group to see it">Twin on my desk</span>';
+  const t = lab.deskSince && lab.deskSince.get(g.r.asset);
+  if (t && g.first && g.first > t) return '<span class="chip blue" title="Found after you last added a strategy of this asset to your desk">New since yours</span>';
+  return "";
+}
 function labGroup() {
   // One line per strategy (same rules and stops), showing its latest result and how often it passed.
-  const by = new Map();
+  const by = new Map(), desk = labDeskMap();
+  lab.deskSince = labDeskSince(desk);
   for (const r of lab.rows) {
     const m = labMetricsFor(r); if (!m) continue;
-    if (lab.view !== "FUT" && lab.only && !labPassed(r, m)) continue;
+    const mine = desk.get(Number(r.id));
+    // A strategy on my desk always stays in the list, so the lab's finds can be compared with it.
+    if (!mine && lab.view !== "FUT" && lab.only && !labPassed(r, m)) continue;
     const risk = r.config ? r.config.risk : r.has_risk;
-    if (lab.stopf === "WITH" && !risk && lab.view === "FUT") continue;
-    if (lab.stopf === "WITHOUT" && risk && lab.view === "FUT") continue;
-    const g = by.get(r.fingerprint);
-    const ok = labPassed(r, m), checking = labChecking(r, m);
-    if (!g) by.set(r.fingerprint, { r, m, nights: 1, passes: ok ? 1 : 0, done: checking ? null : { r, m } });
+    if (!mine && lab.stopf === "WITH" && !risk && lab.view === "FUT") continue;
+    if (!mine && lab.stopf === "WITHOUT" && risk && lab.view === "FUT") continue;
+    let g = by.get(r.fingerprint);
+    const ok = labPassed(r, m), checking = labChecking(r, m), born = Date.parse(r.created_at) || null;
+    if (g && mine) g.deskS = [...(g.deskS || []), ...mine];
+    if (g && born && (!g.first || born < g.first)) g.first = born;
+    if (!g) by.set(r.fingerprint, { r, m, nights: 1, passes: ok ? 1 : 0, done: checking ? null : { r, m }, deskS: mine ? [...mine] : null, first: born });
     else {
       g.nights++; if (ok) g.passes++;
       if (r.run_id > g.r.run_id) { g.r = r; g.m = m; }
@@ -3636,7 +3731,7 @@ function labGroup() {
     if (g.done && g.done.r !== g.r && labChecking(g.r, g.m)) { g.rechecking = g.r; g.r = g.done.r; g.m = g.done.m; }
   }
   // Column filters apply to every strategy; sorting follows the column picked in the header.
-  for (const [k, g] of [...by]) if (!labPassFilters(g)) by.delete(k);
+  for (const [k, g] of [...by]) if (!labPassFilters(g) || (lab.mine === "only" && !g.deskS)) by.delete(k);
   const col = LAB_COLS.find((c) => c.k === lab.sortKey) || LAB_COLS.find((c) => c.k === "score");
   const dir = lab.sortDir || -1;
   const key = (g) => { const v = col.v(g); return typeof v === "string" ? v : (v == null || Number.isNaN(v) ? -Infinity * dir : v); };
@@ -3647,12 +3742,13 @@ function labGroup() {
     const f = fam.get(k); if (f) f.members.push(g); else fam.set(k, { key: k, members: [g] });
   }
   const cmp = (a, b) => { const x = key(a), y = key(b); return (typeof x === "string" ? x.localeCompare(y) : x - y) * dir; };
-  const out = [...fam.values()].map((f) => { f.members.sort(cmp); f.best = f.members[0]; return f; }).sort((a, b) => cmp(a.best, b.best));
-  // "Best N per asset": only the top groups of each asset, in the order picked above.
+  const out = [...fam.values()].map((f) => { f.members.sort(cmp); f.best = f.members[0]; f.desk = f.members.some(deskOpen); return f; }).sort((a, b) => cmp(a.best, b.best));
+  lab.deskN = out.filter((f) => f.desk).length;
+  // "Best N per asset": only the top groups of each asset, in the order picked above. Groups with a strategy on my desk always stay.
   lab.perHidden = 0;
   if (!lab.per) return out;
   const seen = new Map();
-  return out.filter((f) => { const a = f.best.r.asset, k = (seen.get(a) || 0) + 1; seen.set(a, k); if (k > lab.per) { lab.perHidden++; return false; } return true; });
+  return out.filter((f) => { if (f.desk) return true; const a = f.best.r.asset, k = (seen.get(a) || 0) + 1; seen.set(a, k); if (k > lab.per) { lab.perHidden++; return false; } return true; });
 }
 function familyKey(r) {
   // Twins (same asset, 80%+ of trades opened on the same day in the same direction) are one group.
@@ -3848,16 +3944,18 @@ function renderLabTable() {
   lab.openFam = lab.openFam || new Set();
   const nStrat = fams.reduce((a, f) => a + f.members.length, 0);
   const nf = Object.values(lab.filters).filter(Boolean).length;
-  $("lab_count").textContent = fams.length ? `${fams.length} groups of twins / similar strategies (${nStrat} strategies)${lab.perHidden ? `, best ${lab.per} per asset (${lab.perHidden} more groups under “Per asset: All”)` : ""}${nf ? `, ${nf} column filter${nf === 1 ? "" : "s"} on` : ""}${fams.length > (lab.showN || 150) ? `; showing the first ${lab.showN || 150} groups (type in the boxes under the titles to find one, e.g. “HA strength” under Strategy, or press “Show more”)` : ""}.${labPhone() ? " Tap a card to open it." : " Click a column title to sort; type in the boxes under the titles to filter (numbers: 50 = at least 50, >50, <0, 10-20)."}` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run.");
+  const cmpTxt = lab.cmp ? `Comparing with your “${lab.cmp}” (green row, ✓ On my desk): rows above it rank higher on the column you sort by; “New since yours” marks strategies found after you added it. ` : "";
+  $("lab_count").textContent = (fams.length ? cmpTxt : "") + (fams.length ? `${fams.length} groups of twins / similar strategies (${nStrat} strategies)${lab.perHidden ? `, best ${lab.per} per asset (${lab.perHidden} more groups under “Per asset: All”)` : ""}${nf ? `, ${nf} column filter${nf === 1 ? "" : "s"} on` : ""}${lab.deskN ? `; ${lab.deskN} on your desk (green, ✓)` : ""}${fams.length > (lab.showN || 150) ? `; showing the first ${lab.showN || 150} groups (type in the boxes under the titles to find one, e.g. “HA strength” under Strategy, or press “Show more”)` : ""}.${labPhone() ? " Tap a card to open it." : " Click a column title to sort; type in the boxes under the titles to filter (numbers: 50 = at least 50, >50, <0, 10-20)."}` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run."));
   const pc = (v) => `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}" title="${rupees(v)}">${rupeesShort(v)}</span>`;
   const rs = (v) => v == null ? "–" : `<span title="${rupees(v)}">${rupeesShort(v)}</span>`;
   const rowFor = (g, num, f, sub) => {
     const m = g.m, r = g.r, c = r.config || {}, pub = !r.config;
-    const tr = document.createElement("tr"); tr.className = "pick" + (sub ? " sub" : "") + (lab.sel === r.id ? " sel" : "");
+    const tr = document.createElement("tr"); tr.className = "pick" + (sub ? " sub" : "") + (lab.sel === r.id ? " sel" : "") + (deskOpen(g) ? " ondesk" : "");
+    if (g.deskS) tr.dataset.desk = g.deskS.map((x) => x.id).join(" ");
     const chips = [pub ? "" : `<span class="chip">${c.rules && c.rules.daily ? "Daily" : (c.timeframe_min + "m · " + (c.intraday ? "intraday" : "positional"))}</span>`,
       c.rules && c.rules.candles === "HA" ? '<span class="chip">HA candles</span>' : "",
       c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.champion ? '<span class="chip green">Re-tested</span>' : "", g.rechecking ? `<span class="chip blue" title="Showing the result from run #${g.r.run_id}; today's re-test (run #${g.rechecking.run_id}) is still being checked">Re-checking today</span>` : "",
-      r.starred ? '<span class="chip yellow">★</span>' : "", r.promoted_id ? '<span class="chip green">Saved as strategy</span>' : "",
+      r.starred ? '<span class="chip yellow">★</span>' : "", labDeskChip(g, f, sub),
       labPassed(r, m) ? '<span class="chip green">Passed</span>' : labChecking(r, m) ? '<span class="chip blue">Being checked</span>' : m.passed && robDone(r) ? '<span class="chip red">Failed tougher test</span>' : '<span class="chip red">Not passed</span>'].join("");
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : lab.view === "SPREAD" ? r.osp : r.os) : null;
     const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} twins / similar</button>` : "";
@@ -3907,14 +4005,15 @@ function renderLabCards(fams, pc, rs) {
   const box = $("lab_cards"); box.innerHTML = "";
   const card = (g, num, f, sub) => {
     const m = g.m, r = g.r, x = robOf(r);
-    const el = document.createElement("div"); el.className = "lcd" + (lab.sel === r.id ? " sel" : ""); el.tabIndex = 0;
+    const el = document.createElement("div"); el.className = "lcd" + (lab.sel === r.id ? " sel" : "") + (deskOpen(g) ? " ondesk" : ""); el.tabIndex = 0;
+    if (g.deskS) el.dataset.desk = g.deskS.map((x) => x.id).join(" ");
     const status = labPassed(r, m) ? '<span class="chip green">Passed</span>' : labChecking(r, m) ? '<span class="chip blue">Being checked</span>' : m.passed && robDone(r) ? '<span class="chip red">Failed tougher test</span>' : '<span class="chip red">Not passed</span>';
     const cell = (k, v) => `<div><span class="k">${k}</span><b>${v}</b></div>`;
     const ratio = (ok, n) => n == null ? "–" : `<span class="${n && ok >= Math.min(2, n) ? "pos-num" : "neg-num"}">${ok ?? 0}/${n}</span>`;
     const done = x && x.status === "done";
     el.innerHTML = `<div class="tt"><span class="no">${num}</span><span class="nm"></span></div>
       <div class="sub">${esc(labAssetName(r.asset))} · ${esc(labStyle(r))}${g.passes ? ` · passed ${g.passes} of ${g.nights} run${g.nights === 1 ? "" : "s"}` : ""}</div>
-      <div class="chips">${status}${g.rechecking ? '<span class="chip blue">Re-checking today</span>' : ""}${r.champion ? '<span class="chip green">Re-tested</span>' : ""}${r.starred ? '<span class="chip yellow">★</span>' : ""}</div>
+      <div class="chips">${labDeskChip(g, f, sub)}${status}${g.rechecking ? '<span class="chip blue">Re-checking today</span>' : ""}${r.champion ? '<span class="chip green">Re-tested</span>' : ""}${r.starred ? '<span class="chip yellow">★</span>' : ""}</div>
       <div class="mg">${cell("Net (1 yr)", pc(m.full.net) + longNetLine(r))}${cell("Win %", m.full.win_rate)}${cell("Trades", m.full.n)}
         ${cell("Max DD", rs(m.full.max_dd))}${cell("PF", m.full.pf ?? "–")}${cell("Months +", `${m.pos_months}/${m.months_n}`)}
         ${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Margin today (1 lot)", marginToday(r) ? rupees(marginToday(r)) : "–")}${cell("1-yr net on today's margin", returnToday(g) == null ? "–" : returnToday(g) + "%")}${cell("Desk score", deskCell(deskScore(r)))}${cell("Quality", x && x.quality ? `<span class="${x.quality.score >= 70 ? "pos-num" : x.quality.score < 40 ? "neg-num" : ""}">${x.quality.score}</span>` : "–")}
@@ -3987,6 +4086,7 @@ async function openLabDetail(id) {
     const mMax = m.margin_max ?? (v.trades.length ? Math.max(...v.trades.map(tm)) : null);
     box.innerHTML = `<div class="head"><div><span class="label">Lab strategy #${r.id}</span><h2 style="font-size:18px"></h2></div>
       <div class="actions"><button class="btn small" id="ld_star" type="button">${r.starred ? "★ Starred" : "☆ Star (keep)"}</button><button class="btn small" id="ld_xlsx" type="button">Download Excel</button><button class="btn primary small" id="ld_save" type="button">Save as strategy</button><button class="btn small" id="ld_mtest" type="button">Manual test</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
+      ${labDeskBanner(r.id)}
       <div id="ld_form"></div>
       <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.key === "FUT" ? "Futures" : x.label)}</button>`).join("")}</div>
       ${v.key === "FUT" ? robustHTML(r, m, true) : m.passed ? '<div class="banner ok" style="margin-top:12px">This option version passed the walk-forward check. The tougher test (other assets, timeframes, buy &amp; hold) is on the Futures tab.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc(m.why.join("; "))}.</div>`}
@@ -4010,7 +4110,7 @@ async function openLabDetail(id) {
         ${v.skipped && Object.keys(v.skipped).length ? `<dt>Skipped trades</dt><dd>${esc(Object.entries(v.skipped).map(([k2, n]) => `${k2} (${n})`).join("; "))}</dd>` : ""}</dl>
       <h3 style="font-size:15px;margin:16px 0 6px">Trades ${v.trades.length ? `(${v.trades.length})` : ""}</h3>
       ${v.trades.length ? `<div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Entry</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">In</th><th class="n">Out</th><th class="n">Margin (1 lot)</th><th class="n">Net</th><th>Exit reason</th></tr></thead><tbody>${v.trades.map((t) => `<tr><td class="when">${esc(t.entry)}</td><td class="when">${esc(t.exit)}</td><td>${t.side === "LONG" ? "Long" : "Short"}</td><td>${esc(t.contract)}</td><td class="n">${fmtNum(t.entry_px)}</td><td class="n">${fmtNum(t.exit_px)}</td><td class="n">${rupees(tm(t))}</td><td class="n ${t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : ""}">${rupees(t.net)}</td><td>${esc(t.exit_why)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="hint">No trades in this period with these settings (trade lists are kept from 8 Oct 2026 for every strategy tested; earlier ones only for those that passed).</p>'}`;
-    box.querySelector("h2").textContent = r.label;
+    box.querySelector("h2").textContent = r.label; wireDeskBanner(box);
     box.querySelectorAll("#ld_vers button").forEach((b) => b.addEventListener("click", () => { pickI = Number(b.dataset.i); draw(); }));
     $("ld_close").addEventListener("click", () => { box.hidden = true; lab.sel = null; renderLabTable(); });
     $("ld_star").addEventListener("click", (e) => run(e.currentTarget, async () => { must(await db.from("lab_results").update({ starred: !r.starred }).eq("id", r.id)); r.starred = !r.starred; draw(); toast(r.starred ? "Starred: kept beyond 45 days." : "Star removed."); }));
@@ -4039,6 +4139,7 @@ async function openLabDetailPublic(id) {
     const mMax = m.margin_max ?? (v.trades.length ? Math.max(...v.trades.map(tm)) : null);
     box.innerHTML = `<div class="head"><div><span class="label">Lab strategy #${r.id}</span><h2 style="font-size:18px"></h2></div>
       <div class="actions"><button class="btn primary small" id="ld_use" type="button">Use this strategy</button><button class="btn small" id="ld_mtest" type="button">Manual test</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
+      ${labDeskBanner(r.id)}
       <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.label)}</button>`).join("")}</div>
       <div id="ld_form"></div>
       ${v.key === "FUT" ? robustHTML(r, m, false) : m.passed ? '<div class="banner ok" style="margin-top:12px">This option version passed the walk-forward check. The tougher test (other assets, timeframes, buy &amp; hold) is on the first tab.</div>' : `<div class="banner warn" style="margin-top:12px">Not passed: ${esc((m.why || []).join("; "))}.</div>`}
@@ -4060,7 +4161,7 @@ async function openLabDetailPublic(id) {
       <h3 style="font-size:15px;margin:16px 0 6px">Trades ${v.trades.length ? `(${v.trades.length})` : ""}</h3>
       ${v.trades.length ? `<div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Entry</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">In</th><th class="n">Out</th><th class="n">Margin (1 lot)</th><th class="n">Net</th><th>Exit</th></tr></thead><tbody>${v.trades.map((t) => `<tr><td class="when">${esc(t.entry)}</td><td class="when">${esc(t.exit)}</td><td>${t.side === "LONG" ? "Long" : "Short"}</td><td>${esc(t.contract)}</td><td class="n">${fmtNum(t.entry_px)}</td><td class="n">${fmtNum(t.exit_px)}</td><td class="n">${rupees(tm(t))}</td><td class="n ${t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : ""}">${rupees(t.net)}</td><td>${esc(t.exit_why)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="hint">No trade list kept for this test.</p>'}
       <p class="riskline" style="margin-top:10px">Backtest on past prices with estimated charges and fills. Past performance does not guarantee future returns. Not investment advice.</p>`;
-    box.querySelector("h2").textContent = `Lab #${r.id} · ${aName}`;
+    box.querySelector("h2").textContent = `Lab #${r.id} · ${aName}`; wireDeskBanner(box);
     box.querySelectorAll("#ld_vers button").forEach((b) => b.addEventListener("click", () => { pickI = Number(b.dataset.i); draw(); }));
     $("ld_close").addEventListener("click", () => { box.hidden = true; lab.sel = null; renderLabTable(); });
     $("ld_var").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: r.cfg && r.cfg.data_segment === "MCX_COMM" ? true : null, title: `Lab #${r.id}` }));
@@ -4224,7 +4325,7 @@ async function promoteLab(r, v) {
   row.name = `Lab #${r.id} · ${v.key === "FUT" ? "Futures" : v.side === "SELL" ? "Option writing" : v.side === "SPREAD" ? (v.structure && STRUCTS[v.structure.preset] ? STRUCTS[v.structure.preset].name : "Spread") : "Option buying"} · ${r.label}`.slice(0, 80);
   // Lots stay fixed until you choose to size from capital; the tested worst drawdown for 1 lot is filled in for that.
   row.sizing = { mode: "FIXED", alloc_pct: 20, dd_pct: 25, dd_per_lot: Math.trunc((v.metrics && v.metrics.full && v.metrics.full.max_dd) || 0) || null, dd_mult: 1.5, margin_pct: c.data_segment === "MCX_COMM" || c.data_segment === "DELTA" ? 10 : 12, max_lots: 10 };
-  row.active = false; row.live = false;
+  row.active = false; row.live = false; row.lab_id = r.id;
   const created = must(await db.from("algo_strategies").insert(row).select("id").single());
   must(await db.from("lab_results").update({ promoted_id: created.id }).eq("id", r.id));
   formDirty = false; await loadAll(); openStrat(created.id); showTab("set");
@@ -4265,12 +4366,13 @@ $("lab_view").querySelectorAll("button").forEach((b) => b.addEventListener("clic
 {
   const sel = $("lab_asset");
   for (const [k, p] of Object.entries(PRESETS)) { const o = document.createElement("option"); o.value = k; o.textContent = p.name; sel.append(o); }
-  sel.addEventListener("change", () => { lab.asset = sel.value; loadLab().catch((e) => toast(errorText(e))); });
+  sel.addEventListener("change", () => { lab.asset = sel.value; lab.cmp = null; loadLab().catch((e) => toast(errorText(e))); });
   $("lab_per").addEventListener("change", () => { lab.per = Number($("lab_per").value); lab.showN = 0; renderLabTable(); });
   $("lab_more").addEventListener("click", () => { lab.showN = (lab.showN || 150) + 150; renderLabTable(); });
   $("lab_period").addEventListener("change", () => { lab.period = $("lab_period").value; loadLab().catch((e) => toast(errorText(e))); });
   $("lab_only").addEventListener("change", () => { lab.only = $("lab_only").value === "true"; loadLab().catch((e) => toast(errorText(e))); });
   $("lab_stopf").addEventListener("change", () => { lab.stopf = $("lab_stopf").value; renderLabTable(); });
+  $("lab_mine").addEventListener("change", () => { lab.mine = $("lab_mine").value; lab.showN = 0; renderLabTable(); });
 }
 
 /* ================= multi-user desk: pages, roles, strategies table, marketplace, wallet, admin ================= */
@@ -4451,6 +4553,7 @@ function paintMarks(prev) {
     document.querySelectorAll(`[data-ltp="${s.id}"]`).forEach((el) => { el.textContent = posPriceText(s); });
   }
   if (page === "strat" && cur() && cur().position !== "FLAT") renderStratPos(cur());
+  const tot = $("lp_tot_upnl"); if (tot && renderList.shown) tot.innerHTML = listRunTotalHtml(renderList.shown);
 }
 let marksTimer = null, marksBusy = false;
 async function pollMarks() {
@@ -4724,7 +4827,46 @@ function renderList() {
     tb.append(tr);
   }
   renderBulkBar();
-  $("lp_foot").textContent = rows.length ? `${rows.length} strateg${rows.length === 1 ? "y" : "ies"} · running P&L of open positions ${rupees(tRun)} · booked: live ${rupees(tl)}, paper ${rupees(tp)} (closed trades, after estimated charges) · capital set ${rupees(tCap)} · margin required today ${rupees(tReq)} · margin deployed now ${rupees(tDep)}. Click a column title to sort; click a row to open it.` : "";
+  renderList.shown = rows;
+  $("lp_tfoot").innerHTML = rows.length ? listTotals(cols, rows) : "";
+  $("lp_foot").textContent = rows.length ? `${rows.length} strateg${rows.length === 1 ? "y" : "ies"}. The bold row at the bottom totals every column for the strategies shown (margins leave out archived ones). Click a column title to sort; click a row to open it.` : "";
+}
+/** Running P&L total of the strategies shown in the table (kept up to date by the live prices). */
+function listRunTotal(rows) { return rows.reduce((a, s) => a + (!s.archived && s.position !== "FLAT" && s.pos_upnl != null ? Number(s.pos_upnl) : 0), 0); }
+function listRunTotalHtml(rows) {
+  const v = listRunTotal(rows), n = rows.filter((s) => !s.archived && s.position !== "FLAT").length, priced = rows.some((s) => !s.archived && s.position !== "FLAT" && s.pos_upnl != null);
+  return `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${priced ? `${v > 0 ? "+" : ""}${rupees(v)}` : "–"}</span><div class="hint sm">${n} open</div>`;
+}
+/** The totals row under the strategies table: one figure for every column. */
+function listTotals(cols, rows) {
+  const open = rows.filter((s) => !s.archived), sum = (f) => rows.reduce((a, s) => a + (Number(f(s)) || 0), 0);
+  const cnt = (arr) => { const m = new Map(); for (const x of arr) m.set(x, (m.get(x) || 0) + 1); return m; };
+  const p = (s) => pnl.get(s.id) || {};
+  const nTr = sum((s) => p(s).n), nWin = sum((s) => p(s).wins);
+  const tl = sum((s) => p(s).live), tpp = sum((s) => p(s).paper), shownBooked = sum((s) => s.live ? p(s).live : p(s).paper);
+  const lots = open.filter((s) => s.position !== "FLAT").reduce((a, s) => a + (Number(s.pos_lots) || 0), 0);
+  const nOpen = open.filter((s) => s.position !== "FLAT").length;
+  const req = open.reduce((a, s) => a + (marginRequired(s).v || 0), 0), dep = open.reduce((a, s) => a + (marginDeployed(s) || 0), 0), capSet = open.reduce((a, s) => a + (capitalOf(s) || 0), 0);
+  const whens = (f) => rows.map(f).filter(Boolean).sort();
+  const cls = (v) => v > 0 ? "pos-num" : v < 0 ? "neg-num" : "";
+  const cell = {
+    name: `Total<div class="hint sm">${rows.length} strateg${rows.length === 1 ? "y" : "ies"}</div>`,
+    owner: (() => { const n = new Set(rows.map((s) => s.owner_id)).size; return `${n}<div class="hint sm">owner${n === 1 ? "" : "s"}</div>`; })(),
+    asset: `${new Set(rows.map((s) => s.underlying)).size}<div class="hint sm">assets</div>`,
+    setup: [...cnt(rows.map(instName))].map(([k, n]) => `${n} ${esc(k.toLowerCase())}`).join("<br>"),
+    state: `${rows.filter((s) => s.active && !s.archived).length} active<br>${rows.filter((s) => s.live && !s.archived).length} live · ${rows.filter((s) => !s.live && !s.archived).length} paper`,
+    pos: nOpen ? `${nOpen} open<div class="hint sm">${lots} lot${lots === 1 ? "" : "s"}</div>` : '<span class="hint">All flat</span>',
+    upnl: null,
+    booked: `<span class="${cls(shownBooked)}">${rupees(shownBooked)}</span><div class="hint sm">live ${rupees(tl)} · paper ${rupees(tpp)}</div>`,
+    trades: String(nTr),
+    win: nTr ? `${(nWin / nTr * 100).toFixed(0)}%<div class="hint sm">${nWin} of ${nTr}</div>` : "–",
+    size: capSet ? `${rupees(capSet)}<div class="hint sm">capital set</div>` : "–",
+    mreq: rupees(req), mdep: rupees(dep),
+    lasttrade: (() => { const w = whens((s) => p(s).last); return w.length ? `${esc(istText(w[w.length - 1]))}<div class="hint sm">latest</div>` : "–"; })(),
+    run: (() => { const w = whens((s) => !s.archived && s.active ? s.last_run_at : null); return w.length ? `${esc(istText(w[0]))}<div class="hint sm">oldest of the active ones</div>` : "–"; })(),
+  };
+  const num = ["upnl", "booked", "trades", "win", "mreq", "mdep"];
+  return `<tr><td class="ck"></td>${cols.map(([k]) => k === "upnl" ? `<td class="n" id="lp_tot_upnl">${listRunTotalHtml(rows)}</td>` : `<td class="${num.includes(k) ? "n" : ""}">${cell[k] ?? ""}</td>`).join("")}</tr>`;
 }
 ["lf_q", "lf_src", "lf_act", "lf_mode", "lf_asset", "lf_inst", "lf_owner", "lf_arch"].forEach((id) => $(id).addEventListener(id === "lf_q" ? "input" : "change", renderList));
 
