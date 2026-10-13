@@ -3356,7 +3356,7 @@ function robOf(r) {
 }
 /** Passed = the walk-forward pass and the tougher test (other assets, other timeframes, every past year profitable). */
 const robDone = (r) => { const x = robOf(r); return !!x && x.status === "done"; };
-function labPassed(r, m) { return !!(m && m.passed) && r.passed === true; }
+function labPassed(r, m) { return !!(m && m.passed) && r.passed === true && !r.retestFailed; }
 function labChecking(r, m) { const x = robOf(r); return !!(m && m.passed) && r.basic_passed && !!x && x.status !== "done"; }
 const ratioTxt = (v) => v == null ? "–" : `${v}×`;
 function labMetricsFor(r) { return lab.view === "FUT" ? r.metrics : lab.view === "BUY" ? r.ob && r.ob.metrics : lab.view === "SPREAD" ? r.osp && r.osp.metrics : r.os && r.os.metrics; }
@@ -3398,7 +3398,8 @@ const LAB_PEND_TXT = "Still going through the tougher test (other assets, other 
 function labDeskBanner(id) {
   const list = labDeskMap().get(Number(id)); if (!list) return "";
   const open = list.filter((s) => !s.archived);
-  return `<div class="banner ${open.length ? "ok" : "info"} labfrom" style="margin-top:12px"><span>${open.length ? "✓ On your desk as" : "You added this earlier (now archived):"} ${list.map((s) => `<b>${esc(s.name)}</b> (${s.archived ? "archived" : `${s.active ? "active" : "paused"} · ${s.live ? "live" : "paper"}`})`).join(", ")}</span>
+  const failed = list.find((s) => s.lab_status === "failed");
+  return `${failed ? `<div class="banner err" style="margin-top:12px"><b>Failed its latest lab test${failed.lab_checked_at ? ` (${esc(istText(failed.lab_checked_at))})` : ""}:</b> ${esc(failed.lab_note || "did not pass the tougher test")}. The figures below are from the earlier test.</div>` : ""}<div class="banner ${open.length ? "ok" : "info"} labfrom" style="margin-top:12px"><span>${open.length ? "✓ On your desk as" : "You added this earlier (now archived):"} ${list.map((s) => `<b>${esc(s.name)}</b> (${s.archived ? "archived" : `${s.active ? "active" : "paused"} · ${s.live ? "live" : "paper"}`})`).join(", ")}</span>
     ${list.map((s) => `<button class="btn small" type="button" data-open-strat="${s.id}">Open ${list.length > 1 ? esc(s.name.slice(0, 24)) : "it"}</button>`).join("")}</div>`;
 }
 function wireDeskBanner(box) { box.querySelectorAll("[data-open-strat]").forEach((b) => b.addEventListener("click", () => { closeLab(); openStrat(b.dataset.openStrat); })); }
@@ -3460,7 +3461,11 @@ async function loadLab() {
       all.push(...got);
       // A desk strategy re-tested since: its newest result is shown with it.
       const newer = [...new Set(got.map((r) => r.superseded_by).filter((id) => id && !have.has(Number(id))))];
-      if (newer.length) all.push(...((await db.from("lab_results").select(LAB_ROW_COLS).in("id", newer.slice(0, 200)).then((x) => x.data).catch(() => null)) || []));
+      const nrows = newer.length ? ((await db.from("lab_results").select(LAB_ROW_COLS).in("id", newer.slice(0, 200)).then((x) => x.data).catch(() => null)) || []) : [];
+      all.push(...nrows);
+      // Re-tests that failed before failures were kept: only the desk strategy's note says why.
+      const found = new Set([...have, ...nrows.map((r) => Number(r.id))]);
+      for (const r of got) if (r.superseded_by && !found.has(Number(r.superseded_by))) { r.retestFailed = true; r.passed = false; }
     }
   }
   lab.rows = all.map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
@@ -3494,8 +3499,8 @@ async function pollLabStatus() {
 function labRefreshHTML() {
   const x = lab.refreshSt; if (!x || !x.total) return "";
   const left = x.total - x.done;
-  if (left <= 0) return `<div class="banner ok" style="margin-top:8px">All ${x.total} saved strategies were re-tested with the current rules: ${x.passed} still pass. New strategies are being written again.</div>`;
-  return `<div class="banner info" style="margin-top:8px"><b>Re-testing every saved strategy with the current rules</b> (latest year, then the tougher test), strategies on desks first: ${x.done} of ${x.total} done${x.done ? `, ${x.passed} still pass` : ""}; ${x.queued - x.done > 0 ? `${x.queued - x.done} in the current run, ` : ""}${x.total - x.queued} waiting. No new strategies are written until this is finished. It runs 11:30 PM – 8:30 AM while strategies are active, so it may take a few nights.</div>`;
+  if (left <= 0) return `<div class="banner ok" style="margin-top:8px">All ${x.total} saved strategies were re-tested with the current rules: ${x.passed} still pass, ${Math.max(0, x.total - x.passed)} failed and left the “Passed” list. New strategies are being written again.</div>`;
+  return `<div class="banner info" style="margin-top:8px"><b>Re-testing every saved strategy with the current rules</b> (latest year, then the tougher test), strategies on desks first: ${x.done} of ${x.total} done${x.done ? `: ${x.passed} still pass, ${Math.max(0, x.done - x.passed)} failed` : ""}; ${x.queued - x.done > 0 ? `${x.queued - x.done} in the current run, ` : ""}${x.total - x.queued} waiting. No new strategies are written until this is finished. It runs 11:30 PM – 8:30 AM while strategies are active, so it may take a few nights.</div>`;
 }
 function renderLabStatus() {
   const box = $("lab_status"); const r = lab.runs[0];
@@ -3982,7 +3987,7 @@ function renderLabTable() {
     if (g.deskS) tr.dataset.desk = g.deskS.map((x) => x.id).join(" ");
     const chips = [pub ? "" : `<span class="chip">${c.rules && c.rules.daily ? "Daily" : (c.timeframe_min + "m · " + (c.intraday ? "intraday" : "positional"))}</span>`,
       c.rules && c.rules.candles === "HA" ? '<span class="chip">HA candles</span>' : "",
-      c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.refresh ? '<span class="chip blue" title="A saved strategy re-tested with the current rules">Re-tested (current rules)</span>' : r.champion ? '<span class="chip green">Re-tested</span>' : "", g.rechecking ? `<span class="chip blue" title="Showing the result from run #${g.r.run_id}; today's re-test (run #${g.rechecking.run_id}) is still being checked">Re-checking today</span>` : "",
+      c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.retestFailed ? '<span class="chip red" title="Re-tested with the current rules and failed; see the strategy on your desk for why">Failed re-test (current rules)</span>' : r.refresh ? '<span class="chip blue" title="A saved strategy re-tested with the current rules">Re-tested (current rules)</span>' : r.champion ? '<span class="chip green">Re-tested</span>' : "", g.rechecking ? `<span class="chip blue" title="Showing the result from run #${g.r.run_id}; today's re-test (run #${g.rechecking.run_id}) is still being checked">Re-checking today</span>` : "",
       r.starred ? '<span class="chip yellow">★</span>' : "", labDeskChip(g, f, sub),
       labPassed(r, m) ? '<span class="chip green">Passed</span>' : labChecking(r, m) ? '<span class="chip blue">Being checked</span>' : m.passed && robDone(r) ? '<span class="chip red">Failed tougher test</span>' : '<span class="chip red">Not passed</span>'].join("");
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : lab.view === "SPREAD" ? r.osp : r.os) : null;

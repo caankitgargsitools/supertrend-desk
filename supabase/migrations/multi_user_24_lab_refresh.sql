@@ -5,3 +5,6 @@
 -- lab_results.superseded_by: set on older results of the same strategy once its re-test has a verdict (trigger lab_supersede);
 --   the Lab list and lab_feed leave superseded rows out.
 -- lab_refresh_status(): progress for the Lab page (admin).
+-- 13 Oct: failed re-tests are now kept (keepable excludes refresh rows; desk strategies' re-tests are always kept and marked refresh).
+-- The 19 desk strategies whose failed re-test record had been cleared were queued again (prio 0); assets the lab doesn't
+-- research are parked with run_id = -1. lab_refresh_status counts finished re-tests from the queue.

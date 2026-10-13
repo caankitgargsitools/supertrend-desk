@@ -1486,7 +1486,18 @@ async function requestPhase(sb: SupabaseClient, run: Run, assets: string[]) {
 /* ---------- failed strategies: a short record, then the row goes ---------- */
 type Forgettable = { id: number; fingerprint: string; asset: string; label?: string; mode?: string; score?: number; metrics?: any; round: number; why: string[] };
 /** Rows that may be removed when they fail: not starred, not saved as a strategy, not a user's variation run. */
-const keepable = (r: { starred?: boolean; promoted_id?: unknown; request_id?: unknown }) => !r.starred && !r.promoted_id && !r.request_id;
+const keepable = (r: { starred?: boolean; promoted_id?: unknown; request_id?: unknown; refresh?: boolean }) => !r.starred && !r.promoted_id && !r.request_id && !r.refresh;
+/** Strategies (fingerprints) that someone has on their desk: their re-test results are always kept, pass or fail. */
+async function deskFingerprints(sb: SupabaseClient): Promise<Set<string>> {
+  const { data: st } = await sb.from("algo_strategies").select("lab_id").not("lab_id", "is", null).eq("is_master", false).limit(5000);
+  const ids = [...new Set((st ?? []).map((x) => Number(x.lab_id)))];
+  const out = new Set<string>();
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data } = await sb.from("lab_results").select("fingerprint").in("id", ids.slice(i, i + 300));
+    for (const x of data ?? []) if (x.fingerprint) out.add(x.fingerprint);
+  }
+  return out;
+}
 /**
  * Failed strategies are removed to save space; lab_tried keeps one line per strategy (asset, result, why it failed,
  * how often it was tried) so the generator never writes it again.
@@ -1516,7 +1527,7 @@ export async function forget(sb: SupabaseClient, items: Forgettable[]) {
 /** Clears earlier failures in batches (results kept from before failures were removed straight away). */
 async function forgetOld(sb: SupabaseClient, limit = 400) {
   const cols = "id, fingerprint, asset, label, mode, score, metrics, robust, basic_passed, stage, error";
-  const { data: rows } = await sb.from("lab_results").select(cols).in("stage", ["screened", "error"]).eq("starred", false).is("promoted_id", null).is("request_id", null)
+  const { data: rows } = await sb.from("lab_results").select(cols).in("stage", ["screened", "error"]).eq("starred", false).is("promoted_id", null).is("request_id", null).eq("refresh", false)
     .or("basic_passed.eq.false,stage.eq.error,and(robust_status.eq.done,passed.eq.false)").limit(limit);
   await forget(sb, (rows ?? []).map((r: any) => ({ ...r, round: r.stage === "error" ? 0 : r.basic_passed ? 2 : 1,
     why: r.stage === "error" ? [String(r.error ?? "error")] : r.basic_passed ? (r.robust?.why ?? []) : (r.metrics?.why ?? []) })));
@@ -1849,9 +1860,10 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
   }
   const ready = qIds.filter((id) => !waiting.has(id)).slice(0, 20);
   const { data: queued } = ready.length
-    ? await sb.from("lab_results").select("id, config, fingerprint, asset, label, mode, score, metrics, starred, promoted_id, request_id").in("id", ready).order("id", { ascending: false })
+    ? await sb.from("lab_results").select("id, config, fingerprint, asset, label, mode, score, metrics, starred, promoted_id, request_id, refresh").in("id", ready).order("id", { ascending: false })
     : { data: [] as any[] };
   let decided = 0;
+  const desk = (queued ?? []).length ? await deskFingerprints(sb) : new Set<string>();
   const ids = (queued ?? []).map((r) => r.id);
   const { data: allCs } = ids.length ? await sb.from("lab_checks").select("lab_id, kind, asset, tf, status, result").in("lab_id", ids).neq("status", "void").limit(5000) : { data: [] };
   for (const r of queued ?? []) {
@@ -1862,7 +1874,10 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     const v = robustVerdict(r.config, cs);
     // Every trade of the year-by-year test is kept with the result (packed in columns to stay small).
     const longTrades = joinTrades(cs.filter((c) => c.kind === "year" && !c.result?.skip).map((c) => c.result?.tr).filter(Boolean));
-    await sb.from("lab_results").update({ robust_status: "done", robust: v, passed: v.passed, trades_long: longTrades }).eq("id", r.id);
+    // A re-test of a strategy on someone's desk is marked as a re-test (so it replaces the older results) and kept even if it fails.
+    const onDesk = desk.has(r.fingerprint);
+    if (onDesk) r.refresh = true;
+    await sb.from("lab_results").update({ robust_status: "done", robust: v, passed: v.passed, trades_long: longTrades, ...(onDesk ? { refresh: true } : {}) }).eq("id", r.id);
     // Winners are grouped with their twins (same asset, 80%+ of trades opened on the same day in the same direction).
     if (v.passed) await sb.rpc("lab_assign_twin", { p_id: r.id }).then(() => {}, () => {});
     await sb.from("lab_checks").delete().eq("lab_id", r.id);
@@ -1898,6 +1913,7 @@ async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
   cpu += Math.min(250, performance.now() - t0);
   const memo = new Map<string, unknown>();
   const rates = await loadMarginRates(sb);
+  const desk = await deskFingerprints(sb);
   const updates: Promise<unknown>[] = [];
   const failed: Forgettable[] = [];
   for (const row of pend.filter((p) => p.asset === asset)) {
@@ -1906,10 +1922,10 @@ async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     let fields: Record<string, unknown>;
     try {
       const { metrics, trades } = await screenOne(row.config, data, memo, win, capital, rates);
-      if (!metrics.passed && row.refresh) {
+      if (!metrics.passed && (row.refresh || (desk.has(row.fingerprint) && !row.request_id))) {
         // A saved strategy re-tested with the current rules that now fails the first round: kept, with the verdict,
         // so it replaces its older (passing) result instead of quietly disappearing.
-        fields = { stage: "screened", basic_passed: false, passed: false, robust_status: "done", score: metrics.score, metrics, trades: slim(trades), error: null,
+        fields = { stage: "screened", basic_passed: false, passed: false, robust_status: "done", refresh: true, score: metrics.score, metrics, trades: slim(trades), error: null,
           robust: { status: "done", passed: false, why: (metrics.why ?? []).map((w: string) => `first round (latest year): ${w}`), checked_at: new Date().toISOString() } };
         cpu += performance.now() - t1;
         updates.push(sb.from("lab_results").update(fields).eq("id", row.id).then(() => {}));
