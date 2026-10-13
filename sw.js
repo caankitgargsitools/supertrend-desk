@@ -1,6 +1,6 @@
-// Trade Desk app shell. Always tries the network first so a new version shows straight away; the saved copy is only
+// AnkGenie app shell. Always tries the network first so a new version shows straight away; the saved copy is only
 // used when the phone is offline. Calls to Supabase and Dhan are never cached.
-const CACHE = "trade-desk-v2";
+const CACHE = "ankgenie-v1";
 self.addEventListener("install", (e) => { self.skipWaiting(); });
 self.addEventListener("activate", (e) => { e.waitUntil(self.clients.claim()); });
 self.addEventListener("fetch", (e) => {
@@ -20,9 +20,9 @@ self.addEventListener("fetch", (e) => {
 // Phone notifications from the desk: new positions, exits with P&L, errors, going live, lab results, token problems.
 self.addEventListener("push", (e) => {
   let d = {};
-  try { d = e.data ? e.data.json() : {}; } catch { d = { title: "Trade Desk", body: e.data ? e.data.text() : "" }; }
+  try { d = e.data ? e.data.json() : {}; } catch { d = { title: "AnkGenie", body: e.data ? e.data.text() : "" }; }
   const kind = d.kind || "";
-  e.waitUntil(self.registration.showNotification(d.title || "Trade Desk", {
+  e.waitUntil(self.registration.showNotification(d.title || "AnkGenie", {
     body: d.body || "", tag: d.tag || undefined, renotify: true, icon: "icons/icon-192.png", badge: "icons/icon-192.png",
     requireInteraction: kind === "error" || kind === "account", data: { url: d.url || "/" },
     vibrate: kind === "error" || kind === "account" ? [200, 100, 200, 100, 200] : [120, 60, 120],

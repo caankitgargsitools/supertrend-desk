@@ -6,14 +6,14 @@
 <meta name="theme-color" content="#ffffff">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Trade Desk">
+<meta name="apple-mobile-web-app-title" content="AnkGenie">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
-<title>CA Ankit Garg Trade Desk</title>
+<link rel="apple-touch-icon" href="icons/apple-touch-180.png">
+<title>AnkGenie · Your wish, traded</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500;600&display=swap">
 <meta name="robots" content="noindex, nofollow">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%234285f4%22/%3E%3Cpath d=%22M6 22l6-7 5 4 9-10%22 stroke=%22white%22 stroke-width=%223%22 fill=%22none%22/%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="icons/logo.svg">
 <script src="vendor/lightweight-charts.js"></script>
 <script src="vendor/supabase.js"></script>
 <style>
@@ -25,19 +25,20 @@ a { color: var(--blue); }
   --bg: #f6f8fc; --panel: #ffffff; --ink: #202124; --muted: #5f6368; --line: #dde1e7;
   --blue: #1a73e8; --blue-soft: #e8f0fe; --red: #d93025; --red-soft: #fce8e6;
   --yellow: #f9ab00; --yellow-ink: #8a5a00; --yellow-soft: #fef7e0; --green: #188038; --green-soft: #e6f4ea;
+  --genie-ink: #2a1a6b; --genie-gold: #e8960f; --genie-purple: #3b2596;
   --logo-blue: #4285f4; --logo-red: #ea4335; --logo-yellow: #fbbc05; --logo-green: #34a853;
   --chip: #eef0f3; --on-blue: #ffffff;
   --font-ui: "Figtree", "Segoe UI", Roboto, Arial, sans-serif;
   --font-data: "Roboto Mono", ui-monospace, Menlo, Consolas, monospace;
   --r: 10px;
 }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --genie-ink: #ffffff; --genie-gold: #f7c948;
   --bg: #111317; --panel: #1b1d22; --ink: #e8eaed; --muted: #9aa0a6; --line: #30333a;
   --blue: #8ab4f8; --blue-soft: #1d2c46; --red: #f28b82; --red-soft: #3b2120;
   --yellow: #fdd663; --yellow-ink: #fdd663; --yellow-soft: #3a3115; --green: #81c995; --green-soft: #1b3324;
   --chip: #272a30; --on-blue: #0c1a33; color-scheme: dark;
 } }
-:root[data-theme="dark"] {
+:root[data-theme="dark"] { --genie-ink: #ffffff; --genie-gold: #f7c948;
   --bg: #111317; --panel: #1b1d22; --ink: #e8eaed; --muted: #9aa0a6; --line: #30333a;
   --blue: #8ab4f8; --blue-soft: #1d2c46; --red: #f28b82; --red-soft: #3b2120;
   --yellow: #fdd663; --yellow-ink: #fdd663; --yellow-soft: #3a3115; --green: #81c995; --green-soft: #1b3324;
@@ -53,11 +54,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
   display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 10px 16px; }
 .bar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 3px;
-  background: linear-gradient(90deg, var(--logo-blue) 0 25%, var(--logo-red) 25% 50%, var(--logo-yellow) 50% 75%, var(--logo-green) 75% 100%); }
-.brand { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
-.brand h1 { font-size: 21px; font-weight: 800; letter-spacing: -.01em; }
-.brand h1 .b { color: var(--logo-blue); } .brand h1 .r { color: var(--logo-red); } .brand h1 .y { color: var(--logo-yellow); } .brand h1 .g { color: var(--logo-green); }
-.brand small { color: var(--muted); font-size: 12px; }
+  background: linear-gradient(90deg, var(--genie-purple), #7a5cff 45%, #f7c948); }
+.brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+.brand .logo { width: 40px; height: 40px; flex: none; }
+.brand h1 { font-size: 23px; font-weight: 800; letter-spacing: -.01em; line-height: 1.05; }
+.brand h1 .ank { color: var(--genie-ink); } .brand h1 .gn { color: var(--genie-gold); }
+.gatebrand { text-align: center; margin: 4px 0 18px; }
+.gatebrand .gname { font-size: 30px; font-weight: 800; line-height: 1; margin-top: 8px; } .gatebrand .ank { color: var(--genie-ink); } .gatebrand .gn { color: var(--genie-gold); }
+.gatebrand .gtag { font-size: 11px; letter-spacing: .3em; color: var(--muted); margin-top: 6px; }
+.brand small { display: block; color: var(--muted); font-size: 11.5px; letter-spacing: .04em; }
 .mk { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
 .dot.on { background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
@@ -67,7 +72,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 @media (max-width: 760px) {
   .bar { gap: 6px 10px; padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top)); }
   .brand { margin-right: 0; flex: 1 1 auto; min-width: 0; }
-  .brand h1 { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brand h1 { font-size: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brand .logo { width: 32px; height: 32px; }
   .brand small { display: none; }
   .bar > .mk:not(#who) { order: 3; flex-basis: 100%; font-size: 11.5px; }
   #menuBtn { display: inline-flex; flex: 0 0 auto; }
@@ -414,7 +420,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 <body>
 
 <header class="bar">
-  <div class="brand"><h1><span class="b">CA</span> <span class="r">Ankit</span> <span class="y">Garg</span> <span class="g">Trade Desk</span></h1><small>Algo desk · Dhan · NSE / BSE / MCX · Delta crypto</small></div>
+  <div class="brand"><img class="logo" src="icons/logo.svg" alt="" width="40" height="40"><div><h1><span class="ank">Ank</span><span class="gn">Genie</span></h1><small>Your wish, traded · Dhan · NSE / BSE / MCX · Delta crypto</small></div></div>
   <span class="mk"><span class="dot" id="mktDot"></span><span id="mktText">Checking market hours…</span></span>
   <button class="btn small" id="menuBtn" type="button" aria-expanded="false" aria-controls="nav">☰ Menu</button>
   <nav class="nav" id="nav" aria-label="Pages" hidden>
@@ -431,6 +437,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 
 <div id="gate" class="gate" hidden>
   <div class="card">
+    <div class="gatebrand"><img src="icons/logo.svg" alt="" width="84" height="84"><div class="gname"><span class="ank">Ank</span><span class="gn">Genie</span></div><div class="gtag">YOUR WISH, TRADED</div></div>
     <h2 style="margin-bottom:6px" id="g_title">Sign in</h2>
     <p class="hint" id="g_hint">Sign in with the login your admin gave you.</p>
     <form id="loginForm" style="margin-top:12px">
@@ -2506,7 +2513,7 @@ function btFileName(r, ext) {
 async function downloadExcel(r) {
   await loadScript("vendor/xlsx.mini.min.js");
   const wb = XLSX.utils.book_new();
-  const sum = XLSX.utils.aoa_to_sheet([["CA Ankit Garg Trade Desk · Backtest #" + r.id], [], ...btSummaryRows(r)]);
+  const sum = XLSX.utils.aoa_to_sheet([["AnkGenie · Backtest #" + r.id], [], ...btSummaryRows(r)]);
   sum["!cols"] = [{ wch: 28 }, { wch: 70 }];
   XLSX.utils.book_append_sheet(wb, sum, "Summary");
   const tr = XLSX.utils.aoa_to_sheet([BT_COLS, ...btTradeRows(r)]);
@@ -2522,7 +2529,7 @@ async function downloadPdf(r) {
   const doc = new window.jspdf.jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const num = (v, d = 2) => (v === null || v === undefined || v === "–") ? "–" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: d });
   doc.setFontSize(15); doc.setTextColor(32, 33, 36); doc.text(`Backtest #${r.id} · ${btMeta(r).name}`, 40, 42);
-  doc.setFontSize(9); doc.setTextColor(95, 99, 104); doc.text(`CA Ankit Garg Trade Desk · generated ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST · amounts in whole rupees`, 40, 58);
+  doc.setFontSize(9); doc.setTextColor(95, 99, 104); doc.text(`AnkGenie · generated ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST · amounts in whole rupees`, 40, 58);
   const sum = btSummaryRows(r).map(([k, v]) => [k, typeof v === "number" ? num(v) : String(v)]);
   const half = Math.ceil(sum.length / 2);
   const pairs = sum.slice(0, half).map((row, i) => [...row, ...(sum[half + i] || ["", ""])]);
@@ -4339,7 +4346,7 @@ async function downloadLabExcel(r, v, kv) {
   await loadScript("vendor/xlsx.mini.min.js");
   const m = v.metrics, wb = XLSX.utils.book_new();
   const p = (name, x) => [[name], ["Trades", x.n], ["Win rate (%)", x.win_rate], ["Net (Rs)", x.net], ["Gross (Rs)", x.gross], ["Charges (Rs)", x.costs], ["Profit factor", x.pf ?? "–"], ["Max drawdown (Rs)", x.max_dd], [] ];
-  const sum = XLSX.utils.aoa_to_sheet([["CA Ankit Garg Trade Desk · Strategy Lab #" + r.id], [r.label], [], ...kv, ["This version", v.label], ["Stops in this version", riskText(v.risk)], ["Passed", labPassed(r, m) ? "Yes" : !m.passed ? "No: " + m.why.join("; ") : robDone(r) ? "Failed tougher test: " + robOf(r).why.join("; ") : "First round only; tougher test pending"], ["Score", m.score], ["Average margin per lot (Rs)", m.margin_lot ?? "–"], ["Highest margin per lot (Rs)", m.margin_max ?? "–"], ["Margin basis", marginNote(m, labKind(v))], ["Return on average margin (%)", m.ret_margin ?? "–"], [],
+  const sum = XLSX.utils.aoa_to_sheet([["AnkGenie · Strategy Lab #" + r.id], [r.label], [], ...kv, ["This version", v.label], ["Stops in this version", riskText(v.risk)], ["Passed", labPassed(r, m) ? "Yes" : !m.passed ? "No: " + m.why.join("; ") : robDone(r) ? "Failed tougher test: " + robOf(r).why.join("; ") : "First round only; tougher test pending"], ["Score", m.score], ["Average margin per lot (Rs)", m.margin_lot ?? "–"], ["Highest margin per lot (Rs)", m.margin_max ?? "–"], ["Margin basis", marginNote(m, labKind(v))], ["Return on average margin (%)", m.ret_margin ?? "–"], [],
     ...p("Whole year", m.full), ...p("First 9 months (ranked)", m.train), ...p("Last 3 months (check)", m.test), ["Month", "Net (Rs)", "Trades"], ...m.months.map((x) => [x.m, x.net, x.n])]);
   sum["!cols"] = [{ wch: 26 }, { wch: 90 }];
   XLSX.utils.book_append_sheet(wb, sum, "Summary");
@@ -5224,7 +5231,7 @@ function loginText(email, password, name, trial) {
   return [
     `Hello${name ? " " + name : ""},`,
     "",
-    "Your account on CA Ankit Garg Trade Desk is ready.",
+    "Your account on AnkGenie is ready.",
     "",
     `Sign in: ${location.origin}${location.pathname}`,
     `Login (email): ${email}`,

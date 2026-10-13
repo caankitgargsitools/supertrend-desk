@@ -1,4 +1,4 @@
-# CA Ankit Garg Trade Desk
+# AnkGenie · Your wish, traded
 
 Private control panel for Supertrend algo strategies (Dhan + Supabase).
 
