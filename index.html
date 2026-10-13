@@ -67,7 +67,35 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
 .dot.on { background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
 
-#menuBtn, .mob-only, .labmtools, .labcards { display: none; }
+#menuBtn, .mob-only, .labmtools, .labcards, .lpm { display: none; }
+/* Strategies on phones: summary tiles and one card per strategy */
+.lpsum { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 2px 0 10px; }
+.lpsum .t { border: 1px solid var(--line); border-radius: 12px; padding: 9px 11px; background: var(--panel); }
+.lpsum .t .k { display: block; font-size: 11.5px; color: var(--muted); }
+.lpsum .t .v { display: block; font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.lpsum .t .s { display: block; font-size: 11.5px; color: var(--muted); }
+.lpquick { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; margin-bottom: 8px; scrollbar-width: none; }
+.lpquick button { flex: none; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 999px; padding: 7px 13px; font-size: 13.5px; font-weight: 600; }
+.lpquick button[aria-pressed="true"] { background: var(--genie-purple); border-color: var(--genie-purple); color: #fff; }
+.lpsort { display: flex; gap: 6px; margin-bottom: 10px; } .lpsort select { flex: 1; }
+.lpcards { display: grid; gap: 10px; }
+.lpc { border: 1px solid var(--line); border-radius: 14px; padding: 12px 12px 10px; background: var(--panel); position: relative; }
+.lpc.open { border-left: 4px solid var(--genie-gold); }
+.lpc.sel { outline: 2px solid var(--genie-purple); }
+.lpc .top { display: flex; gap: 10px; align-items: flex-start; }
+.lpc .nm { flex: 1; min-width: 0; font-weight: 700; font-size: 15px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--ink); }
+.lpc .ck { flex: none; width: 22px; height: 22px; margin: 0; }
+.lpc .sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+.lpc .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+.lpc .chips .chip { font-size: 10.5px; padding: 3px 7px; }
+.lpc .pos { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; margin-top: 10px; padding: 9px 10px; border-radius: 10px; background: var(--bg); }
+.lpc .pos .side { font-weight: 800; font-size: 15px; } .lpc .pos .side.l { color: var(--green); } .lpc .pos .side.s { color: var(--red); } .lpc .pos .side.f { color: var(--muted); font-weight: 600; }
+.lpc .pos .px { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.lpc .pos [data-upnl] { text-align: right; font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; border-radius: 6px; padding: 0 2px; }
+.lpc .pos [data-upnl] .hint { font-size: 11px; font-weight: 400; }
+.lpc .mini { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 9px; }
+.lpc .mini div { min-width: 0; } .lpc .mini .k { display: block; font-size: 10.5px; color: var(--muted); }
+.lpc .mini .v { display: block; font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* ---------- phones ---------- */
 @media (max-width: 760px) {
   .bar { gap: 6px 10px; padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top)); }
@@ -87,6 +115,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .card { padding: 12px; }
   .mob-only { display: inline-flex; margin-bottom: 8px; }
   #lf_box:not(.open) { display: none; }
+  .lpm { display: block; } .lp-desk, #lp_foot { display: none; }
   .longhint:not(.open) { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
   input, select, textarea { font-size: 16px; }
   .btn { min-height: 38px; }
@@ -922,7 +951,14 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
         <button class="btn small" type="button" data-bulk="paper">Back to paper</button>
         <button class="btn small" type="button" data-bulk="clear">Clear selection</button>
       </div>
-      <div class="scroll"><table class="big-table"><thead id="lp_head"></thead><tbody id="lp_body"></tbody><tfoot id="lp_tfoot"></tfoot></table></div>
+      <div class="lpm" id="lp_m">
+        <div class="lpsum" id="lp_sum"></div>
+        <div class="lpquick" id="lp_quick" role="group" aria-label="Show">
+          <button type="button" data-q="" aria-pressed="true">All</button><button type="button" data-q="open" aria-pressed="false">In a trade</button><button type="button" data-q="live" aria-pressed="false">Live</button><button type="button" data-q="attn" aria-pressed="false">Needs attention</button></div>
+        <div class="lpsort"><select id="lp_msort" aria-label="Sort by"></select><button class="btn small" id="lp_mdir" type="button" aria-label="Sort direction">▼</button></div>
+        <div id="lp_cards" class="lpcards"></div>
+      </div>
+      <div class="scroll lp-desk"><table class="big-table"><thead id="lp_head"></thead><tbody id="lp_body"></tbody><tfoot id="lp_tfoot"></tfoot></table></div>
       <p class="hint" id="lp_foot" style="margin:8px 0 0"></p>
       </div>
     </section>
@@ -4509,6 +4545,7 @@ function listCols() {
   ];
   return c.filter((x) => x[3] !== "admin" || isAdmin());
 }
+let lpQuick = "";
 function listRows() {
   const q = $("lf_q").value.trim().toLowerCase(), src = $("lf_src").value, act = $("lf_act").value, mode = $("lf_mode").value, asset = $("lf_asset").value,
     inst = $("lf_inst").value, owner = isAdmin() ? $("lf_owner").value : "ME", arch = $("lf_arch").checked;
@@ -4523,6 +4560,10 @@ function listRows() {
     if (asset && s.underlying !== asset) return false;
     if (inst && instName(s) !== inst) return false;
     if (q && ![s.name, assetLabel(s.underlying), s.underlying, ownerName(s.owner_id)].join(" ").toLowerCase().includes(q)) return false;
+    // Phone quick filters (the desktop table shows everything the filters above allow)
+    if (lpQuick === "open" && s.position === "FLAT") return false;
+    if (lpQuick === "live" && !s.live) return false;
+    if (lpQuick === "attn" && !(s.last_error || s.lab_status === "failed")) return false;
     return true;
   });
 }
@@ -4595,6 +4636,7 @@ function paintMarks(prev) {
   }
   if (page === "strat" && cur() && cur().position !== "FLAT") renderStratPos(cur());
   const tot = $("lp_tot_upnl"); if (tot && renderList.shown) tot.innerHTML = listRunTotalHtml(renderList.shown);
+  const tot2 = $("lp_sum_upnl"); if (tot2 && renderList.shown) tot2.innerHTML = listRunTotalHtml(renderList.shown);
 }
 let marksTimer = null, marksBusy = false;
 async function pollMarks() {
@@ -4869,9 +4911,54 @@ function renderList() {
   }
   renderBulkBar();
   renderList.shown = rows;
+  renderListCards(cols, rows);
   $("lp_tfoot").innerHTML = rows.length ? listTotals(cols, rows) : "";
   $("lp_foot").textContent = rows.length ? `${rows.length} strateg${rows.length === 1 ? "y" : "ies"}. The bold row at the bottom totals every column for the strategies shown (margins leave out archived ones). Click a column title to sort; click a row to open it.` : "";
 }
+/** Phones: summary tiles and one card per strategy (same rows, same order as the table). */
+function renderListCards(cols, rows) {
+  const box = $("lp_cards"); if (!box) return;
+  const sortSel = $("lp_msort");
+  const sortable = cols.filter(([k]) => !["name", "owner", "setup", "state", "size"].includes(k));
+  const want = '<option value="name">Sort: name</option>' + sortable.map(([k, l]) => `<option value="${k}">Sort: ${esc(l.replace(/ \(.*\)$/, ""))}</option>`).join("");
+  if (sortSel.dataset.v !== want) { sortSel.innerHTML = want; sortSel.dataset.v = want; }
+  sortSel.value = lsort.key || "name"; $("lp_mdir").textContent = lsort.dir > 0 ? "▲" : "▼";
+  const open = rows.filter((s) => !s.archived);
+  const p = (s) => pnl.get(s.id) || {};
+  const nOpen = open.filter((s) => s.position !== "FLAT").length;
+  const booked = rows.reduce((a, s) => a + (s.live ? (p(s).live || 0) : (p(s).paper || 0)), 0);
+  const req = open.reduce((a, s) => a + (marginRequired(s).v || 0), 0), dep = open.reduce((a, s) => a + (marginDeployed(s) || 0), 0);
+  const cls = (v) => v > 0 ? "pos-num" : v < 0 ? "neg-num" : "";
+  $("lp_sum").innerHTML = `<div class="t"><span class="k">Running P&amp;L</span><span class="v" id="lp_sum_upnl">${listRunTotalHtml(rows)}</span></div>
+    <div class="t"><span class="k">Booked P&amp;L</span><span class="v ${cls(booked)}">${rupees(booked)}</span><span class="s">${rows.reduce((a, s) => a + (p(s).n || 0), 0)} closed trades</span></div>
+    <div class="t"><span class="k">In a trade</span><span class="v">${nOpen} <small style="font-size:13px;font-weight:600;color:var(--muted)">of ${open.length}</small></span><span class="s">${open.filter((s) => s.active).length} active · ${open.filter((s) => s.live).length} live</span></div>
+    <div class="t"><span class="k">Margin deployed</span><span class="v">${rupeesShort(dep)}</span><span class="s">needs ${rupeesShort(req)} for all</span></div>`;
+  box.innerHTML = rows.length ? "" : '<p class="hint">No strategies match.</p>';
+  for (const s of rows) {
+    const a = p(s), side = s.position === "LONG" ? "l" : s.position === "SHORT" ? "s" : "f";
+    const tf = hideRules(s) ? "" : cxStratTf(s) === "D" ? "Daily" : `${cxStratTf(s)} min`;
+    const el = document.createElement("div"); el.className = "lpc" + (s.position !== "FLAT" ? " open" : "") + (lsel.has(s.id) ? " sel" : ""); el.tabIndex = 0;
+    el.innerHTML = `<div class="top"><div class="nm"></div>${s.archived ? "" : `<input type="checkbox" class="ck" aria-label="Select" ${lsel.has(s.id) ? "checked" : ""}>`}</div>
+      <div class="sub">${esc(assetLabel(s.underlying))} · ${esc(instName(s))}${tf ? ` · ${esc(tf)}` : ""}</div>
+      <div class="chips">${s.archived ? '<span class="chip">Archived</span>' : s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>'}${s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>'}${s.lab_status === "failed" ? `<span class="chip red" title="${esc(s.lab_note || "")}">Failed lab test</span>` : ""}${s.last_error ? '<span class="chip red">Error</span>' : ""}</div>
+      <div class="pos"><div><div class="side ${side}">${s.position === "FLAT" ? "Flat" : `${s.position === "LONG" ? "Long" : "Short"}${s.pos_lots ? ` · ${s.pos_lots} lot${s.pos_lots === 1 ? "" : "s"}` : ""}`}</div>${s.position === "FLAT" ? '<div class="px">Waiting for a signal</div>' : `<div class="px" data-ltp="${s.id}">${posPriceText(s)}</div>`}</div>
+        ${s.position === "FLAT" ? "" : `<div data-upnl="${s.id}">${upnlHtml(s)}</div>`}</div>
+      <div class="mini"><div><span class="k">Booked</span><span class="v ${cls(s.live ? a.live : a.paper)}">${a.n ? rupeesShort(s.live ? (a.live || 0) : (a.paper || 0)) : "–"}</span></div>
+        <div><span class="k">Trades · win</span><span class="v">${a.n ? `${a.n} · ${Math.round(a.wins / a.n * 100)}%` : "0"}</span></div>
+        <div><span class="k">Margin</span><span class="v">${(() => { const v = marginDeployed(s) || marginRequired(s).v; return v ? rupeesShort(v) : "–"; })()}</span></div>
+        <div><span class="k">Last trade</span><span class="v">${a.last ? esc(istText(a.last).replace(/,.*$/, "")) : "–"}</span></div></div>`;
+    el.querySelector(".nm").textContent = s.name.replace(/^Lab #(\d+) · (Futures|Option buying|Option writing) · /, "#$1 · ");
+    const ck = el.querySelector(".ck");
+    if (ck) { ck.addEventListener("click", (e) => e.stopPropagation()); ck.addEventListener("change", () => { ck.checked ? lsel.add(s.id) : lsel.delete(s.id); renderList(); }); }
+    el.addEventListener("click", () => openStrat(s.id));
+    box.append(el);
+  }
+}
+$("lp_msort").addEventListener("change", (e) => { lsort.key = e.target.value; lsort.dir = e.target.value === "name" ? 1 : -1; renderList(); });
+$("lp_mdir").addEventListener("click", () => { lsort.dir = -lsort.dir; renderList(); });
+$("lp_quick").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+  lpQuick = b.dataset.q; $("lp_quick").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); renderList();
+}));
 /** Running P&L total of the strategies shown in the table (kept up to date by the live prices). */
 function listRunTotal(rows) { return rows.reduce((a, s) => a + (!s.archived && s.position !== "FLAT" && s.pos_upnl != null ? Number(s.pos_upnl) : 0), 0); }
 function listRunTotalHtml(rows) {
