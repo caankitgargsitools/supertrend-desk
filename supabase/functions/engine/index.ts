@@ -880,6 +880,19 @@ async function processRulesDaily(s: Strategy, set: Settings, action: string) {
       event = event === "EXIT" ? "REVERSE" : "ENTRY"; newState = { position: d.enter, ...e.state };
     }
   }
+  // One-time catch-up asked for from the desk: a flat strategy takes the side its own rules have held since their last
+  // signal (it was added after that signal, so it would otherwise wait for the next one). Cleared once used.
+  if (s.catch_up && (position !== "FLAT" || event)) update.catch_up = null;
+  else if (s.catch_up && spot && now.min >= sess.open + 1 && now.min < sess.close) {
+    const side = String(s.catch_up) as Pos;
+    const okDir = s.direction === "BOTH" || (side === "LONG" ? s.direction === "LONG_ONLY" : s.direction === "SHORT_ONLY");
+    if ((side === "LONG" || side === "SHORT") && okDir && canEnter(s)) {
+      const e = entryLeg(s, side, spot, legs.length + 1);
+      legs.push(...asArr(e.leg)); notes.push(`Catch-up (one time): ${s.catch_note ? `${s.catch_note}; ` : ""}${e.label}`);
+      event = "ENTRY"; newState = { position: side, ...e.state };
+    }
+    update.catch_up = null;
+  }
   update.last_candle_ts = last.t;
   const r = riskOf(s);
   await finish(s, set, update, legs, event, notes, newState, candle, r ? (atrSeries(days, r.atr_len ?? 14).at(-1) || 0) : 0);
