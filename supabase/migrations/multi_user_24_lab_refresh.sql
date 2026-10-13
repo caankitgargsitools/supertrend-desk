@@ -11,3 +11,7 @@
 -- 13 Oct: tougher test needs the rules to work on at least 1 other asset (was 2). Existing verdicts re-applied in place
 -- (the asset reason removed where 1+ other asset worked; passed when nothing else failed); strategies whose re-test
 -- failed only on that rule and whose record was cleared were queued again; desk verdicts re-synced.
+-- 13 Oct: stress test = slippage paid a second time only (charges counted once). Every stored tougher-test result was
+-- re-scored with engine action lab_reverdict (slippage per year from the kept trades; robust.rev = 2); backup of the
+-- previous verdicts in lab_robust_bak_1013. Saved strategies whose cleared re-test failed only on the old cost rule
+-- were queued again in lab_refresh.
