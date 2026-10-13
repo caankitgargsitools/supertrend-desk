@@ -8,3 +8,6 @@
 -- 13 Oct: failed re-tests are now kept (keepable excludes refresh rows; desk strategies' re-tests are always kept and marked refresh).
 -- The 19 desk strategies whose failed re-test record had been cleared were queued again (prio 0); assets the lab doesn't
 -- research are parked with run_id = -1. lab_refresh_status counts finished re-tests from the queue.
+-- 13 Oct: tougher test needs the rules to work on at least 1 other asset (was 2). Existing verdicts re-applied in place
+-- (the asset reason removed where 1+ other asset worked; passed when nothing else failed); strategies whose re-test
+-- failed only on that rule and whose record was cleared were queued again; desk verdicts re-synced.

@@ -1604,7 +1604,7 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   const why: string[] = [];
   if (!self || !(self.net > 0)) why.push("lost money on the latest year");
   if (!assets.length) why.push("no other asset to test it on");
-  else if (okA < Math.min(2, assets.length)) why.push(`worked on ${okA} of ${assets.length} other assets (needs ${Math.min(2, assets.length)})`);
+  else if (okA < 1) why.push(`worked on ${okA} of ${assets.length} other assets (needs 1)`);
   if (tfs.length) { const need = tfs.length >= 3 ? 2 : 1; if (okT < need) why.push(`worked on ${okT} of ${tfs.length} other timeframes (needs ${need})`); }
   else why.push("could not be tested on another timeframe yet (not enough 5-minute candles for this asset; MCX history grows every night)");
   if (yrs.length < 3) why.push(`only ${yrs.length} year${yrs.length === 1 ? "" : "s"} of history to test year by year (needs 3)`);
