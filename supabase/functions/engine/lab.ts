@@ -7,7 +7,7 @@
 // Each step runs in a short instalment (Supabase allows ~2 s of computing per call) and chains to the next.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { Dhan, DhanBusyError, type OptBar } from "./dhan.ts";
-import { type Acc, type BtParams, type ChargeRates, type MBar, newAcc, type OptStore, type Plan, priceBatch, simulateRules, type SimData } from "./backtest.ts";
+import { type Acc, type BtParams, type ChargeRates, type MBar, newAcc, type OptStore, slippageFor, type Plan, priceBatch, simulateRules, type SimData } from "./backtest.ts";
 import { addDays, type DayBar, ist, sessionFor } from "./logic.ts";
 import { describeCond, HAS_WEIGHTS, type Cond, type Rules, validateRules } from "./rules.ts";
 import { dataSecurity } from "./instruments.ts";
@@ -1609,14 +1609,14 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   else why.push("could not be tested on another timeframe yet (not enough 5-minute candles for this asset; MCX history grows every night)");
   if (yrs.length < 3) why.push(`only ${yrs.length} year${yrs.length === 1 ? "" : "s"} of history to test year by year (needs 3)`);
   else if (okY < yrs.length) why.push(`profitable in ${okY} of the past ${yrs.length} years (needs every year; lost or flat in ${yrs.filter((x) => !x.ok).map((x) => `year ${x.y}`).join(", ")})`);
-  // 5-minute strategies trade often for small moves, so costs decide them: they must still make money in total and in
-  // every year with costs doubled plus an extra 0.01% a side (on top of the asset's normal slippage).
+  // Minute-candle strategies trade often for small moves, so fills decide them: they must still make money in total and
+  // in every year with the asset's slippage doubled (charges are known exactly and counted once).
   if (!daily && yrs.length >= 3) {
     const st = yrs.map((y) => ({ y: y.y, v: (Number(y.net) || 0) - (Number(y.xcost) || 0), has: y.xcost != null }));
     if (st.every((x) => x.has)) {
       const tot = st.reduce((a, x) => a + x.v, 0), bad = st.filter((x) => !(x.v > 0));
-      if (!(tot > 0)) why.push(`loses money once costs and slippage are doubled (₹${Math.trunc(tot).toLocaleString("en-IN")} over ${st.length} years)`);
-      else if (bad.length) why.push(`with costs and slippage doubled it lost money in ${bad.map((x) => `year ${x.y}`).join(", ")}`);
+      if (!(tot > 0)) why.push(`loses money once slippage is doubled (₹${Math.trunc(tot).toLocaleString("en-IN")} over ${st.length} years)`);
+      else if (bad.length) why.push(`with slippage doubled it lost money in ${bad.map((x) => `year ${x.y}`).join(", ")}`);
     }
   }
   const bh = self?.bh ?? null;
@@ -1663,7 +1663,7 @@ export function unpackTrades(p: Packed | null | undefined) {
  *  months 7 – share of months that made money          steadiness 8 – how even the yearly profits are
  *  profit factor 6 (2.5 or more = full)                 robustness 6 – other assets and timeframes that work
  *  enough trades 3 (12 a year)                          setting stability 10 – small setting steps that also work
- *  cost stress 7 – profit left with charges paid twice and 0.01% slippage per order, and the years still profitable
+ *  cost stress 7 – profit left with the slippage paid twice, and the years still profitable
  *  time under water 5 – longest stretch from a peak back to a new peak (a year or more = 0)
  *  tail risk 5 – worst month vs the average month, worst trade vs the average winning trade
  *  random order 5 – trades shuffled 1,000 times: how often the drawdown passes 25% of the capital
@@ -1717,7 +1717,7 @@ export function qualityScore(
   const sample = Math.min(1, trades.length / (n * 12));
   // Setting stability: share of the small setting steps that also work (no steps to try: half marks).
   const stability = ex.stepsN ? ex.stepsOk / ex.stepsN : 0.5;
-  // Cost stress: what is left after paying charges twice and 0.01% slippage on every order.
+  // Slippage stress: what is left after paying the slippage a second time on every order.
   const xcost = yrs.reduce((a, y) => a + (Number(y.xcost) || 0), 0);
   const stressNet = total - xcost, stressYearsOk = yrs.filter((y) => (Number(y.net) || 0) - (Number(y.xcost) || 0) > 0).length;
   const cost = total > 0 && stressNet > 0 ? clamp(stressNet / total) * (stressYearsOk / n) : 0;
@@ -1819,8 +1819,8 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
           }
           const { metrics, trades } = await screenOne(c.config, data, memo, { from, split: from, to: hi }, capital, rates);
           const f = metrics.full;
-          // Cost stress: charges paid a second time plus slippage of 0.01% of the price on every order (entry and exit).
-          const xcost = Math.trunc(trades.reduce((a: number, t: any) => a + (Number(t.costs) || 0) + (Number(t.slip) || 0) + 0.0001 * ((Number(t.entry_px) || 0) + (Number(t.exit_px) || 0)) * (Number(t.units) || 0), 0));
+          // Slippage stress: the asset's slippage paid a second time on every order (charges are known exactly, counted once).
+          const xcost = Math.trunc(trades.reduce((a: number, t: any) => a + (Number(t.slip) || 0), 0));
           // How the asset itself moved in that year (for the up-years / down-years check).
           const dd0 = data.daily.filter((d) => d.day >= from && d.day <= hi);
           const under = dd0.length > 1 ? +(((dd0[dd0.length - 1].c - dd0[0].c) / dd0[0].c) * 100).toFixed(2) : null;
@@ -2162,4 +2162,45 @@ export function periodWindows(trades: { exit: string; net: number }[], from: str
       ratio: dd > 0 ? +(eq / dd).toFixed(2) : null };
   }
   return out;
+}
+
+/**
+ * Re-applies the current pass rules to stored tougher-test results without re-running the backtests: the slippage
+ * stress of each year is recomputed from the kept trades (entry and exit prices × the asset's slippage × the lot), and
+ * the verdict and quality score are worked out again. Marks each row done (robust.rev) so it can be called repeatedly.
+ */
+export async function labReverdict(sb: SupabaseClient, limit = 120): Promise<{ done: number; flipped: number; left: number }> {
+  await loadCryptoAssets(sb);
+  const { data: rows, error } = await sb.from("lab_results").select("id, config, robust, trades_long, basic_passed, passed")
+    .eq("robust_status", "done").not("robust->years->list", "is", null).is("robust->rev", null).order("id").limit(limit);
+  if (error) throw new Error(error.message);
+  let done = 0, flipped = 0;
+  for (const r of rows ?? []) {
+    const x = r.robust ?? {}, cfg = r.config ?? {};
+    const lot = Number(cfg.lot_size) || 1, frac = slippageFor(String(cfg.underlying)).fut;
+    const trades = unpackTrades(r.trades_long);
+    const years = (x.years?.list ?? []) as any[];
+    const yearChecks = years.map((y) => {
+      const ts = trades.filter((t) => t.exit.slice(0, 10) >= String(y.from) && t.exit.slice(0, 10) <= String(y.to));
+      const xcost = trades.length ? Math.trunc(ts.reduce((a, t) => a + frac * ((Number(t.entry_px) || 0) + (Number(t.exit_px) || 0)) * lot, 0)) : y.xcost;
+      return { kind: "year", asset: String(cfg.underlying), tf: Number(y.y), result: { ...y, xcost, ...(Number(y.y) === 1 && r.trades_long ? { tr: r.trades_long } : {}) } };
+    });
+    const checks = [
+      ...(x.self ? [{ kind: "self", asset: String(cfg.underlying), tf: null, result: x.self }] : []),
+      ...((x.assets?.list ?? []) as any[]).map((a) => ({ kind: "asset", asset: String(a.asset), tf: null, result: a })),
+      ...((x.tfs?.list ?? []) as any[]).map((t) => ({ kind: "tf", asset: String(cfg.underlying), tf: Number(t.tf), result: t })),
+      ...yearChecks,
+      ...((x.steps?.list ?? []) as any[]).map((st) => ({ kind: "step", asset: String(cfg.underlying), tf: null, result: st })),
+    ];
+    const v: any = robustVerdict(cfg, checks as any);
+    v.checked_at = x.checked_at ?? v.checked_at; v.rev = 2; v.status = "done";
+    const passed = !!r.basic_passed && v.passed;
+    if (passed !== !!r.passed) flipped++;
+    const { error: ue } = await sb.from("lab_results").update({ robust: v, passed }).eq("id", r.id);
+    if (ue) throw new Error(ue.message);
+    if (passed && !r.passed) await sb.rpc("lab_assign_twin", { p_id: r.id }).then(() => {}, () => {});
+    done++;
+  }
+  const { count } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("robust_status", "done").not("robust->years->list", "is", null).is("robust->rev", null);
+  return { done, flipped, left: count ?? 0 };
 }

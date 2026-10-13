@@ -14,7 +14,7 @@ import { dataSecurity, syncMcx } from "./instruments.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
-import { LAB_ASSETS, labNext, labOptStep, labStart, labStep, loadCryptoAssets, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
+import { LAB_ASSETS, labNext, labOptStep, labReverdict, labStart, labStep, loadCryptoAssets, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
 import { contractsFor, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaOrder, niceLot } from "./crypto.ts";
 import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
@@ -1349,6 +1349,7 @@ Deno.serve(async (req) => {
 
   // Option-pricing queue: one instalment per call (the schedule paces it), only while no lab run is going.
   if (action === "push") return Response.json({ action, ...(await pushOut()) });
+  if (action === "lab_reverdict") return Response.json({ action, ...(await labReverdict(sb, Math.min(300, Number(body.limit) || 120))) });
   if (action === "marks" && body.user_id) return Response.json({ action, marks: await liveMarks(body.user_id, false) });
   if (action === "lab_opt") {
     EdgeRuntime.waitUntil((async () => {
