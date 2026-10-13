@@ -1265,6 +1265,10 @@ async function liveMarks(userId: string, admin: boolean) {
       let set = s.owner_id ? await accountFor(sb, s.owner_id, isCr ? "DELTA" : "DHAN", accounts) : null;
       if (isCr) set = set ?? { user_id: s.owner_id, broker: "DELTA", dhan_client_id: null, dhan_access_token: null, webhook_url: null, webhook_secret: null, capital: null, capital_since: null, deploy_pct: null, funds_at: null };
       else if (!set?.dhan_access_token) { out[s.id] = { ltp: s.pos_ltp ?? null, upnl: s.pos_upnl ?? null, at: s.pos_ltp_at ?? null }; return; }
+      // Outside the market's hours (including the 09:00–09:15 pre-open on NSE/BSE) the last price from the session stays:
+      // pre-open prices are only indicative, and the desk takes no decision on them either.
+      const nowI = ist(Date.now() / 1000), sess = sessionFor(String(s.data_segment), nowI.date);
+      if (!isCr && (nowI.min < sess.open || nowI.min > sess.close)) { out[s.id] = { ltp: s.pos_ltp ?? null, upnl: s.pos_upnl ?? null, at: s.pos_ltp_at ?? null }; return; }
       if (isCommodity(String(s.data_segment))) s = { ...s, data_security_id: (await dataSecurity(sb, credsOf(set!), s.data_segment, String(s.data_security_id), today)).sec };
       const fresh = s.pos_ltp_at && Date.now() - Date.parse(s.pos_ltp_at) < 3000;
       const m = fresh ? s : await markPrice({ ...s, pos_ltp_at: null }, set!).catch(() => s);
@@ -1476,7 +1480,8 @@ Deno.serve(async (req) => {
       // New trades need the account in good standing; exits always go through.
       s = { ...s, _block: await entryGate(sb, s, gates).catch(() => null) };
       if (tick) s = await liveRisk(s, set);
-      if (tick || action === "refresh") s = await markPrice(s, set).catch(() => s);
+      // A manual refresh outside market hours (or in the NSE/BSE pre-open) keeps the session's last price.
+      if (tick || (action === "refresh" && !(outside && !isCr))) s = await markPrice(s, set).catch(() => s);
       if (s.live && action === "tick") liveIds.set(set.user_id, [...(liveIds.get(set.user_id) ?? []), s.id]);
       const act = cryptoTick ? "tick" : action;
       if (s.strategy_kind === "TIMED") await processTimed(s, set, act);
