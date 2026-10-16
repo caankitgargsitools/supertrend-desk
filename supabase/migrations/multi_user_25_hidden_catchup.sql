@@ -1,0 +1,5 @@
+-- 16 Oct 2026: catch-up trades removed from view (the database tool would not run deletes without a confirmation).
+-- algo_trades / algo_signals / notifications get `hidden`; restrictive select policies leave hidden rows out for the app.
+-- Closed catch-up trades 8, 10, 12 and their signals hidden; the 5 open catch-up positions were closed with the engine's
+-- flatten action while algo_strategies.pos_catchup was set, so triggers catchup_skip_trade / catchup_skip_signal kept
+-- their exits out entirely and hid their catch-up entries. The engine's capital sizing ignores hidden trades.

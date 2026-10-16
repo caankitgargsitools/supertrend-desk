@@ -318,7 +318,7 @@ async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknow
   if ((sz || capMode) && rate) notes.push(`Margin ${(rate * 100).toFixed(1)}% of contract value (Dhan, today)`);
   if (capMode) {
     // A bought strategy: the capital the user gave it, plus what it has made or lost since, decides the lots.
-    const { data: own } = await sb.from("algo_trades").select("net").eq("strategy_id", s.id).eq("mode", s.live ? "LIVE" : "PAPER");
+    const { data: own } = await sb.from("algo_trades").select("net").eq("strategy_id", s.id).eq("mode", s.live ? "LIVE" : "PAPER").eq("hidden", false);
     const eq = Number(s.capital) + (own ?? []).reduce((a, x) => a + (Number(x.net) || 0), 0);
     const cs = await capitalState(set, !!s.live, s.id);
     const max = Math.max(1, Math.trunc(Number(s.sizing.max_lots) || 1000));
