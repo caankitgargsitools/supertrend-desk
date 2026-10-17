@@ -16,14 +16,16 @@ export async function syncMcx(sb: SupabaseClient, clientId: string, token: strin
   const lines = (await r.text()).split(/\r?\n/);
   const head = lines[0].split(",");
   const col = (n: string) => head.indexOf(n);
-  const iSec = col("SECURITY_ID"), iIns = col("INSTRUMENT"), iUnd = col("UNDERLYING_SYMBOL"), iDisp = col("DISPLAY_NAME"), iExp = col("SM_EXPIRY_DATE");
+  const iSec = col("SECURITY_ID"), iIns = col("INSTRUMENT"), iUnd = col("UNDERLYING_SYMBOL"), iDisp = col("DISPLAY_NAME"), iExp = col("SM_EXPIRY_DATE"),
+    iLot = col("LOT_SIZE"), iTick = col("TICK_SIZE");
   if ([iSec, iIns, iUnd, iExp].some((i) => i < 0)) throw new Error("Dhan's MCX instrument list has an unexpected format.");
   const now = new Date().toISOString();
   const rows: Record<string, unknown>[] = [];
   for (const line of lines.slice(1)) {
     const a = line.split(",");
     if (a[iIns] !== "FUTCOM" || !/^\d{4}-\d{2}-\d{2}/.test(a[iExp] ?? "")) continue;
-    rows.push({ sec_id: a[iSec], underlying: a[iUnd], display: a[iDisp] ?? null, expiry: a[iExp].slice(0, 10), synced_at: now });
+    rows.push({ sec_id: a[iSec], underlying: a[iUnd], display: a[iDisp] ?? null, expiry: a[iExp].slice(0, 10), synced_at: now,
+      lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) || null : null });
   }
   if (!rows.length) throw new Error("Dhan's MCX instrument list had no futures contracts.");
   for (let i = 0; i < rows.length; i += 500) {

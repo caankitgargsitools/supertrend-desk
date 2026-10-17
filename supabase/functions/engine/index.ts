@@ -13,9 +13,13 @@ import {
 import { dataSecurity, syncMcx } from "./instruments.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
-import { hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
+import { effectiveStop, hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
 import { LAB_ASSETS, labNext, labOptStep, labReverdict, labStart, labStep, loadCryptoAssets, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
-import { contractsFor, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaOrder, niceLot } from "./crypto.ts";
+import { contractsFor, CRYPTO, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaCancel, deltaOrderChecked, deltaOrderState, deltaPositions, deltaStop, deltaStopMove, niceLot } from "./crypto.ts";
+import {
+  brokerQty, type BrokerStatus, brokerStopTrigger, chaseDecision, type Creds, dhanByTag, dhanCancel, dhanLtp, dhanModify, dhanPlace, dhanPositions, dhanStatus,
+  positionDiff, productOf, resolveLeg, type Side, sideOf, stepFor, stopLimit, syncFno, toTick,
+} from "./execution.ts";
 import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
 import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
@@ -51,7 +55,7 @@ function warmDays(tf: number, atr: number, seg = "IDX_I", bars = WARM_BARS) {
   return Math.min(400, Math.max(5, Math.ceil(((Math.max(bars, atr * 10) * tf) / dayMins) * 1.5) + 4));
 }
 const FLAT_STATE = { position: "FLAT", pos_legs: null, pos_option_type: null, pos_option_side: null, pos_strike: null, pos_expiry: null, pos_qty: null, pos_entry_date: null, pos_risk: null,
-  pos_entry_px: null, pos_entry_prem: null, pos_lots: null, pos_margin: null, pos_ltp: null, pos_ltp_at: null, pos_upnl: null };
+  pos_entry_px: null, pos_entry_prem: null, pos_lots: null, pos_margin: null, pos_ltp: null, pos_ltp_at: null, pos_upnl: null, pos_broker: null };
 const NO_PENDING = { pending_target: null, pending_trigger: null, pending_from: null, pending_to: null };
 const hhmm = (sec: number) => fmtIst(sec, true).slice(11, 16);
 
@@ -453,7 +457,8 @@ async function liveRisk(s: Strategy, set: Settings): Promise<Strategy> {
     await sb.from("algo_strategies").update(update).eq("id", s.id);
     return { ...s, ...update };
   }
-  const out = await bookPnl(s, set, update, under, hit.why, pr.basis === "PREMIUM" ? hit.px : undefined);
+  const crFill = s.live && isCrypto(String(s.data_segment)) ? deltaFill.exit : null;
+  const out = await bookPnl(s, set, update, crFill ?? under, hit.why, pr.basis === "PREMIUM" ? hit.px : undefined);
   await saveFills([fillOf(s, "Exit", out ?? (s.trade_type === "OPTIONS" ? null : hit.px))]);
   Object.assign(update, FLAT_STATE);
   await sb.from("algo_strategies").update(update).eq("id", s.id);
@@ -462,6 +467,7 @@ async function liveRisk(s: Strategy, set: Settings): Promise<Strategy> {
 
 async function sendOrders(s: Strategy, set: Settings, event: string, legs: Record<string, unknown>[], description: string, candle: Candle): Promise<boolean> {
   if (isCrypto(String(s.data_segment))) return sendDelta(s, set, event, legs, description, candle);
+  if (s.live) return queueDhan(s, set, event, legs, description, candle);
   const payload = { secret: set.webhook_secret ?? "", alertType: "multi_leg_order", order_legs: legs };
   const mode = s.live ? "LIVE" : "PAPER";
   let status = "LOGGED";
@@ -488,25 +494,54 @@ async function sendOrders(s: Strategy, set: Settings, event: string, legs: Recor
   return status !== "FAILED";
 }
 
-/** Crypto orders: market orders on Delta Exchange, one per leg, in order (a reversal closes first, then opens). */
+/**
+ * Crypto orders: market orders on Delta Exchange, one per leg, in order (a reversal closes first, then opens). Each is
+ * checked until Delta reports it filled; one left unfilled stops the rest. Before an exit the stop order resting at
+ * Delta is cancelled (if it already filled, the position is already closed and no exit order is sent).
+ */
 async function sendDelta(s: Strategy, set: Settings, event: string, legs: Record<string, unknown>[], description: string, candle: Candle): Promise<boolean> {
   // Lots → Delta contracts (a lot is a set number of coins, e.g. 0.05 BTC = 50 contracts).
   const payload = { broker: "DELTA", orders: legs.map((l) => ({ symbol: l.symbol, side: l.side === "B" ? "buy" : "sell", lots: l.qty, size: contractsFor(String(l.symbol), Number(s.lot_size), Number(l.qty)), reduce_only: !!l.reduce_only })) };
   let status = "LOGGED", response: string | null = null;
+  deltaFill = { exit: null, entry: null };
   if (s.live) {
     if (!set.dhan_client_id || !set.dhan_access_token) { status = "FAILED"; response = "Add your Delta Exchange API key and secret under Delta Exchange connection."; }
     else {
       const out: string[] = [];
-      status = "SENT";
-      for (const o of payload.orders) {
+      const pb = (s.pos_broker ?? null) as PosBroker | null;
+      let stopClosed = false;
+      if (pb?.stopId && payload.orders.some((o) => o.reduce_only)) {
         try {
-          const r = await deltaOrder(sb, set.user_id, { symbol: String(o.symbol), size: Number(o.size), side: o.side as "buy" | "sell", reduceOnly: o.reduce_only });
-          out.push(`${o.side} ${o.size} ${o.symbol}: order ${r?.id ?? "?"} ${r?.state ?? ""}${r?.average_fill_price ? ` filled at ${r.average_fill_price}` : ""}`);
+          const st = await deltaOrderState(sb, set.user_id, pb.stopId);
+          if (st.state === "closed" && st.unfilled === 0) { stopClosed = true; deltaFill.exit = st.avg; out.push(`already closed by the stop order at Delta${st.avg ? ` at ${st.avg}` : ""}`); }
+          else await deltaCancel(sb, set.user_id, String(pb.symbol ?? pb.legs[0]?.sec), pb.stopId).catch(() => {});
+          await sb.from("live_orders").update({ state: stopClosed ? "filled" : "cancelled", avg_px: stopClosed ? st.avg : null, done_at: nowIso(), note: stopClosed ? "filled (desk exit came after)" : "cancelled before the desk's exit" })
+            .eq("broker_order_id", pb.stopId).eq("state", "resting");
+        } catch (e) { out.push(`stop order check failed: ${e instanceof Error ? e.message : e}`); }
+      }
+      status = "SENT";
+      let opened: PosBroker | null = null;
+      for (const o of payload.orders) {
+        if (o.reduce_only && stopClosed) continue;
+        try {
+          const st = await deltaOrderChecked(sb, set.user_id, { symbol: String(o.symbol), size: Number(o.size), side: o.side as "buy" | "sell", reduceOnly: o.reduce_only });
+          const filled = st.size - st.unfilled;
+          out.push(`${o.side} ${o.size} ${o.symbol}: order ${st.id || "?"} ${st.state}${st.avg ? ` filled at ${st.avg}` : ""}${st.unfilled ? `, ${st.unfilled} unfilled` : ""}`);
+          if (o.reduce_only) deltaFill.exit = st.avg ?? deltaFill.exit;
+          else {
+            deltaFill.entry = st.avg;
+            if (filled > 0) opened = { broker: "DELTA", symbol: String(o.symbol), legs: [{ sec: String(o.symbol), seg: "DELTA", qty: (o.side === "buy" ? 1 : -1) * filled }],
+              tick: Number(CRYPTO[String(o.symbol)]?.tick_size) || 0.5, step: 0, option: false, offset: 0, fill: st.avg };
+          }
+          if (st.unfilled > 0 || !(filled > 0)) { status = "FAILED"; out.push(`only ${filled} of ${st.size} contracts filled`); break; }
         } catch (e) {
           status = "FAILED"; out.push(`${o.side} ${o.size} ${o.symbol}: ${e instanceof Error ? e.message : String(e)}`);
           break; // don't open a new position if closing the old one failed
         }
       }
+      if (opened) opened.step = stepFor(Number(opened.fill) || 0, opened.tick, false);
+      // The position as Delta holds it (read by the stop order and the 5-minute check); a closed one has none.
+      if (opened || payload.orders.some((o) => o.reduce_only)) await sb.from("algo_strategies").update({ pos_broker: opened }).eq("id", s.id);
       response = out.join(" | ").slice(0, 1000);
     }
   }
@@ -628,7 +663,7 @@ async function logSignal(s: Strategy, event: string, description: string, candle
 async function flatten(s: Strategy, set: Settings, update: Record<string, unknown>, candle: Candle) {
   if (s.position === "FLAT") return;
   const ok = await sendOrders(s, set, "FLATTEN", asArr(exitLeg(s, 1)), `Manual exit: ${exitLabel(s)}`, candle);
-  if (ok) { const out = await bookPnl(s, set, update, candle.c, "Manual exit"); await saveFills([fillOf(s, "Exit", out)]); Object.assign(update, FLAT_STATE); }
+  if (ok) { const out = await bookPnl(s, set, update, (s.live && isCrypto(String(s.data_segment)) ? deltaFill.exit : null) ?? candle.c, "Manual exit"); await saveFills([fillOf(s, "Exit", out)]); Object.assign(update, FLAT_STATE); }
   else Object.assign(update, { last_error: "Exit order failed to send. Check the log and close the position in Dhan.", active: false });
 }
 
@@ -647,8 +682,10 @@ async function finish(s: Strategy, set: Settings, update: Record<string, unknown
     } else if (entering) await armRisk(s, set, newState, entryPx!, atrNow, notes);
     const ok = await sendOrders(s, set, event, legs, notes.join(" | "), candle);
     const fills: Fill[] = [];
-    if (ok && exiting) fills.push(fillOf(s, "Exit", await bookPnl(s, set, update, candle.c, notes[0] ?? event)));
+    const crLive = s.live && isCrypto(String(s.data_segment));
+    if (ok && exiting) fills.push(fillOf(s, "Exit", await bookPnl(s, set, update, (crLive ? deltaFill.exit : null) ?? candle.c, notes[0] ?? event)));
     if (ok && entering && newState.position !== "FLAT") {
+      if (crLive && deltaFill.entry) newState.pos_entry_px = deltaFill.entry;
       const st = { ...s, ...newState };
       fills.push(fillOf(st, "Entry", s.trade_type === "OPTIONS" ? (newState.pos_entry_prem as number | null) : entryPx));
       Object.assign(newState, { pos_ltp: null, pos_ltp_at: null, pos_upnl: null });
@@ -1327,6 +1364,403 @@ async function pushOut() {
   }
   return { sent, notifications: ns.length };
 }
+/* ================================================================ live orders (Dhan: worked limit orders; both: broker stops, reconciliation)
+ * Only strategies switched to live use any of this; paper strategies keep logging orders as before.
+ */
+type LiveRow = Record<string, any>;
+type BrokerLeg = { sec: string; seg: string; qty: number; product?: string };
+type PosBroker = { broker: "DHAN" | "DELTA"; legs: BrokerLeg[]; tick: number; step: number; option: boolean; offset: number; fill: number | null;
+  stopId?: string | null; stopTrig?: number | null; stopRow?: number | null; stopErrAt?: string | null; symbol?: string };
+const EXIT_EVENTS = new Set(["EXIT", "STOP_LOSS", "TRAIL_STOP", "TARGET", "SQUARE_OFF", "FLATTEN"]);
+const nowIso = () => new Date().toISOString();
+/** Crypto fills of the order just sent (for the ledger). */
+let deltaFill: { exit: number | null; entry: number | null } = { exit: null, entry: null };
+
+/** How many of an order's legs close the current position (they go first; the rest open the new one). */
+function exitCount(s: Strategy, event: string, legs: Record<string, unknown>[]): number {
+  if (s.position === "FLAT") return 0;
+  if (EXIT_EVENTS.has(event)) return legs.length;
+  if (event === "REVERSE") return Math.min(legs.length, asArr(exitLeg(s, 1)).length);
+  return 0;
+}
+async function alert(s: Strategy, title: string, body: string, tag?: string) {
+  if (tag) {
+    const { data } = await sb.from("notifications").select("id").eq("tag", tag).gte("created_at", new Date(Date.now() - 6 * 3600000).toISOString()).limit(1);
+    if (data?.length) return;
+  }
+  await sb.rpc("notify_tagged", { p_user: s.owner_id, p_kind: "error", p_title: `${title} · ${String(s.name ?? "").slice(0, 50)}`, p_body: body.slice(0, 400), p_url: `/?s=${s.id}`, p_strategy: s.id, p_tag: tag ?? null });
+}
+const brokerKey = (seg: string, sec: string) => `${seg}|${sec}`;
+
+/**
+ * A live Dhan order: each leg resolved to its contract, written to live_orders and worked by the order manager.
+ * The exit legs go first; an entry leg is placed only once the exit before it has filled. Before an exit, the stop
+ * order resting at Dhan is cancelled (if it has already filled, it is the exit) and Dhan's positions are checked, so an
+ * exit is never sent for a position the account doesn't hold (it would open a position the wrong way).
+ */
+async function queueDhan(s: Strategy, set: Settings, event: string, legs: Record<string, unknown>[], description: string, candle: Candle): Promise<boolean> {
+  const c = credsOf(set), today = todayIst();
+  const nExit = exitCount(s, event, legs);
+  const payload = { broker: "DHAN", legs };
+  const pb = (s.pos_broker ?? null) as PosBroker | null;
+  const notes: string[] = [];
+  let rows: LiveRow[] = [];
+  try {
+    for (let i = 0; i < legs.length; i++) {
+      const leg = legs[i], purpose = i < nExit ? "exit" : "entry";
+      const k = await resolveLeg(sb, c, s, leg, today);
+      const q = Number(leg.quantity ?? 0);
+      const lots = s.qty_mode === "LOTS" ? q : q / (k.lot || 1);
+      const ref = k.option ? null : Number(candle.c) || null; // an option is priced from its own last trade
+      rows.push({ user_id: s.owner_id, strategy_id: s.id, broker: "DHAN", seq: i, purpose, event, side: sideOf(leg.transactionType), sec: k.sec, seg: k.seg,
+        product: productOf(leg.productType), qty: brokerQty(k.seg, lots, k.lot), lots, lot: k.lot, tick: k.tick, option: k.option, label: k.label, ref_px: ref });
+    }
+  } catch (e) {
+    await logSignal(s, event, description, candle, "FAILED", payload, e instanceof Error ? e.message : String(e));
+    return false;
+  }
+  // Exits: the broker's stop first, then what the account actually holds.
+  const exits = rows.filter((r) => r.purpose === "exit");
+  if (exits.length) {
+    if (pb?.stopId) {
+      try {
+        const st = await dhanStatus(c, pb.stopId);
+        if (String(st.status).toUpperCase() === "TRADED") {
+          // The stop at Dhan already closed the position: that's the exit (its fill is recorded when the order manager sees it).
+          for (const r of exits) { r.state = "filled"; r.note = "closed by the stop-loss order at Dhan"; r.avg_px = st.avg; r.filled_qty = st.filled; r.done_at = nowIso(); r.broker_order_id = pb.stopId; }
+          await sb.from("live_orders").update({ state: "filled", done_at: nowIso(), avg_px: st.avg, filled_qty: st.filled, note: "filled (desk exit came after)" }).eq("broker_order_id", pb.stopId).eq("state", "resting");
+        } else {
+          await dhanCancel(c, pb.stopId).catch(() => {});
+          await sb.from("live_orders").update({ state: "cancelled", done_at: nowIso(), note: "cancelled before the desk's exit" }).eq("broker_order_id", pb.stopId).eq("state", "resting");
+        }
+      } catch (e) { notes.push(`Couldn't check the stop order at Dhan: ${e instanceof Error ? e.message : e}`); }
+    }
+    const open = exits.filter((r) => r.state !== "filled");
+    if (open.length) {
+      const held = await dhanPositions(c).catch(() => null);
+      for (const r of open) {
+        if (!pb) { r.state = "cancelled"; r.note = "not sent: the desk has no record of this position being opened at Dhan"; continue; }
+        if (!held) continue; // positions couldn't be read: send the exit anyway
+        const h = held.get(brokerKey(r.seg, r.sec)) ?? 0, want = r.side === "SELL" ? 1 : -1; // selling closes a long
+        if (Math.sign(h) !== want) { r.state = "cancelled"; r.note = `not sent: Dhan shows no ${want === 1 ? "long" : "short"} position in ${r.label}`; continue; }
+        if (Math.abs(h) < r.qty) { r.note = `Dhan holds ${Math.abs(h)} of ${r.qty}; closing what it holds`; r.qty = Math.abs(h); }
+      }
+      for (const r of open.filter((r) => r.state === "cancelled")) {
+        await alert(s, "Exit not sent", `${r.label}: ${r.note}. The desk is now flat; check your Dhan positions.`);
+      }
+    }
+  }
+  const batch = crypto.randomUUID();
+  await logSignal(s, event, description, candle, "SENT", payload, `Worked at Dhan: ${rows.map((r) => `${r.purpose} ${r.side} ${r.qty} ${r.label}${r.state === "cancelled" ? " (not sent)" : ""}`).join(" | ")}${notes.length ? " | " + notes.join(" | ") : ""}`.slice(0, 1000));
+  rows = rows.map((r) => ({ ...r, batch, signal_id: lastSignalId, state: r.state ?? "queued" }));
+  const { data: ins, error } = await sb.from("live_orders").insert(rows).select("*");
+  if (error) { console.error("live_orders", error); return false; }
+  await sb.from("algo_strategies").update({ exec_state: "working", ...(nExit ? { pos_broker: null } : {}) }).eq("id", s.id);
+  // The first leg goes straight away (the order manager places the rest, in order, as each fills).
+  const first = (ins ?? []).sort((a, b) => a.seq - b.seq).find((r) => r.state === "queued");
+  if (first) {
+    const ok = await placeRow(first, c);
+    if (!ok && first.purpose === "entry" && !(ins ?? []).some((r) => r.purpose === "exit")) {
+      await sb.from("algo_strategies").update({ exec_state: null }).eq("id", s.id);
+      return false; // a plain entry Dhan wouldn't take: nothing changed, the strategy is paused by the caller
+    }
+  } else await afterRow(s.id, batch);
+  return true;
+}
+
+/** Places (or re-places) one order at the last traded price. Returns false when Dhan wouldn't take it. */
+async function placeRow(r: LiveRow, c: Creds): Promise<boolean> {
+  const ltp = await dhanLtp(c, r.seg, r.sec);
+  const px = ltp ?? (Number(r.ref_px) > 0 ? Number(r.ref_px) : null);
+  const market = r.market_retry || (px == null && r.purpose === "exit");
+  if (px == null && !market) return failRow(r, "no price to place the order at");
+  const limit = market ? null : toTick(px!, Number(r.tick), r.side);
+  const tag = `ag${r.id}x${r.market_retry ? "m" : ""}${Date.now() % 100000}`;
+  try {
+    let id: string;
+    try {
+      id = (await dhanPlace(c, { sec: r.sec, seg: r.seg, product: r.product, side: r.side, qty: r.qty, type: market ? "MARKET" : "LIMIT", price: limit ?? undefined, tag })).id;
+    } catch (e) {
+      // The reply may have been lost: look the order up by its tag before calling it failed.
+      const found = /timed? ?out|abort|network|fetch/i.test(String(e)) ? await dhanByTag(c, tag).catch(() => null) : null;
+      if (!found) throw e;
+      id = found.id;
+    }
+    await sb.from("live_orders").update({ state: "working", broker_order_id: id, correlation_id: tag, limit_px: limit, ref_px: r.ref_px ?? px, step: stepFor(px ?? 0, Number(r.tick), !!r.option),
+      placed_at: nowIso(), updated_at: nowIso(), note: market ? "market order" : null }).eq("id", r.id);
+    return true;
+  } catch (e) {
+    return failRow(r, e instanceof Error ? e.message : String(e));
+  }
+}
+/** Dhan wouldn't take or rejected an order. An exit is tried once more at market; anything else stops here. */
+async function failRow(r: LiveRow, reason: string): Promise<boolean> {
+  if (r.purpose === "exit" && !r.market_retry) {
+    await sb.from("live_orders").update({ market_retry: true, note: `rejected (${reason.slice(0, 120)}); retrying at market`, updated_at: nowIso() }).eq("id", r.id);
+    const set = await accountFor(sb, r.user_id, "DHAN");
+    if (set) return placeRow({ ...r, market_retry: true }, credsOf(set));
+  }
+  await sb.from("live_orders").update({ state: "failed", note: reason.slice(0, 300), done_at: nowIso(), updated_at: nowIso() }).eq("id", r.id);
+  await sb.from("live_orders").update({ state: "cancelled", note: "not sent: an earlier leg failed", done_at: nowIso() }).eq("batch", r.batch).eq("state", "queued");
+  const s = (await sb.from("algo_strategies").select("*").eq("id", r.strategy_id).single()).data as Strategy | null;
+  if (s) {
+    const anyFilled = (await sb.from("live_orders").select("id").eq("batch", r.batch).eq("state", "filled").eq("purpose", "entry")).data?.length;
+    const upd: Record<string, unknown> = { exec_state: null, active: false };
+    if (r.purpose === "exit") {
+      upd.last_error = `Exit order rejected by Dhan (${reason.slice(0, 150)}), also at market. The strategy is paused: close ${r.label} in Dhan.`;
+    } else {
+      // The desk takes back the entry it assumed (a structure partly opened is flagged to close by hand).
+      Object.assign(upd, FLAT_STATE);
+      upd.last_error = anyFilled ? `Part of the entry filled, then Dhan rejected ${r.label} (${reason.slice(0, 120)}). The strategy is paused: close the filled legs in Dhan.`
+        : `Entry order rejected by Dhan: ${reason.slice(0, 160)}. The desk stays flat and the strategy is paused.`;
+    }
+    await sb.from("algo_strategies").update(upd).eq("id", s.id);
+  }
+  return false;
+}
+
+/** After a leg finishes: the next queued leg of the same order goes out; when none are left the strategy is free. */
+async function afterRow(strategyId: string, batch: string) {
+  const { data: next } = await sb.from("live_orders").select("*").eq("batch", batch).eq("state", "queued").order("seq").limit(1);
+  if (next?.length) {
+    const set = await accountFor(sb, next[0].user_id, "DHAN");
+    if (set) { await placeRow(next[0], credsOf(set)); return; }
+  }
+  const { data: busy } = await sb.from("live_orders").select("id").eq("strategy_id", strategyId).in("state", ["queued", "working"]).limit(1);
+  if (!busy?.length) await sb.from("algo_strategies").update({ exec_state: null }).eq("id", strategyId);
+}
+
+/** An order filled: its price goes on the signal, the position's broker record and (for an exit) the ledger. */
+async function onFilled(r: LiveRow, st: BrokerStatus) {
+  const avg = st.avg ?? Number(r.limit_px) ?? null;
+  await sb.from("live_orders").update({ state: "filled", avg_px: avg, filled_qty: st.filled || r.qty, done_at: nowIso(), updated_at: nowIso() }).eq("id", r.id);
+  if (r.signal_id && avg) {
+    const { data: g } = await sb.from("algo_signals").select("fills").eq("id", r.signal_id).single();
+    const fills = (g?.fills ?? []) as Fill[];
+    const f = fills.find((x) => x.leg === (r.purpose === "exit" ? "Exit" : "Entry") && x.broker_px == null && x.side === r.side);
+    if (f) { f.broker_px = +Number(avg).toFixed(2); f.broker_qty = st.filled || r.qty; f.broker_ids = [String(r.broker_order_id)]; f.broker_at = nowIso(); await sb.from("algo_signals").update({ fills }).eq("id", r.signal_id); }
+  }
+  const s = (await sb.from("algo_strategies").select("*").eq("id", r.strategy_id).single()).data as Strategy | null;
+  if (!s) return;
+  if (r.purpose === "entry") {
+    const pb = ((s.pos_broker ?? null) as PosBroker | null) ?? { broker: "DHAN", legs: [], tick: Number(r.tick), step: Number(r.step) || stepFor(avg ?? 0, Number(r.tick), !!r.option), option: !!r.option, offset: 0, fill: null };
+    pb.legs.push({ sec: r.sec, seg: r.seg, qty: (r.side === "BUY" ? 1 : -1) * Number(st.filled || r.qty), product: r.product });
+    pb.fill = avg;
+    // Index futures trade above / below the index the desk watches: the gap at the fill moves the broker stop with it.
+    const indexFut = !r.option && r.seg !== "MCX_COMM";
+    pb.offset = indexFut && avg && Number(r.ref_px) > 0 ? +(avg - Number(r.ref_px)).toFixed(2) : 0;
+    const upd: Record<string, unknown> = { pos_broker: pb };
+    if (!isMulti(s) && avg) {
+      if (s.trade_type === "OPTIONS") upd.pos_entry_prem = +Number(avg).toFixed(2);
+      else if (!indexFut) upd.pos_entry_px = +Number(avg).toFixed(2);
+    }
+    await sb.from("algo_strategies").update(upd).eq("id", s.id);
+  } else if (avg) await fixLedger(s, r, avg);
+  await afterRow(s.id, r.batch);
+}
+/** The closed trade at the prices Dhan actually filled (entry and exit), with charges and the day's total corrected. */
+async function fixLedger(s: Strategy, r: LiveRow, exitAvg: number) {
+  const { data: ent } = await sb.from("live_orders").select("avg_px, qty, lot, option, seg").eq("strategy_id", s.id).eq("sec", r.sec).in("purpose", ["entry"]).eq("state", "filled")
+    .lt("created_at", r.created_at).order("created_at", { ascending: false }).limit(1);
+  const e = ent?.[0];
+  const { data: tr } = await sb.from("algo_trades").select("*").eq("strategy_id", s.id).eq("mode", "LIVE").gte("exit_at", new Date(Date.parse(r.created_at) - 10 * 60000).toISOString())
+    .order("exit_at", { ascending: false }).limit(1);
+  const t = tr?.[0];
+  if (!t || !e?.avg_px || isMulti(s)) return;
+  const inPx = Number(e.avg_px), outPx = exitAvg, units = Number(t.units);
+  const dir = r.side === "SELL" ? 1 : -1; // the exit sells what was bought
+  const gross = (outPx - inPx) * dir * units;
+  const buyVal = (dir === 1 ? inPx : outPx) * units, sellVal = (dir === 1 ? outPx : inPx) * units;
+  const costs = tradeCharges({ from: "", to: "", capital: 0, brokerage: 20, charges: ratesFor(s), near_code: 1 }, !!r.option, buyVal, sellVal).total;
+  const net = Math.trunc(gross - costs);
+  await sb.from("algo_trades").update({ entry_px: +inPx.toFixed(2), exit_px: +outPx.toFixed(2), gross: Math.trunc(gross), costs: Math.trunc(costs), net,
+    exit_why: `${String(t.exit_why ?? "").slice(0, 150)} · Dhan fills`.slice(0, 200) }).eq("id", t.id);
+  if (String(s.day_pnl_date) === todayIst() && s.day_pnl != null) await sb.from("algo_strategies").update({ day_pnl: Math.trunc(Number(s.day_pnl) + net - Number(t.net)) }).eq("id", s.id);
+}
+
+/**
+ * The order manager (every minute; looks at each working order every 15 seconds within the minute):
+ * filled → recorded, next leg placed; rejected → handled (failRow); price beyond the limit → one step towards it,
+ * an exit at market after 3 steps, an entry given up after 4 (the desk goes back to flat); a quiet market → wait.
+ * Stop orders resting at the broker are checked once a minute: one that filled closes the desk's position.
+ */
+async function runOrders(passes = 4) {
+  const until = new Date(Date.now() + 75000).toISOString();
+  const { data: lock } = await sb.from("live_lock").update({ until }).eq("id", 1).lt("until", nowIso()).select("id");
+  if (!lock?.length) return { skipped: "another order manager is running" };
+  const done: string[] = [];
+  try {
+    for (let pass = 0; pass < passes; pass++) {
+      if (pass) await new Promise((res) => setTimeout(res, 15000));
+      const { data: rows } = await sb.from("live_orders").select("*").in("state", pass === 0 ? ["working", "resting"] : ["working"]).order("id");
+      if (!rows?.length) break;
+      const accts = new Map<string, Account | null>();
+      for (const r of rows) {
+        try {
+          const set = await accountFor(sb, r.user_id, r.broker, accts);
+          if (!set?.dhan_access_token) continue;
+          if (r.state === "resting") { await checkStop(r, set); continue; }
+          const c = credsOf(set);
+          const st = await dhanStatus(c, r.broker_order_id);
+          const ltp = await dhanLtp(c, r.seg, r.sec);
+          const d = chaseDecision({ purpose: r.purpose, side: r.side, limit: r.limit_px == null ? null : Number(r.limit_px), steps: Number(r.steps), step: Number(r.step), tick: Number(r.tick) }, st, ltp);
+          done.push(`${r.id}:${d.kind}`);
+          if (d.kind === "filled") await onFilled(r, st);
+          else if (d.kind === "failed") await failRow(r, d.reason);
+          else if (d.kind === "modify") {
+            await dhanModify(c, r.broker_order_id, { type: "LIMIT", qty: r.qty, price: d.price });
+            await sb.from("live_orders").update({ limit_px: d.price, steps: Number(r.steps) + 1, updated_at: nowIso() }).eq("id", r.id);
+          } else if (d.kind === "market") {
+            await dhanModify(c, r.broker_order_id, { type: "MARKET", qty: r.qty });
+            await sb.from("live_orders").update({ limit_px: null, note: `price ran ${r.steps} steps away: sent at market`, updated_at: nowIso() }).eq("id", r.id);
+          } else if (d.kind === "give_up") {
+            await dhanCancel(c, r.broker_order_id).catch(() => {});
+            const again = await dhanStatus(c, r.broker_order_id).catch(() => null);
+            if (again && (String(again.status).toUpperCase() === "TRADED" || again.filled > 0)) { if (String(again.status).toUpperCase() === "TRADED") await onFilled(r, again); continue; }
+            await giveUp(r, ltp);
+          }
+        } catch (e) {
+          done.push(`${r.id}:error ${e instanceof Error ? e.message : e}`);
+          await sb.from("live_orders").update({ note: `check failed: ${String(e instanceof Error ? e.message : e).slice(0, 200)}`, updated_at: nowIso() }).eq("id", r.id);
+        }
+      }
+    }
+  } finally {
+    await sb.from("live_lock").update({ until: nowIso() }).eq("id", 1);
+  }
+  return { done };
+}
+/** The price ran away from an entry: the order is cancelled, the desk goes back to flat and you are told. */
+async function giveUp(r: LiveRow, ltp: number | null) {
+  await sb.from("live_orders").update({ state: "gave_up", note: `price moved away (last ${ltp ?? "?"}, limit ${r.limit_px}); cancelled after ${r.steps} steps`, done_at: nowIso() }).eq("id", r.id);
+  await sb.from("live_orders").update({ state: "cancelled", note: "not sent: the entry before it wasn't filled", done_at: nowIso() }).eq("batch", r.batch).eq("state", "queued");
+  const s = (await sb.from("algo_strategies").select("*").eq("id", r.strategy_id).single()).data as Strategy | null;
+  if (!s) return;
+  const partial = (await sb.from("live_orders").select("id").eq("batch", r.batch).eq("purpose", "entry").eq("state", "filled")).data?.length;
+  await sb.from("algo_strategies").update({ ...FLAT_STATE, exec_state: null, ...(partial ? { active: false, last_error: `Part of the entry filled, then the price ran away from ${r.label}. The strategy is paused: close the filled legs in Dhan.` } : {}) }).eq("id", s.id);
+  await logSignal({ ...s, live: true }, "INFO", `Entry not filled: ${r.label} moved away from the limit (${r.steps} steps). The order was cancelled and the desk is flat again.`, { c: ltp ?? undefined });
+  if (!partial) await alert(s, "Entry not filled", `${r.label} moved away from the limit; the order was cancelled after ${r.steps} steps and the desk is flat again. It enters on the next signal.`);
+}
+
+/* ---------- the stop-loss order resting at the broker ---------- */
+/** Where the broker stop should be now (null: none for this position). Moves only in the position's favour. */
+function wantedStop(s: Strategy, pb: PosBroker): { trig: number; long: boolean; limit: number } | null {
+  const r = riskOf(s), pr = s.pos_risk as PosRisk | null;
+  if (!r || !pr || pr.dir === undefined || isMulti(s) || pb.legs.length !== 1) return null;
+  if (s.trade_type === "OPTIONS" && pr.basis !== "PREMIUM") return null; // an index-level stop can't be put on the option itself
+  const eff = effectiveStop({ dir: pr.dir!, stop: pr.stop ?? null, tgt: pr.tgt ?? null, trail: pr.trail ?? null, trailAtr: pr.trailAtr ?? 0, best: Number(pr.best), scanFrom: 0 } as RiskState).px;
+  if (eff == null || !(eff > 0)) return null;
+  const long = pb.legs[0].qty > 0;
+  const trig = brokerStopTrigger(eff, pb.offset || 0, long, pb.step || stepFor(eff, pb.tick, pb.option), pb.tick);
+  return trig > 0 ? { trig, long, limit: stopLimit(trig, long, pb.tick, pb.option) } : null;
+}
+/** Places the broker stop after an entry fills, and moves it as the trailing stop moves (every minute, live strategies). */
+async function syncStop(s: Strategy, set: Settings): Promise<Strategy> {
+  const pb = s.pos_broker as PosBroker | null;
+  if (!s.live || s.position === "FLAT" || !pb || s.exec_state === "working") return s;
+  if (pb.stopErrAt && Date.now() - Date.parse(pb.stopErrAt) < 10 * 60000) return s;
+  const w = wantedStop(s, pb);
+  if (!w) return s;
+  if (pb.stopId && pb.stopTrig != null && (w.long ? w.trig <= pb.stopTrig : w.trig >= pb.stopTrig)) return s; // not tighter
+  const leg = pb.legs[0], side: Side = w.long ? "SELL" : "BUY", qty = Math.abs(leg.qty);
+  const next: PosBroker = { ...pb, stopErrAt: null };
+  try {
+    if (pb.broker === "DELTA") {
+      const sym = String(pb.symbol ?? leg.sec);
+      if (pb.stopId) await deltaStopMove(sb, set.user_id, sym, pb.stopId, w.trig);
+      else next.stopId = await deltaStop(sb, set.user_id, { symbol: sym, size: qty, side: side === "BUY" ? "buy" : "sell", stop: w.trig });
+    } else {
+      const c = credsOf(set);
+      if (pb.stopId) await dhanModify(c, pb.stopId, { type: "STOP_LOSS", qty, price: w.limit, trigger: w.trig });
+      else next.stopId = (await dhanPlace(c, { sec: leg.sec, seg: leg.seg, product: leg.product ?? productOf(s.product_type), side, qty, type: "STOP_LOSS", price: w.limit, trigger: w.trig, tag: `ag${String(s.id).slice(0, 8)}s${Date.now() % 100000}` })).id;
+    }
+    if (!pb.stopId) {
+      const { data: row } = await sb.from("live_orders").insert({ user_id: s.owner_id, strategy_id: s.id, batch: crypto.randomUUID(), broker: pb.broker, purpose: "stop", event: "STOP_LOSS", side,
+        sec: leg.sec, seg: leg.seg, product: leg.product ?? null, qty, tick: pb.tick, option: pb.option, label: `${s.name} stop`, trigger_px: w.trig, limit_px: pb.broker === "DHAN" ? w.limit : null,
+        state: "resting", broker_order_id: next.stopId, placed_at: nowIso() }).select("id").single();
+      next.stopRow = row?.id ?? null;
+    } else await sb.from("live_orders").update({ trigger_px: w.trig, limit_px: pb.broker === "DHAN" ? w.limit : null, updated_at: nowIso() }).eq("broker_order_id", pb.stopId).eq("state", "resting");
+    next.stopTrig = w.trig;
+  } catch (e) {
+    next.stopErrAt = nowIso();
+    await alert(s, "Stop order not placed", `The stop-loss order at ${pb.broker === "DELTA" ? "Delta Exchange" : "Dhan"} couldn't be ${pb.stopId ? "moved" : "placed"} (${e instanceof Error ? e.message : e}). The desk still watches its own stop every minute.`, `stoperr-${s.id}`);
+  }
+  await sb.from("algo_strategies").update({ pos_broker: next }).eq("id", s.id);
+  return { ...s, pos_broker: next };
+}
+/** A resting stop order: filled → the desk books the exit at its price; cancelled / rejected by the broker → you are told. */
+async function checkStop(r: LiveRow, set: Settings) {
+  let state = "", avg: number | null = null, filled = 0;
+  if (r.broker === "DELTA") {
+    const st = await deltaOrderState(sb, r.user_id, r.broker_order_id);
+    state = st.state === "closed" && st.unfilled === 0 ? "TRADED" : st.state === "cancelled" ? "CANCELLED" : "PENDING"; avg = st.avg; filled = st.size - st.unfilled;
+  } else {
+    const st = await dhanStatus(credsOf(set), r.broker_order_id);
+    state = String(st.status).toUpperCase(); avg = st.avg; filled = st.filled;
+  }
+  if (state !== "TRADED" && !["REJECTED", "CANCELLED", "EXPIRED"].includes(state)) return;
+  const s0 = (await sb.from("algo_strategies").select("*").eq("id", r.strategy_id).single()).data as Strategy | null;
+  if (state !== "TRADED") {
+    await sb.from("live_orders").update({ state: "failed", note: `${state.toLowerCase()} at the broker`, done_at: nowIso() }).eq("id", r.id);
+    if (s0?.pos_broker?.stopId === r.broker_order_id) {
+      await sb.from("algo_strategies").update({ pos_broker: { ...s0.pos_broker, stopId: null, stopTrig: null, stopErrAt: nowIso() } }).eq("id", s0.id);
+      if (state !== "EXPIRED") await alert(s0, "Stop order cancelled", `The stop-loss order at the broker was ${state.toLowerCase()}. A new one is placed within 10 minutes; the desk keeps watching its own stop.`, `stopgone-${r.id}`);
+    }
+    return;
+  }
+  await sb.from("live_orders").update({ state: "filled", avg_px: avg, filled_qty: filled, done_at: nowIso() }).eq("id", r.id);
+  if (!s0 || s0.position === "FLAT" || s0.pos_broker?.stopId !== r.broker_order_id) return;
+  const [s] = await withMasters(sb, [s0]);
+  const pb = s.pos_broker as PosBroker;
+  const update: Record<string, unknown> = { last_run_at: nowIso() };
+  const opt = s.trade_type === "OPTIONS";
+  const under = opt ? undefined : avg != null ? avg - (pb.offset || 0) : undefined;
+  await logSignal(s, "STOP_LOSS", `Stop-loss order filled at ${r.broker === "DELTA" ? "Delta Exchange" : "Dhan"} at ${avg ?? "?"}: ${exitLabel(s)}`, { t: Math.floor(Date.now() / 1000), c: under }, "SENT", null, `order ${r.broker_order_id}`);
+  const out = await bookPnl(s, set, update, under, `Stop-loss order at the broker${avg ? ` (${avg})` : ""}`, opt ? avg : undefined);
+  await saveFills([{ ...fillOf(s, "Exit", out), broker_px: avg ?? undefined, broker_qty: filled, broker_ids: [String(r.broker_order_id)], broker_at: nowIso() }]);
+  Object.assign(update, FLAT_STATE);
+  await sb.from("algo_strategies").update(update).eq("id", s.id);
+  if (r.broker === "DHAN" && avg) await fixLedger(s, { ...r, created_at: nowIso() }, avg);
+}
+
+/* ---------- desk vs broker, every 5 minutes ---------- */
+async function reconcile() {
+  const { data: live } = await sb.from("algo_strategies").select("id, name, owner_id, data_segment, position, pos_broker, exec_state, futures_symbol").eq("live", true).eq("active", true);
+  const byUser = new Map<string, Strategy[]>();
+  for (const s of live ?? []) byUser.set(s.owner_id, [...(byUser.get(s.owner_id) ?? []), s]);
+  const out: Record<string, string> = {};
+  for (const [u, list] of byUser) {
+    for (const broker of ["DHAN", "DELTA"] as const) {
+      const mine = list.filter((s) => (broker === "DELTA") === isCrypto(String(s.data_segment)));
+      if (!mine.length) continue;
+      const nowMin = ist(Date.now() / 1000);
+      if (broker === "DHAN" && !mine.some((s) => { const ss = sessionFor(s.data_segment, nowMin.date); return nowMin.min >= ss.open + 2 && nowMin.min <= ss.close; })) continue;
+      if (mine.some((s) => s.exec_state === "working")) { out[`${u}|${broker}`] = "orders working: next time"; continue; }
+      try {
+        const set = await accountFor(sb, u, broker);
+        if (!set?.dhan_access_token) continue;
+        const held = broker === "DHAN" ? await dhanPositions(credsOf(set)) : await deltaPositions(sb, u);
+        const desk = new Map<string, number>(), who = new Map<string, Strategy>();
+        for (const s of mine) for (const l of ((s.pos_broker as PosBroker | null)?.legs ?? [])) {
+          if (s.position === "FLAT") continue;
+          const k = brokerKey(l.seg, l.sec); desk.set(k, (desk.get(k) ?? 0) + l.qty); who.set(k, s);
+        }
+        // Only contracts the desk has traded are compared (the account may hold other positions of your own).
+        const { data: traded } = await sb.from("live_orders").select("seg, sec, strategy_id").eq("user_id", u).eq("broker", broker).gte("created_at", new Date(Date.now() - 40 * 86400000).toISOString());
+        const known = new Map<string, string>((traded ?? []).map((t) => [brokerKey(t.seg, t.sec), t.strategy_id]));
+        const brk = new Map<string, number>([...held].filter(([k]) => desk.has(k) || known.has(k)));
+        const diffs = positionDiff(desk, brk);
+        out[`${u}|${broker}`] = diffs.length ? diffs.map((d) => `${d.key} desk ${d.desk} broker ${d.broker}`).join("; ") : "match";
+        for (const d of diffs) {
+          const s = who.get(d.key) ?? mine.find((x) => x.id === known.get(d.key)) ?? mine[0];
+          await alert(s, "Positions don't match", `${broker === "DELTA" ? "Delta Exchange" : "Dhan"} holds ${d.broker} in ${d.key.split("|")[1]} but the desk expects ${d.desk}. Check the position at the broker.`, `recon-${d.key}-${d.desk}-${d.broker}`);
+        }
+      } catch (e) { out[`${u}|${broker}`] = `error: ${e instanceof Error ? e.message : e}`; }
+    }
+  }
+  return out;
+}
+
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 
 Deno.serve(async (req) => {
@@ -1366,6 +1800,8 @@ Deno.serve(async (req) => {
 
   // Option-pricing queue: one instalment per call (the schedule paces it), only while no lab run is going.
   if (action === "push") return Response.json({ action, ...(await pushOut()) });
+  if (action === "orders") return Response.json({ action, ...(await runOrders(Math.min(4, Math.max(1, Number(body.passes) || 4)))) });
+  if (action === "reconcile") return Response.json({ action, ...(await reconcile()) });
   if (action === "lab_reverdict") return Response.json({ action, ...(await labReverdict(sb, Math.min(300, Number(body.limit) || 120))) });
   if (action === "marks" && body.user_id) return Response.json({ action, marks: await liveMarks(body.user_id, false) });
   if (action === "lab_opt") {
@@ -1441,7 +1877,8 @@ Deno.serve(async (req) => {
   if (action === "sync_instruments") {
     const c = credsOf(await adminAccount(sb));
     const n = await syncMcx(sb, c.client, c.token);
-    return Response.json({ action, contracts: n });
+    const fno = await syncFno(sb, c).catch((e) => `F&O list failed: ${e instanceof Error ? e.message : e}`);
+    return Response.json({ action, contracts: n, fno });
   }
   let q = sb.from("algo_strategies").select("*");
   q = body.strategy_id ? q.eq("id", body.strategy_id) : q.eq("active", true).eq("is_master", false);
@@ -1476,6 +1913,7 @@ Deno.serve(async (req) => {
         set = set ?? { user_id: s.owner_id, broker: "DELTA", dhan_client_id: null, dhan_access_token: null, webhook_url: null, webhook_secret: null, capital: null, capital_since: null, deploy_pct: null, funds_at: null };
         if (cryptoTick && outside) {
           s = await liveRisk(s, set);
+          if (s.live) s = await syncStop(s, set).catch(() => s);
           s = await markPrice(s, set).catch(() => s);
           results[s.id] = "ok (outside the crypto session: stops only)";
           continue;
@@ -1490,9 +1928,15 @@ Deno.serve(async (req) => {
         const r = await dataSecurity(sb, credsOf(set), s.data_segment, String(s.data_security_id), nowIst.date);
         s = { ...s, data_security_id: r.sec };
       }
+      // A live strategy whose orders are still being worked waits for them (the order manager finishes them first).
+      if (s.live && s.exec_state === "working" && action !== "refresh") {
+        if (action === "flatten") throw new Error("Orders for this strategy are still being worked at the broker. Try again in a minute.");
+        results[s.id] = "orders working"; continue;
+      }
       // New trades need the account in good standing; exits always go through.
       s = { ...s, _block: await entryGate(sb, s, gates).catch(() => null) };
       if (tick) s = await liveRisk(s, set);
+      if (tick && s.live) s = await syncStop(s, set).catch((e) => { console.error("stop", e); return s; });
       // A manual refresh outside market hours (or in the NSE/BSE pre-open) keeps the session's last price.
       if (tick || (action === "refresh" && !(outside && !isCr))) s = await markPrice(s, set).catch(() => s);
       if (s.live && action === "tick") liveIds.set(set.user_id, [...(liveIds.get(set.user_id) ?? []), s.id]);

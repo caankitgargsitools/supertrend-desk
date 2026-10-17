@@ -210,7 +210,7 @@ export async function cryptoProduct(symbol: string) {
  * to call. So signed requests go out from the database (public.delta_send, synchronous), whose address is fixed: it
  * signs with the user's stored secret (which never leaves the database) and returns Delta's answer.
  */
-export async function deltaPrivate(sb: SupabaseClient, userId: string, method: "GET" | "POST", path: string, query = "", body?: unknown): Promise<any> {
+export async function deltaPrivate(sb: SupabaseClient, userId: string, method: "GET" | "POST" | "PUT" | "DELETE", path: string, query = "", body?: unknown): Promise<any> {
   const { data, error } = await sb.rpc("delta_send", { p_user: userId, p_method: method, p_path: path, p_query: query, p_body: body === undefined ? "" : JSON.stringify(body) });
   if (error || !data) throw new Error(`Delta ${path}: couldn't send (${error?.message ?? "no answer"}).`);
   const res = { ...(data as { status: number | null; body: string | null }), error: null as string | null };
@@ -240,4 +240,50 @@ export async function deltaBalances(sb: SupabaseClient, userId: string) {
   const rows: any[] = Array.isArray(j?.result) ? j.result : [];
   return rows.map((x) => ({ asset: String(x.asset_symbol ?? x.asset?.symbol ?? ""), balance: Number(x.balance ?? 0), available: Number(x.available_balance ?? 0),
     inr: x.balance_inr != null ? Number(x.balance_inr) : null })).filter((x) => x.asset);
+}
+
+/* ---------- live order checks (fills, the stop order at Delta, positions) ---------- */
+export type DeltaState = { state: string; size: number; unfilled: number; avg: number | null; id: string };
+const deltaState = (r: any): DeltaState => ({ state: String(r?.state ?? ""), size: Number(r?.size ?? 0), unfilled: Number(r?.unfilled_size ?? 0),
+  avg: Number(r?.average_fill_price) > 0 ? Number(r.average_fill_price) : null, id: String(r?.id ?? "") });
+/** An order's state at Delta (open / pending / closed / cancelled) and how much of it is still unfilled. */
+export async function deltaOrderState(sb: SupabaseClient, userId: string, id: string): Promise<DeltaState> {
+  return deltaState((await deltaPrivate(sb, userId, "GET", `/v2/orders/${encodeURIComponent(id)}`))?.result);
+}
+/** A market order, then (if Delta hasn't finished it yet) one more look after 2 seconds. */
+export async function deltaOrderChecked(sb: SupabaseClient, userId: string, o: { symbol: string; size: number; side: "buy" | "sell"; reduceOnly?: boolean }): Promise<DeltaState> {
+  let st = deltaState(await deltaOrder(sb, userId, o));
+  if (st.id && st.state !== "closed" && st.state !== "cancelled") {
+    await new Promise((r) => setTimeout(r, 2000));
+    st = await deltaOrderState(sb, userId, st.id).catch(() => st);
+  }
+  return st;
+}
+/** A stop-loss market order resting at Delta (reduce-only, so it can only close the position). */
+export async function deltaStop(sb: SupabaseClient, userId: string, o: { symbol: string; size: number; side: "buy" | "sell"; stop: number }): Promise<string> {
+  const a = CRYPTO[o.symbol];
+  const body: Record<string, unknown> = { product_symbol: o.symbol, size: Math.trunc(o.size), side: o.side, order_type: "market_order", stop_order_type: "stop_loss_order",
+    stop_price: String(o.stop), reduce_only: true };
+  if (a?.product_id) body.product_id = a.product_id;
+  const r = (await deltaPrivate(sb, userId, "POST", "/v2/orders", "", body))?.result;
+  if (!r?.id) throw new Error("Delta didn't return an id for the stop order.");
+  return String(r.id);
+}
+export async function deltaStopMove(sb: SupabaseClient, userId: string, symbol: string, id: string, stop: number) {
+  const a = CRYPTO[symbol];
+  await deltaPrivate(sb, userId, "PUT", "/v2/orders", "", { id: Number(id), product_id: a?.product_id, product_symbol: symbol, stop_price: String(stop) });
+}
+export async function deltaCancel(sb: SupabaseClient, userId: string, symbol: string, id: string) {
+  const a = CRYPTO[symbol];
+  await deltaPrivate(sb, userId, "DELETE", "/v2/orders", "", { id: Number(id), product_id: a?.product_id, product_symbol: symbol });
+}
+/** Net open contracts per coin ("DELTA|BTCUSD" → signed contracts). */
+export async function deltaPositions(sb: SupabaseClient, userId: string): Promise<Map<string, number>> {
+  const j = await deltaPrivate(sb, userId, "GET", "/v2/positions/margined");
+  const out = new Map<string, number>();
+  for (const p of Array.isArray(j?.result) ? j.result : []) {
+    const q = Number(p.size ?? 0);
+    if (q) out.set(`DELTA|${p.product_symbol ?? p.product?.symbol}`, q);
+  }
+  return out;
 }
