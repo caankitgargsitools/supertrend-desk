@@ -18,7 +18,7 @@ import { LAB_ASSETS, labNext, labOptStep, labReverdict, labStart, labStep, loadC
 import { contractsFor, CRYPTO, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaCancel, deltaOrderChecked, deltaOrderState, deltaPositions, deltaStop, deltaStopMove, niceLot } from "./crypto.ts";
 import {
   brokerQty, type BrokerStatus, brokerStopTrigger, chaseDecision, type Creds, dhanByTag, dhanCancel, dhanLtp, dhanModify, dhanPlace, dhanPositions, dhanStatus,
-  positionDiff, productOf, resolveLeg, type Side, sideOf, stepFor, stopLimit, syncFno, toTick,
+  positionDiff, productOf, resolveLeg, setDhanRpc, type Side, sideOf, stepFor, stopLimit, syncFno, toTick,
 } from "./execution.ts";
 import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
@@ -30,6 +30,7 @@ declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
   auth: { persistSession: false },
 });
+setDhanRpc(sb); // Dhan order calls from the database's fixed IP address
 
 type Strategy = Record<string, any>;
 type Settings = Account;
@@ -1364,6 +1365,31 @@ async function pushOut() {
   }
   return { sent, notifications: ns.length };
 }
+
+/**
+ * Supervised first live test: one lot, long, through the full live path (worked limit order, fill check, stop order at
+ * the broker 1.5% below). It is closed with the strategy's normal "Exit now" (flatten). Only for a live, flat, futures strategy.
+ */
+async function liveTest(id: string) {
+  const { data: row } = await sb.from("algo_strategies").select("*").eq("id", id).single();
+  if (!row) return { error: "no such strategy" };
+  const [s0] = await withMasters(sb, [row]);
+  if (!s0.live || s0.position !== "FLAT" || s0.trade_type !== "FUTURES" || isMulti(s0) || s0.exec_state === "working") return { error: "needs a live, flat, single-leg futures strategy" };
+  const set = await accountFor(sb, s0.owner_id, isCrypto(String(s0.data_segment)) ? "DELTA" : "DHAN");
+  if (!set?.dhan_access_token) return { error: "no broker account" };
+  let s = s0;
+  if (isCommodity(String(s.data_segment))) s = { ...s, data_security_id: (await dataSecurity(sb, credsOf(set), s.data_segment, String(s.data_security_id), todayIst())).sec };
+  const px = await dhanFor(set).ltp(s.data_segment, String(s.data_security_id));
+  if (!(Number(px) > 0)) return { error: "no price" };
+  const e = entryLeg({ ...s, lots: 1 }, "LONG", px!, 1, 1);
+  const stop = +(px! * 0.985).toFixed(2);
+  const newState = { ...e.state, position: "LONG", pos_lots: 1, pos_entry_px: px, pos_risk: { basis: "UNDERLYING", entry: px, dir: 1, stop, tgt: null, trail: null, trailAtr: 0, best: px, scanFrom: Math.floor(Date.now() / 60000) * 60 } };
+  delete (newState as any)._px;
+  const ok = await sendOrders(s, set, "ENTRY", asArr(e.leg), `Live test (supervised): ${e.label} | Levels: stop ${stop}`, { t: Math.floor(Date.now() / 1000), c: px! });
+  if (!ok) return { error: "the order didn't go", detail: (await sb.from("algo_strategies").select("last_error").eq("id", id).single()).data };
+  await sb.from("algo_strategies").update(newState).eq("id", id);
+  return { ok: true, price: px, stop };
+}
 /* ================================================================ live orders (Dhan: worked limit orders; both: broker stops, reconciliation)
  * Only strategies switched to live use any of this; paper strategies keep logging orders as before.
  */
@@ -1625,6 +1651,14 @@ async function runOrders(passes = 4) {
         }
       }
     }
+    // A position that has just filled gets its stop order at the broker straight away (not at the next minute's tick).
+    const { data: open } = await sb.from("algo_strategies").select("*").eq("live", true).neq("position", "FLAT").is("exec_state", null).not("pos_broker", "is", null);
+    for (const r of (open ?? []).filter((x) => !x.pos_broker?.stopId)) {
+      try {
+        const set = await accountFor(sb, r.owner_id, isCrypto(String(r.data_segment)) ? "DELTA" : "DHAN");
+        if (set?.dhan_access_token) { const [s] = await withMasters(sb, [r]); await syncStop(s, set); done.push(`${r.id}:stop`); }
+      } catch (e) { console.error("stop", e); }
+    }
   } finally {
     await sb.from("live_lock").update({ until: nowIso() }).eq("id", 1);
   }
@@ -1800,6 +1834,7 @@ Deno.serve(async (req) => {
 
   // Option-pricing queue: one instalment per call (the schedule paces it), only while no lab run is going.
   if (action === "push") return Response.json({ action, ...(await pushOut()) });
+  if (action === "live_test" && body.strategy_id) return Response.json({ action, ...(await liveTest(String(body.strategy_id))) });
   if (action === "orders") return Response.json({ action, ...(await runOrders(Math.min(4, Math.max(1, Number(body.passes) || 4)))) });
   if (action === "reconcile") return Response.json({ action, ...(await reconcile()) });
   if (action === "lab_reverdict") return Response.json({ action, ...(await labReverdict(sb, Math.min(300, Number(body.limit) || 120))) });

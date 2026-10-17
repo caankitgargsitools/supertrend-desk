@@ -90,7 +90,21 @@ let http: HttpFn = (u, i) => fetch(u, i);
 /** Tests swap in a simulated Dhan. */
 export function setHttp(f: HttpFn) { http = f; }
 
+/**
+ * Order calls go out from the database (public.dhan_send), whose address is fixed: SEBI allows API orders only from
+ * an IP address whitelisted at the broker. Set once at start-up; without it (tests) the calls go out directly.
+ */
+let via: SupabaseClient | null = null;
+export function setDhanRpc(sb: SupabaseClient) { via = sb; }
+
 async function dhanReq(c: Creds, method: string, path: string, body?: Record<string, unknown>) {
+  if (via) {
+    const { data, error } = await via.rpc("dhan_send", { p_client: c.client, p_token: c.token, p_method: method, p_path: "/v2" + path, p_body: body ? JSON.stringify({ dhanClientId: c.client, ...body }) : "" });
+    if (error || !data) throw new Error(`network: couldn't reach Dhan (${error?.message ?? "no answer"})`);
+    const status = Number((data as any).status) || 0, text = String((data as any).body ?? "");
+    let j: any = null; try { j = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
+    return { ok: status >= 200 && status < 300, status, j, text };
+  }
   const init: RequestInit = {
     method,
     headers: { "Content-Type": "application/json", Accept: "application/json", "access-token": c.token, "client-id": c.client },

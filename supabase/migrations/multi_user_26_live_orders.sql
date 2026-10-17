@@ -38,3 +38,18 @@ select cron.schedule('live-orders', '* * * * *',
   $$select public.engine_call('orders') where exists (select 1 from public.live_orders where state in ('queued','working','resting'))$$);
 select cron.schedule('live-reconcile', '*/5 * * * *',
   $$select public.engine_call('reconcile') where exists (select 1 from public.algo_strategies where live and active)$$);
+
+-- multi_user_28_dhan_send: Dhan order calls from the database's fixed IP (SEBI static-IP rule); service role only.
+create or replace function public.dhan_send(p_client text, p_token text, p_method text, p_path text, p_body text default '')
+returns json language plpgsql security definer set search_path to 'public', 'extensions' as $$
+declare r extensions.http_response;
+begin
+  if p_path !~ '^/v2/' then raise exception 'Bad path'; end if;
+  perform extensions.http_set_curlopt('CURLOPT_TIMEOUT', '12');
+  r := extensions.http((upper(p_method), 'https://api.dhan.co' || p_path,
+    array[extensions.http_header('access-token', p_token), extensions.http_header('client-id', p_client), extensions.http_header('Accept', 'application/json')],
+    'application/json', nullif(p_body, ''))::extensions.http_request);
+  return json_build_object('status', r.status, 'body', r.content);
+end $$;
+revoke all on function public.dhan_send(text, text, text, text, text) from public, anon, authenticated;
+grant execute on function public.dhan_send(text, text, text, text, text) to service_role;
