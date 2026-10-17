@@ -196,7 +196,7 @@ export async function syncFno(sb: SupabaseClient, c: Creds): Promise<number> {
       const ins = a[iIns], und = a[iUnd], exp = (a[iExp] ?? "").slice(0, 10);
       if ((ins !== "FUTIDX" && ins !== "OPTIDX") || !FNO_UNDERLYINGS.includes(und) || !(exp >= today && exp <= until)) continue;
       rows.push({ sec_id: a[iSec], seg, underlying: und, instrument: ins, expiry: exp, strike: ins === "OPTIDX" && iStr >= 0 ? Number(a[iStr]) : null,
-        opt_type: ins === "OPTIDX" && iOpt >= 0 ? a[iOpt] : null, lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) || null : null,
+        opt_type: ins === "OPTIDX" && iOpt >= 0 ? a[iOpt] : null, lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) / 100 || null : null, // Dhan lists the tick in paise
         display: iDisp >= 0 ? a[iDisp] : null, synced_at: now });
     }
     for (let i = 0; i < rows.length; i += 500) {

@@ -25,7 +25,7 @@ export async function syncMcx(sb: SupabaseClient, clientId: string, token: strin
     const a = line.split(",");
     if (a[iIns] !== "FUTCOM" || !/^\d{4}-\d{2}-\d{2}/.test(a[iExp] ?? "")) continue;
     rows.push({ sec_id: a[iSec], underlying: a[iUnd], display: a[iDisp] ?? null, expiry: a[iExp].slice(0, 10), synced_at: now,
-      lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) || null : null });
+      lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) / 100 || null : null }); // Dhan lists the tick in paise
   }
   if (!rows.length) throw new Error("Dhan's MCX instrument list had no futures contracts.");
   for (let i = 0; i < rows.length; i += 500) {
