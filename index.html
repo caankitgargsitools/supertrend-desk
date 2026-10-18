@@ -956,6 +956,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
           <label class="f"><span>Closed by</span><select id="tf_why"><option value="">Any</option></select></label>
           <label class="f"><span>Instrument</span><select id="tf_inst"><option value="">All</option><option>Futures</option><option>Options</option><option>Crypto</option><option>Commodity</option></select></label>
           <label class="f grow"><span>Search</span><input id="tf_q" type="search" placeholder="Contract, reason…" autocomplete="off"></label>
+          <label class="showtr"><input type="checkbox" id="tf_arch"> Archived strategies</label>
           <button class="btn small" id="tf_clear" type="button">Clear filters</button>
           <button class="btn small" id="tf_csv" type="button">Download CSV</button>
         </div>
@@ -4615,12 +4616,12 @@ function tradesHtml(rows, opts = {}, openRows = []) {
   const head = `<tr><th>Closed (IST)</th><th>Opened</th>${ws ? "<th>Strategy</th><th>Asset</th>" : ""}${opts.withMode ? "<th>Mode</th>" : ""}<th>Side</th><th>Contract</th><th class="n">Lots</th><th class="n">Entry</th><th class="n">Exit</th><th class="n">Gross</th><th class="n">Charges</th><th class="n">Net P&amp;L</th><th>Closed by</th></tr>`;
   const cls = (v) => Number(v) > 0 ? "pos-num" : Number(v) < 0 ? "neg-num" : "";
   const modeChip = (m) => `<span class="chip ${m === "LIVE" ? "red" : "yellow"}">${m === "LIVE" ? "Live" : "Paper"}</span>`;
-  const openTr = openRows.map((s) => `<tr class="openrow"><td><span class="chip blue">Open now</span></td><td>${esc(dayTxt(s.pos_entry_date))}</td>${ws ? `<td>${esc(s.name)}</td><td>${esc(assetOfStrat(s))}</td>` : ""}${opts.withMode ? `<td>${modeChip(s.live ? "LIVE" : "PAPER")}</td>` : ""}<td>${esc(sideTxt(s.position))}</td><td class="hint">${esc(s.trade_type === "OPTIONS" && s.pos_strike ? `${s.dhan_symbol} ${s.pos_strike} ${s.pos_option_type}` : s.futures_symbol || "")}</td><td class="n">${esc(String(s.pos_lots ?? s.lots ?? "–"))}</td><td class="n">${esc(pxTxt(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px))}</td><td class="n">${esc(pxTxt(s.pos_ltp))}<div class="hint sm">last price</div></td><td class="n"></td><td class="n"></td><td class="n ${cls(s.pos_upnl)}">${s.pos_upnl != null ? esc(rupees(s.pos_upnl)) : "–"}<div class="hint sm">running</div></td><td class="hint">still open</td></tr>`).join("");
+  const openTr = openRows.map((s) => `<tr class="openrow"><td><span class="chip blue">Open now</span></td><td>${esc(dayTxt(s.pos_entry_date))}</td>${ws ? `<td><a href="#" data-open="${esc(s.id)}">${esc(s.name)}</a></td><td>${esc(assetOfStrat(s))}</td>` : ""}${opts.withMode ? `<td>${modeChip(s.live ? "LIVE" : "PAPER")}</td>` : ""}<td>${esc(sideTxt(s.position))}</td><td class="hint">${esc(s.trade_type === "OPTIONS" && s.pos_strike ? `${s.dhan_symbol} ${s.pos_strike} ${s.pos_option_type}` : s.futures_symbol || "")}</td><td class="n">${esc(String(s.pos_lots ?? s.lots ?? "–"))}</td><td class="n">${esc(pxTxt(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px))}</td><td class="n">${esc(pxTxt(s.pos_ltp))}<div class="hint sm">last price</div></td><td class="n"></td><td class="n"></td><td class="n ${cls(s.pos_upnl)}">${s.pos_upnl != null ? esc(rupees(s.pos_upnl)) : "–"}<div class="hint sm">running</div></td><td class="hint">still open</td></tr>`).join("");
   const body = rows.map((t) => { const s = stratOf(t.strategy_id); return `<tr><td class="when">${esc(istText(t.exit_at))}</td><td>${esc(dayTxt(t.entry_day))}</td>${ws ? `<td>${s ? `<a href="#" data-open="${esc(t.strategy_id)}">${esc(s.name)}</a>` : "–"}</td><td>${esc(assetOfStrat(s))}</td>` : ""}${opts.withMode ? `<td>${modeChip(t.mode)}</td>` : ""}<td>${esc(sideTxt(t.side))}</td><td class="hint">${esc(t.contract || "")}</td><td class="n">${esc(String(t.lots ?? "–"))}</td><td class="n">${esc(pxTxt(t.entry_px))}</td><td class="n">${esc(pxTxt(t.exit_px))}</td><td class="n ${cls(t.gross)}">${esc(rupees(t.gross))}</td><td class="n">${esc(rupees(t.costs))}</td><td class="n ${cls(t.net)}"><b>${esc(rupees(t.net))}</b></td><td title="${esc(t.exit_why || "")}">${esc(closedBy(t.exit_why))}</td></tr>`; }).join("");
   const st = tradeTotals(rows), span = 2 + (ws ? 2 : 0) + (opts.withMode ? 1 : 0) + 5;
   const foot = rows.length ? `<tfoot><tr><td colspan="${span}"><b>Total · ${rows.length} trade${rows.length === 1 ? "" : "s"}</b></td><td class="n ${cls(st.gross)}">${esc(rupees(st.gross))}</td><td class="n">${esc(rupees(st.costs))}</td><td class="n ${cls(st.net)}"><b>${esc(rupees(st.net))}</b></td><td></td></tr></tfoot>` : "";
   const empty = !rows.length && !openRows.length ? `<p class="hint">${esc(opts.empty || "No trades.")}</p>` : "";
-  const cards = openRows.map((s) => `<div class="tcard"><div class="r1"><span class="nm">${ws ? esc(s.name) : esc(sideTxt(s.position))}</span><span class="chip blue">Open now</span></div><div class="r1"><span class="hint">${esc(sideTxt(s.position))} · from ${esc(dayTxt(s.pos_entry_date))} · at ${esc(pxTxt(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px))}</span><b class="${cls(s.pos_upnl)}">${s.pos_upnl != null ? esc(rupees(s.pos_upnl)) : "–"}</b></div></div>`).join("")
+  const cards = openRows.map((s) => `<div class="tcard"><div class="r1"><span class="nm">${ws ? `<a href="#" data-open="${esc(s.id)}">${esc(s.name)}</a>` : esc(sideTxt(s.position))}</span><span class="chip blue">Open now</span></div><div class="r1"><span class="hint">${esc(sideTxt(s.position))} · from ${esc(dayTxt(s.pos_entry_date))} · at ${esc(pxTxt(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px))}</span><b class="${cls(s.pos_upnl)}">${s.pos_upnl != null ? esc(rupees(s.pos_upnl)) : "–"}</b></div></div>`).join("")
     + rows.map((t) => { const s = stratOf(t.strategy_id); return `<div class="tcard"><div class="r1"><span class="nm">${ws && s ? `<a href="#" data-open="${esc(t.strategy_id)}">${esc(s.name)}</a>` : esc(t.contract || sideTxt(t.side))}</span><b class="${cls(t.net)}">${esc(rupees(t.net))}</b></div>
       <div class="r1"><span class="hint">${esc(sideTxt(t.side))} · ${esc(pxTxt(t.entry_px))} → ${esc(pxTxt(t.exit_px))} · ${esc(String(t.lots ?? ""))} lot${Number(t.lots) === 1 ? "" : "s"}</span>${opts.withMode ? modeChip(t.mode) : ""}</div>
       <div class="r1"><span class="hint">${esc(dayTxt(t.entry_day))} → ${esc(istText(t.exit_at))}</span><span class="hint">${esc(closedBy(t.exit_why))}</span></div>
@@ -4645,7 +4646,7 @@ async function loadAllTrades(force = false) {
 function fillTradeFilters() {
   const keep = (id) => $(id).value;
   const opt = (v, t) => `<option value="${esc(v)}">${esc(t)}</option>`;
-  const ids = [...new Set(deskTrades.map((t) => t.strategy_id))];
+  const ids = [...new Set([...deskTrades.map((t) => t.strategy_id), ...myStrats().filter((x) => x.position !== "FLAT").map((x) => x.id)])];
   const strats = ids.map(stratOf).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
   const assets = [...new Set(strats.map(assetOfStrat))].sort();
   const whys = [...new Set(deskTrades.map((t) => closedBy(t.exit_why)))].sort();
@@ -4671,6 +4672,7 @@ function filteredTrades() {
   return deskTrades.filter((t) => {
     const s = stratOf(t.strategy_id), day = new Date(Date.parse(t.exit_at) + 19800000).toISOString().slice(0, 10);
     if (mode && t.mode !== mode) return false;
+    if (!$("tf_arch").checked && s && s.archived) return false;
     if (sid && t.strategy_id !== sid) return false;
     if (asset && assetOfStrat(s) !== asset) return false;
     if (inst && instOfStrat(s) !== inst) return false;
@@ -4684,22 +4686,34 @@ function filteredTrades() {
     return true;
   });
 }
+/** Positions open now that match the filters (shown on top of the closed trades). */
+function filteredOpen() {
+  const mode = $("tf_mode").value, asset = $("tf_asset").value, sid = $("tf_strat").value, side = $("tf_side").value, res = $("tf_res").value, why = $("tf_why").value, inst = $("tf_inst").value;
+  const to = $("tf_to").value, q = $("tf_q").value.trim().toLowerCase(), today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+  if (why || (to && to < today)) return [];
+  return myStrats().filter((x) => x.position !== "FLAT" && (!x.archived || $("tf_arch").checked)
+    && (!mode || (mode === "LIVE") === !!x.live) && (!sid || x.id === sid) && (!asset || assetOfStrat(x) === asset) && (!inst || instOfStrat(x) === inst)
+    && (!side || x.position === side) && (res !== "W" || Number(x.pos_upnl) > 0) && (res !== "L" || !(Number(x.pos_upnl) > 0))
+    && (!q || `${x.name} ${x.futures_symbol || ""}`.toLowerCase().includes(q)));
+}
 function renderAllTrades() {
-  const rows = filteredTrades(), st = tradeTotals(rows);
-  const mode = $("tf_mode").value;
-  const open = myStrats().filter((x) => x.position !== "FLAT" && !x.archived && (!mode || (mode === "LIVE") === !!x.live));
+  const rows = filteredTrades(), st = tradeTotals(rows), open = filteredOpen();
   const runSum = open.reduce((a, x) => a + (Number(x.pos_upnl) || 0), 0);
   const filtered = rows.length !== deskTrades.length;
-  $("tf_stats").innerHTML = statsHtml(st, `<p class="hint" style="margin:8px 0 0">${filtered ? `Showing ${rows.length} of ${deskTrades.length} closed trades. ` : ""}${open.length ? `${open.length} position${open.length === 1 ? "" : "s"} open now (running ${rupees(runSum)}): open each strategy to see it.` : "No positions open now."}</p>`);
-  $("tf_list").innerHTML = tradesHtml(rows, { withStrategy: true, withMode: true, empty: deskTrades.length ? "No trades match these filters." : "No closed trades yet. Trades appear here as soon as a strategy closes a position, paper or live." });
+  const arch = !$("tf_arch").checked ? deskTrades.filter((t) => { const s = stratOf(t.strategy_id); return s && s.archived; }) : [];
+  const sgn = (v) => v > 0 ? "up" : v < 0 ? "down" : "";
+  const runTile = `<div class="stats" style="margin-top:10px"><div class="stat"><span class="label">Open now (running)</span><span class="v ${sgn(runSum)}">${esc(rupees(runSum))}</span><span class="hint">${open.length} position${open.length === 1 ? "" : "s"} · not yet booked</span></div>
+    <div class="stat"><span class="label">Booked + running</span><span class="v ${sgn(st.net + runSum)}">${esc(rupees(st.net + runSum))}</span><span class="hint">if everything open closed at the last price</span></div></div>`;
+  $("tf_stats").innerHTML = statsHtml(st, `${runTile}<p class="hint" style="margin:8px 0 0">${filtered ? `Showing ${rows.length} of ${deskTrades.length} closed trades. ` : ""}${arch.length ? `${arch.length} trade${arch.length === 1 ? "" : "s"} of archived strategies (${rupees(arch.reduce((a, t) => a + Number(t.net || 0), 0))}) left out, as on the strategies list; tick “Archived strategies” to include them.` : ""}</p>`);
+  $("tf_list").innerHTML = tradesHtml(rows, { withStrategy: true, withMode: true, empty: deskTrades.length ? "No trades match these filters." : "No closed trades yet. Trades appear here as soon as a strategy closes a position, paper or live." }, open);
   wireOpenLinks($("tf_list"));
-  $("tf_note").textContent = "Closed trades after charges, in whole rupees. Paper trades are priced by the desk; live trades at the broker's fill prices where the desk has them. Your contract notes are the final word.";
+  $("tf_note").textContent = "Open positions are on top (running P&L at the last price, not booked). Closed trades are after charges, in whole rupees. Paper trades are priced by the desk; live trades at the broker's fill prices where the desk has them. Your contract notes are the final word.";
 }
-["tf_mode", "tf_asset", "tf_strat", "tf_side", "tf_res", "tf_why", "tf_inst"].forEach((id) => $(id).addEventListener("change", renderAllTrades));
+["tf_mode", "tf_asset", "tf_strat", "tf_side", "tf_res", "tf_why", "tf_inst", "tf_arch"].forEach((id) => $(id).addEventListener("change", renderAllTrades));
 $("tf_q").addEventListener("input", renderAllTrades);
 $("tf_period").addEventListener("change", () => { const p = $("tf_period").value; if (p !== "custom") { const [a, b] = periodDates(p); $("tf_from").value = a; $("tf_to").value = b; } renderAllTrades(); });
 ["tf_from", "tf_to"].forEach((id) => $(id).addEventListener("change", () => { $("tf_period").value = "custom"; renderAllTrades(); }));
-$("tf_clear").addEventListener("click", () => { ["tf_mode", "tf_asset", "tf_strat", "tf_side", "tf_res", "tf_why", "tf_inst", "tf_from", "tf_to", "tf_q"].forEach((id) => $(id).value = ""); $("tf_period").value = "all"; renderAllTrades(); });
+$("tf_clear").addEventListener("click", () => { ["tf_mode", "tf_asset", "tf_strat", "tf_side", "tf_res", "tf_why", "tf_inst", "tf_from", "tf_to", "tf_q"].forEach((id) => $(id).value = ""); $("tf_period").value = "all"; $("tf_arch").checked = false; renderAllTrades(); });
 $("tf_toggle").addEventListener("click", () => { const box = $("tf_box"), on = !box.classList.contains("open"); box.classList.toggle("open", on); $("tf_toggle").setAttribute("aria-expanded", String(on)); $("tf_toggle").textContent = on ? "Hide filters" : "Filters"; });
 $("tf_csv").addEventListener("click", () => {
   const rows = filteredTrades(), q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
