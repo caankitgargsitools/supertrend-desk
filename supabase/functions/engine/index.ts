@@ -1837,7 +1837,7 @@ Deno.serve(async (req) => {
   if (action === "live_test" && body.strategy_id) return Response.json({ action, ...(await liveTest(String(body.strategy_id))) });
   if (action === "orders") return Response.json({ action, ...(await runOrders(Math.min(4, Math.max(1, Number(body.passes) || 4)))) });
   if (action === "reconcile") return Response.json({ action, ...(await reconcile()) });
-  if (action === "lab_reverdict") return Response.json({ action, ...(await labReverdict(sb, Math.min(300, Number(body.limit) || 120))) });
+  if (action === "lab_reverdict") return Response.json({ action, ...(await labReverdict(sb, Math.min(300, Number((body as any).limit) || 120), !!(body as any).short)) });
   if (action === "marks" && body.user_id) return Response.json({ action, marks: await liveMarks(body.user_id, false) });
   if (action === "lab_opt") {
     EdgeRuntime.waitUntil((async () => {

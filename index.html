@@ -3435,7 +3435,7 @@ function robOf(r) {
   if (!r.basic_passed && !(x && x.status)) return null;
   if (!x) return { status: "waiting" };
   if (x.assets && typeof x.assets === "object") return { status: x.status || (x.checked_at ? "done" : "waiting"), passed: x.passed, assets_ok: x.assets.ok, assets_n: x.assets.n, tfs_ok: x.tfs.ok, tfs_n: x.tfs.n,
-    years_ok: x.years ? x.years.ok : null, years_n: x.years ? x.years.n : null, years: x.years ? x.years.list : null, quality: x.quality || null,
+    years_ok: x.years ? x.years.ok : null, years_n: x.years ? x.years.n : null, years: x.years ? x.years.list : null, quality: x.quality || null, q_ok: x.quarters ? x.quarters.ok : null, q_n: x.quarters ? x.quarters.n : null, quarters: x.quarters ? x.quarters.list : null,
     vs_bh: x.vs_bh, risk_vs_bh: x.risk_vs_bh, bh_net: x.bh && x.bh.net, bh_dd: x.bh && x.bh.max_dd, bh_ratio: x.bh && x.bh.ratio, net: x.self && x.self.net, max_dd: x.self && x.self.max_dd, why: x.why || [], daily: x.daily,
     assetList: x.assets.list, tfList: x.tfs.list, stepList: x.steps ? x.steps.list : null };
   return { ...x, status: x.status || "waiting", why: x.why || [] };
@@ -3498,7 +3498,7 @@ async function loadLab() {
   if (!isAdmin()) {
     // Users: results and trades only, from a server view that leaves out every parameter.
     const res = must(await db.rpc("lab_feed", { p_view: lab.view, p_asset: lab.asset, p_period: lab.period, p_only: lab.only, p_request: lab.request || null }));
-    lab.settings = null; lab.runs = res.run ? [res.run] : [];
+    lab.settings = null; lab.runs = res.run ? [res.run] : []; lab.checking = Number(res.checking) || 0;
     lab.long = await db.rpc("lab_long_map").then((x) => x.data || {}).catch(() => ({}));
     lab.rows = (res.rows || []).map((r) => ({ ...r, config: null, label: `Lab #${r.id} · ${(PRESETS[r.asset] && PRESETS[r.asset].name) || r.asset}` }));
     renderLabStatus(); renderLabTable(); $("lab_stop").hidden = true; $("lab_run").hidden = true; loadLabRequests().catch(() => {}); labFocus();
@@ -3523,8 +3523,10 @@ async function loadLab() {
     if (lab.request) q = q.eq("request_id", lab.request);
     else if (lab.period === "run") q = q.eq("run_id", runs[0] ? runs[0].id : -1);
     else q = q.gte("created_at", new Date(Date.now() - Number(lab.period) * 86400000).toISOString());
-    // "Passed only" also lists first-round winners still waiting for the tougher test (marked "Being checked").
-    if (lab.only && lab.view === "FUT") q = q.or("passed.eq.true,and(basic_passed.eq.true,robust_status.is.null),and(basic_passed.eq.true,robust_status.eq.queued)");
+    // A result shows only once it has been through every test: first-round winners still waiting for the tougher
+    // test are left out (counted in the status line).
+    q = q.or("basic_passed.is.null,basic_passed.eq.false,robust_status.eq.done");
+    if (lab.only && lab.view === "FUT") q = q.eq("passed", true);
     if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : lab.view === "SPREAD" ? "opt_struct" : "opt_sell", "is", null);
     if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
     return q.order("score", { ascending: false }).order("id", { ascending: false });
@@ -3555,6 +3557,7 @@ async function loadLab() {
     }
   }
   lab.rows = all.map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
+  lab.checking = await db.from("lab_results").select("id", { count: "exact", head: true }).eq("basic_passed", true).or("robust_status.is.null,robust_status.neq.done").is("superseded_by", null).then((x) => x.count || 0).catch(() => 0);
   lab.long = await db.rpc("lab_long_map").then((x) => x.data || {}).catch(() => ({}));
   renderLabStatus(); renderLabTable(); loadLabRequests().catch(() => {});
   scheduleLabPoll(); labFocus();
@@ -3606,6 +3609,7 @@ function renderLabStatus() {
     <div class="stat"><span class="label">Test year</span><span class="v" style="font-size:13px">${esc(r.from_day || "")} → ${esc(r.to_day || "")}<br><span class="hint">ranked to ${esc(r.split_day || "")}</span></span></div>
   </div>
   <p class="hint" style="margin:8px 0 0">${r.status === "running" ? `Step ${esc(phases[r.phase] || r.phase)}: ${esc(r.progress || "")}` : esc(r.progress || "")}</p>
+  ${lab.checking ? `<p class="hint" style="margin:6px 0 0">${lab.checking} first-round winner${lab.checking === 1 ? " is" : "s are"} still going through the tougher test (other assets, timeframes, past years). They appear in the list once every test is done.</p>` : ""}
   ${r.error ? `<div class="banner err" style="margin-top:8px">${esc(r.error)}</div>` : ""}
   ${pausedTill ? (() => { const why = lab.settings.pause_reason;
     const t = why === "rest" ? `Resting between runs so the database stays quick. The next run starts by itself at ${esc(istText(pausedTill))} IST, or press “Run now”.`
@@ -3714,7 +3718,7 @@ function robCells(r) {
   if (!x) return '<td class="n hint">–</td><td class="n hint">–</td><td class="n hint">–</td><td class="n hint">–</td>';
   if (x.status !== "done") return '<td class="n hint" colspan="4" style="text-align:center">being checked</td>';
   const c = (ok, n, need) => `<td class="n"><span class="${n && ok >= need ? "pos-num" : "neg-num"}">${ok ?? 0}/${n ?? 0}</span></td>`;
-  return `${c(x.assets_ok, x.assets_n, 1)}${x.tfs_n ? c(x.tfs_ok, x.tfs_n, x.tfs_n >= 3 ? 2 : 1) : '<td class="n hint" title="Not testable on other timeframes">n/a</td>'}${x.years_n == null ? '<td class="n hint">–</td>' : `<td class="n"><span class="${x.years_n >= 3 && x.years_ok === x.years_n ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span></td>`}<td class="n"><span>${ratioTxt(x.risk_vs_bh)}</span></td>`;
+  return `${c(x.assets_ok, x.assets_n, 1)}${x.tfs_n ? c(x.tfs_ok, x.tfs_n, x.tfs_n >= 3 ? 2 : 1) : '<td class="n hint" title="Not testable on other timeframes">n/a</td>'}${x.years_n == null ? '<td class="n hint">–</td>' : x.q_n ? `<td class="n" title="Only ${x.years_n} year of minute prices: judged by quarter (3 of the last 4 needed)"><span class="${x.q_ok >= 3 ? "pos-num" : "neg-num"}">${x.q_ok}/${x.q_n} qtr</span></td>` : `<td class="n"><span class="${x.years_n >= 3 && x.years_ok === x.years_n ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span></td>`}<td class="n"><span>${ratioTxt(x.risk_vs_bh)}</span></td>`;
 }
 /** The tougher test as a panel for the lab detail. Users see counts; the admin also sees each asset and timeframe. */
 /** The quality score and what it is made of. */
@@ -3778,7 +3782,7 @@ function robustHTML(r, m, admin) {
     <div class="stats">
       <div class="stat"><span class="label">Other assets that work</span><span class="v">${x.assets_ok ?? 0} of ${x.assets_n ?? 0}</span><span class="hint">needs 1</span></div>
       <div class="stat"><span class="label">Other timeframes that work</span><span class="v">${x.tfs_n ? `${x.tfs_ok} of ${x.tfs_n}` : "n/a"}</span><span class="hint">${x.tfs_n ? `needs ${x.tfs_n >= 3 ? 2 : 1}` : "no intraday candles for this asset yet, so it can't pass"}</span></div>
-      <div class="stat"><span class="label">Past years profitable</span><span class="v">${x.years_n == null ? "–" : `${x.years_ok} of ${x.years_n}`}</span><span class="hint">every year needed (at least 3 tested)</span></div>
+      ${x.q_n ? `<div class="stat"><span class="label">Quarters profitable</span><span class="v">${x.q_ok} of ${x.q_n}</span><span class="hint">only ${x.years_n} year of minute prices, so judged by quarter: 3 of the last 4 needed${x.quarters ? ` (${x.quarters.map((q) => `Q${q.q} ${rupees(q.net)}`).join(" · ")})` : ""}</span></div>` : `<div class="stat"><span class="label">Past years profitable</span><span class="v">${x.years_n == null ? "–" : `${x.years_ok} of ${x.years_n}`}</span><span class="hint">every year needed (at least 3 tested)</span></div>`}
       <div class="stat"><span class="label">Strategy net · worst fall</span><span class="v">${pc(x.net)}</span><span class="hint">max DD ${x.max_dd == null ? "–" : rupees(x.max_dd)}</span></div>
       <div class="stat"><span class="label">Buy &amp; hold 1 lot · worst fall</span><span class="v">${pc(x.bh_net)}</span><span class="hint">max DD ${x.bh_dd == null ? "–" : rupees(x.bh_dd)}</span></div>
       <div class="stat"><span class="label">Profit vs buy &amp; hold</span><span class="v">${ratioTxt(x.vs_bh)}</span><span class="hint">${x.vs_bh == null ? (x.bh_net != null && x.bh_net <= 0 ? "buy &amp; hold lost money" : "") : "strategy net ÷ buy &amp; hold net"}</span></div>
@@ -4136,7 +4140,7 @@ function renderLabCards(fams, pc, rs) {
       <div class="mg">${cell("Net (1 yr)", pc(m.full.net) + longNetLine(r))}${cell("Win %", m.full.win_rate)}${cell("Trades", m.full.n)}
         ${cell("Max DD", rs(m.full.max_dd))}${cell("PF", m.full.pf ?? "–")}${cell("Months +", `${m.pos_months}/${m.months_n}`)}
         ${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Margin today (1 lot)", marginToday(r) ? rupees(marginToday(r)) : "–")}${cell("1-yr net on today's margin", returnToday(g) == null ? "–" : returnToday(g) + "%")}${cell("Desk score", deskCell(deskScore(r)))}${cell("Quality", x && x.quality ? `<span class="${x.quality.score >= 70 ? "pos-num" : x.quality.score < 40 ? "neg-num" : ""}">${x.quality.score}</span>` : "–")}
-        ${done ? cell("Assets +", ratio(x.assets_ok, x.assets_n)) + cell("Timeframes +", x.tfs_n ? ratio(x.tfs_ok, x.tfs_n, x.tfs_n >= 3 ? 2 : 1) : "n/a") + cell("Years +", x.years_n == null ? "–" : `<span class="${x.years_n >= 3 && x.years_ok === x.years_n ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span>`) : ""}</div>
+        ${done ? cell("Assets +", ratio(x.assets_ok, x.assets_n)) + cell("Timeframes +", x.tfs_n ? ratio(x.tfs_ok, x.tfs_n, x.tfs_n >= 3 ? 2 : 1) : "n/a") + cell("Years +", x.years_n == null ? "–" : x.q_n ? `<span class="${x.q_ok >= 3 ? "pos-num" : "neg-num"}">${x.q_ok}/${x.q_n} qtr</span>` : `<span class="${x.years_n >= 3 && x.years_ok === x.years_n ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span>`) : ""}</div>
       ${!sub && f.members.length > 1 ? `<button type="button" class="btn small fam">${lab.openFam.has(f.key) ? "Hide similar" : `+${f.members.length - 1} similar`}</button>` : ""}`;
     el.querySelector(".nm").textContent = r.label;
     el.addEventListener("click", (e) => {

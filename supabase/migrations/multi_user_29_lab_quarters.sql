@@ -1,0 +1,6 @@
+-- Applied to umryzxusbdttbcshkajt:
+-- * bt_data_from / bt_short; listing_results and market_listings mark periods longer than the price history as 'short'.
+-- * lab_feed: a result shows only once it has been through every test (first-round winners waiting for the tougher
+--   test are left out); returns 'checking' = how many are waiting.
+-- * lab_robust_public: + q_ok, q_n, quarters (minute strategies with under 3 years of prices are judged by quarter:
+--   at least 3 of the last 4 profitable).

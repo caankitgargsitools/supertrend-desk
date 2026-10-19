@@ -1607,11 +1607,27 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   else if (okA < 1) why.push(`worked on ${okA} of ${assets.length} other assets (needs 1)`);
   if (tfs.length) { const need = tfs.length >= 3 ? 2 : 1; if (okT < need) why.push(`worked on ${okT} of ${tfs.length} other timeframes (needs ${need})`); }
   else why.push("could not be tested on another timeframe yet (not enough 5-minute candles for this asset; MCX history grows every night)");
-  if (yrs.length < 3) why.push(`only ${yrs.length} year${yrs.length === 1 ? "" : "s"} of history to test year by year (needs 3)`);
+  // Minute-candle strategies on assets with only about a year of minute prices (Dhan keeps an MCX contract's intraday
+  // history for about a year): judged quarter by quarter instead, at least 3 of the last 4 quarters profitable.
+  let quarters: { q: number; from: string; to: string; n: number; net: number; ok: boolean }[] | null = null;
+  if (yrs.length < 3 && !daily && yrs.length >= 1) {
+    const end0 = String((yrs.find((y) => y.y === 1) as any)?.to ?? allTrades.map((t) => t.exit.slice(0, 10)).sort().pop() ?? "");
+    const back = (d: string, m: number) => { const x = new Date(d + "T12:00:00Z"); x.setUTCMonth(x.getUTCMonth() - m); return x.toISOString().slice(0, 10); };
+    if (end0) {
+      quarters = [1, 2, 3, 4].map((q) => {
+        const to = back(end0, 3 * (q - 1)), from = back(end0, 3 * q);
+        const ts = allTrades.filter((t) => { const d = t.exit.slice(0, 10); return d > from && d <= to; });
+        const net = Math.trunc(ts.reduce((a, t) => a + (Number(t.net) || 0), 0));
+        return { q, from, to, n: ts.length, net, ok: net > 0 };
+      });
+      const okQ = quarters.filter((x) => x.ok).length;
+      if (okQ < 3) why.push(`only ${yrs.length} year${yrs.length === 1 ? "" : "s"} of minute prices, so judged by quarter: profitable in ${okQ} of the last 4 quarters (needs 3; lost or flat in ${quarters.filter((x) => !x.ok).map((x) => `quarter ${x.q}`).join(", ")})`);
+    } else why.push(`only ${yrs.length} year${yrs.length === 1 ? "" : "s"} of history to test year by year (needs 3)`);
+  } else if (yrs.length < 3) why.push(`only ${yrs.length} year${yrs.length === 1 ? "" : "s"} of history to test year by year (needs 3)`);
   else if (okY < yrs.length) why.push(`profitable in ${okY} of the past ${yrs.length} years (needs every year; lost or flat in ${yrs.filter((x) => !x.ok).map((x) => `year ${x.y}`).join(", ")})`);
   // Minute-candle strategies trade often for small moves, so fills decide them: they must still make money in total and
   // in every year with the asset's slippage doubled (charges are known exactly and counted once).
-  if (!daily && yrs.length >= 3) {
+  if (!daily && (yrs.length >= 3 || quarters)) {
     const st = yrs.map((y) => ({ y: y.y, v: (Number(y.net) || 0) - (Number(y.xcost) || 0), has: y.xcost != null }));
     if (st.every((x) => x.has)) {
       const tot = st.reduce((a, x) => a + x.v, 0), bad = st.filter((x) => !(x.v > 0));
@@ -1631,7 +1647,7 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   const quality = qualityScore(yrs, allTrades, { okA, nA: assets.length, okT, nT: tfs.length },
     { stepsOk: stepList.filter((x) => x.ok).length, stepsN: stepList.length, twoWay: cfg.direction === "BOTH", capital: 500000 });
   return { passed: why.length === 0, why, self, bh, vs_bh: vsBh, risk_vs_bh: riskVsBh, assets: { ok: okA, n: assets.length, list: assets },
-    tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, steps: { ok: stepList.filter((x) => x.ok).length, n: stepList.length, list: stepList }, quality, daily, checked_at: new Date().toISOString() };
+    tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, ...(quarters ? { quarters: { ok: quarters.filter((x) => x.ok).length, n: quarters.length, list: quarters } } : {}), steps: { ok: stepList.filter((x) => x.ok).length, n: stepList.length, list: stepList }, quality, daily, checked_at: new Date().toISOString() };
 }
 
 /* ---------- long trade lists and the quality score ---------- */
@@ -2169,10 +2185,10 @@ export function periodWindows(trades: { exit: string; net: number }[], from: str
  * stress of each year is recomputed from the kept trades (entry and exit prices × the asset's slippage × the lot), and
  * the verdict and quality score are worked out again. Marks each row done (robust.rev) so it can be called repeatedly.
  */
-export async function labReverdict(sb: SupabaseClient, limit = 120): Promise<{ done: number; flipped: number; left: number }> {
+export async function labReverdict(sb: SupabaseClient, limit = 120, shortOnly = false): Promise<{ done: number; flipped: number; left: number }> {
   await loadCryptoAssets(sb);
   const { data: rows, error } = await sb.from("lab_results").select("id, config, robust, trades_long, basic_passed, passed")
-    .eq("robust_status", "done").not("robust->years->list", "is", null).is("robust->rev", null).order("id").limit(limit);
+    .eq("robust_status", "done").not("robust->years->list", "is", null).or("robust->>rev.is.null,robust->>rev.neq.3").in("robust->years->>n", shortOnly ? ["0", "1", "2"] : ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]).order("id").limit(limit);
   if (error) throw new Error(error.message);
   let done = 0, flipped = 0;
   for (const r of rows ?? []) {
@@ -2193,7 +2209,7 @@ export async function labReverdict(sb: SupabaseClient, limit = 120): Promise<{ d
       ...((x.steps?.list ?? []) as any[]).map((st) => ({ kind: "step", asset: String(cfg.underlying), tf: null, result: st })),
     ];
     const v: any = robustVerdict(cfg, checks as any);
-    v.checked_at = x.checked_at ?? v.checked_at; v.rev = 2; v.status = "done";
+    v.checked_at = x.checked_at ?? v.checked_at; v.rev = 3; v.status = "done";
     const passed = !!r.basic_passed && v.passed;
     if (passed !== !!r.passed) flipped++;
     const { error: ue } = await sb.from("lab_results").update({ robust: v, passed }).eq("id", r.id);
@@ -2201,6 +2217,6 @@ export async function labReverdict(sb: SupabaseClient, limit = 120): Promise<{ d
     if (passed && !r.passed) await sb.rpc("lab_assign_twin", { p_id: r.id }).then(() => {}, () => {});
     done++;
   }
-  const { count } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("robust_status", "done").not("robust->years->list", "is", null).is("robust->rev", null);
+  const { count } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("robust_status", "done").not("robust->years->list", "is", null).or("robust->>rev.is.null,robust->>rev.neq.3");
   return { done, flipped, left: count ?? 0 };
 }
