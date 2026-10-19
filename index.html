@@ -3618,6 +3618,7 @@ function renderLabStatus() {
     <div class="stat"><span class="label">Test year</span><span class="v" style="font-size:13px">${esc(r.from_day || "")} → ${esc(r.to_day || "")}<br><span class="hint">ranked to ${esc(r.split_day || "")}</span></span></div>
   </div>
   <p class="hint" style="margin:8px 0 0">${r.status === "running" ? `Step ${esc(phases[r.phase] || r.phase)}: ${esc(r.progress || "")}` : esc(r.progress || "")}</p>
+  ${Array.isArray(c.stale) && c.stale.length ? `<div class="banner warn" style="margin-top:8px">Dhan didn't send fresh candles for ${c.stale.length} asset${c.stale.length === 1 ? "" : "s"}, so ${c.stale.length === 1 ? "it was" : "they were"} tested on the candles already saved: ${esc(c.stale.join(" · "))}</div>` : ""}
   ${lab.checking ? `<p class="hint" style="margin:6px 0 0">${lab.checking} first-round winner${lab.checking === 1 ? " is" : "s are"} still going through the tougher test (other assets, timeframes, past years). They appear in the list once every test is done.</p>` : ""}
   ${r.error ? `<div class="banner err" style="margin-top:8px">${esc(r.error)}</div>` : ""}
   ${pausedTill ? (() => { const why = lab.settings.pause_reason;

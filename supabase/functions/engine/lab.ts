@@ -1266,7 +1266,20 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
       }
       while (i < assets.length && Date.now() - ctx.started < WALL_BUDGET - 20000) {
         await patch({ progress: `Updating candles: ${LAB_ASSETS[assets[i]].name} (${i + 1} of ${assets.length})` });
-        await refreshAsset(sb, ctx.creds, assets[i], win.to, run.trigger === "continuous" ? 6 : 0);
+        // One asset's candles not coming back (Dhan hiccups, mostly early in the morning) doesn't stop the run: it is
+        // tried once more, then that asset carries on with the candles already saved and the run goes on.
+        try {
+          await refreshAsset(sb, ctx.creds, assets[i], win.to, run.trigger === "continuous" ? 6 : 0);
+        } catch (e1) {
+          await new Promise((r) => setTimeout(r, 3000));
+          try { await refreshAsset(sb, ctx.creds, assets[i], win.to, run.trigger === "continuous" ? 6 : 0); }
+          catch (e2) {
+            const msg = `${LAB_ASSETS[assets[i]].name}: ${String(e2 instanceof Error ? e2.message : e2).slice(0, 160)}`;
+            counts.stale = [...(Array.isArray(counts.stale) ? counts.stale : []), msg].slice(-10);
+            await patch({ counts });
+            console.error("lab candles", msg);
+          }
+        }
         i++;
       }
       if (i >= assets.length) await refreshCryptoMargins(sb, assets.filter((k) => LAB_ASSETS[k]?.crypto));
