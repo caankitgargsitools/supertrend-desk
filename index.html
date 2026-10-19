@@ -310,6 +310,7 @@ details.xp[open] > summary::before { transform: rotate(90deg); }
 details.xp > summary:hover { background: var(--bg); border-radius: 10px; }
 details.xp > .xpb { padding: 0 14px 12px; }
 details.xp > .xpb > h3:first-child { margin-top: 4px !important; }
+@media (max-width: 760px) { #tr_per { grid-template-columns: repeat(5, 1fr); } #tr_per button { border-top: 0; border-left: 1px solid var(--line); padding: 8px 2px; } }
 /* trade lists (all trades on the strategies page, one strategy's trades on its page) */
 #lp_tabs { display: inline-grid !important; grid-template-columns: repeat(3, auto) !important; } #lp_tabs button { white-space: nowrap; }
 @media (max-width: 760px) { #lp_tabs { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; width: 100%; } #lp_tabs button { padding: 9px 4px; font-size: 11.5px; } }
@@ -3754,26 +3755,60 @@ function qualityHTML(q) {
     <p class="hint" style="margin:6px 0 0">${q.years} years tested: net ${rupees(q.net)} for 1 lot after charges, ${q.profitable_years} profitable years.</p>`;
 }
 function unpackLong(p) { return p && p.e ? p.e.map((e, k) => ({ entry: e, exit: p.x[k], side: p.s[k] === "S" ? "SHORT" : "LONG", entry_px: p.i[k], exit_px: p.o[k], net: p.n[k], exit_why: (p.why || [])[p.w[k]] || "" })) : []; }
-/** Fills the long trade list in a lab detail, with year and side filters and an Excel download. */
-function wireLongTrades(box, r) {
-  const body = box.querySelector("#lt_body"); if (!body) return;
-  const all = unpackLong(r.trades_long);
+/**
+ * One trade list per lab strategy: every backtested trade (the futures version's list covers all the years of the
+ * year-by-year test; an option version has its own year), with period tabs (1 month … 10 years, Max) counted back
+ * from the last trade, a long / short filter and an Excel download of what is shown.
+ */
+const TR_PERIODS = [["1M", 1], ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["3Y", 36], ["5Y", 60], ["10Y", 120]];
+let trPeriod = "1Y";
+function labTradeList(r, v) {
+  const long = v.key === "FUT" ? unpackLong(r.trades_long) : [];
+  const own = (v.trades || []).map((t) => ({ ...t, own: true }));
+  if (!long.length) return own;
+  // The futures version: the long list, with contract and margin from the latest year's list where the trade matches.
+  const byKey = new Map(own.map((t) => [`${t.entry}|${t.side}`, t]));
+  return long.map((t) => byKey.get(`${t.entry}|${t.side}`) || t);
+}
+function tradesXP(r, v) {
+  const all = labTradeList(r, v);
+  return `${xpA("trades", `Trades (${all.length})`, all.length ? `${esc(String(all[0].entry).slice(0, 10))} → ${esc(String(all[all.length - 1].exit).slice(0, 10))}` : "")}
+    ${all.length ? `<div class="seg" id="tr_per" role="tablist" aria-label="Period" style="margin:2px 0 8px"></div>
+    <div class="formbar" style="margin:0 0 6px"><select id="tr_side" aria-label="Side"><option value="">Long and short</option><option value="LONG">Long only</option><option value="SHORT">Short only</option></select>
+      <button class="btn small" id="tr_xlsx" type="button">Download Excel</button><span class="hint" id="tr_sum"></span></div>
+    <div class="scroll" style="max-height:460px;overflow-y:auto"><table class="mini"><thead><tr><th>#</th><th>Entry</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">In</th><th class="n">Out</th><th class="n">Margin (1 lot)</th><th class="n">Net (1 lot)</th><th class="n">Running total</th><th>Exit reason</th></tr></thead><tbody id="tr_body"></tbody></table></div>`
+    : '<p class="hint">No trade list kept for this test.</p>'}${XPZ}`;
+}
+function wireTrades(box, r, v, tm) {
+  const body = box.querySelector("#tr_body"); if (!body) return;
+  const all = labTradeList(r, v);
+  const day = (x) => String(x).slice(0, 10);
+  const end = day(all[all.length - 1].exit), first = day(all[0].entry);
+  const back = (m) => { const d = new Date(end + "T12:00:00Z"); d.setUTCMonth(d.getUTCMonth() - m); return d.toISOString().slice(0, 10); };
+  // Tabs up to the first period that already covers every trade; then Max.
+  const tabs = []; for (const [k, m] of TR_PERIODS) { tabs.push([k, back(m)]); if (back(m) <= first) break; }
+  if (tabs[tabs.length - 1][1] > first) tabs.push(["Max", ""]); else tabs[tabs.length - 1] = ["Max", ""];
+  if (!tabs.some(([k]) => k === trPeriod)) trPeriod = tabs.some(([k]) => k === "1Y") ? "1Y" : "Max";
+  const seg = box.querySelector("#tr_per");
+  seg.innerHTML = tabs.map(([k]) => `<button type="button" data-p="${k}" aria-pressed="${k === trPeriod}">${k === "Max" ? `Max (${Math.max(1, Math.round((Date.parse(end) - Date.parse(first)) / (365.25 * 86400000) * 10) / 10)}y)` : k}</button>`).join("");
   const draw = () => {
-    const [from, to] = (box.querySelector("#lt_year").value || "|").split("|"), side = box.querySelector("#lt_side").value;
-    const rows = all.filter((t) => (!from || (t.exit.slice(0, 10) >= from && t.exit.slice(0, 10) <= to)) && (!side || t.side === side));
+    const from = (tabs.find(([k]) => k === trPeriod) || ["", ""])[1], side = box.querySelector("#tr_side").value;
+    const rows = all.filter((t) => (!from || day(t.exit) > from) && (!side || t.side === side));
     let run = 0, wins = 0;
-    body.innerHTML = rows.map((t, i) => { run += t.net; if (t.net > 0) wins++; return `<tr><td class="n">${i + 1}</td><td class="when">${esc(t.entry)}</td><td class="when">${esc(t.exit)}</td><td>${t.side === "LONG" ? "Long" : "Short"}</td><td class="n">${fmtNum(t.entry_px)}</td><td class="n">${fmtNum(t.exit_px)}</td><td class="n ${t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : ""}">${rupees(t.net)}</td><td class="n">${rupees(run)}</td><td>${esc(t.exit_why)}</td></tr>`; }).join("");
-    box.querySelector("#lt_sum").textContent = rows.length ? `${rows.length} trades · net ${rupees(run)} · win rate ${Math.round((wins / rows.length) * 100)}%` : "No trades in this period.";
+    body.innerHTML = rows.map((t, i) => { run += Number(t.net) || 0; if (t.net > 0) wins++; const mg = t.own && tm ? tm(t) : null;
+      return `<tr><td class="n">${i + 1}</td><td class="when">${esc(t.entry)}</td><td class="when">${esc(t.exit)}</td><td>${t.side === "LONG" ? "Long" : "Short"}</td><td>${esc(t.contract || "")}</td><td class="n">${fmtNum(t.entry_px)}</td><td class="n">${fmtNum(t.exit_px)}</td><td class="n">${mg ? rupees(mg) : "–"}</td><td class="n ${t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : ""}">${rupees(t.net)}</td><td class="n ${run > 0 ? "pos-num" : run < 0 ? "neg-num" : ""}">${rupees(run)}</td><td>${esc(t.exit_why || "")}</td></tr>`; }).join("") || '<tr><td colspan="11" class="hint">No trades in this period.</td></tr>';
+    box.querySelector("#tr_sum").textContent = rows.length ? `${rows.length} trades · net ${rupees(run)} · win rate ${Math.round((wins / rows.length) * 100)}%` : "";
+    seg.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.p === trPeriod)));
     return rows;
   };
-  box.querySelector("#lt_year").addEventListener("change", draw);
-  box.querySelector("#lt_side").addEventListener("change", draw);
-  box.querySelector("#lt_xlsx").addEventListener("click", (e) => run(e.currentTarget, async () => {
+  seg.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { trPeriod = b.dataset.p; draw(); }));
+  box.querySelector("#tr_side").addEventListener("change", draw);
+  box.querySelector("#tr_xlsx").addEventListener("click", (e) => run(e.currentTarget, async () => {
     await loadScript("vendor/xlsx.mini.min.js");
     let tot = 0;
-    const rows = draw().map((t) => { tot += t.net; return { Entry: t.entry, Exit: t.exit, Side: t.side === "LONG" ? "Long" : "Short", In: t.entry_px, Out: t.exit_px, "Net (1 lot, Rs)": t.net, "Running total (Rs)": tot, "Exit reason": t.exit_why }; });
+    const rows = draw().map((t) => { tot += Number(t.net) || 0; return { Entry: t.entry, Exit: t.exit, Side: t.side === "LONG" ? "Long" : "Short", Contract: t.contract || "", In: t.entry_px, Out: t.exit_px, "Net (1 lot, Rs)": t.net, "Running total (Rs)": tot, "Exit reason": t.exit_why || "" }; });
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Trades");
-    XLSX.writeFile(wb, `lab-${r.id}-all-trades.xlsx`);
+    XLSX.writeFile(wb, `lab-${r.id}-trades-${trPeriod}.xlsx`);
   }));
   draw();
 }
@@ -3803,11 +3838,6 @@ function robustHTML(r, m, admin) {
     </div>
     ${x.years && x.years.length ? `${xpA("years", "Year by year (1 lot, after charges)", `${x.years_ok} of ${x.years_n} years profitable`)}<div class="scroll"><table class="mini"><thead><tr><th>Year</th><th>From</th><th>To</th><th class="n">Trades</th><th class="n">Net</th><th></th></tr></thead><tbody>${x.years.map((y) => `<tr><td>${y.y === 1 ? "Latest 12 months" : `${y.y} years back`}</td><td class="when">${esc(y.from || "")}</td><td class="when">${esc(y.to || "")}</td><td class="n">${y.n ?? "–"}</td><td class="n">${pc(y.net)}</td><td>${y.ok ? '<span class="chip green">Profit</span>' : '<span class="chip red">Loss / flat</span>'}</td></tr>`).join("")}</tbody></table></div>${XPZ}` : ""}
     ${x.quality ? xpA("quality", "Quality score", x.quality.score != null ? `${x.quality.score} of 100` : "") + qualityHTML(x.quality).replace(/^\s*<h3[^>]*>[\s\S]*?<\/h3>/, "") + XPZ : ""}
-    ${r.trades_long && r.trades_long.e && r.trades_long.e.length ? `${xpA("ytrades", `Every trade of the year-by-year test (${r.trades_long.e.length})`)}
-      <div class="formbar" style="margin:0 0 6px"><select id="lt_year" aria-label="Year"><option value="">All years</option>${(x.years || []).map((y) => `<option value="${y.from}|${y.to}">${y.y === 1 ? "Latest 12 months" : y.y + " years back"} (${esc(y.from || "")} → ${esc(y.to || "")})</option>`).join("")}</select>
-        <select id="lt_side" aria-label="Side"><option value="">Long and short</option><option value="LONG">Long only</option><option value="SHORT">Short only</option></select>
-        <button class="btn small" id="lt_xlsx" type="button">Download Excel</button><span class="hint" id="lt_sum"></span></div>
-      <div class="scroll" style="max-height:420px;overflow-y:auto"><table class="mini"><thead><tr><th>#</th><th>Entry</th><th>Exit</th><th>Side</th><th class="n">In</th><th class="n">Out</th><th class="n">Net (1 lot)</th><th class="n">Running total</th><th>Exit</th></tr></thead><tbody id="lt_body"></tbody></table></div>${XPZ}` : ""}
     ${xpA("checks", admin ? "Other assets, timeframes and setting steps" : "How the checks are judged", admin ? `${x.assets_ok ?? 0}/${x.assets_n ?? 0} assets · ${x.tfs_n ? `${x.tfs_ok}/${x.tfs_n}` : "no"} timeframes${x.stepList && x.stepList.length ? ` · ${x.stepList.filter((y) => y.ok).length}/${x.stepList.length} setting steps` : ""}` : "")}
     <p class="hint" style="margin:0">A check “works” when it makes money with a profit factor of 1.1 or more and enough trades (5 for once-a-day, 10 for intraday).</p>
     ${admin ? list(x.assetList, "Asset") + list(x.tfList, "Timeframe") : ""}
@@ -4245,8 +4275,7 @@ async function openLabDetail(id) {
       ${xpA("params", "How this strategy works", "every rule and setting")}
       <dl class="kv">${kv.map(([k, val]) => `<dt>${esc(k)}</dt><dd>${esc(val)}</dd>`).join("")}<dt>This version</dt><dd>${esc(v.label)}${v.key !== "FUT" ? ` · stops: ${esc(riskText(v.risk))}` : ""}</dd>
         ${v.skipped && Object.keys(v.skipped).length ? `<dt>Skipped trades</dt><dd>${esc(Object.entries(v.skipped).map(([k2, n]) => `${k2} (${n})`).join("; "))}</dd>` : ""}</dl>${XPZ}
-      ${xpA("trades", `Trades ${v.trades.length ? `(${v.trades.length})` : ""}`)}
-      ${v.trades.length ? `<div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Entry</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">In</th><th class="n">Out</th><th class="n">Margin (1 lot)</th><th class="n">Net</th><th>Exit reason</th></tr></thead><tbody>${v.trades.map((t) => `<tr><td class="when">${esc(t.entry)}</td><td class="when">${esc(t.exit)}</td><td>${t.side === "LONG" ? "Long" : "Short"}</td><td>${esc(t.contract)}</td><td class="n">${fmtNum(t.entry_px)}</td><td class="n">${fmtNum(t.exit_px)}</td><td class="n">${rupees(tm(t))}</td><td class="n ${t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : ""}">${rupees(t.net)}</td><td>${esc(t.exit_why)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="hint">No trades in this period with these settings (trade lists are kept from 8 Oct 2026 for every strategy tested; earlier ones only for those that passed).</p>'}${XPZ}`;
+      ${tradesXP(r, v)}`;
     box.querySelector("h2").textContent = r.label; wireDeskBanner(box);
     box.querySelectorAll("#ld_vers button").forEach((b) => b.addEventListener("click", () => { pickI = Number(b.dataset.i); draw(); }));
     $("ld_close").addEventListener("click", () => { box.hidden = true; lab.sel = null; renderLabTable(); });
@@ -4255,7 +4284,7 @@ async function openLabDetail(id) {
     $("ld_save").addEventListener("click", (e) => { if (labPending(r)) { toast(LAB_PEND_TXT); return; } run(e.currentTarget, () => promoteLab(r, versions[pickI])); });
     $("ld_var").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: !!(r.config.rules && r.config.rules.daily), title: `Lab #${r.id}` }));
     $("ld_mtest").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: !!(r.config.rules && r.config.rules.daily), title: `Lab #${r.id}`, manual: true }));
-    renderLongTests(r.id); wireLongTrades(box, r);
+    renderLongTests(r.id); wireTrades(box, r, v, tm);
     box.scrollIntoView({ block: "start", behavior: "smooth" });
   };
   draw();
@@ -4295,15 +4324,14 @@ async function openLabDetailPublic(id) {
       <div id="ld_long"></div>
       ${xpA("period", "Results by period")}${statsTable(m)}${XPZ}
       <p class="hint">Tested on ${esc(aName)} from ${esc(run0.from_day || "")} to ${esc(run0.to_day || "")}, 1 lot, after brokerage and statutory charges. The strategy's settings stay private.</p>
-      ${xpA("trades", `Trades ${v.trades.length ? `(${v.trades.length})` : ""}`)}
-      ${v.trades.length ? `<div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Entry</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">In</th><th class="n">Out</th><th class="n">Margin (1 lot)</th><th class="n">Net</th><th>Exit</th></tr></thead><tbody>${v.trades.map((t) => `<tr><td class="when">${esc(t.entry)}</td><td class="when">${esc(t.exit)}</td><td>${t.side === "LONG" ? "Long" : "Short"}</td><td>${esc(t.contract)}</td><td class="n">${fmtNum(t.entry_px)}</td><td class="n">${fmtNum(t.exit_px)}</td><td class="n">${rupees(tm(t))}</td><td class="n ${t.net > 0 ? "pos-num" : t.net < 0 ? "neg-num" : ""}">${rupees(t.net)}</td><td>${esc(t.exit_why)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="hint">No trade list kept for this test.</p>'}${XPZ}
+      ${tradesXP(r, v)}
       <p class="riskline" style="margin-top:10px">Backtest on past prices with estimated charges and fills. Past performance does not guarantee future returns. Not investment advice.</p>`;
     box.querySelector("h2").textContent = `Lab #${r.id} · ${aName}`; wireDeskBanner(box);
     box.querySelectorAll("#ld_vers button").forEach((b) => b.addEventListener("click", () => { pickI = Number(b.dataset.i); draw(); }));
     $("ld_close").addEventListener("click", () => { box.hidden = true; lab.sel = null; renderLabTable(); });
     $("ld_var").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: r.cfg && r.cfg.data_segment === "MCX_COMM" ? true : null, title: `Lab #${r.id}` }));
     $("ld_mtest").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: r.cfg && r.cfg.data_segment === "MCX_COMM" ? true : null, title: `Lab #${r.id}`, manual: true }));
-    renderLongTests(r.id); wireLongTrades(box, r);
+    renderLongTests(r.id); wireTrades(box, r, v, tm);
     $("ld_use").addEventListener("click", () => {
       if (labPending(r)) { toast(LAB_PEND_TXT); return; }
       const f = $("ld_form");
