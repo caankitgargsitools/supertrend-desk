@@ -312,8 +312,9 @@ details.xp > .xpb { padding: 0 14px 12px; }
 details.xp > .xpb > h3:first-child { margin-top: 4px !important; }
 @media (max-width: 760px) { #tr_per { grid-template-columns: repeat(5, 1fr); } #tr_per button { border-top: 0; border-left: 1px solid var(--line); padding: 8px 2px; } }
 /* trade lists (all trades on the strategies page, one strategy's trades on its page) */
-#lp_tabs { display: inline-grid !important; grid-template-columns: repeat(3, auto) !important; } #lp_tabs button { white-space: nowrap; }
-@media (max-width: 760px) { #lp_tabs { display: grid !important; grid-template-columns: repeat(3, 1fr) !important; width: 100%; } #lp_tabs button { padding: 9px 4px; font-size: 11.5px; } }
+#lp_tabs { display: inline-grid !important; grid-template-columns: repeat(4, auto) !important; } #lp_tabs button { white-space: nowrap; }
+@media (max-width: 760px) { #lp_tabs { display: grid !important; grid-template-columns: repeat(2, 1fr) !important; width: 100%; } #lp_tabs button { padding: 9px 4px; font-size: 11.5px; } #lp_tabs button:nth-child(n+3) { border-top: 1px solid var(--line); } #lp_tabs button:nth-child(odd) { border-left: 0; } }
+.ostat { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
 #lp_tabs button:nth-child(n+3) { border-top: 0; } #lp_tabs button + button { border-left: 1px solid var(--line); }
 .tlist .tmob { display: none; }
 .tcard { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 4px; }
@@ -322,7 +323,7 @@ details.xp > .xpb > h3:first-child { margin-top: 4px !important; }
 .tcard .r1 b { font-size: 15px; }
 .tcard .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 tr.openrow td { background: var(--bg); }
-@media (max-width: 760px) { .tlist .tdesk { display: none; } .tlist .tmob { display: block; } #tf_box:not(.open) { display: none; } }
+@media (max-width: 760px) { .tlist .tdesk { display: none; } .tlist .tmob { display: block; } #tf_box:not(.open), #of_box:not(.open) { display: none; } }
 .l10 { color: var(--green); } .lS { color: #e8710a; }
 .lt { font-size: 10.5px; font-weight: 700; margin-top: 2px; white-space: nowrap; }
 @media (prefers-color-scheme: dark) { .lS { color: #fbad6b; } }
@@ -950,7 +951,21 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
       <div class="head"><h2 id="lp_title">Strategies</h2>
         <div class="actions"><button class="btn primary" id="newFlip2" type="button">+ New strategy</button></div></div>
       <div class="seg" id="lp_tabs" role="tablist" aria-label="Strategies view" style="margin:4px 0 10px">
-        <button type="button" role="tab" data-t="all" aria-pressed="true">All strategies</button><button type="button" role="tab" data-t="live" aria-pressed="false">Live performance</button><button type="button" role="tab" data-t="trades" aria-pressed="false">Trades</button></div>
+        <button type="button" role="tab" data-t="all" aria-pressed="true">All strategies</button><button type="button" role="tab" data-t="live" aria-pressed="false">Live performance</button><button type="button" role="tab" data-t="trades" aria-pressed="false">Trades</button><button type="button" role="tab" data-t="orders" aria-pressed="false">Orders</button></div>
+      <div id="lp_orders_box" hidden>
+        <button class="btn small mob-only" id="of_toggle" type="button" aria-expanded="false">Filters</button>
+        <div class="filters" id="of_box">
+          <label class="f"><span>Period</span><select id="of_period"><option value="today">Today</option><option value="2">Since yesterday</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>
+          <label class="f"><span>Mode</span><select id="of_mode"><option value="">Live and paper</option><option value="LIVE">Live</option><option value="PAPER">Paper</option></select></label>
+          <label class="f grow"><span>Strategy</span><select id="of_strat"><option value="">All</option></select></label>
+          <label class="f"><span>Asset</span><select id="of_asset"><option value="">All</option></select></label>
+          <label class="f"><span>Status</span><select id="of_status"><option value="">Any</option><option value="FILLED">Filled</option><option value="WORKING">Working at broker</option><option value="PROBLEM">Rejected / failed / not filled</option><option value="PAPER">Paper (not sent)</option></select></label>
+          <button class="btn small" id="of_refresh" type="button">Refresh</button>
+        </div>
+        <div id="of_stats"></div>
+        <div id="of_list" class="tlist" style="margin-top:10px"></div>
+        <p class="hint" style="margin:8px 0 0">Every order the desk has generated, newest first. Paper orders are only recorded. Live orders show what the broker says: each leg's order, its state, the limit it was worked at and the price it filled at. Refreshes every 30 seconds while open.</p>
+      </div>
       <div id="lp_trades_box" hidden>
         <button class="btn small mob-only" id="tf_toggle" type="button" aria-expanded="false">Filters</button>
         <div class="filters" id="tf_box">
@@ -4957,13 +4972,93 @@ function marginDeployed(s) {
 }
 const capitalOf = (s) => s.sizing && s.sizing.mode === "CAPITAL" && Number(s.capital) > 0 ? Math.trunc(Number(s.capital)) : null;
 
+
+/* ---------- orders: every order the desk generated, with the broker's state for live ones ---------- */
+let ordRows = [], ordLegs = new Map(), ordTimer = null;
+const ORD_EVENT = { ENTRY: "Entry", EXIT: "Exit", REVERSE: "Reverse", SQUARE_OFF: "Square-off", FLATTEN: "Manual exit", STOP_LOSS: "Stop loss", TARGET: "Target", TRAIL_STOP: "Trailing stop" };
+const ORD_STATE = { queued: ["Waiting for the leg before", ""], working: ["Working at broker", "blue"], resting: ["Stop resting at broker", "blue"], filled: ["Filled", "green"], failed: ["Rejected / failed", "red"], cancelled: ["Cancelled / not sent", "yellow"], gave_up: ["Not filled (price ran away)", "red"] };
+function ordFrom() {
+  const p = $("of_period").value, day = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+  if (p === "today") return new Date(Date.parse(day + "T00:00:00+05:30")).toISOString();
+  return new Date(Date.parse(day + "T00:00:00+05:30") - (Number(p) - 1) * 86400000).toISOString();
+}
+async function loadOrders() {
+  clearTimeout(ordTimer);
+  const mine = new Set(myStrats().map((x) => x.id)), from = ordFrom();
+  const sigs = must(await db.from("algo_signals").select("id, strategy_id, created_at, event, mode, status, payload, response, close, fills").gte("created_at", from).neq("event", "INFO").order("created_at", { ascending: false }).limit(3000));
+  ordRows = sigs.filter((g) => mine.has(g.strategy_id));
+  const legs = must(await db.from("live_orders").select("id, signal_id, strategy_id, seq, purpose, side, qty, label, state, limit_px, trigger_px, steps, avg_px, filled_qty, broker_order_id, note, created_at, done_at, broker").eq("user_id", me.user_id).gte("created_at", from).order("seq"));
+  ordLegs = new Map(); for (const l of legs) { const k = l.signal_id ?? `s${l.strategy_id}`; if (!ordLegs.has(k)) ordLegs.set(k, []); ordLegs.get(k).push(l); }
+  // Stop orders resting at the broker belong to no signal: shown as their own rows.
+  ordRows = ordRows.concat(legs.filter((l) => l.purpose === "stop").map((l) => ({ id: `stop${l.id}`, strategy_id: l.strategy_id, created_at: l.created_at, event: "STOP_ORDER", mode: "LIVE", status: "SENT", stopLeg: l })))
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  fillOrderFilters(); renderOrders();
+  if (lpTab === "orders" && page === "list") ordTimer = setTimeout(() => loadOrders().catch(() => {}), 30000);
+}
+/** The order legs as the desk wrote them (without the webhook secret). */
+function ordLegText(g) {
+  const p = g.payload || {};
+  if (Array.isArray(p.orders)) return p.orders.map((o) => `${o.side === "buy" ? "Buy" : "Sell"} ${o.size} ${o.symbol}${o.reduce_only ? " (close)" : ""}`);
+  const legs = p.order_legs || p.legs || [];
+  return legs.map((l) => `${/^B/i.test(l.transactionType) ? "Buy" : "Sell"} ${l.quantity} ${l.symbol}${l.instrument === "OPT" ? ` ${l.strike_price} ${l.option_type} ${l.expiry_date}` : ""}`);
+}
+/** One status for an order: paper, or the worst / latest state of its live legs. */
+function ordStatus(g) {
+  if (g.stopLeg) return g.stopLeg.state === "resting" ? "WORKING" : g.stopLeg.state === "filled" ? "FILLED" : "PROBLEM";
+  if (g.mode !== "LIVE") return "PAPER";
+  if (g.status === "FAILED") return "PROBLEM";
+  const legs = ordLegs.get(g.id) || [];
+  if (!legs.length) return g.status === "SENT" ? "FILLED" : "PROBLEM"; // Delta orders are filled or failed when sent
+  if (legs.some((l) => ["failed", "gave_up"].includes(l.state))) return "PROBLEM";
+  if (legs.some((l) => ["working", "queued"].includes(l.state))) return "WORKING";
+  return legs.some((l) => l.state === "filled") ? "FILLED" : "PROBLEM";
+}
+const OSTAT = { PAPER: ["Paper (not sent)", "yellow"], FILLED: ["Filled", "green"], WORKING: ["Working at broker", "blue"], PROBLEM: ["Problem", "red"] };
+function fillOrderFilters() {
+  const opt = (v, t) => `<option value="${esc(v)}">${esc(t)}</option>`;
+  const strats = [...new Set(ordRows.map((g) => g.strategy_id))].map(stratOf).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+  const assets = [...new Set(strats.map(assetOfStrat))].sort();
+  for (const [id, list] of [["of_strat", strats.map((x) => [x.id, x.name])], ["of_asset", assets.map((a) => [a, a])]]) {
+    const v = $(id).value; $(id).innerHTML = opt("", "All") + list.map(([a, b]) => opt(a, b)).join(""); if ([...$(id).options].some((o) => o.value === v)) $(id).value = v;
+  }
+}
+function renderOrders() {
+  const mode = $("of_mode").value, sid = $("of_strat").value, asset = $("of_asset").value, st = $("of_status").value;
+  const rows = ordRows.filter((g) => (!mode || g.mode === mode) && (!sid || g.strategy_id === sid) && (!asset || assetOfStrat(stratOf(g.strategy_id)) === asset) && (!st || ordStatus(g) === st));
+  const cnt = (k) => rows.filter((g) => ordStatus(g) === k).length;
+  const tile = (l, v, sub, cls = "") => `<div class="stat"><span class="label">${esc(l)}</span><span class="v ${cls}">${esc(String(v))}</span>${sub ? `<span class="hint">${esc(sub)}</span>` : ""}</div>`;
+  $("of_stats").innerHTML = `<div class="stats">${tile("Orders", rows.length, `${rows.filter((g) => g.mode === "LIVE").length} live · ${rows.filter((g) => g.mode !== "LIVE").length} paper`)}${tile("Filled at broker", cnt("FILLED"))}${tile("Working now", cnt("WORKING"), "", cnt("WORKING") ? "up" : "")}${tile("Problems", cnt("PROBLEM"), "rejected, failed or not filled", cnt("PROBLEM") ? "down" : "")}</div>`;
+  const chip = (k) => `<span class="chip ${OSTAT[k][1]}">${OSTAT[k][0]}</span>`;
+  const legHtml = (l) => { const [t, c] = ORD_STATE[l.state] || [l.state, ""];
+    const px = l.avg_px != null ? `filled ${pxTxt(l.avg_px)}` : l.purpose === "stop" ? `trigger ${pxTxt(l.trigger_px)}` : l.limit_px != null ? `limit ${pxTxt(l.limit_px)}${l.steps ? ` (moved ${l.steps}×)` : ""}` : "market";
+    return `<div class="hint" style="margin-top:2px">${esc(l.side === "BUY" ? "Buy" : "Sell")} ${esc(String(l.qty))} ${esc(l.label || "")} · ${esc(px)} · <span class="chip ${c}">${esc(t)}</span>${l.broker_order_id ? ` · #${esc(l.broker_order_id)}` : ""}${l.note ? ` · ${esc(l.note)}` : ""}</div>`; };
+  const detail = (g) => {
+    if (g.stopLeg) return legHtml(g.stopLeg);
+    const legs = ordLegs.get(g.id) || [];
+    if (legs.length) return legs.map(legHtml).join("");
+    const fills = (g.fills || []).filter((f) => f.broker_px != null).map((f) => `${f.leg} filled ${pxTxt(f.broker_px)}`);
+    return `${ordLegText(g).map((x) => `<div class="hint" style="margin-top:2px">${esc(x)}</div>`).join("")}${fills.length ? `<div class="hint">${esc(fills.join(" · "))}</div>` : ""}${g.mode === "LIVE" && g.response ? `<div class="hint">${esc(String(g.response).slice(0, 220))}</div>` : ""}`;
+  };
+  const ev = (g) => g.stopLeg ? "Stop order" : ORD_EVENT[g.event] || g.event;
+  const head = "<tr><th>Time (IST)</th><th>Strategy</th><th>Asset</th><th>Mode</th><th>Order</th><th class=\"n\">Price at signal</th><th>Orders &amp; broker status</th><th>Status</th></tr>";
+  const body = rows.map((g) => { const s = stratOf(g.strategy_id); return `<tr><td class="when">${esc(istText(g.created_at))}</td><td>${s ? `<a href="#" data-open="${esc(s.id)}">${esc(s.name)}</a>` : "–"}</td><td>${esc(assetOfStrat(s))}</td><td><span class="chip ${g.mode === "LIVE" ? "red" : "yellow"}">${g.mode === "LIVE" ? "Live" : "Paper"}</span></td><td>${esc(ev(g))}</td><td class="n">${g.close != null ? esc(pxTxt(g.close)) : "–"}</td><td>${detail(g)}</td><td>${chip(ordStatus(g))}</td></tr>`; }).join("");
+  const cards = rows.map((g) => { const s = stratOf(g.strategy_id); return `<div class="tcard"><div class="r1"><span class="nm">${s ? `<a href="#" data-open="${esc(s.id)}">${esc(s.name)}</a>` : "–"}</span>${chip(ordStatus(g))}</div><div class="r1"><span class="hint">${esc(ev(g))} · ${esc(assetOfStrat(s))}${g.close != null ? ` · at ${esc(pxTxt(g.close))}` : ""}</span><span class="chip ${g.mode === "LIVE" ? "red" : "yellow"}">${g.mode === "LIVE" ? "Live" : "Paper"}</span></div><div class="hint">${esc(istText(g.created_at))}</div>${detail(g)}</div>`; }).join("");
+  $("of_list").innerHTML = rows.length ? `<div class="scroll tdesk" style="max-height:680px;overflow-y:auto"><table class="big-table"><thead>${head}</thead><tbody>${body}</tbody></table></div><div class="tmob">${cards}</div>` : `<p class="hint">${ordRows.length ? "No orders match these filters." : "No orders in this period."}</p>`;
+  wireOpenLinks($("of_list"));
+}
+["of_mode", "of_strat", "of_asset", "of_status"].forEach((id) => $(id).addEventListener("change", renderOrders));
+$("of_period").addEventListener("change", () => loadOrders().catch((e) => toast(errorText(e))));
+$("of_refresh").addEventListener("click", (e) => run(e.currentTarget, () => loadOrders()));
+$("of_toggle").addEventListener("click", () => { const box = $("of_box"), on = !box.classList.contains("open"); box.classList.toggle("open", on); $("of_toggle").setAttribute("aria-expanded", String(on)); $("of_toggle").textContent = on ? "Hide filters" : "Filters"; });
+
 /* ---------- live performance: capital, profit, CAGR and drawdown of every strategy that is live now ---------- */
 let lpTab = "all";
 const lvOpen = new Set();
 function setLpTab(t) {
   lpTab = t;
   document.querySelectorAll("#lp_tabs [data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === t)));
-  $("lp_all_box").hidden = t !== "all"; $("lp_live_box").hidden = t !== "live"; $("lp_trades_box").hidden = t !== "trades";
+  $("lp_all_box").hidden = t !== "all"; $("lp_live_box").hidden = t !== "live"; $("lp_trades_box").hidden = t !== "trades"; $("lp_orders_box").hidden = t !== "orders";
+  clearTimeout(ordTimer); if (t === "orders") loadOrders().catch((e) => toast(errorText(e)));
   if (t === "live") renderLive().catch((e) => toast(errorText(e)));
   if (t === "trades") loadAllTrades().catch((e) => toast(errorText(e)));
 }
