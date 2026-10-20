@@ -8,7 +8,7 @@ import { type ChargeRates, newAcc, planBacktest, priceBatch, summarize, tradeCha
 import { lotsFor, marginPerLot, normaliseSizing } from "./sizing.ts";
 import {
   addDays, aggregate, type DayBar, dayMinutes, fillTemplate, isCommodity, isComplete, isCrypto, ist, nextExpiry, nextMonthlyExpiry, partialDay,
-  pickBaseInterval, sessionFor, signalSeries, strikeFor, supertrend, timeToMin,
+  pickBaseInterval, sessionFor, setHolidays, signalSeries, strikeFor, supertrend, timeToMin, tradingSession,
 } from "./logic.ts";
 import { dataSecurity, syncMcx } from "./instruments.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
@@ -425,7 +425,7 @@ function brokerRef(s: Strategy): string {
 async function liveRisk(s: Strategy, set: Settings): Promise<Strategy> {
   const r = riskOf(s), pr = s.pos_risk as PosRisk | null;
   if (s.position === "FLAT" || !pr || !hasLevels(r) || pr.dir === undefined) return s;
-  const nowSec = Date.now() / 1000, now = ist(nowSec), sess = sessionFor(s.data_segment, now.date);
+  const nowSec = Date.now() / 1000, now = ist(nowSec), sess = tradingSession(s.data_segment, now.date);
   // Crypto never closes: an open position's stop is watched round the clock (other markets only in their hours).
   if (!isCrypto(String(s.data_segment)) && (now.min < sess.open || now.min >= sess.close)) return s;
   const dhan = dhanFor(set);
@@ -901,7 +901,7 @@ async function processRulesDaily(s: Strategy, set: Settings, action: string) {
   await saveChart(s, days, days.map(() => NaN), days.map(() => 0));
   if (action === "refresh") { await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
   if (action === "flatten") { await flatten(s, set, update, candle); await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
-  const sess = sessionFor(seg, now.date);
+  const sess = tradingSession(seg, now.date);
   const legs: Record<string, unknown>[] = [], notes: string[] = [];
   let event = "", newState: Record<string, unknown> = {};
   let position: Pos = s.position;
@@ -1768,7 +1768,7 @@ async function reconcile() {
       const mine = list.filter((s) => (broker === "DELTA") === isCrypto(String(s.data_segment)));
       if (!mine.length) continue;
       const nowMin = ist(Date.now() / 1000);
-      if (broker === "DHAN" && !mine.some((s) => { const ss = sessionFor(s.data_segment, nowMin.date); return nowMin.min >= ss.open + 2 && nowMin.min <= ss.close; })) continue;
+      if (broker === "DHAN" && !mine.some((s) => { const ss = tradingSession(s.data_segment, nowMin.date); return nowMin.min >= ss.open + 2 && nowMin.min <= ss.close; })) continue;
       if (mine.some((s) => s.exec_state === "working")) { out[`${u}|${broker}`] = "orders working: next time"; continue; }
       try {
         const set = await accountFor(sb, u, broker);
@@ -1836,6 +1836,7 @@ Deno.serve(async (req) => {
   if (action === "push") return Response.json({ action, ...(await pushOut()) });
   if (action === "live_test" && body.strategy_id) return Response.json({ action, ...(await liveTest(String(body.strategy_id))) });
   if (action === "orders") return Response.json({ action, ...(await runOrders(Math.min(4, Math.max(1, Number(body.passes) || 4)))) });
+  if (action === "reconcile") { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", ist(Date.now() / 1000).date); setHolidays(hol ?? []); }
   if (action === "reconcile") return Response.json({ action, ...(await reconcile()) });
   if (action === "lab_reverdict") return Response.json({ action, ...(await labReverdict(sb, Math.min(300, Number((body as any).limit) || 120), !!(body as any).short)) });
   if (action === "marks" && body.user_id) return Response.json({ action, marks: await liveMarks(body.user_id, false) });
@@ -1905,6 +1906,8 @@ Deno.serve(async (req) => {
 
   if (!["tick", "tick_crypto", "refresh", "flatten", "sync_instruments"].includes(action)) return Response.json({ error: `Unknown action ${action}` }, { status: 400 });
   const nowIst = ist(Date.now() / 1000);
+  // Exchange holidays today (no session, or MCX's evening session only).
+  { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", nowIst.date); setHolidays(hol ?? []); }
   // Crypto trades every day: its own minute tick (tick_crypto) runs round the clock, the market tick on weekdays.
   const cryptoTick = action === "tick_crypto";
   if (action === "tick" && (nowIst.wd === 0 || nowIst.wd === 6)) return Response.json({ skipped: "weekend" });
@@ -1936,7 +1939,7 @@ Deno.serve(async (req) => {
       const tick = action === "tick" || cryptoTick;
       // Each market has its own hours (NSE/BSE 09:15–15:30, MCX 09:00–23:30/23:55, crypto 05:30–24:00); ticks outside
       // them are skipped (a crypto position's stop is still watched).
-      const sess = sessionFor(s.data_segment, nowIst.date);
+      const sess = tradingSession(s.data_segment, nowIst.date); // holidays: no session, or the evening session only
       const outside = nowIst.min < sess.open || nowIst.min > sess.close + 5;
       if (action === "tick" && outside) continue;
       if (!s.owner_id) throw new Error("This strategy has no owner.");

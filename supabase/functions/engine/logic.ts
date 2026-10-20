@@ -43,6 +43,28 @@ export function sessionFor(seg: string, date: string): Session {
   return { open: 540, close: usDst ? 1410 : 1435 };
 }
 
+/* Exchange holidays (market_holidays), loaded by the engine for the days it is working on: "NSE|day" / "MCX|day" →
+   the minute the day's only session opens (MCX evening session), or null when closed all day. */
+const HOLIDAYS = new Map<string, number | null>();
+export function setHolidays(rows: { day: string; exch: string; opens_at: string | null }[]) {
+  HOLIDAYS.clear();
+  for (const r of rows) HOLIDAYS.set(`${r.exch}|${String(r.day).slice(0, 10)}`, r.opens_at ? Number(r.opens_at.slice(0, 2)) * 60 + Number(r.opens_at.slice(3, 5)) : null);
+}
+export function holidayNote(seg: string, date: string): string | null {
+  if (isCrypto(seg)) return null;
+  const k = `${isCommodity(seg) ? "MCX" : "NSE"}|${date}`;
+  return HOLIDAYS.has(k) ? (HOLIDAYS.get(k) == null ? "closed all day" : "evening session only") : null;
+}
+/** The session the desk may trade today: the normal one, shortened on a half holiday, none on a full holiday. */
+export function tradingSession(seg: string, date: string): Session {
+  const s = sessionFor(seg, date);
+  if (isCrypto(seg)) return s;
+  const k = `${isCommodity(seg) ? "MCX" : "NSE"}|${date}`;
+  if (!HOLIDAYS.has(k)) return s;
+  const o = HOLIDAYS.get(k);
+  return o == null ? { open: 1440, close: -1 } : { open: Math.max(s.open, o), close: s.close };
+}
+
 /** Dhan has returned both true-UTC and IST-shifted epochs at different times; detect which. */
 export function normaliseTimestamps(ts: number[], seg = "IDX_I"): number {
   if (!ts.length) return 0;

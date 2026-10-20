@@ -1240,17 +1240,30 @@ function mcxClose(date) {
   const nth = (m, n) => { const f = new Date(Date.UTC(y, m - 1, 1)).getUTCDay(); return `${y}-${String(m).padStart(2, "0")}-${String(1 + ((7 - f) % 7) + (n - 1) * 7).padStart(2, "0")}`; };
   return date >= nth(3, 2) && date < nth(11, 1) ? 1410 : 1435;
 }
+/** Exchange holidays (market_holidays): "NSE|day" / "MCX|day" → minute the only session opens, or null (closed). */
+let HOLS = new Map();
+async function loadHolidays() {
+  try {
+    const rows = must(await db.from("market_holidays").select("day, exch, opens_at, note").gte("day", istDate(-1)));
+    HOLS = new Map(rows.map((r) => [`${r.exch}|${r.day}`, { open: r.opens_at ? Number(r.opens_at.slice(0, 2)) * 60 + Number(r.opens_at.slice(3, 5)) : null, note: r.note }]));
+    paintMarket();
+  } catch { /* the normal hours stay */ }
+}
 function marketOpenFor(seg) {
   const n = istNow();
   if (isCrypto(seg)) return true; // crypto: round the clock, every day
   if (n.wd < 1 || n.wd > 5) return false;
+  const h = HOLS.get(`${isMcx(seg) ? "MCX" : "NSE"}|${istDate(0)}`);
+  if (h && (h.open == null || n.min < h.open)) return false;
   return isMcx(seg) ? n.min >= 540 && n.min < mcxClose(istDate(0)) : n.min >= 555 && n.min < 930;
 }
 function marketOpen() { return marketOpenFor("IDX_I") || marketOpenFor("MCX_COMM") || (state.strategies || []).some((s) => s.active && isCrypto(s.data_segment)); }
 function paintMarket() {
   const nse = marketOpenFor("IDX_I"), mcx = marketOpenFor("MCX_COMM");
   $("mktDot").classList.toggle("on", nse || mcx);
-  $("mktText").textContent = nse ? "NSE/BSE & MCX open · engine checking every minute" : mcx ? "MCX open · engine checking every minute" : "Markets closed · engine idle";
+  const hn = HOLS.get(`NSE|${istDate(0)}`), hm = HOLS.get(`MCX|${istDate(0)}`);
+  const hol = !nse && !mcx && (hn || hm) ? ` (${(hn || hm).note || "holiday"}${hm && hm.open != null ? `; MCX evening session from ${String(Math.floor(hm.open / 60)).padStart(2, "0")}:${String(hm.open % 60).padStart(2, "0")}` : ""})` : "";
+  $("mktText").textContent = nse ? "NSE/BSE & MCX open · engine checking every minute" : mcx ? `MCX open${hn ? ` · NSE/BSE closed (${hn.note || "holiday"})` : ""} · engine checking every minute` : `Markets closed${hol} · engine idle`;
 }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
@@ -1265,6 +1278,7 @@ function must(res) { if (res.error) throw res.error; return res.data; }
 
 let todayMarg = {};
 async function loadAll() {
+  loadHolidays();
   db.from("lab_margins").select("asset, detail").then((x) => { if (x.data) { todayMarg = Object.fromEntries(x.data.map((m) => [m.asset, m.detail || {}])); if (!$("listPane").hidden) renderList(); } }).catch(() => {});
   const [settings, strategies] = await Promise.all([
     db.rpc("broker_status").then(must),
