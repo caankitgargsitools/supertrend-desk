@@ -322,7 +322,15 @@ details.xp > .xpb > h3:first-child { margin-top: 4px !important; }
 .tcard + .tcard { margin-top: 8px; }
 .tcard .r1 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .tcard .r1 b { font-size: 15px; }
-.tcard .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcard .nm { font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; flex: 1 1 auto; min-width: 0; }
+/* phone cards never get wider than the screen: long names cut with "…", long notes wrap */
+.tlist, .tmob { min-width: 0; max-width: 100%; }
+.tcard { grid-template-columns: minmax(0, 1fr); min-width: 0; overflow: hidden; }
+.tcard > * { min-width: 0; overflow-wrap: anywhere; }
+.tcard .r1 { min-width: 0; flex-wrap: wrap; }
+.tcard .r1 > .nm { flex-basis: 0; }
+.tcard .r1 > b, .tcard .r1 > .chip { flex: none; }
+.tcard .hint { overflow-wrap: anywhere; }
 tr.openrow td { background: var(--bg); }
 @media (max-width: 760px) { .tlist .tdesk { display: none; } .tlist .tmob { display: block; } #tf_box:not(.open), #of_box:not(.open) { display: none; } }
 .l10 { color: var(--green); } .lS { color: #e8710a; }
