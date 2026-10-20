@@ -1,6 +1,6 @@
 // AnkGenie app shell. Always tries the network first so a new version shows straight away; the saved copy is only
 // used when the phone is offline. Calls to Supabase and Dhan are never cached.
-const CACHE = "ankgenie-v1";
+const CACHE = "ankgenie-v2";
 self.addEventListener("install", (e) => { self.skipWaiting(); });
 self.addEventListener("activate", (e) => { e.waitUntil(self.clients.claim()); });
 self.addEventListener("fetch", (e) => {
