@@ -386,8 +386,8 @@ body.wide .wrap { max-width: 1840px; }
 .lab-table tr.sel td, .lab-table tr.sel td:nth-child(1), .lab-table tr.sel td:nth-child(2) { background: var(--blue-soft); }
 .months { display: grid; grid-template-columns: repeat(auto-fit, minmax(42px, 1fr)); gap: 4px; align-items: end; height: 150px; margin-top: 8px; }
 .months .mb { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 3px; min-width: 0; }
-.months .bar { width: 100%; border-radius: 3px 3px 0 0; min-height: 2px; }
-.months .bar.up { background: var(--logo-green); } .months .bar.dn { background: var(--logo-red); border-radius: 0 0 3px 3px; }
+.months .mbar { width: 100%; border-radius: 3px 3px 0 0; min-height: 2px; }
+.months .mbar.up { background: var(--logo-green); } .months .mbar.dn { background: var(--logo-red); border-radius: 0 0 3px 3px; }
 .months .mt { font: 10px var(--font-data); color: var(--muted); white-space: nowrap; }
 .months .split { outline: 2px dashed var(--yellow); outline-offset: 2px; }
 .kv { display: grid; grid-template-columns: minmax(130px, max-content) 1fr; gap: 6px 14px; font-size: 13px; }
@@ -4447,7 +4447,7 @@ function monthsHTML(m) {
   const max = Math.max(1, ...m.months.map((x) => Math.abs(x.net)));
   const split = m.months.length - Math.max(0, m.months_n - m.train_months_n);
   return `<div class="months">${m.months.map((x, i) => `<div class="mb${i === split ? " split" : ""}" title="${x.m}: ${rupees(x.net)} from ${x.n} trades">
-    <div class="bar ${x.net >= 0 ? "up" : "dn"}" style="height:${Math.max(2, Math.round((Math.abs(x.net) / max) * 110))}px"></div><span class="mt">${x.m.slice(2).replace("-", "/")}</span></div>`).join("")}</div>
+    <div class="mbar ${x.net >= 0 ? "up" : "dn"}" style="height:${Math.max(2, Math.round((Math.abs(x.net) / max) * 110))}px"></div><span class="mt">${x.m.slice(2).replace("-", "/")}</span></div>`).join("")}</div>
     <p class="hint" style="margin:6px 0 0">Net per month (by exit date). The dashed month starts the last-3-months check, which the ranking never saw.</p>`;
 }
 function statsTable(m) {
