@@ -591,7 +591,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
   .acct .btn { width: 100%; justify-content: flex-start; }
   #app, .wrap, body > main, body > section, #gate, footer, .legal, body > .card { margin-left: var(--side); }
   .wrap { max-width: 1480px; padding-inline: 28px; padding-block: 26px 48px; margin-left: var(--side); margin-right: 0; }
-  .labgrid { min-height: min(640px, calc(100vh - 40px)) !important; }
+  .labgrid { min-height: min(640px, calc(100vh - 40px)) !important; overscroll-behavior: contain; }
   .lab-table tbody td { padding-top: 6px; padding-bottom: 6px; }
   body.wide .wrap { max-width: none; }
   .bar { background: var(--panel); backdrop-filter: none; -webkit-backdrop-filter: none; }
@@ -4275,6 +4275,29 @@ function labPassFilters(g) {
     if (dy > 0 && bar > 4) { e.preventDefault(); window.scrollBy(0, Math.min(dy, bar)); return; }
     if (dy < 0 && bar < -4) { e.preventDefault(); window.scrollBy(0, Math.max(dy, bar)); return; } // page past the table: bring it back first
     if ((dy < 0 && atTop) || (dy > 0 && atEnd)) { e.preventDefault(); window.scrollBy(0, dy); }
+  }, { passive: false });
+})();
+/*
+ * The results table scrolls inside the page. The mouse wheel treats the two as one surface: going down, the page moves
+ * first until the table's top reaches the top of the screen, then the table scrolls to its last row, then the page goes
+ * on; going up, the page comes back to the table's top, the table scrolls back to its first row, then the page moves up.
+ */
+(function oneScroll() {
+  const g = document.getElementById("lab_grid"); if (!g) return;
+  g.addEventListener("wheel", (e) => {
+    if (e.ctrlKey || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return; // pinch-zoom and sideways scrolling stay as they are
+    const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * window.innerHeight : e.deltaY;
+    const top = g.getBoundingClientRect().top, max = g.scrollHeight - g.clientHeight;
+    e.preventDefault();
+    if (dy > 0) {
+      if (top > 1) { const d = Math.min(dy, top); window.scrollBy(0, d); if (dy > d) g.scrollTop += dy - d; }
+      else if (g.scrollTop < max - 1) g.scrollTop = Math.min(max, g.scrollTop + dy);
+      else window.scrollBy(0, dy);
+    } else {
+      if (top < -1) window.scrollBy(0, Math.max(dy, top));
+      else if (g.scrollTop > 0) g.scrollTop = Math.max(0, g.scrollTop + dy);
+      else window.scrollBy(0, dy);
+    }
   }, { passive: false });
 })();
 function fitLabGrid() {
