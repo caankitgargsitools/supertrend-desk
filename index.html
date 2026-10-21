@@ -591,6 +591,8 @@ details.xp > summary:hover { background: var(--blue-soft); }
   .acct .btn { width: 100%; justify-content: flex-start; }
   #app, .wrap, body > main, body > section, #gate, footer, .legal, body > .card { margin-left: var(--side); }
   .wrap { max-width: 1480px; padding-inline: 28px; padding-block: 26px 48px; margin-left: var(--side); margin-right: 0; }
+  .labgrid { min-height: min(640px, calc(100vh - 40px)) !important; }
+  .lab-table tbody td { padding-top: 6px; padding-bottom: 6px; }
   body.wide .wrap { max-width: none; }
   .bar { background: var(--panel); backdrop-filter: none; -webkit-backdrop-filter: none; }
   footer.disclaim { margin-left: var(--side) !important; padding-left: 28px; padding-right: 28px; }
@@ -4134,7 +4136,13 @@ function familyKey(r) {
   document.querySelectorAll(".longhint").forEach((p) => p.addEventListener("click", () => p.classList.toggle("open")));
   if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 })();
-function setBarH() { const b = document.querySelector("header.bar"); if (b) document.documentElement.style.setProperty("--barH", `${b.offsetHeight}px`); }
+function setBarH() {
+  // The header is a top bar on phones and tablets, a full-height sidebar on wide screens (then it takes no height above the page).
+  const b = document.querySelector("header.bar"); if (!b) return;
+  const side = getComputedStyle(b).position === "fixed" && b.offsetWidth < window.innerWidth / 2;
+  document.documentElement.style.setProperty("--barH", `${side ? 0 : b.offsetHeight}px`);
+}
+window.addEventListener("resize", () => setBarH());
 window.addEventListener("resize", setBarH); setTimeout(setBarH, 0);
 function labAssetName(k) { return ((PRESETS[k] && PRESETS[k].name) || k || "").replace(/\s*\(.*\)$/, ""); }
 function labStyle(r) {
