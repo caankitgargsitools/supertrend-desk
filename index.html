@@ -3718,7 +3718,7 @@ async function loadLab() {
   // The database hands out at most 1,000 rows per request, so the list is read in pages of 1,000 (up to 8,000 rows),
   // ordered by score and then id so no row is skipped or repeated between pages.
   const build = () => {
-    let q = db.from("lab_results").select(LAB_ROW_COLS)
+    let q = db.from("lab_results_list").select(LAB_ROW_COLS)
       .in("stage", ["screened", "opt_queue", "pricing", "priced"]);
     if (!lab.request) q = q.is("superseded_by", null); // a saved strategy re-tested with the current rules shows only its newest result
     if (lab.request) q = q.eq("request_id", lab.request);
@@ -3732,25 +3732,29 @@ async function loadLab() {
     if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
     return q.order("score", { ascending: false }).order("id", { ascending: false });
   };
+  // The best-scoring 1,000 show straight away; the rest load behind them (up to 15,000 rows, 1,000 per request).
   const all = [];
-  for (let from = 0; from < 8000; from += 1000) {
+  const shape = (rows) => rows.map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
+  for (let from = 0; from < 15000; from += 1000) {
     const page = must(await build().range(from, from + 999));
     all.push(...page);
     if (page.length < 1000) break;
+    if (from === 0 && lab.open) { lab.rows = shape(all); lab.long = lab.long || {}; lab.loadingMore = true; try { renderLabStatus(); renderLabTable(); } catch (e) { console.error(e); } }
   }
+  lab.loadingMore = false;
   // Lab results behind strategies on my desk are always read, even when older than the period or no longer passing.
   if (!lab.request) {
     const have = new Set(all.map((r) => Number(r.id)));
     const miss = [...labDeskMap().keys()].filter((id) => !have.has(id));
     if (miss.length) {
-      let q = db.from("lab_results").select(LAB_ROW_COLS).in("id", miss.slice(0, 200));
+      let q = db.from("lab_results_list").select(LAB_ROW_COLS).in("id", miss.slice(0, 200));
       if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
       if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : lab.view === "SPREAD" ? "opt_struct" : "opt_sell", "is", null);
       const got = (await q.then((x) => x.data).catch(() => null)) || [];
       all.push(...got);
       // A desk strategy re-tested since: its newest result is shown with it.
       const newer = [...new Set(got.map((r) => r.superseded_by).filter((id) => id && !have.has(Number(id))))];
-      const nrows = newer.length ? ((await db.from("lab_results").select(LAB_ROW_COLS).in("id", newer.slice(0, 200)).then((x) => x.data).catch(() => null)) || []) : [];
+      const nrows = newer.length ? ((await db.from("lab_results_list").select(LAB_ROW_COLS).in("id", newer.slice(0, 200)).then((x) => x.data).catch(() => null)) || []) : [];
       all.push(...nrows);
       // Re-tests that failed before failures were kept: only the desk strategy's note says why.
       const found = new Set([...have, ...nrows.map((r) => Number(r.id))]);
@@ -3811,6 +3815,7 @@ function renderLabStatus() {
   </div>
   <p class="hint" style="margin:8px 0 0">${r.status === "running" ? `Step ${esc(phases[r.phase] || r.phase)}: ${esc(r.progress || "")}` : esc(r.progress || "")}</p>
   ${Array.isArray(c.stale) && c.stale.length ? `<div class="banner warn" style="margin-top:8px">Dhan didn't send fresh candles for ${c.stale.length} asset${c.stale.length === 1 ? "" : "s"}, so ${c.stale.length === 1 ? "it was" : "they were"} tested on the candles already saved: ${esc(c.stale.join(" · "))}</div>` : ""}
+  ${lab.loadingMore ? '<p class="hint" style="margin:6px 0 0">Showing the best 1,000 results; the rest are loading…</p>' : ""}
   ${lab.checking ? `<p class="hint" style="margin:6px 0 0">${lab.checking} first-round winner${lab.checking === 1 ? " is" : "s are"} still going through the tougher test (other assets, timeframes, past years). They appear in the list once every test is done.</p>` : ""}
   ${r.error ? `<div class="banner err" style="margin-top:8px">${esc(r.error)}</div>` : ""}
   ${pausedTill ? (() => { const why = lab.settings.pause_reason;
