@@ -3672,8 +3672,16 @@ function openLab() {
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true; $("labPane").hidden = false;
   document.querySelectorAll("#stratList .strat, #archList .strat").forEach((b) => b.setAttribute("aria-current", "false"));
   $("openLab").classList.add("primary");
+  // Coming back within a few minutes: show what is already loaded (only the small status refreshes) instead of
+  // reading the whole list again. A load still going on from before simply carries on.
+  const age = Date.now() - (lab.loadedAt || 0);
+  if (!lab.focus && lab.rows.length && lab.loadedAt && lab.loadedKey === labKey() && (age < 300000 || (!lab.dirty && age < 900000))) {
+    renderLabStatus(); renderLabTable(); if (!lab.loading) scheduleLabPoll(); return;
+  }
   loadLab().catch((e) => toast(errorText(e)));
 }
+/** What the loaded list depends on; a change means it must be read again. */
+const labKey = () => [lab.view, lab.asset, lab.period, lab.only, lab.request || ""].join("|");
 /** From a strategy on my desk: open the lab on its asset and instrument, either on its own result or to compare. */
 function openLabFor(s, how) {
   lab.asset = PRESETS[s.underlying] ? s.underlying : "ALL"; $("lab_asset").value = lab.asset;
@@ -3713,11 +3721,21 @@ function closeLab() { document.body.classList.remove("wide"); if (!lab.open) ret
 function stopLabPoll() { if (lab.poll) { clearTimeout(lab.poll); lab.poll = null; } }
 const LAB_ROW_COLS = "id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, twin_of, refresh, superseded_by, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary";
 async function loadLab() {
+  // Only the newest load may draw: an older one still running (e.g. started before you left the lab, or by the
+  // status check) stops quietly, so the list never jumps between two loads.
+  const seq = lab.seq = (lab.seq || 0) + 1, stale = () => seq !== lab.seq;
+  lab.loading = true;
+  try { await loadLabRun(stale); } finally { if (!stale()) lab.loading = false; }
+}
+async function loadLabRun(stale) {
   // Today's margin for one lot of every asset (Dhan's margin calculator; crypto: Delta at 10× leverage), refreshed each run.
   lab.marg = await db.from("lab_margins").select("asset, detail, checked_at").then((x) => Object.fromEntries((x.data || []).map((m) => [m.asset, { ...(m.detail || {}), at: m.checked_at }]))).catch(() => lab.marg || {});
   if (!isAdmin()) {
     // Users: results and trades only, from a server view that leaves out every parameter.
+    const key = labKey();
     const res = must(await db.rpc("lab_feed", { p_view: lab.view, p_asset: lab.asset, p_period: lab.period, p_only: lab.only, p_request: lab.request || null }));
+    if (stale()) return;
+    lab.loadedAt = Date.now(); lab.loadedKey = key;
     lab.settings = null; lab.runs = res.run ? [res.run] : []; lab.checking = Number(res.checking) || 0;
     lab.long = await db.rpc("lab_long_map").then((x) => x.data || {}).catch(() => ({}));
     lab.rows = (res.rows || []).map((r) => ({ ...r, config: null, label: `Lab #${r.id} · ${(PRESETS[r.asset] && PRESETS[r.asset].name) || r.asset}` }));
@@ -3730,10 +3748,11 @@ async function loadLab() {
     db.from("lab_settings").select("*").eq("id", 1).maybeSingle().then(must),
     db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at, cursor, timings, focus:settings->focus, fassets:settings->assets").order("id", { ascending: false }).limit(8).then(must),
   ]);
+  if (stale()) return;
   lab.settings = settings; lab.runs = runs;
+  const key = labKey();
   lab.optLeft = await labOptCount();
   lab.refreshSt = await db.rpc("lab_refresh_status").then((x) => x.data).catch(() => null);
-  lab.loadedAt = Date.now();
   // The database hands out at most 1,000 rows per request, so the list is read in pages of 1,000 (up to 8,000 rows),
   // ordered by score and then id so no row is skipped or repeated between pages.
   const build = () => {
@@ -3756,11 +3775,13 @@ async function loadLab() {
   const shape = (rows) => rows.map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
   for (let from = 0; from < 15000; from += 1000) {
     const page = must(await build().range(from, from + 999));
+    if (stale()) return;
     all.push(...page);
     if (page.length < 1000) break;
     if (from === 0 && lab.open) { lab.rows = shape(all); lab.long = lab.long || {}; lab.loadingMore = true; try { renderLabStatus(); renderLabTable(); } catch (e) { console.error(e); } }
   }
   lab.loadingMore = false;
+  if (stale()) return;
   // Lab results behind strategies on my desk are always read, even when older than the period or no longer passing.
   if (!lab.request) {
     const have = new Set(all.map((r) => Number(r.id)));
@@ -3783,6 +3804,9 @@ async function loadLab() {
   lab.rows = all.map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
   lab.checking = await db.from("lab_results").select("id", { count: "exact", head: true }).eq("basic_passed", true).or("robust_status.is.null,robust_status.neq.done").is("superseded_by", null).then((x) => x.count || 0).catch(() => 0);
   lab.long = await db.rpc("lab_long_map").then((x) => x.data || {}).catch(() => ({}));
+  if (stale()) return;
+  lab.loadedAt = Date.now(); lab.loadedKey = key; lab.dirty = false;
+  if (!lab.open) return; // left the lab meanwhile: the rows are kept for when you come back
   renderLabStatus(); renderLabTable(); loadLabRequests().catch(() => {});
   scheduleLabPoll(); labFocus();
 }
@@ -3803,9 +3827,12 @@ async function pollLabStatus() {
     labOptCount(),
   ]);
   const a = lab.runs && lab.runs[0], b = runs[0], pc = (x) => x && x.counts ? `${x.counts.passed ?? ""}|${x.counts.basic_passed ?? ""}` : "";
-  const moved = !a || !b || a.id !== b.id || a.status !== b.status || a.phase !== b.phase || pc(a) !== pc(b) || n !== lab.optLeft;
+  // The big list is read again only when its results can have changed (a run finished or started, or its pass count
+  // moved) and at most every 5 minutes; otherwise only the status line refreshes.
+  lab.dirty = lab.dirty || !a || !b || a.id !== b.id || a.status !== b.status || pc(a) !== pc(b);
   lab.settings = settings; lab.runs = runs; lab.optLeft = n;
-  if (moved || Date.now() - (lab.loadedAt || 0) > 180000) return loadLab();
+  if (!lab.open) return;
+  if (!lab.loading && ((lab.dirty && Date.now() - (lab.loadedAt || 0) > 300000) || Date.now() - (lab.loadedAt || 0) > 900000)) return loadLab();
   renderLabStatus(); scheduleLabPoll();
 }
 /** Progress of the re-test of every saved strategy with the current rules (new strategies wait until it's done). */
