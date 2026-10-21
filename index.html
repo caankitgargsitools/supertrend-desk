@@ -591,7 +591,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
   .acct .btn { width: 100%; justify-content: flex-start; }
   #app, .wrap, body > main, body > section, #gate, footer, .legal, body > .card { margin-left: var(--side); }
   .wrap { max-width: 1480px; padding-inline: 28px; padding-block: 26px 48px; margin-left: var(--side); margin-right: 0; }
-  .labgrid { min-height: min(640px, calc(100vh - 40px)) !important; overscroll-behavior: contain; }
+
   .lab-table tbody td { padding-top: 6px; padding-bottom: 6px; }
   body.wide .wrap { max-width: none; }
   .bar { background: var(--panel); backdrop-filter: none; -webkit-backdrop-filter: none; }
@@ -617,6 +617,14 @@ details.xp > summary:hover { background: var(--blue-soft); }
   body:not(.menu-open) #themeBtn { display: none !important; }
   body.menu-open #themeBtn { order: 6; flex: 1 1 40%; justify-content: center; padding: 10px; }
 }
+/* lab results: one page scroll; the table only scrolls sideways; its title row floats at the top while scrolled past */
+@media (min-width: 761px) {
+  .labgrid { max-height: none !important; min-height: 0 !important; overflow-x: auto !important; overflow-y: hidden !important; }
+}
+.labfhead { position: fixed; z-index: 25; overflow: hidden; background: var(--panel-2); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 10px 10px; box-shadow: 0 10px 24px -14px rgba(0,0,0,.6); }
+.labfhead .lab-table { table-layout: fixed; min-width: 0; }
+.labfhead th { position: static !important; }
+.labfhead th:nth-child(2) { position: sticky !important; left: var(--labc1, 34px); z-index: 1; }
 </style>
 </head>
 <body>
@@ -3692,7 +3700,7 @@ function labDeskBanner(id) {
     ${list.map((s) => `<button class="btn small" type="button" data-open-strat="${s.id}">Open ${list.length > 1 ? esc(s.name.slice(0, 24)) : "it"}</button>`).join("")}</div>`;
 }
 function wireDeskBanner(box) { box.querySelectorAll("[data-open-strat]").forEach((b) => b.addEventListener("click", () => { closeLab(); openStrat(b.dataset.openStrat); })); }
-function closeLab() { document.body.classList.remove("wide"); if (!lab.open) return; lab.open = false; $("labPane").hidden = true; $("openLab").classList.remove("primary"); stopLabPoll(); }
+function closeLab() { document.body.classList.remove("wide"); if (!lab.open) return; lab.open = false; { const fh = document.getElementById("lab_fhead"); if (fh) fh.hidden = true; } $("labPane").hidden = true; $("openLab").classList.remove("primary"); stopLabPoll(); }
 function stopLabPoll() { if (lab.poll) { clearTimeout(lab.poll); lab.poll = null; } }
 const LAB_ROW_COLS = "id, run_id, created_at, asset, mode, label, fingerprint, champion, config, stage, passed, basic_passed, robust_status, robust, score, metrics, starred, promoted_id, twin_of, refresh, superseded_by, ob:opt_buy->summary, os:opt_sell->summary, osp:opt_struct->summary";
 async function loadLab() {
@@ -4278,28 +4286,33 @@ function labPassFilters(g) {
   }, { passive: false });
 })();
 /*
- * The results table scrolls inside the page. The mouse wheel treats the two as one surface: going down, the page moves
- * first until the table's top reaches the top of the screen, then the table scrolls to its last row, then the page goes
- * on; going up, the page comes back to the table's top, the table scrolls back to its first row, then the page moves up.
+ * The results table grows with the page (one scrollbar for everything). Its title row floats at the top of the screen
+ * while the table is scrolled past, kept in line with the table's columns and its sideways scroll; clicking a title
+ * there sorts like the real one.
  */
-(function oneScroll() {
-  const g = document.getElementById("lab_grid"); if (!g) return;
-  g.addEventListener("wheel", (e) => {
-    if (e.ctrlKey || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return; // pinch-zoom and sideways scrolling stay as they are
-    const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * window.innerHeight : e.deltaY;
-    const top = g.getBoundingClientRect().top, max = g.scrollHeight - g.clientHeight;
-    e.preventDefault();
-    if (dy > 0) {
-      if (top > 1) { const d = Math.min(dy, top); window.scrollBy(0, d); if (dy > d) g.scrollTop += dy - d; }
-      else if (g.scrollTop < max - 1) g.scrollTop = Math.min(max, g.scrollTop + dy);
-      else window.scrollBy(0, dy);
-    } else {
-      if (top < -1) window.scrollBy(0, Math.max(dy, top));
-      else if (g.scrollTop > 0) g.scrollTop = Math.max(0, g.scrollTop + dy);
-      else window.scrollBy(0, dy);
-    }
-  }, { passive: false });
-})();
+function labFloatHead() {
+  const g = $("lab_grid"), t = g && g.querySelector("table"), tr = t && t.querySelector("thead tr.t");
+  let f = document.getElementById("lab_fhead");
+  const off = () => { if (f) f.hidden = true; };
+  if (!tr || !lab.open || window.innerWidth < 761 || !t.tBodies[0]) return off();
+  const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--barH")) || 0;
+  const hr = tr.getBoundingClientRect(), tb = t.tBodies[0].getBoundingClientRect();
+  if (!(hr.top < top && tb.bottom > top + hr.height + 30)) return off();
+  if (!f) {
+    f = document.createElement("div"); f.id = "lab_fhead"; f.className = "labfhead"; f.hidden = true; document.body.append(f);
+    f.addEventListener("click", (ev) => { const th = ev.target.closest("th[data-k]"); const tt = $("lab_grid").querySelector("table"); const o = th && tt && tt.querySelector(`thead tr.t th[data-k="${th.dataset.k}"]`); if (o) o.click(); });
+  }
+  if (f._src !== tr.innerHTML) { f.innerHTML = `<table class="lab-table"><thead><tr class="t">${tr.innerHTML}</tr></thead></table>`; f._src = tr.innerHTML; }
+  const src = [...tr.children], dst = [...f.querySelectorAll("th")];
+  src.forEach((th, i) => { const w = `${th.getBoundingClientRect().width}px`; if (dst[i]) { dst[i].style.width = w; dst[i].style.minWidth = w; dst[i].style.maxWidth = w; } });
+  const gr = g.getBoundingClientRect();
+  f.querySelector("table").style.width = `${t.offsetWidth}px`;
+  Object.assign(f.style, { left: `${gr.left + g.clientLeft}px`, width: `${g.clientWidth}px`, top: `${top}px` });
+  f.hidden = false; f.scrollLeft = g.scrollLeft;
+}
+window.addEventListener("scroll", () => labFloatHead(), { passive: true });
+window.addEventListener("resize", () => labFloatHead());
+{ const g0 = document.getElementById("lab_grid"); if (g0) g0.addEventListener("scroll", () => labFloatHead(), { passive: true }); }
 function fitLabGrid() {
   const g = $("lab_grid"), t = g && g.querySelector("table"); if (!t) return;
   // Keeps the sticky Strategy column right after the # column.
@@ -4328,7 +4341,7 @@ function renderLabHead() {
   });
   const clr = $("lab_fclear"); if (clr) clr.addEventListener("click", () => { lab.filters = {}; renderLabHead(); renderLabTable(); });
   // The filter row sits right under the title row.
-  requestAnimationFrame(() => { setBarH(); const tr = head.querySelector("tr.t"); if (tr) $("lab_grid").style.setProperty("--labhead", `${tr.getBoundingClientRect().height}px`); fitLabGrid(); });
+  requestAnimationFrame(() => { setBarH(); const tr = head.querySelector("tr.t"); if (tr) $("lab_grid").style.setProperty("--labhead", `${tr.getBoundingClientRect().height}px`); fitLabGrid(); labFloatHead(); });
 }
 function renderLabTable() {
   if ($("lab_more_wrap")) $("lab_more_wrap").hidden = true;
