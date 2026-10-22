@@ -1274,6 +1274,80 @@ async function runAudit(batch: string, offset: number) {
   }
   return { batch, done: i, of: pairs.length };
 }
+/**
+ * Prices every second (cron "live-prices"): one batched quote request per account for every running strategy's
+ * instrument and every live order being worked, plus Delta's tickers for crypto. The prices go to live_prices (the
+ * minute tick and the order manager read them from there instead of asking Dhan again) and the running P&L of each
+ * open futures / crypto position to live_marks, which the app receives through Realtime.
+ */
+let priceHolDay = "";
+const mcxSecMemo = new Map<string, string>();
+async function pricesTick() {
+  const { data: lk } = await sb.from("price_lock").update({ at: nowIso() }).eq("id", 1).lt("at", new Date(Date.now() - 800).toISOString()).select("id");
+  if (!lk?.length) return { skipped: "busy" };
+  const nowI = ist(Date.now() / 1000), today = nowI.date;
+  if (priceHolDay !== today) { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", today); setHolidays(hol ?? []); priceHolDay = today; mcxSecMemo.clear(); }
+  const { data: rows0 } = await sb.from("algo_strategies").select("*").eq("archived", false).or("active.eq.true,position.neq.FLAT");
+  const rows = (await withMasters(sb, rows0 ?? [])) as Strategy[];
+  const accounts = new Map<string, Account | null>();
+  const bySeg = new Map<string, Record<string, string[]>>(); // owner -> seg -> secs
+  const coins = new Set<string>();
+  const want = new Map<string, { s: Strategy; key: string }>();
+  const add = (owner: string, seg: string, sec: string) => { const m = bySeg.get(owner) ?? {}; (m[seg] ??= []).push(sec); bySeg.set(owner, m); };
+  await Promise.all(rows.map(async (s) => {
+    const seg = String(s.data_segment);
+    if (!s.owner_id) return;
+    if (isCrypto(seg)) { coins.add(String(s.data_security_id)); want.set(s.id, { s, key: `${seg}|${s.data_security_id}` }); return; }
+    const sess = tradingSession(seg, today);
+    if (nowI.min < sess.open || nowI.min > sess.close) return;
+    let sec = String(s.data_security_id);
+    if (isCommodity(seg) && !/^\d+$/.test(sec)) {
+      let r = mcxSecMemo.get(sec);
+      if (!r) {
+        const set = await accountFor(sb, s.owner_id, "DHAN", accounts).catch(() => null);
+        if (!set?.dhan_access_token) return;
+        r = (await dataSecurity(sb, credsOf(set), seg, sec, today).catch(() => ({ sec: "" }))).sec;
+        if (r) mcxSecMemo.set(sec, r);
+      }
+      if (!r) return;
+      sec = r;
+    }
+    add(s.owner_id, seg, sec);
+    want.set(s.id, { s, key: `${seg}|${sec}` });
+  }));
+  // Live orders being worked: their own contracts (the order manager chases them with these prices).
+  const { data: work } = await sb.from("live_orders").select("user_id, seg, sec").eq("broker", "DHAN").in("state", ["queued", "working"]);
+  for (const w of work ?? []) add(w.user_id, w.seg, String(w.sec));
+  const px = new Map<string, number>();
+  await Promise.all([
+    ...[...bySeg].map(async ([uid, segs]) => {
+      const set = await accountFor(sb, uid, "DHAN", accounts).catch(() => null);
+      if (!set?.dhan_access_token) return;
+      try { for (const [k, v] of await dhanFor(set).ltpMany(segs)) px.set(k, v); } catch (e) { console.error("prices", e); }
+    }),
+    ...[...coins].map(async (c) => { const v = await cryptoLtp(c).catch(() => null); if (v) px.set(`DELTA|${c}`, v); }),
+  ]);
+  if (!px.size) return { prices: 0 };
+  const at = nowIso();
+  await sb.from("live_prices").upsert([...px].map(([k, v]) => { const [seg, sec] = k.split("|"); return { seg, sec, px: v, at }; }));
+  // Running P&L of open positions priced on one instrument (futures, index basis, crypto). Option positions are
+  // priced by the minute tick (their premium comes from the option chain, allowed once every 3 seconds).
+  const marks: { strategy_id: string; owner_id: string; ltp: number; upnl: number | null; at: string }[] = [];
+  const slow: PromiseLike<unknown>[] = [];
+  for (const { s, key } of want.values()) {
+    if (s.position === "FLAT" || s.trade_type === "OPTIONS" || isMulti(s)) continue;
+    const p = px.get(key); if (!(Number(p) > 0)) continue;
+    const pr = (s.pos_risk ?? {}) as PosRisk;
+    const inPx = Number(s.pos_entry_px ?? pr.entry ?? 0), dir = s.position === "LONG" ? 1 : -1;
+    const upnl = inPx > 0 ? Math.trunc((p! - inPx) * dir * unitsOf(s)) : null;
+    marks.push({ strategy_id: s.id, owner_id: s.owner_id, ltp: +p!.toFixed(2), upnl, at });
+    // The strategy row itself (lists, capital, alerts) every 10 seconds.
+    if (!s.pos_ltp_at || Date.now() - Date.parse(s.pos_ltp_at) > 10000) slow.push(sb.from("algo_strategies").update({ pos_ltp: +p!.toFixed(2), pos_upnl: upnl, pos_ltp_at: at }).eq("id", s.id).eq("position", s.position));
+  }
+  if (marks.length) await sb.from("live_marks").upsert(marks);
+  await Promise.all(slow);
+  return { prices: px.size, marks: marks.length };
+}
 /** Strategy lab: run one instalment, then hand over to a fresh invocation if there is more to do. */
 async function labLoop() {
   const creds = credsOf(await adminAccount(sb));
@@ -1931,6 +2005,7 @@ Deno.serve(async (req) => {
   if (action === "orders") return Response.json({ action, ...(await runOrders(Math.min(4, Math.max(1, Number(body.passes) || 4)))) });
   if (action === "reconcile") { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", ist(Date.now() / 1000).date); setHolidays(hol ?? []); }
   if (action === "reconcile") return Response.json({ action, ...(await reconcile()) });
+  if (action === "prices") return Response.json({ action, ...(await pricesTick()) });
   if (action === "audit") {
     const b = body as { batch?: string; offset?: number };
     const batch = b.batch || `${ist(Date.now() / 1000).date}-${Date.now().toString(36)}`;
@@ -2051,6 +2126,13 @@ Deno.serve(async (req) => {
       if (!sec) return;
       const m = byOwner.get(x.owner_id) ?? {}; (m[seg] ??= []).push(sec); byOwner.set(x.owner_id, m);
     }));
+    // Prices the per-second updater fetched in the last 3 seconds are used as they are.
+    const { data: fresh } = await sb.from("live_prices").select("seg, sec, px").gt("at", new Date(Date.now() - 3000).toISOString());
+    for (const f of fresh ?? []) Dhan.ltpSeed!.set(`${f.seg}|${f.sec}`, Number(f.px));
+    for (const [uid, m] of byOwner) {
+      for (const seg of Object.keys(m)) { m[seg] = m[seg].filter((sec) => !Dhan.ltpSeed!.has(`${seg}|${sec}`)); if (!m[seg].length) delete m[seg]; }
+      if (!Object.keys(m).length) byOwner.delete(uid);
+    }
     await Promise.all([...byOwner].map(async ([uid, bySeg]) => {
       const set = await accountFor(sb, uid, "DHAN", accounts).catch(() => null);
       if (!set?.dhan_access_token) return;

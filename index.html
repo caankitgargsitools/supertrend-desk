@@ -4942,12 +4942,12 @@ function tradesHtml(rows, opts = {}, openRows = []) {
   const head = `<tr><th>Closed (IST)</th><th>Opened</th>${ws ? "<th>Strategy</th><th>Asset</th>" : ""}${opts.withMode ? "<th>Mode</th>" : ""}<th>Side</th><th>Contract</th><th class="n">Lots</th><th class="n">Entry</th><th class="n">Exit</th><th class="n">Gross</th><th class="n">Charges</th><th class="n">Net P&amp;L</th><th>Closed by</th></tr>`;
   const cls = (v) => Number(v) > 0 ? "pos-num" : Number(v) < 0 ? "neg-num" : "";
   const modeChip = (m) => `<span class="chip ${m === "LIVE" ? "red" : "yellow"}">${m === "LIVE" ? "Live" : "Paper"}</span>`;
-  const openTr = openRows.map((s) => `<tr class="openrow"><td><span class="chip blue">Open now</span></td><td>${esc(dayTxt(s.pos_entry_date))}</td>${ws ? `<td><a href="#" data-open="${esc(s.id)}">${esc(s.name)}</a></td><td>${esc(assetOfStrat(s))}</td>` : ""}${opts.withMode ? `<td>${modeChip(s.live ? "LIVE" : "PAPER")}</td>` : ""}<td>${esc(sideTxt(s.position))}</td><td class="hint">${esc(s.trade_type === "OPTIONS" && s.pos_strike ? `${s.dhan_symbol} ${s.pos_strike} ${s.pos_option_type}` : s.futures_symbol || "")}</td><td class="n">${esc(String(s.pos_lots ?? s.lots ?? "–"))}</td><td class="n">${esc(pxTxt(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px))}</td><td class="n">${esc(pxTxt(s.pos_ltp))}<div class="hint sm">last price</div></td><td class="n"></td><td class="n"></td><td class="n ${cls(s.pos_upnl)}">${s.pos_upnl != null ? esc(rupees(s.pos_upnl)) : "–"}<div class="hint sm">running</div></td><td class="hint">still open</td></tr>`).join("");
+  const openTr = openRows.map((s) => `<tr class="openrow"><td><span class="chip blue">Open now</span></td><td>${esc(dayTxt(s.pos_entry_date))}</td>${ws ? `<td><a href="#" data-open="${esc(s.id)}">${esc(s.name)}</a></td><td>${esc(assetOfStrat(s))}</td>` : ""}${opts.withMode ? `<td>${modeChip(s.live ? "LIVE" : "PAPER")}</td>` : ""}<td>${esc(sideTxt(s.position))}</td><td class="hint">${esc(s.trade_type === "OPTIONS" && s.pos_strike ? `${s.dhan_symbol} ${s.pos_strike} ${s.pos_option_type}` : s.futures_symbol || "")}</td><td class="n">${esc(String(s.pos_lots ?? s.lots ?? "–"))}</td><td class="n">${esc(pxTxt(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px))}</td><td class="n"><span data-ltpn="${esc(s.id)}">${esc(pxTxt(s.pos_ltp))}</span><div class="hint sm">last price</div></td><td class="n"></td><td class="n"></td><td class="n" data-upnl="${esc(s.id)}">${upnlHtml(s)}</td><td class="hint">still open</td></tr>`).join("");
   const body = rows.map((t) => { const s = stratOf(t.strategy_id); return `<tr><td class="when">${esc(istText(t.exit_at))}</td><td>${esc(dayTxt(t.entry_day))}</td>${ws ? `<td>${s ? `<a href="#" data-open="${esc(t.strategy_id)}">${esc(s.name)}</a>` : "–"}</td><td>${esc(assetOfStrat(s))}</td>` : ""}${opts.withMode ? `<td>${modeChip(t.mode)}</td>` : ""}<td>${esc(sideTxt(t.side))}</td><td class="hint">${esc(t.contract || "")}</td><td class="n">${esc(String(t.lots ?? "–"))}</td><td class="n">${esc(pxTxt(t.entry_px))}</td><td class="n">${esc(pxTxt(t.exit_px))}</td><td class="n ${cls(t.gross)}">${esc(rupees(t.gross))}</td><td class="n">${esc(rupees(t.costs))}</td><td class="n ${cls(t.net)}"><b>${esc(rupees(t.net))}</b></td><td title="${esc(t.exit_why || "")}">${esc(closedBy(t.exit_why))}</td></tr>`; }).join("");
   const st = tradeTotals(rows), span = 2 + (ws ? 2 : 0) + (opts.withMode ? 1 : 0) + 5;
   const foot = rows.length ? `<tfoot><tr><td colspan="${span}"><b>Total · ${rows.length} trade${rows.length === 1 ? "" : "s"}</b></td><td class="n ${cls(st.gross)}">${esc(rupees(st.gross))}</td><td class="n">${esc(rupees(st.costs))}</td><td class="n ${cls(st.net)}"><b>${esc(rupees(st.net))}</b></td><td></td></tr></tfoot>` : "";
   const empty = !rows.length && !openRows.length ? `<p class="hint">${esc(opts.empty || "No trades.")}</p>` : "";
-  const cards = openRows.map((s) => `<div class="tcard"><div class="r1"><span class="nm">${ws ? `<a href="#" data-open="${esc(s.id)}">${esc(s.name)}</a>` : esc(sideTxt(s.position))}</span><span class="chip blue">Open now</span></div><div class="r1"><span class="hint">${esc(sideTxt(s.position))} · from ${esc(dayTxt(s.pos_entry_date))} · at ${esc(pxTxt(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px))}</span><b class="${cls(s.pos_upnl)}">${s.pos_upnl != null ? esc(rupees(s.pos_upnl)) : "–"}</b></div></div>`).join("")
+  const cards = openRows.map((s) => `<div class="tcard"><div class="r1"><span class="nm">${ws ? `<a href="#" data-open="${esc(s.id)}">${esc(s.name)}</a>` : esc(sideTxt(s.position))}</span><span class="chip blue">Open now</span></div><div class="r1"><span class="hint">${esc(sideTxt(s.position))} · from ${esc(dayTxt(s.pos_entry_date))} · at ${esc(pxTxt(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px))}</span><b data-upnl="${esc(s.id)}">${upnlHtml(s)}</b></div></div>`).join("")
     + rows.map((t) => { const s = stratOf(t.strategy_id); return `<div class="tcard"><div class="r1"><span class="nm">${ws && s ? `<a href="#" data-open="${esc(t.strategy_id)}">${esc(s.name)}</a>` : esc(t.contract || sideTxt(t.side))}</span><b class="${cls(t.net)}">${esc(rupees(t.net))}</b></div>
       <div class="r1"><span class="hint">${esc(sideTxt(t.side))} · ${esc(pxTxt(t.entry_px))} → ${esc(pxTxt(t.exit_px))} · ${esc(String(t.lots ?? ""))} lot${Number(t.lots) === 1 ? "" : "s"}</span>${opts.withMode ? modeChip(t.mode) : ""}</div>
       <div class="r1"><span class="hint">${esc(dayTxt(t.entry_day))} → ${esc(istText(t.exit_at))}</span><span class="hint">${esc(closedBy(t.exit_why))}</span></div>
@@ -5057,8 +5057,9 @@ function renderAllTrades() {
   const filtered = rows.length !== deskTrades.length;
   const arch = !$("tf_arch").checked ? deskTrades.filter((t) => { const s = stratOf(t.strategy_id); return s && s.archived; }) : [];
   const sgn = (v) => v > 0 ? "up" : v < 0 ? "down" : "";
-  const runTile = `<div class="stats" style="margin-top:10px"><div class="stat"><span class="label">Open now (running)</span><span class="v ${sgn(runSum)}">${esc(rupees(runSum))}</span><span class="hint">${open.length} position${open.length === 1 ? "" : "s"} · not yet booked</span></div>
-    <div class="stat"><span class="label">Booked + running</span><span class="v ${sgn(st.net + runSum)}">${esc(rupees(st.net + runSum))}</span><span class="hint">if everything open closed at the last price</span></div></div>`;
+  renderAllTrades.booked = st.net;
+  const runTile = `<div class="stats" style="margin-top:10px"><div class="stat"><span class="label">Open now (running)</span><span class="v ${sgn(runSum)}" id="tf_runsum">${esc(rupees(runSum))}</span><span class="hint">${open.length} position${open.length === 1 ? "" : "s"} · not yet booked</span></div>
+    <div class="stat"><span class="label">Booked + running</span><span class="v ${sgn(st.net + runSum)}" id="tf_bookrun">${esc(rupees(st.net + runSum))}</span><span class="hint">if everything open closed at the last price</span></div></div>`;
   $("tf_stats").innerHTML = statsHtml(st, `${runTile}<p class="hint" style="margin:8px 0 0">${filtered ? `Showing ${rows.length} of ${deskTrades.length} closed trades. ` : ""}${arch.length ? `${arch.length} trade${arch.length === 1 ? "" : "s"} of archived strategies (${rupees(arch.reduce((a, t) => a + Number(t.net || 0), 0))}) left out, as on the strategies list; tick “Archived strategies” to include them.` : ""}</p>`);
   $("tf_list").innerHTML = tradesHtml(rows, { withStrategy: true, withMode: true, empty: deskTrades.length ? "No trades match these filters." : "No closed trades yet. Trades appear here as soon as a strategy closes a position, paper or live." }, open);
   wireOpenLinks($("tf_list"));
@@ -5204,35 +5205,52 @@ function paintMarks(prev) {
       if (p != null && s.pos_upnl != null && Number(s.pos_upnl) !== p) { el.classList.remove("tick-up", "tick-down"); void el.offsetWidth; el.classList.add(Number(s.pos_upnl) > p ? "tick-up" : "tick-down"); }
     });
     document.querySelectorAll(`[data-ltp="${s.id}"]`).forEach((el) => { el.textContent = posPriceText(s); });
+    document.querySelectorAll(`[data-ltpn="${s.id}"]`).forEach((el) => { el.textContent = pxTxt(s.pos_ltp); });
+  }
+  const rs = $("tf_runsum");
+  if (rs && rs.offsetParent) {
+    const run = filteredOpen().reduce((a, x) => a + (Number(x.pos_upnl) || 0), 0), both = (renderAllTrades.booked || 0) + run;
+    const sg = (v) => "v " + (v > 0 ? "up" : v < 0 ? "down" : "");
+    rs.textContent = rupees(run); rs.className = sg(run);
+    const br = $("tf_bookrun"); if (br) { br.textContent = rupees(both); br.className = sg(both); }
   }
   if (page === "strat" && cur() && cur().position !== "FLAT") renderStratPos(cur());
   const tot = $("lp_tot_upnl"); if (tot && renderList.shown) tot.innerHTML = listRunTotalHtml(renderList.shown);
   const tot2 = $("lp_sum_upnl"); if (tot2 && renderList.shown) tot2.innerHTML = listRunTotalHtml(renderList.shown);
 }
-let marksTimer = null, marksBusy = false;
+let marksTimer = null, marksBusy = false, marksCh = null, marksLast = 0, marksPrev = null, marksRaf = 0;
+/** One price update from the server (every second for each open futures / crypto position). */
+function onMark(m) {
+  if (!m || !m.strategy_id) return;
+  const s = (state.strategies || []).find((x) => x.id === m.strategy_id);
+  if (!s || s.position === "FLAT") return;
+  marksPrev = marksPrev || new Map();
+  if (!marksPrev.has(s.id)) marksPrev.set(s.id, s.pos_upnl == null ? null : Number(s.pos_upnl));
+  s.pos_ltp = m.ltp; s.pos_upnl = m.upnl; s.pos_ltp_at = m.at; marksLast = Date.now();
+  // Several positions update in the same second: the screen is repainted once for all of them.
+  if (!marksRaf) marksRaf = requestAnimationFrame(() => { marksRaf = 0; const prev = marksPrev; marksPrev = null; if (!document.hidden) paintMarks(prev); });
+}
+/** Live prices: the server pushes each open position's price and running P&L every second (Realtime). */
+function startLiveMarks() {
+  if (marksCh || !me) return;
+  marksCh = db.channel("live-marks")
+    .on("postgres_changes", { event: "*", schema: "public", table: "live_marks", filter: `owner_id=eq.${me.user_id}` }, (p) => onMark(p.new))
+    .subscribe((st) => { if (st === "CHANNEL_ERROR" || st === "TIMED_OUT" || st === "CLOSED") { try { db.removeChannel(marksCh); } catch { /* gone */ } marksCh = null; setTimeout(startLiveMarks, 5000); } });
+}
 async function pollMarks() {
   clearTimeout(marksTimer);
+  startLiveMarks();
   const open = (state.strategies || []).filter((s) => s.position !== "FLAT" && !s.archived);
-  const onScreen = !document.hidden && (page === "list" || page === "strat");
-  if (open.length && onScreen && !marksBusy) {
+  // Backup for the live feed: if nothing arrived for 5 seconds, read the latest prices directly.
+  if (open.length && !document.hidden && Date.now() - marksLast > 5000 && !marksBusy) {
     marksBusy = true;
     try {
-      const { data } = await db.auth.getSession();
-      const tok = data && data.session && data.session.access_token;
-      if (tok) {
-        const r = await fetch(`${SUPABASE_URL}/functions/v1/engine`, { method: "POST", headers: { "Content-Type": "application/json", apikey: SUPABASE_KEY, Authorization: `Bearer ${tok}` }, body: JSON.stringify({ action: "marks" }) });
-        const j = await r.json().catch(() => ({}));
-        if (r.ok && j.marks) {
-          const prev = new Map(open.map((s) => [s.id, s.pos_upnl == null ? null : Number(s.pos_upnl)]));
-          for (const s of state.strategies) { const m = j.marks[s.id]; if (m) { s.pos_ltp = m.ltp; s.pos_upnl = m.upnl; s.pos_ltp_at = m.at; } }
-          paintMarks(prev);
-        }
-      }
+      const rows = must(await db.from("live_marks").select("strategy_id, ltp, upnl, at").in("strategy_id", open.map((s) => s.id)));
+      for (const m of rows) if (!open.find((s) => s.id === m.strategy_id && s.pos_ltp_at && Date.parse(s.pos_ltp_at) >= Date.parse(m.at))) onMark(m);
     } catch { /* try again next time */ } finally { marksBusy = false; }
   }
-  // Every 5 seconds while a market with an open position is trading; otherwise once a minute.
   const live = open.some((s) => marketOpenFor(s.data_segment));
-  marksTimer = setTimeout(pollMarks, open.length && live ? 5000 : 60000);
+  marksTimer = setTimeout(pollMarks, open.length && live ? 3000 : 60000);
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) pollMarks(); });
 
