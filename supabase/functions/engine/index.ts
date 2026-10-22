@@ -1283,6 +1283,7 @@ async function runAudit(batch: string, offset: number) {
 let priceHolDay = "";
 const mcxSecMemo = new Map<string, string>();
 const rowWriteAt = new Map<string, number>();
+let lastMarkAt = "";
 /**
  * One engine run per minute (cron) that prices every second until the next run takes over. A lock row keeps a
  * single loop going; the strategy list is re-read every 5 seconds (positions change), prices every second.
@@ -1296,6 +1297,9 @@ async function pricesLoop(minuteEnd?: number) {
   const { data: lk } = await sb.from("price_lock").update({ at: new Date(end + 3000).toISOString() }).eq("id", 1).lt("at", minuteEnd ? new Date(Date.now() + 5000).toISOString() : nowIso()).select("id");
   if (!lk?.length) return { skipped: "another price loop is running" };
   let rounds = 0, rows: Strategy[] = [], rowsAt = 0;
+  // A round starts every second on the second, without waiting for a slow one to finish (at most 2 at once), so a
+  // slow answer from one price source doesn't stretch the rhythm.
+  const inflight = new Set<Promise<unknown>>();
   while (Date.now() < end - 900) {
     const t = Date.now();
     try {
@@ -1304,11 +1308,15 @@ async function pricesLoop(minuteEnd?: number) {
         rows = (r0 ?? []) as Strategy[]; rowsAt = Date.now();
         if (!rows.some((x) => x.position !== "FLAT")) break; // nothing open: no need to price
       }
-      await pricesTick(rows); rounds++;
+      if (inflight.size < 2) {
+        const p = pricesTick(rows).then(() => { rounds++; }, (e) => console.error("prices", e)).finally(() => inflight.delete(p));
+        inflight.add(p);
+      }
     } catch (e) { console.error("prices", e); }
     const wait = 1000 - (Date.now() - t);
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   }
+  await Promise.all(inflight);
   if (final - Date.now() > 2500 && rows.some((x) => x.position !== "FLAT")) {
     const { data: sec } = await sb.from("engine_secret").select("secret").single();
     await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/engine`, { method: "POST", headers: { "Content-Type": "application/json", "x-engine-secret": sec!.secret }, body: JSON.stringify({ action: "prices", until: final }) }).catch(() => {});
@@ -1317,6 +1325,7 @@ async function pricesLoop(minuteEnd?: number) {
 }
 async function pricesTick(rows: Strategy[]) {
   const nowI = ist(Date.now() / 1000), today = nowI.date;
+  const at = nowIso(); // the round's start: of two overlapping rounds, the later-started one's prices are the newer
   if (priceHolDay !== today) { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", today); setHolidays(hol ?? []); priceHolDay = today; mcxSecMemo.clear(); }
   const accounts = new Map<string, Account | null>();
   const bySeg = new Map<string, Record<string, string[]>>(); // owner -> seg -> secs
@@ -1357,7 +1366,6 @@ async function pricesTick(rows: Strategy[]) {
     ...[...coins].map(async (c) => { const v = await cryptoLtp(c).catch(() => null); if (v) px.set(`DELTA|${c}`, v); }),
   ]);
   if (!px.size) return { prices: 0 };
-  const at = nowIso();
   await sb.from("live_prices").upsert([...px].map(([k, v]) => { const [seg, sec] = k.split("|"); return { seg, sec, px: v, at }; }));
   // Running P&L of open positions priced on one instrument (futures, index basis, crypto). Option positions are
   // priced by the minute tick (their premium comes from the option chain, allowed once every 3 seconds).
@@ -1373,7 +1381,7 @@ async function pricesTick(rows: Strategy[]) {
     // The strategy row itself (lists, capital, alerts) every 10 seconds.
     if (Date.now() - (rowWriteAt.get(s.id) ?? (s.pos_ltp_at ? Date.parse(s.pos_ltp_at) : 0)) > 10000) rowWriteAt.set(s.id, Date.now()), slow.push(sb.from("algo_strategies").update({ pos_ltp: +p!.toFixed(2), pos_upnl: upnl, pos_ltp_at: at }).eq("id", s.id).eq("position", s.position));
   }
-  if (marks.length) await sb.from("live_marks").upsert(marks);
+  if (marks.length && at >= lastMarkAt) { lastMarkAt = at; await sb.from("live_marks").upsert(marks); }
   await Promise.all(slow);
   return { prices: px.size, marks: marks.length };
 }
