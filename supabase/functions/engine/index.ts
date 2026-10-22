@@ -1287,17 +1287,21 @@ const rowWriteAt = new Map<string, number>();
  * One engine run per minute (cron) that prices every second until the next run takes over. A lock row keeps a
  * single loop going; the strategy list is re-read every 5 seconds (positions change), prices every second.
  */
-async function pricesLoop() {
-  const end = Date.now() + 58000;
-  const { data: lk } = await sb.from("price_lock").update({ at: new Date(end).toISOString() }).eq("id", 1).lt("at", nowIso()).select("id");
+const PRICE_COLS = "id, owner_id, data_segment, data_security_id, position, trade_type, structure, pos_entry_px, pos_risk, pos_qty, qty_mode, lot_size, pos_ltp_at, active, archived";
+async function pricesLoop(minuteEnd?: number) {
+  // Each engine run may use about 2 seconds of computing, so one run prices for 15 seconds and then hands over
+  // to a fresh run, until the minute's next run takes over.
+  const final = minuteEnd ?? Date.now() + 58000;
+  const end = Math.min(final, Date.now() + 15000);
+  const { data: lk } = await sb.from("price_lock").update({ at: new Date(end + 3000).toISOString() }).eq("id", 1).lt("at", minuteEnd ? new Date(Date.now() + 5000).toISOString() : nowIso()).select("id");
   if (!lk?.length) return { skipped: "another price loop is running" };
   let rounds = 0, rows: Strategy[] = [], rowsAt = 0;
   while (Date.now() < end - 900) {
     const t = Date.now();
     try {
       if (Date.now() - rowsAt > 5000) {
-        const { data: r0 } = await sb.from("algo_strategies").select("*").eq("archived", false).or("active.eq.true,position.neq.FLAT");
-        rows = (await withMasters(sb, r0 ?? [])) as Strategy[]; rowsAt = Date.now();
+        const { data: r0 } = await sb.from("algo_strategies").select(PRICE_COLS).eq("archived", false).or("active.eq.true,position.neq.FLAT");
+        rows = (r0 ?? []) as Strategy[]; rowsAt = Date.now();
         if (!rows.some((x) => x.position !== "FLAT")) break; // nothing open: no need to price
       }
       await pricesTick(rows); rounds++;
@@ -1305,7 +1309,10 @@ async function pricesLoop() {
     const wait = 1000 - (Date.now() - t);
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   }
-  await sb.from("price_lock").update({ at: nowIso() }).eq("id", 1);
+  if (final - Date.now() > 2500 && rows.some((x) => x.position !== "FLAT")) {
+    const { data: sec } = await sb.from("engine_secret").select("secret").single();
+    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/engine`, { method: "POST", headers: { "Content-Type": "application/json", "x-engine-secret": sec!.secret }, body: JSON.stringify({ action: "prices", until: final }) }).catch(() => {});
+  } else await sb.from("price_lock").update({ at: nowIso() }).eq("id", 1);
   return { rounds };
 }
 async function pricesTick(rows: Strategy[]) {
@@ -2027,7 +2034,7 @@ Deno.serve(async (req) => {
   if (action === "orders") return Response.json({ action, ...(await runOrders(Math.min(4, Math.max(1, Number(body.passes) || 4)))) });
   if (action === "reconcile") { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", ist(Date.now() / 1000).date); setHolidays(hol ?? []); }
   if (action === "reconcile") return Response.json({ action, ...(await reconcile()) });
-  if (action === "prices") { EdgeRuntime.waitUntil(pricesLoop().catch((e) => console.error("price loop", e))); return Response.json({ action, accepted: true }); }
+  if (action === "prices") { const u = Number((body as { until?: number }).until) || undefined; EdgeRuntime.waitUntil(pricesLoop(u).catch((e) => console.error("price loop", e))); return Response.json({ action, accepted: true }); }
   if (action === "audit") {
     const b = body as { batch?: string; offset?: number };
     const batch = b.batch || `${ist(Date.now() / 1000).date}-${Date.now().toString(36)}`;
