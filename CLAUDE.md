@@ -1,0 +1,74 @@
+# AnkGenie (Supertrend Desk) — handover for Claude Code
+
+Automated futures/options/crypto trading desk on Dhan (NSE/BSE/MCX) and Delta Exchange (crypto), with a strategy lab,
+marketplace, paper and live trading. Built for and with the owner, a Chartered Accountant.
+
+## How to work with the owner (standing rules — always follow)
+- Address the owner as **"Papa"**. Reply in Hindi when he writes in Hindi; otherwise English.
+- Answers go inline in chat. No documents/files unless he asks.
+- When he says "discuss first, don't implement", only discuss.
+- Owner login: ca.ankitgarg@gmail.com.
+- Be honest about losses and limits. Never claim "all fine" without checking; separate "the system ran correctly"
+  from "the strategy will make money".
+- Never show the Dhan token, webhook URL or secret, Delta API keys, the private push key, or webhook secrets in the
+  browser (the Orders page strips them).
+- P&L is shown in whole rupees, truncated.
+- No profit share is charged (billing code exists but is not used).
+- Backtests: don't add the futures premium. Every-year-profitable rule stands; minute strategies with < 3 years of
+  history use the quarter rule (3 of the last 4 quarters), approved by Papa.
+- Nothing goes live with real money until a supervised 1-lot test (engine action `live_test`).
+- Never write test rows to the production database. Test with mocks (tests/) or rollback.
+- Destructive SQL (DELETE/DROP) needs Papa's approval — don't work around it; use `hidden` flags or other approaches
+  (e.g. hidden trades/signals are excluded by RLS and by the totals functions).
+- Every commit message ends with:
+  ```
+  Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+  ```
+
+## Layout
+- `index.html` — the whole web app (static, no build), deployed by Vercel on push to `main`.
+- `supabase/functions/engine/*.ts` — the engine (Deno edge function). **This folder is the source of truth.**
+  - `index.ts` tick loop, orders (paper/live), stops, per-second prices (`pricesLoop`/`pricesTick`/`secondRisk`),
+    audit, lab entry points, notifications, reconcile.
+  - `execution.ts` Dhan order client (routed through the DB function `dhan_send` for Dhan's static-IP rule:
+    IP 13.206.175.148 must be whitelisted at Dhan), chase/stop rules.
+  - `dhan.ts` Dhan data client: per-tick memo, shared pacing (210 ms data, 1.05 s quotes per token), batched LTP.
+  - `lab.ts` strategy lab (generate, screen, tougher test, quarter rule, re-verdict). `backtest.ts`, `rules.ts`,
+    `risk.ts`, `logic.ts` (sessions, holidays), `crypto.ts` (Delta), `audit.ts` (daily self-check), `margins.ts`,
+    `sizing.ts`, `structures.ts`, `instruments.ts`.
+- `supabase/migrations/*.sql` — notes of every migration applied (applied via the Supabase MCP / dashboard).
+- `tests/sim` — Node tests with an in-memory fake Supabase and simulated Dhan (see tests/sim/README.md).
+- `tests/ui` — Playwright checks with mocked Supabase responses.
+
+## Backend
+- Supabase project `umryzxusbdttbcshkajt` (region ap-south-1).
+- Engine deploy: the deployed function is a one-line wrapper that imports this repo's raw file at a pinned commit:
+  `import "https://raw.githubusercontent.com/caankitgargsitools/supertrend-desk/<SHA>/supabase/functions/engine/index.ts";`
+  Steps: push the commit, then deploy the wrapper with the new SHA (verify_jwt **false**).
+- Build check: `cd supabase/functions/engine && npx esbuild index.ts --bundle --format=esm --platform=neutral "--external:npm:*" --outfile=/dev/null`
+- Edge runtime limit: about 2 s of CPU per invocation — long work is split (lab instalments, 10-second price runs).
+- Cron jobs (pg_cron, call `public.engine_call(action)`):
+  `tick` every minute (NSE/MCX hours), `tick_crypto` every minute, `prices` every 10 s while any position is open
+  (prices every second inside), `orders` while live orders are worked, `reconcile` every 5 min, `audit` daily 07:40 IST,
+  lab jobs, margins, token check, billing.
+- SQL via the MCP tool: statements containing the words drop/delete are blocked or need approval.
+
+## Key behaviours (current state)
+- Strategies run side by side in each tick (up to 8); booking trades/sending orders is serialized (`actLocked`).
+- Every signal records `lag_ms` (decision delay after candle close), shown in the signal log.
+- Prices: `live_prices` (per instrument) and `live_marks` (running P&L per open position, pushed to the app via
+  Realtime). The minute tick and the order manager reuse these prices (no extra Dhan quote calls).
+- Stops/targets/trailing stops are checked every second (`secondRisk`) and on 1-minute candles (`liveRisk`);
+  exits are claimed with `exec_state='stopping'` + `exec_at` so they never run twice. Option premiums: minute only.
+- Holidays: `market_holidays` table + `tradingSession` in logic.ts.
+- Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
+  missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
+- Totals (`ledger_net_user`, `ledger_net`, `admin_users`) exclude hidden trades.
+
+## Open items
+- Supervised 1-lot live test (NATGASMINI, Lab #6038) once Papa adds Dhan funds and whitelists the IP.
+- Risk-based lot sizing per strategy (drawdown-based), and not running two strategies on the same asset at once
+  (GOLD 1 kg contract dominated the paper loss) — proposed, awaiting Papa's go-ahead.
+- Tick-level prices/stops need Dhan's WebSocket feed on an always-on server (~₹500–1,500/month) — offered, not built.
+- Slippage column on Orders + per-strategy slippage summary (signal price vs fill) — proposed.
+- Ideas from the Tradl.ai review (one-page backtest report, morning brief, featured shelves) — proposed.

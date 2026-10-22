@@ -1,0 +1,7 @@
+tests/sim/node_modules/
+tests/sim/engine.mjs
+tests/sim/lab.mjs
+tests/sim/exec.mjs
+tests/sim/audit.mjs
+tests/sim/dhan.mjs
+supabase/functions/engine/__sim.ts
