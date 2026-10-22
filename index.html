@@ -1467,7 +1467,7 @@ async function loadDetail() {
   const id = selected; if (!id) return;
   if (chartFor !== id) { chartFor = id; cxFromStrategy(cur()); loadChart(); fillCharges((cur() || {}).exchange); }
   const [signals, bts] = await Promise.all([
-    db.from("algo_signals").select("id, created_at, event, description, mode, status, payload, response, fills").eq("strategy_id", id).order("id", { ascending: false }).limit(60).then(must),
+    db.from("algo_signals").select("id, created_at, event, description, mode, status, payload, response, fills, lag_ms").eq("strategy_id", id).order("id", { ascending: false }).limit(60).then(must),
     db.from("algo_backtests").select("id, created_at, status, params, summary").eq("strategy_id", id).order("id", { ascending: false }).limit(12).then(must),
   ]);
   if (id !== selected) return;
@@ -2684,6 +2684,7 @@ function renderLog(rows) {
     const statusChip = r.status === "SENT" ? "green" : r.status === "FAILED" ? "red" : "";
     tr.innerHTML = `<td class="when"></td><td><span class="chip ${EVENT_COLOR[r.event] || ""}"></span></td><td><span class="chip ${r.mode === "LIVE" ? "red" : "yellow"}"></span></td><td><span class="chip ${statusChip}"></span></td><td class="fillcell"></td><td></td>`;
     tr.children[0].textContent = istText(r.created_at);
+    if (r.lag_ms != null && r.event !== "INFO") { const h = document.createElement("div"); h.className = "hint sm"; h.textContent = `decided ${(r.lag_ms / 1000).toFixed(1)} s after the candle closed`; tr.children[0].append(h); }
     tr.children[1].firstChild.textContent = EVENT_NAMES[r.event] || r.event;
     tr.children[2].firstChild.textContent = r.mode;
     tr.children[3].firstChild.textContent = r.status === "LOGGED" ? "Logged" : r.status === "SENT" ? "Sent" : "Failed";

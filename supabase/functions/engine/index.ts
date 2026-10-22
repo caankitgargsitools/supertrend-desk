@@ -450,6 +450,9 @@ async function liveRisk(s: Strategy, set: Settings): Promise<Strategy> {
     await sb.from("algo_strategies").update(update).eq("id", s.id);
     return { ...s, ...update };
   }
+  return actLocked(() => riskExit(s, set, pr, hit, update));
+}
+async function riskExit(s: Strategy, set: Settings, pr: PosRisk, hit: { px: number; t: number; why: string }, update: Record<string, unknown>): Promise<Strategy> {
   const event = /Target/.test(hit.why) ? "TARGET" : /Trailing/.test(hit.why) ? "TRAIL_STOP" : "STOP_LOSS";
   const under = pr.basis === "PREMIUM" ? undefined : hit.px;
   const ok = await sendOrders(s, set, event, asArr(exitLeg(s, 1)), `${hit.why}${pr.basis === "PREMIUM" ? " (premium)" : ""}: ${exitLabel(s)}`, { t: hit.t, c: under });
@@ -655,21 +658,37 @@ async function logSignal(s: Strategy, event: string, description: string, candle
   if (s.locked) { description = plainLog(event, description); candle = { t: candle.t, c: candle.c }; }
   lastSignalId = null;
   const { data: ins } = await sb.from("algo_signals").insert({
-    strategy_id: s.id, event, description, mode: s.live ? "LIVE" : "PAPER", status, payload, response,
+    strategy_id: s.id, event, description, mode: s.live ? "LIVE" : "PAPER", status, payload, response, lag_ms: tickT0 ? Date.now() - tickT0 : null,
     candle_time: candle.t ? new Date(candle.t * 1000).toISOString() : null,
     trend: candle.trend ?? null, close: candle.c ?? null, supertrend: candle.st ?? null,
   }).select("id").single();
   lastSignalId = ins?.id ?? null;
 }
 
-async function flatten(s: Strategy, set: Settings, update: Record<string, unknown>, candle: Candle) {
+/**
+ * Strategies are worked side by side within a tick (fetching prices and candles is the slow part), but anything that
+ * books a trade or sends orders runs one at a time: sizing reads the capital in use, and the order path keeps a little
+ * shared state (the last signal's id, Delta's fill prices).
+ */
+let actChain: Promise<unknown> = Promise.resolve();
+function actLocked<T>(fn: () => Promise<T>): Promise<T> {
+  const run = actChain.then(fn, fn);
+  actChain = run.then(() => {}, () => {});
+  return run;
+}
+/** Start of the current tick, rounded down to the minute (when the candles closed); for the decision delay. */
+let tickT0: number | null = null;
+const flatten = (s: Strategy, set: Settings, update: Record<string, unknown>, candle: Candle) => actLocked(() => flattenNow(s, set, update, candle));
+async function flattenNow(s: Strategy, set: Settings, update: Record<string, unknown>, candle: Candle) {
   if (s.position === "FLAT") return;
   const ok = await sendOrders(s, set, "FLATTEN", asArr(exitLeg(s, 1)), `Manual exit: ${exitLabel(s)}`, candle);
   if (ok) { const out = await bookPnl(s, set, update, (s.live && isCrypto(String(s.data_segment)) ? deltaFill.exit : null) ?? candle.c, "Manual exit"); await saveFills([fillOf(s, "Exit", out)]); Object.assign(update, FLAT_STATE); }
   else Object.assign(update, { last_error: "Exit order failed to send. Check the log and close the position in Dhan.", active: false });
 }
 
-async function finish(s: Strategy, set: Settings, update: Record<string, unknown>, legs: Record<string, unknown>[], event: string, notes: string[], newState: Record<string, unknown>, candle: Candle, atrNow = 0) {
+const finish = (s: Strategy, set: Settings, update: Record<string, unknown>, legs: Record<string, unknown>[], event: string, notes: string[], newState: Record<string, unknown>, candle: Candle, atrNow = 0) =>
+  actLocked(() => finishNow(s, set, update, legs, event, notes, newState, candle, atrNow));
+async function finishNow(s: Strategy, set: Settings, update: Record<string, unknown>, legs: Record<string, unknown>[], event: string, notes: string[], newState: Record<string, unknown>, candle: Candle, atrNow = 0) {
   if (legs.length) {
     const entryPx = newState._px as number | undefined;
     delete newState._px;
@@ -1977,18 +1996,22 @@ Deno.serve(async (req) => {
   const fundsDone = new Set<string>();
   const liveIds = new Map<string, string[]>();
   const results: Record<string, string> = {};
-  for (const row of strategies) {
+  // Market data fetched during this tick is shared between strategies (one request per asset and timeframe), and
+  // last prices are fetched in batches.
+  const tickMode = action === "tick" || cryptoTick;
+  if (tickMode) { Dhan.memo = new Map(); Dhan.ltpSeed = new Map(); tickT0 = Math.floor(Date.now() / 60000) * 60000; }
+  const runOne = async (row: Strategy) => {
     let s = row;
     try {
       const isCr = isCrypto(String(s.data_segment));
-      if (action === "tick" && isCr) continue; // crypto runs on tick_crypto
-      if (cryptoTick && !isCr) continue;
+      if (action === "tick" && isCr) return; // crypto runs on tick_crypto
+      if (cryptoTick && !isCr) return;
       const tick = action === "tick" || cryptoTick;
       // Each market has its own hours (NSE/BSE 09:15–15:30, MCX 09:00–23:30/23:55, crypto 05:30–24:00); ticks outside
       // them are skipped (a crypto position's stop is still watched).
       const sess = tradingSession(s.data_segment, nowIst.date); // holidays: no session, or the evening session only
       const outside = nowIst.min < sess.open || nowIst.min > sess.close + 5;
-      if (action === "tick" && outside) continue;
+      if (action === "tick" && outside) return;
       if (!s.owner_id) throw new Error("This strategy has no owner.");
       const broker = isCr ? "DELTA" : "DHAN";
       let set = await accountFor(sb, s.owner_id, broker, accounts);
@@ -2001,7 +2024,7 @@ Deno.serve(async (req) => {
           if (s.live) s = await syncStop(s, set).catch(() => s);
           s = await markPrice(s, set).catch(() => s);
           results[s.id] = "ok (outside the crypto session: stops only)";
-          continue;
+          return;
         }
       } else if (!set?.dhan_access_token) throw new Error("Connect your Dhan account (client ID and access token) to run this strategy.");
       if (!set) throw new Error("No broker account.");
@@ -2016,12 +2039,12 @@ Deno.serve(async (req) => {
       // A live strategy whose orders are still being worked waits for them (the order manager finishes them first).
       if (s.live && s.exec_state === "working" && action !== "refresh") {
         if (action === "flatten") throw new Error("Orders for this strategy are still being worked at the broker. Try again in a minute.");
-        results[s.id] = "orders working"; continue;
+        results[s.id] = "orders working"; return;
       }
       // New trades need the account in good standing; exits always go through.
       s = { ...s, _block: await entryGate(sb, s, gates).catch(() => null) };
       if (tick) s = await liveRisk(s, set);
-      if (tick && s.live) s = await syncStop(s, set).catch((e) => { console.error("stop", e); return s; });
+      if (tick && s.live) { const s0 = s; s = await actLocked(() => syncStop(s0, set)).catch((e) => { console.error("stop", e); return s0; }); }
       // A manual refresh outside market hours (or in the NSE/BSE pre-open) keeps the session's last price.
       if (tick || (action === "refresh" && !(outside && !isCr))) s = await markPrice(s, set).catch(() => s);
       if (s.live && action === "tick") liveIds.set(set.user_id, [...(liveIds.get(set.user_id) ?? []), s.id]);
@@ -2035,7 +2058,11 @@ Deno.serve(async (req) => {
       results[s.id] = msg;
       await sb.from("algo_strategies").update({ last_error: msg, last_run_at: new Date().toISOString() }).eq("id", s.id);
     }
-  }
+  };
+  // Up to 8 strategies at a time (Dhan's request pacing is shared, per account).
+  const queue = [...strategies];
+  await Promise.all(Array.from({ length: Math.min(8, queue.length) }, async () => { for (let r = queue.shift(); r; r = queue.shift()) await runOne(r); }));
+  if (tickMode) { Dhan.memo = null; Dhan.ltpSeed = null; tickT0 = null; }
   // Actual fill prices from each account's Dhan trade book for recent live orders.
   for (const [u, ids] of liveIds) { try { const a = accounts.get(`${u}|DHAN`); if (a) await brokerFills(a, ids); } catch (e) { console.error("fills", e); } }
   return Response.json({ action, results });

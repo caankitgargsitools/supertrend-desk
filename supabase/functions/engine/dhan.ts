@@ -10,7 +10,19 @@ let lastChainAt = 0; // Dhan allows one option-chain request every 3 seconds
 /** Dhan was temporarily unavailable (timeouts, 5xx, rate limits) — worth retrying later, unlike a bad token. */
 export class DhanBusyError extends Error {}
 
+/** Per-tick sharing of market-data answers: strategies on the same asset reuse one request (set by the tick loop). */
+type Memo = Map<string, Promise<any>>;
+/** Pacing per access token, shared by every Dhan object (strategies run side by side within one tick). */
+const lastByToken = new Map<string, number>();
+const DATA_PATHS = new Set(["/charts/intraday", "/charts/historical"]);
+type LtpItem = { seg: string; sec: string; ok: (v: number | null) => void; fail: (e: unknown) => void };
+const ltpBatches = new Map<string, { items: LtpItem[]; timer: number }>();
+
 export class Dhan {
+  /** Set by the tick loop for the length of one tick; null elsewhere (backtests, lab, orders). */
+  static memo: Memo | null = null;
+  /** Last prices fetched in one batch at the start of a tick: "SEG|sec" -> price. */
+  static ltpSeed: Map<string, number> | null = null;
   private last = 0;
   calls = 0;
   /** Epoch ms after which no more retries are attempted (keeps a backtest round inside the function's time limit). */
@@ -23,11 +35,28 @@ export class Dhan {
   }
 
   async post(path: string, body: unknown): Promise<any> {
+    const memo = Dhan.memo;
+    if (memo && DATA_PATHS.has(path)) {
+      // The end of an open-ended candle request is "now + 2 min" down to the second; within one tick it's the same ask.
+      const b = { ...(body as Record<string, unknown>) };
+      if (typeof b.toDate === "string") b.toDate = b.toDate.slice(0, 13);
+      const key = path + JSON.stringify(b);
+      let p = memo.get(key);
+      if (!p) { p = this.send(path, body); memo.set(key, p); p.catch(() => memo.delete(key)); }
+      return p;
+    }
+    return this.send(path, body);
+  }
+
+  private async send(path: string, body: unknown): Promise<any> {
     let lastErr = "";
     for (let attempt = 0; attempt < 4; attempt++) {
       if (attempt > 0 && Date.now() + 22000 > this.deadline) break; // out of time for another try
-      const wait = this.last + 260 - Date.now();
-      if (wait > 0) await sleep(wait);
+      // Dhan's data APIs allow about 5 requests a second per account: requests are spaced 210 ms apart per token.
+      const tk = this.token || "-";
+      const at = Math.max(Date.now(), (lastByToken.get(tk) ?? 0) + 210);
+      lastByToken.set(tk, at);
+      if (at > Date.now()) await sleep(at - Date.now());
       this.last = Date.now();
       this.calls++;
       let r: Response, text: string;
@@ -146,8 +175,48 @@ export class Dhan {
   /** Last traded price for one instrument (Data API; 1 request per second). */
   async ltp(seg: string, sec: string): Promise<number | null> {
     if (seg === "DELTA") return cryptoLtp(sec);
+    const seeded = Dhan.ltpSeed?.get(`${seg}|${sec}`);
+    if (seeded != null) return seeded;
+    if (Dhan.memo) return this.ltpBatched(seg, String(sec));
     const j = await this.post("/marketfeed/ltp", { [seg]: [Number(sec)] });
     const v = j?.data?.[seg]?.[String(sec)]?.last_price;
     return typeof v === "number" ? v : v != null ? Number(v) : null;
+  }
+
+  /**
+   * During a tick, price requests from strategies running side by side within 40 ms are sent as one request
+   * (the quote API allows one request a second, so separate requests would queue up behind each other).
+   */
+  private ltpBatched(seg: string, sec: string): Promise<number | null> {
+    const tk = this.token || "-";
+    let b = ltpBatches.get(tk);
+    if (!b) {
+      b = { items: [], timer: 0 };
+      ltpBatches.set(tk, b);
+      const batch = b;
+      batch.timer = setTimeout(async () => {
+        ltpBatches.delete(tk);
+        const bySeg: Record<string, string[]> = {};
+        for (const it of batch.items) (bySeg[it.seg] ??= []).push(it.sec);
+        try {
+          const got = await this.ltpMany(bySeg);
+          for (const [k, v] of got) Dhan.ltpSeed?.set(k, v);
+          for (const it of batch.items) it.ok(got.get(`${it.seg}|${it.sec}`) ?? null);
+        } catch (e) { for (const it of batch.items) it.fail(e); }
+      }, 40) as unknown as number;
+    }
+    return new Promise((ok, fail) => b!.items.push({ seg, sec, ok, fail }));
+  }
+
+  /** Last prices of many instruments in one request (the quote API allows one request a second). */
+  async ltpMany(bySeg: Record<string, string[]>): Promise<Map<string, number>> {
+    const body = Object.fromEntries(Object.entries(bySeg).map(([seg, secs]) => [seg, [...new Set(secs)].map(Number)]));
+    const j = await this.send("/marketfeed/ltp", body);
+    const out = new Map<string, number>();
+    for (const [seg, secs] of Object.entries(bySeg)) for (const sec of secs) {
+      const v = j?.data?.[seg]?.[String(sec)]?.last_price;
+      if (v != null && Number.isFinite(Number(v))) out.set(`${seg}|${sec}`, Number(v));
+    }
+    return out;
   }
 }
