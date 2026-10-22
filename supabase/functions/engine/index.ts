@@ -2200,8 +2200,9 @@ Deno.serve(async (req) => {
       if (!sec) return;
       const m = byOwner.get(x.owner_id) ?? {}; (m[seg] ??= []).push(sec); byOwner.set(x.owner_id, m);
     }));
-    // Prices the per-second updater fetched in the last 3 seconds are used as they are.
-    const { data: fresh } = await sb.from("live_prices").select("seg, sec, px").gt("at", new Date(Date.now() - 3000).toISOString());
+    // Prices the per-second updater fetched in the last 10 seconds are used as they are (it skips a second now and
+    // then when Dhan rate-limits; asking Dhan again here would only collide with it).
+    const { data: fresh } = await sb.from("live_prices").select("seg, sec, px").gt("at", new Date(Date.now() - 10000).toISOString());
     for (const f of fresh ?? []) Dhan.ltpSeed!.set(`${f.seg}|${f.sec}`, Number(f.px));
     for (const [uid, m] of byOwner) {
       for (const seg of Object.keys(m)) { m[seg] = m[seg].filter((sec) => !Dhan.ltpSeed!.has(`${seg}|${sec}`)); if (!m[seg].length) delete m[seg]; }
@@ -2210,7 +2211,7 @@ Deno.serve(async (req) => {
     await Promise.all([...byOwner].map(async ([uid, bySeg]) => {
       const set = await accountFor(sb, uid, "DHAN", accounts).catch(() => null);
       if (!set?.dhan_access_token) return;
-      try { for (const [k, v] of await dhanFor(set).ltpMany(bySeg)) Dhan.ltpSeed!.set(k, v); } catch (e) { console.error("ltp batch", e); }
+      try { for (const [k, v] of await dhanFor(set).ltpMany(bySeg, true)) Dhan.ltpSeed!.set(k, v); } catch { /* rate-limited: strategies ask again (batched) */ }
     }));
   }
   const runOne = async (row: Strategy) => {
