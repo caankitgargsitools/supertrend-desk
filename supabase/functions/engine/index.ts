@@ -940,8 +940,7 @@ async function processRulesDaily(s: Strategy, set: Settings, action: string) {
   const rules = validateRules(s.rules);
   const dhan = dhanFor(set);
   const nowSec = Date.now() / 1000, now = ist(nowSec), seg = String(s.data_segment);
-  const all = await dhan.daily(s.data_security_id, seg, s.data_instrument, addDays(now.date, -Math.ceil(warmBarsFor(rules) * 1.5)), addDays(now.date, 1));
-  const days = all.filter((d) => d.day < now.date);
+  const days = await dailyBefore(dhan, s, Math.ceil(warmBarsFor(rules) * 1.5), now.date);
   if (days.length < 3) throw new Error(`Only ${days.length} daily candles came back from Dhan.`);
   const book = new RuleBook(rules, s.timeframe_min, new Map(), days, new Map(), seg, undefined, await cryptoExt(s, rules, now.date));
   const openT = (day: string) => Date.parse(`${day}T00:00:00+05:30`) / 1000 + sessionFor(seg, day).open * 60 + 60;
@@ -2034,6 +2033,30 @@ Deno.serve(async (req) => {
   // last prices are fetched in batches.
   const tickMode = action === "tick" || cryptoTick;
   if (tickMode) { Dhan.memo = new Map(); Dhan.ltpSeed = new Map(); tickT0 = Math.floor(Date.now() / 60000) * 60000; }
+  // Every strategy's last price in one request per account at the start of the tick (Dhan's quote API allows one
+  // request a second, so separate requests would queue up behind each other).
+  if (action === "tick") {
+    const byOwner = new Map<string, Record<string, string[]>>();
+    await Promise.all(strategies.map(async (x) => {
+      const seg = String(x.data_segment);
+      if (isCrypto(seg) || !x.owner_id) return;
+      const sess = tradingSession(seg, nowIst.date);
+      if (nowIst.min < sess.open || nowIst.min > sess.close + 5) return;
+      let sec = String(x.data_security_id);
+      if (isCommodity(seg)) {
+        const set = await accountFor(sb, x.owner_id, "DHAN", accounts).catch(() => null);
+        if (!set?.dhan_access_token) return;
+        sec = (await dataSecurity(sb, credsOf(set), seg, sec, nowIst.date).catch(() => ({ sec: "" }))).sec;
+      }
+      if (!sec) return;
+      const m = byOwner.get(x.owner_id) ?? {}; (m[seg] ??= []).push(sec); byOwner.set(x.owner_id, m);
+    }));
+    await Promise.all([...byOwner].map(async ([uid, bySeg]) => {
+      const set = await accountFor(sb, uid, "DHAN", accounts).catch(() => null);
+      if (!set?.dhan_access_token) return;
+      try { for (const [k, v] of await dhanFor(set).ltpMany(bySeg)) Dhan.ltpSeed!.set(k, v); } catch (e) { console.error("ltp batch", e); }
+    }));
+  }
   const runOne = async (row: Strategy) => {
     let s = row;
     const t1 = Date.now();
