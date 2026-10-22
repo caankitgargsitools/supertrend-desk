@@ -2036,6 +2036,7 @@ Deno.serve(async (req) => {
   if (tickMode) { Dhan.memo = new Map(); Dhan.ltpSeed = new Map(); tickT0 = Math.floor(Date.now() / 60000) * 60000; }
   const runOne = async (row: Strategy) => {
     let s = row;
+    const t1 = Date.now();
     try {
       const isCr = isCrypto(String(s.data_segment));
       if (action === "tick" && isCr) return; // crypto runs on tick_crypto
@@ -2086,7 +2087,7 @@ Deno.serve(async (req) => {
       if (s.strategy_kind === "TIMED") await processTimed(s, set, act);
       else if (s.strategy_kind === "RULES") await processRules(s, set, act);
       else await processFlip(s, set, act);
-      results[s.id] = "ok";
+      results[s.id] = `ok ${Date.now() - t1}ms (done ${tickT0 ? Date.now() - tickT0 : 0}ms after the minute)`;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       results[s.id] = msg;
