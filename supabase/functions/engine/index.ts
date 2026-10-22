@@ -1361,7 +1361,7 @@ async function pricesTick(rows: Strategy[]) {
     ...[...bySeg].map(async ([uid, segs]) => {
       const set = await accountFor(sb, uid, "DHAN", accounts).catch(() => null);
       if (!set?.dhan_access_token) return;
-      try { for (const [k, v] of await dhanFor(set).ltpMany(segs)) px.set(k, v); } catch (e) { console.error("prices", e); }
+      try { for (const [k, v] of await dhanFor(set).ltpMany(segs, true)) px.set(k, v); } catch { /* rate-limited or busy: the next round is a second away */ }
     }),
     ...[...coins].map(async (c) => { const v = await cryptoLtp(c).catch(() => null); if (v) px.set(`DELTA|${c}`, v); }),
   ]);
@@ -1507,29 +1507,21 @@ async function runBacktestJob(id: number) {
  * so no broker token ever reaches the browser. Each position is re-priced at most every 3 seconds, whoever asks.
  */
 async function liveMarks(userId: string, admin: boolean) {
-  let q = sb.from("algo_strategies").select("*").neq("position", "FLAT").eq("archived", false);
+  // Served from the per-second prices (live_marks) and the strategy rows: no Dhan request from here, since the quote
+  // API allows one request a second per account and the price loop uses it.
+  let q = sb.from("algo_strategies").select("id, pos_ltp, pos_upnl, pos_ltp_at").neq("position", "FLAT").eq("archived", false);
   if (!admin) q = q.eq("owner_id", userId);
-  const { data: rows0 } = await q;
-  const rows = await withMasters(sb, rows0 ?? []);
-  const accounts = new Map<string, Account | null>(), today = ist(Date.now() / 1000).date;
+  const { data: rows } = await q;
+  const ids = (rows ?? []).map((r) => r.id);
+  const { data: lm } = ids.length ? await sb.from("live_marks").select("strategy_id, ltp, upnl, at").in("strategy_id", ids) : { data: [] };
+  const live = new Map((lm ?? []).map((m) => [m.strategy_id, m]));
   const out: Record<string, { ltp: number | null; upnl: number | null; at: string | null }> = {};
-  await Promise.all(rows.map(async (row: Strategy) => {
-    try {
-      let s = row;
-      const isCr = isCrypto(String(s.data_segment));
-      let set = s.owner_id ? await accountFor(sb, s.owner_id, isCr ? "DELTA" : "DHAN", accounts) : null;
-      if (isCr) set = set ?? { user_id: s.owner_id, broker: "DELTA", dhan_client_id: null, dhan_access_token: null, webhook_url: null, webhook_secret: null, capital: null, capital_since: null, deploy_pct: null, funds_at: null };
-      else if (!set?.dhan_access_token) { out[s.id] = { ltp: s.pos_ltp ?? null, upnl: s.pos_upnl ?? null, at: s.pos_ltp_at ?? null }; return; }
-      // Outside the market's hours (including the 09:00–09:15 pre-open on NSE/BSE) the last price from the session stays:
-      // pre-open prices are only indicative, and the desk takes no decision on them either.
-      const nowI = ist(Date.now() / 1000), sess = sessionFor(String(s.data_segment), nowI.date);
-      if (!isCr && (nowI.min < sess.open || nowI.min > sess.close)) { out[s.id] = { ltp: s.pos_ltp ?? null, upnl: s.pos_upnl ?? null, at: s.pos_ltp_at ?? null }; return; }
-      if (isCommodity(String(s.data_segment))) s = { ...s, data_security_id: (await dataSecurity(sb, credsOf(set!), s.data_segment, String(s.data_security_id), today)).sec };
-      const fresh = s.pos_ltp_at && Date.now() - Date.parse(s.pos_ltp_at) < 3000;
-      const m = fresh ? s : await markPrice({ ...s, pos_ltp_at: null }, set!).catch(() => s);
-      out[s.id] = { ltp: m.pos_ltp ?? null, upnl: m.pos_upnl ?? null, at: m.pos_ltp_at ?? null };
-    } catch { /* leave this one out */ }
-  }));
+  for (const r of rows ?? []) {
+    const m = live.get(r.id);
+    out[r.id] = m && (!r.pos_ltp_at || Date.parse(m.at) > Date.parse(r.pos_ltp_at))
+      ? { ltp: Number(m.ltp), upnl: m.upnl == null ? null : Number(m.upnl), at: m.at }
+      : { ltp: r.pos_ltp ?? null, upnl: r.pos_upnl ?? null, at: r.pos_ltp_at ?? null };
+  }
   return out;
 }
 /**
