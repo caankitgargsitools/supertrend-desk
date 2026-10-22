@@ -24,6 +24,7 @@ import { loadMarginRates, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
 import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
 import { legsFor, legSign, structMargin, structName, structOf } from "./structures.ts";
+import { auditStrategy } from "./audit.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -1181,6 +1182,46 @@ async function chainBacktest(id: number) {
   });
 }
 
+/**
+ * Daily self-check: every strategy with paper or live trades in the last 30 days is replayed with the backtest engine
+ * and its trades matched one by one (see audit.ts). Two strategies per call (the 2-second limit); the rest chain on.
+ */
+async function runAudit(batch: string, offset: number) {
+  const today = ist(Date.now() / 1000).date, days = 30;
+  const { data: tr } = await sb.from("algo_trades").select("strategy_id, mode").eq("hidden", false).gte("entry_day", addDays(today, -days));
+  const pairs = [...new Set((tr ?? []).map((t) => `${t.strategy_id}|${t.mode}`))].sort();
+  const creds = credsOf(await adminAccount(sb));
+  const t0 = Date.now();
+  let i = offset;
+  for (; i < pairs.length && (i === offset || Date.now() - t0 < 20000) && i < offset + 2; i++) {
+    const [sid, mode] = pairs[i].split("|");
+    const { data: s } = await sb.from("algo_strategies").select("*").eq("id", sid).maybeSingle();
+    if (!s) continue;
+    try {
+      const r = await auditStrategy(sb, creds, s, mode as "PAPER" | "LIVE", days, today);
+      if (r) await sb.from("desk_audit").insert({ batch, ...r });
+    } catch (e) {
+      await sb.from("desk_audit").insert({ batch, strategy_id: sid, user_id: s.owner_id, mode, name: s.name, verdict: "skipped", note: `Couldn't replay: ${(e as Error).message}`.slice(0, 300), trades: [] });
+    }
+  }
+  if (i < pairs.length) {
+    const { data: sec } = await sb.from("engine_secret").select("secret").single();
+    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/engine`, { method: "POST", headers: { "Content-Type": "application/json", "x-engine-secret": sec!.secret }, body: JSON.stringify({ action: "audit", batch, offset: i }) });
+    return { batch, done: i, of: pairs.length };
+  }
+  // All done: one note per owner with the strategies that showed a gap.
+  const { data: rows } = await sb.from("desk_audit").select("user_id, name, mode, verdict, issues, missed, extra").eq("batch", batch);
+  const byUser = new Map<string, typeof rows>();
+  for (const r of rows ?? []) byUser.set(r.user_id, [...(byUser.get(r.user_id) ?? []), r]);
+  for (const [uid, list] of byUser) {
+    const gaps = (list ?? []).filter((r) => r.verdict === "gap");
+    const ok = (list ?? []).filter((r) => r.verdict === "ok").length;
+    await sb.from("notifications").insert({ user_id: uid, kind: "audit", url: "/?trades=1",
+      title: gaps.length ? `Daily self-check: ${gaps.length} strateg${gaps.length === 1 ? "y" : "ies"} with gaps` : `Daily self-check: all ${ok} strategies match the backtest`,
+      body: gaps.length ? gaps.slice(0, 4).map((g) => `${g.name.slice(0, 40)} (${g.mode.toLowerCase()}): ${g.issues} issue${g.issues === 1 ? "" : "s"}`).join(" · ") : `${ok} checked, no gaps.` });
+  }
+  return { batch, done: i, of: pairs.length };
+}
 /** Strategy lab: run one instalment, then hand over to a fresh invocation if there is more to do. */
 async function labLoop() {
   const creds = credsOf(await adminAccount(sb));
@@ -1838,6 +1879,12 @@ Deno.serve(async (req) => {
   if (action === "orders") return Response.json({ action, ...(await runOrders(Math.min(4, Math.max(1, Number(body.passes) || 4)))) });
   if (action === "reconcile") { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", ist(Date.now() / 1000).date); setHolidays(hol ?? []); }
   if (action === "reconcile") return Response.json({ action, ...(await reconcile()) });
+  if (action === "audit") {
+    const b = body as { batch?: string; offset?: number };
+    const batch = b.batch || `${ist(Date.now() / 1000).date}-${Date.now().toString(36)}`;
+    EdgeRuntime.waitUntil(runAudit(batch, Number(b.offset) || 0).catch((e) => console.error("audit", e)));
+    return Response.json({ action, accepted: true, batch });
+  }
   if (action === "lab_reverdict") return Response.json({ action, ...(await labReverdict(sb, Math.min(300, Number((body as any).limit) || 120), !!(body as any).short)) });
   if (action === "marks" && body.user_id) return Response.json({ action, marks: await liveMarks(body.user_id, false) });
   if (action === "lab_opt") {
