@@ -27,5 +27,6 @@ create table if not exists public.price_lock (id int primary key, at timestamptz
 insert into public.price_lock (id) values (1) on conflict do nothing;
 alter table public.price_lock enable row level security;
 
-select cron.schedule('live-prices', '1 seconds',
+-- One engine run a minute that loops every second (pg_net delivers per-second calls in bursts).
+select cron.schedule('live-prices', '* * * * *',
   $$select public.engine_call('prices') where exists (select 1 from public.algo_strategies where active and position <> 'FLAT' and not archived)$$);

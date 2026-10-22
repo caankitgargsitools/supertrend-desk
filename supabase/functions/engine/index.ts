@@ -1282,13 +1282,35 @@ async function runAudit(batch: string, offset: number) {
  */
 let priceHolDay = "";
 const mcxSecMemo = new Map<string, string>();
-async function pricesTick() {
-  const { data: lk } = await sb.from("price_lock").update({ at: nowIso() }).eq("id", 1).lt("at", new Date(Date.now() - 800).toISOString()).select("id");
-  if (!lk?.length) return { skipped: "busy" };
+const rowWriteAt = new Map<string, number>();
+/**
+ * One engine run per minute (cron) that prices every second until the next run takes over. A lock row keeps a
+ * single loop going; the strategy list is re-read every 5 seconds (positions change), prices every second.
+ */
+async function pricesLoop() {
+  const end = Date.now() + 58000;
+  const { data: lk } = await sb.from("price_lock").update({ at: new Date(end).toISOString() }).eq("id", 1).lt("at", nowIso()).select("id");
+  if (!lk?.length) return { skipped: "another price loop is running" };
+  let rounds = 0, rows: Strategy[] = [], rowsAt = 0;
+  while (Date.now() < end - 900) {
+    const t = Date.now();
+    try {
+      if (Date.now() - rowsAt > 5000) {
+        const { data: r0 } = await sb.from("algo_strategies").select("*").eq("archived", false).or("active.eq.true,position.neq.FLAT");
+        rows = (await withMasters(sb, r0 ?? [])) as Strategy[]; rowsAt = Date.now();
+        if (!rows.some((x) => x.position !== "FLAT")) break; // nothing open: no need to price
+      }
+      await pricesTick(rows); rounds++;
+    } catch (e) { console.error("prices", e); }
+    const wait = 1000 - (Date.now() - t);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  }
+  await sb.from("price_lock").update({ at: nowIso() }).eq("id", 1);
+  return { rounds };
+}
+async function pricesTick(rows: Strategy[]) {
   const nowI = ist(Date.now() / 1000), today = nowI.date;
   if (priceHolDay !== today) { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", today); setHolidays(hol ?? []); priceHolDay = today; mcxSecMemo.clear(); }
-  const { data: rows0 } = await sb.from("algo_strategies").select("*").eq("archived", false).or("active.eq.true,position.neq.FLAT");
-  const rows = (await withMasters(sb, rows0 ?? [])) as Strategy[];
   const accounts = new Map<string, Account | null>();
   const bySeg = new Map<string, Record<string, string[]>>(); // owner -> seg -> secs
   const coins = new Set<string>();
@@ -1342,7 +1364,7 @@ async function pricesTick() {
     const upnl = inPx > 0 ? Math.trunc((p! - inPx) * dir * unitsOf(s)) : null;
     marks.push({ strategy_id: s.id, owner_id: s.owner_id, ltp: +p!.toFixed(2), upnl, at });
     // The strategy row itself (lists, capital, alerts) every 10 seconds.
-    if (!s.pos_ltp_at || Date.now() - Date.parse(s.pos_ltp_at) > 10000) slow.push(sb.from("algo_strategies").update({ pos_ltp: +p!.toFixed(2), pos_upnl: upnl, pos_ltp_at: at }).eq("id", s.id).eq("position", s.position));
+    if (Date.now() - (rowWriteAt.get(s.id) ?? (s.pos_ltp_at ? Date.parse(s.pos_ltp_at) : 0)) > 10000) rowWriteAt.set(s.id, Date.now()), slow.push(sb.from("algo_strategies").update({ pos_ltp: +p!.toFixed(2), pos_upnl: upnl, pos_ltp_at: at }).eq("id", s.id).eq("position", s.position));
   }
   if (marks.length) await sb.from("live_marks").upsert(marks);
   await Promise.all(slow);
@@ -2005,7 +2027,7 @@ Deno.serve(async (req) => {
   if (action === "orders") return Response.json({ action, ...(await runOrders(Math.min(4, Math.max(1, Number(body.passes) || 4)))) });
   if (action === "reconcile") { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", ist(Date.now() / 1000).date); setHolidays(hol ?? []); }
   if (action === "reconcile") return Response.json({ action, ...(await reconcile()) });
-  if (action === "prices") return Response.json({ action, ...(await pricesTick()) });
+  if (action === "prices") { EdgeRuntime.waitUntil(pricesLoop().catch((e) => console.error("price loop", e))); return Response.json({ action, accepted: true }); }
   if (action === "audit") {
     const b = body as { batch?: string; offset?: number };
     const batch = b.batch || `${ist(Date.now() / 1000).date}-${Date.now().toString(36)}`;
