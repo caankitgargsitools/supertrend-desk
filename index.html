@@ -5233,9 +5233,15 @@ function onMark(m) {
 /** Live prices: the server pushes each open position's price and running P&L every second (Realtime). */
 function startLiveMarks() {
   if (marksCh || !me) return;
-  marksCh = db.channel("live-marks")
+  const ch = marksCh = db.channel("live-marks")
     .on("postgres_changes", { event: "*", schema: "public", table: "live_marks", filter: `owner_id=eq.${me.user_id}` }, (p) => onMark(p.new))
-    .subscribe((st) => { if (st === "CHANNEL_ERROR" || st === "TIMED_OUT" || st === "CLOSED") { try { db.removeChannel(marksCh); } catch { /* gone */ } marksCh = null; setTimeout(startLiveMarks, 5000); } });
+    .subscribe((st) => {
+      // Connection lost: drop this channel (outside this callback, which removing it would call again) and retry later.
+      if ((st === "CHANNEL_ERROR" || st === "TIMED_OUT" || st === "CLOSED") && marksCh === ch) {
+        marksCh = null;
+        setTimeout(() => { try { db.removeChannel(ch); } catch { /* gone */ } startLiveMarks(); }, 15000);
+      }
+    });
 }
 async function pollMarks() {
   clearTimeout(marksTimer);
