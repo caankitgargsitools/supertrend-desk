@@ -479,6 +479,15 @@ async function liveRisk(s: Strategy, set: Settings): Promise<Strategy> {
   return actLocked(() => riskExit(s, set, pr, hit, update));
 }
 async function riskExit(s: Strategy, set: Settings, pr: PosRisk, hit: { px: number; t: number; why: string }, update: Record<string, unknown>): Promise<Strategy> {
+  // The per-second price check and the minute tick can both see the same stop: whichever claims the position first
+  // exits it; the other leaves it alone.
+  const { data: claim } = await sb.from("algo_strategies").update({ exec_state: "stopping", exec_at: nowIso() }).eq("id", s.id).eq("position", s.position)
+    .or(`exec_state.is.null,and(exec_state.eq.stopping,exec_at.lt.${new Date(Date.now() - 90000).toISOString()})`).select("id");
+  if (!claim?.length) return s;
+  try { return await riskExitNow(s, set, pr, hit, update); }
+  finally { await sb.from("algo_strategies").update({ exec_state: null }).eq("id", s.id).eq("exec_state", "stopping"); }
+}
+async function riskExitNow(s: Strategy, set: Settings, pr: PosRisk, hit: { px: number; t: number; why: string }, update: Record<string, unknown>): Promise<Strategy> {
   const event = /Target/.test(hit.why) ? "TARGET" : /Trailing/.test(hit.why) ? "TRAIL_STOP" : "STOP_LOSS";
   const under = pr.basis === "PREMIUM" ? undefined : hit.px;
   const ok = await sendOrders(s, set, event, asArr(exitLeg(s, 1)), `${hit.why}${pr.basis === "PREMIUM" ? " (premium)" : ""}: ${exitLabel(s)}`, { t: hit.t, c: under });
@@ -1370,6 +1379,7 @@ async function pricesTick(rows: Strategy[]) {
   // Running P&L of open positions priced on one instrument (futures, index basis, crypto). Option positions are
   // priced by the minute tick (their premium comes from the option chain, allowed once every 3 seconds).
   const marks: { strategy_id: string; owner_id: string; ltp: number; upnl: number | null; at: string }[] = [];
+  const checks: Promise<unknown>[] = [];
   const slow: PromiseLike<unknown>[] = [];
   for (const { s, key } of want.values()) {
     if (s.position === "FLAT" || s.trade_type === "OPTIONS" || isMulti(s)) continue;
@@ -1378,12 +1388,47 @@ async function pricesTick(rows: Strategy[]) {
     const inPx = Number(s.pos_entry_px ?? pr.entry ?? 0), dir = s.position === "LONG" ? 1 : -1;
     const upnl = inPx > 0 ? Math.trunc((p! - inPx) * dir * unitsOf(s)) : null;
     marks.push({ strategy_id: s.id, owner_id: s.owner_id, ltp: +p!.toFixed(2), upnl, at });
+    checks.push(secondRisk(s, p!, at));
     // The strategy row itself (lists, capital, alerts) every 10 seconds.
     if (Date.now() - (rowWriteAt.get(s.id) ?? (s.pos_ltp_at ? Date.parse(s.pos_ltp_at) : 0)) > 10000) rowWriteAt.set(s.id, Date.now()), slow.push(sb.from("algo_strategies").update({ pos_ltp: +p!.toFixed(2), pos_upnl: upnl, pos_ltp_at: at }).eq("id", s.id).eq("position", s.position));
   }
   if (marks.length && at >= lastMarkAt) { lastMarkAt = at; await sb.from("live_marks").upsert(marks); }
+  await Promise.all(checks);
   await Promise.all(slow);
   return { prices: px.size, marks: marks.length };
+}
+/**
+ * Stop loss, target and trailing stop on every second's price (the minute tick also checks completed 1-minute
+ * candles, which catch a spike between two seconds). A new best price moves the trailing stop at once.
+ */
+const bestMemo = new Map<string, { best: number; at: string }>();
+async function secondRisk(s: Strategy, px: number, at: string) {
+  const pr = s.pos_risk as PosRisk | null;
+  if (!s.active || !pr || pr.dir === undefined || pr.basis === "PREMIUM" || !(pr.stop || pr.tgt || pr.trail)) return;
+  const m = bestMemo.get(s.id);
+  const best0 = Number(pr.best), best = m && m.at > (s.pos_ltp_at ?? "") ? (pr.dir === 1 ? Math.max(best0, m.best) : Math.min(best0, m.best)) : best0;
+  const rs = { dir: pr.dir!, stop: pr.stop ?? null, tgt: pr.tgt ?? null, trail: pr.trail ?? null, trailAtr: pr.trailAtr ?? 0, best, scanFrom: 0 } as RiskState;
+  const t = Math.floor(Date.parse(at) / 1000);
+  const hit = riskScan(rs, [{ t, o: px, h: px, l: px }]);
+  if (!hit) {
+    if (rs.best !== best) { // new best price: the trailing stop moves now
+      bestMemo.set(s.id, { best: rs.best, at });
+      await sb.from("algo_strategies").update({ pos_risk: { ...pr, best: rs.best } }).eq("id", s.id).eq("position", s.position);
+    }
+    return;
+  }
+  // Hit: the full strategy row and its account, then the same exit path as the minute tick.
+  const { data: full } = await sb.from("algo_strategies").select("*").eq("id", s.id).maybeSingle();
+  if (!full || full.position !== s.position || !full.active) return; // paused strategies' stops aren't run (as on the minute tick)
+  const st = (await withMasters(sb, [full]))[0] as Strategy;
+  const isCr = isCrypto(String(st.data_segment));
+  let set = await accountFor(sb, st.owner_id, isCr ? "DELTA" : "DHAN", new Map()).catch(() => null);
+  if (isCr && !set) set = { user_id: st.owner_id, broker: "DELTA", dhan_client_id: null, dhan_access_token: null, webhook_url: null, webhook_secret: null, capital: null, capital_since: null, deploy_pct: null, funds_at: null };
+  if (!set) return;
+  if (isCommodity(String(st.data_segment)) && !/^\d+$/.test(String(st.data_security_id))) st.data_security_id = mcxSecMemo.get(String(st.data_security_id)) ?? st.data_security_id;
+  const fpr = (full.pos_risk ?? pr) as PosRisk;
+  bestMemo.delete(s.id);
+  await actLocked(() => riskExit(st, set!, fpr, hit, { last_run_at: nowIso() }));
 }
 /** Strategy lab: run one instalment, then hand over to a fresh invocation if there is more to do. */
 async function labLoop() {
@@ -2206,6 +2251,7 @@ Deno.serve(async (req) => {
         s = { ...s, data_security_id: r.sec };
       }
       // A live strategy whose orders are still being worked waits for them (the order manager finishes them first).
+      if (s.exec_state === "stopping" && s.exec_at && Date.now() - Date.parse(s.exec_at) < 90000) { results[s.id] = "stop being handled"; return; }
       if (s.live && s.exec_state === "working" && action !== "refresh") {
         if (action === "flatten") throw new Error("Orders for this strategy are still being worked at the broker. Try again in a minute.");
         results[s.id] = "orders working"; return;
