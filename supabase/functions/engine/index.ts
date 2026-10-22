@@ -42,7 +42,33 @@ const CHART_BARS = 160;
 const WARM_BARS = 500; // same Supertrend warm-up as the chart and the backtester
 
 /** Intraday candles over more than Dhan's 90-day request limit. */
+/**
+ * Candles kept in memory between ticks (the engine stays warm between minute calls): after the first full download,
+ * each tick asks Dhan only for candles from the last stored day on, instead of weeks of history every minute.
+ */
+type Row5 = { t: number; o: number; h: number; l: number; c: number };
+const SPAN_CACHE = new Map<string, { rows: Map<number, Row5>; from: string; at: number }>();
 async function intradaySpan(dhan: Dhan, s: Strategy, interval: number, days: number, nowSec: number) {
+  const today = fmtIst(nowSec, false), want = addDays(today, -days);
+  const key = `${s.data_security_id}|${s.data_segment}|${interval}`;
+  const hit = SPAN_CACHE.get(key);
+  if (hit && hit.from <= want && Date.now() - hit.at < 6 * 3600000 && hit.rows.size) {
+    const lastT = Math.max(...hit.rows.keys());
+    const fromDay = fmtIst(lastT, false);
+    const rows = await dhan.intraday(s.data_security_id, s.data_segment, s.data_instrument, interval, `${fromDay} 00:00:00`, fmtIst(nowSec + 120, true));
+    // The newest stored candle may have been incomplete when stored: everything from that day is replaced.
+    const dayStart = Date.parse(`${fromDay}T00:00:00+05:30`) / 1000;
+    for (const t of [...hit.rows.keys()]) if (t >= dayStart) hit.rows.delete(t);
+    for (const r of rows) hit.rows.set(r.t, r);
+    const lo = Date.parse(`${want}T00:00:00+05:30`) / 1000;
+    return [...hit.rows.values()].filter((r) => r.t >= lo).sort((x, y) => x.t - y.t);
+  }
+  const all = await intradaySpanFull(dhan, s, interval, days, nowSec);
+  const m = new Map<number, Row5>(); for (const r of all) m.set(r.t, r);
+  SPAN_CACHE.set(key, { rows: m, from: want, at: Date.now() });
+  return all;
+}
+async function intradaySpanFull(dhan: Dhan, s: Strategy, interval: number, days: number, nowSec: number) {
   const out = new Map<number, ReturnType<typeof Object>>();
   const today = fmtIst(nowSec, false);
   for (let back = days; back > 0; back -= 85) {
@@ -880,9 +906,7 @@ async function rulesData(s: Strategy, dhan: Dhan, nowSec: number) {
     frames.set(tf, aggregate(rawBy.get(bi)!, tf, seg).filter((b) => isComplete(b, bi, nowSec)));
   }
   const today = ist(nowSec).date;
-  const daily: DayBar[] = tfs.daily
-    ? (await dhan.daily(s.data_security_id, seg, s.data_instrument, addDays(today, -Math.ceil(warm * 1.5)), addDays(today, 1))).filter((d) => d.day < today)
-    : [];
+  const daily: DayBar[] = tfs.daily ? await dailyBefore(dhan, s, Math.ceil(warm * 1.5), today) : [];
   const smallest = Math.min(...rawBy.keys());
   const baseByDay = new Map<string, { min: number; h: number; l: number }[]>();
   for (const r of rawBy.get(smallest) ?? []) {
@@ -890,6 +914,16 @@ async function rulesData(s: Strategy, dhan: Dhan, nowSec: number) {
     const a = baseByDay.get(p.date) ?? []; a.push({ min: p.min, h: r.h, l: r.l }); baseByDay.set(p.date, a);
   }
   return { rules, book: new RuleBook(rules, s.timeframe_min, frames, daily, baseByDay, seg, undefined, await cryptoExt(s, rules, today)), bars: frames.get(s.timeframe_min)! };
+}
+/** Completed daily candles before today; they don't change during the day, so they are fetched once a day. */
+const DAILY_CACHE = new Map<string, { day: string; from: string; rows: DayBar[] }>();
+async function dailyBefore(dhan: Dhan, s: Strategy, days: number, today: string): Promise<DayBar[]> {
+  const key = `${s.data_security_id}|${s.data_segment}|${s.data_instrument}`, from = addDays(today, -days);
+  const hit = DAILY_CACHE.get(key);
+  if (hit && hit.day === today && hit.from <= from) return hit.rows.filter((d) => d.day >= from);
+  const rows = (await dhan.daily(s.data_security_id, String(s.data_segment), s.data_instrument, from, addDays(today, 1))).filter((d) => d.day < today);
+  if (rows.length) DAILY_CACHE.set(key, { day: today, from, rows });
+  return rows;
 }
 /** Crypto rules that read Bitcoin's trend or the funding rate get those series (other strategies: none). */
 async function cryptoExt(s: Strategy, rules: ReturnType<typeof validateRules>, today: string) {
