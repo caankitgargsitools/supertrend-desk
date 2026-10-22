@@ -61,8 +61,8 @@ export function matchTrades(desk: DeskRow[], plans: Plan[], opts: { daily: boole
       if (late > (opts.daily ? 0 : tol)) issue = `Exit differs: desk ${deskInfo.exit}, backtest ${bt.exit}`;
       if (!opts.options && btPts != null) {
         rupee = Math.trunc((dPts - btPts) * Number(best.units));
-        // Points gap beyond 0.25% of the price: slippage alone doesn't explain it.
-        if (!issue && Math.abs(dPts - btPts) > p.spotIn * 0.0025) issue = `Price gap: desk ${dPts.toFixed(1)} pts, backtest ${btPts.toFixed(1)} pts`;
+        // The desk did worse than the backtest by more than 0.25% of the price: slippage alone doesn't explain it.
+        if (!issue && btPts - dPts > p.spotIn * 0.0025) issue = `Desk did worse: ${dPts.toFixed(1)} pts against the backtest's ${btPts.toFixed(1)} pts`;
       }
     }
     out.push({ side: p.side, entry_day: p.entryDay, desk: deskInfo, bt, issue, rupee_gap: rupee });

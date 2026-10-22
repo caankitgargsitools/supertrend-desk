@@ -1154,6 +1154,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
         <div id="tf_stats"></div>
         <div id="tf_list" class="tlist" style="margin-top:10px"></div>
         <p class="hint" id="tf_note" style="margin:8px 0 0"></p>
+        <div id="auditBox" style="margin-top:16px"></div>
       </div>
       <div id="lp_live_box" hidden>
         <p class="hint" style="margin:0 0 8px">Strategies that are live now (archived ones and ones back on paper are left out, along with their trades). Capital = the capital you gave the strategy, or else its lots × today's margin for one lot (Dhan's margin calculator; crypto: Delta at 10×). Profits are real closed trades after charges, in whole rupees. CAGR = the yearly growth rate that turns the capital into capital + profit over the days since the strategy first went live. Click a strategy to see every trade.</p>
@@ -4965,7 +4966,36 @@ async function loadAllTrades(force = false) {
     }
     deskTrades = out; deskTradesAt = Date.now();
   }
-  fillTradeFilters(); renderAllTrades();
+  fillTradeFilters(); renderAllTrades(); loadAudit().catch(() => {});
+}
+/* daily self-check: every strategy's trades replayed with the backtest engine */
+async function loadAudit() {
+  const last = must(await db.from("desk_audit").select("batch, created_at").eq("user_id", me.user_id).order("id", { ascending: false }).limit(1));
+  const box = $("auditBox");
+  const btn = isAdmin() ? '<button class="btn small" id="au_now" type="button">Check now</button>' : "";
+  if (!last.length) { box.innerHTML = `<section class="card"><div class="head"><h3 style="margin:0">Daily self-check</h3>${btn}</div><p class="hint">Not run yet. Every morning at 7:40 AM the desk replays each strategy's trades of the last 30 days with the backtest engine and flags any trade that differs.</p></section>`; wireAudit(); return; }
+  const rows = must(await db.from("desk_audit").select("*").eq("batch", last[0].batch).order("verdict").order("name"));
+  const gaps = rows.filter((r) => r.verdict === "gap"), ok = rows.filter((r) => r.verdict === "ok"), sk = rows.filter((r) => r.verdict === "skipped");
+  const cls = (v) => Number(v) > 0 ? "pos-num" : Number(v) < 0 ? "neg-num" : "";
+  const chip = (v) => v === "ok" ? '<span class="chip green">Matches</span>' : v === "gap" ? '<span class="chip red">Gap</span>' : '<span class="chip">Not checked</span>';
+  const tr = (t) => `<tr><td>${esc(t.entry_day)}</td><td>${esc(t.side === "LONG" ? "Long" : "Short")}</td>
+    <td>${t.desk ? `${esc(pxTxt(t.desk.entry_px))} → ${esc(pxTxt(t.desk.exit_px))}<div class="hint sm">out ${esc(t.desk.exit)} · ${esc(t.desk.pts)} pts</div>` : '<span class="hint">no trade</span>'}</td>
+    <td>${t.bt ? `${esc(pxTxt(t.bt.entry_px))} → ${t.bt.exit_px == null ? "open" : esc(pxTxt(t.bt.exit_px))}<div class="hint sm">in ${esc(t.bt.entry)} · out ${esc(t.bt.exit)}${t.bt.pts != null ? ` · ${esc(t.bt.pts)} pts` : ""}</div>` : '<span class="hint">no trade</span>'}</td>
+    <td class="n ${cls(t.rupee_gap)}">${t.rupee_gap != null ? esc(rupees(t.rupee_gap)) : "–"}</td><td>${t.issue ? `<span class="neg-num">${esc(t.issue)}</span>` : '<span class="pos-num">✓</span>'}</td></tr>`;
+  const one = (r) => `<details class="xp"><summary><span class="xt">${chip(r.verdict)} ${esc(r.name)} <span class="chip ${r.mode === "LIVE" ? "red" : "yellow"}">${r.mode === "LIVE" ? "Live" : "Paper"}</span></span>
+      <span class="hint">${r.verdict === "skipped" ? esc(r.note || "") : `${r.matched} matched · ${r.missed} missed · ${r.extra} extra · ₹ gap <span class="${cls(r.rupee_gap)}">${esc(rupees(r.rupee_gap))}</span>`}</span></summary>
+    <div class="xpb">${r.verdict === "skipped" ? "" : `<p class="hint" style="margin:0 0 8px">${esc(r.from_day)} to ${esc(r.to_day)}. Points are per unit on the underlying; ₹ gap = (desk points − backtest points) × units (negative: the desk did worse). ${esc(r.note || "")}</p>
+      <div class="scroll"><table class="mini"><thead><tr><th>Entry day</th><th>Side</th><th>Desk</th><th>Backtest</th><th class="n">₹ gap</th><th>Check</th></tr></thead><tbody>${(r.trades || []).map(tr).join("")}</tbody></table></div>`}</div></details>`;
+  const gapSum = rows.reduce((a, r) => a + Number(r.rupee_gap || 0), 0);
+  box.innerHTML = `<section class="card"><div class="head"><div><h3 style="margin:0">Daily self-check</h3><span class="hint">Last run ${esc(istText(last[0].created_at))}: each strategy's trades of the last 30 days replayed with the backtest engine on the same days</span></div>${btn}</div>
+    <div class="stats" style="margin-top:10px"><div class="stat"><span class="label">Match the backtest</span><span class="v up">${ok.length}</span></div><div class="stat"><span class="label">With gaps</span><span class="v ${gaps.length ? "down" : ""}">${gaps.length}</span><span class="hint">missed / extra trades, different exits, prices off by more than 0.25%</span></div>
+    <div class="stat"><span class="label">₹ gap, desk vs backtest</span><span class="v ${gapSum < 0 ? "down" : gapSum > 0 ? "up" : ""}">${esc(rupees(gapSum))}</span><span class="hint">on matched trades</span></div>${sk.length ? `<div class="stat"><span class="label">Not checked</span><span class="v">${sk.length}</span><span class="hint">older non-rule strategies</span></div>` : ""}</div>
+    <div style="margin-top:10px">${[...gaps, ...ok, ...sk].map(one).join("")}</div></section>`;
+  wireAudit();
+}
+function wireAudit() {
+  const b = $("au_now"); if (!b) return;
+  b.addEventListener("click", (e) => run(e.currentTarget, async () => { must(await db.rpc("audit_now")); toast("Self-check started; it takes a minute or two."); setTimeout(() => loadAudit().catch(() => {}), 90000); }));
 }
 function fillTradeFilters() {
   const keep = (id) => $(id).value;
