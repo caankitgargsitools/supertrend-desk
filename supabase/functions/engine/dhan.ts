@@ -7,6 +7,9 @@ export type OptBar = { t: number; o: number; h?: number; l?: number; c: number; 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let lastChainAt = 0; // Dhan allows one option-chain request every 3 seconds
 
+/** Dhan answered a candle request with "bad request" (DH-905), as it did for every candle request from 23 Oct 2026. */
+const refused = (e: unknown) => /HTTP 400\b|DH-905/.test(e instanceof Error ? e.message : String(e));
+
 /** Dhan was temporarily unavailable (timeouts, 5xx, rate limits) — worth retrying later, unlike a bad token. */
 export class DhanBusyError extends Error {}
 
@@ -25,6 +28,13 @@ export class Dhan {
   static memo: Memo | null = null;
   /** Last prices fetched in one batch at the start of a tick: "SEG|sec" -> price. */
   static ltpSeed: Map<string, number> | null = null;
+  /** Candles built without Dhan's candle API (stored history + own minute candles), set by the engine. */
+  static own: { intraday: (sec: string, seg: string, interval: number, from: string, to: string) => Promise<Raw[] | null>;
+    daily: (sec: string, seg: string, from: string, to: string) => Promise<DayBar[] | null> } | null = null;
+  /** Instruments ("SEG|sec") whose candles came from own candles in this tick (noted on their signals). */
+  static ownUsed = new Set<string>();
+  /** Strategy ticks fall back to own candles when Dhan refuses a candle request; the lab never does. */
+  useOwn = false;
   private last = 0;
   calls = 0;
   /** Epoch ms after which no more retries are attempted (keeps a backtest round inside the function's time limit). */
@@ -105,9 +115,16 @@ export class Dhan {
   /** Minute candles (interval 1/5/15/25/60). Dates as "YYYY-MM-DD HH:mm:ss" IST, max ~90 days per call. */
   async intraday(sec: string, seg: string, instr: string, interval: number, fromDate: string, toDate: string): Promise<Raw[]> {
     if (seg === "DELTA") return cryptoIntraday(sec, interval, fromDate, toDate); // crypto: Delta Exchange (no Dhan call)
-    const j = await this.post("/charts/intraday", {
-      securityId: String(sec), exchangeSegment: seg, instrument: instr, interval: String(interval), oi: false, fromDate, toDate,
-    });
+    let j: any;
+    try {
+      j = await this.post("/charts/intraday", {
+        securityId: String(sec), exchangeSegment: seg, instrument: instr, interval: String(interval), oi: false, fromDate, toDate,
+      });
+    } catch (e) {
+      const own = this.useOwn && Dhan.own && refused(e) ? await Dhan.own.intraday(String(sec), seg, interval, fromDate, toDate).catch(() => null) : null;
+      if (own) { Dhan.ownUsed.add(`${seg}|${sec}`); return own; }
+      throw e;
+    }
     const ts: number[] = j.timestamp ?? [];
     const shift = normaliseTimestamps(ts, seg);
     return ts.map((t, i) => ({ t: t + shift, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0) }));
@@ -117,9 +134,16 @@ export class Dhan {
   async daily(sec: string, seg: string, instr: string, fromDate: string, toDate: string): Promise<DayBar[]> {
     if (seg === "DELTA") return cryptoDaily(sec, fromDate, toDate);
     // For futures, expiryCode 0 returns Dhan's continuous near-month series (years of history).
-    const j = await this.post("/charts/historical", {
-      securityId: String(sec), exchangeSegment: seg, instrument: instr, expiryCode: 0, oi: false, fromDate, toDate,
-    });
+    let j: any;
+    try {
+      j = await this.post("/charts/historical", {
+        securityId: String(sec), exchangeSegment: seg, instrument: instr, expiryCode: 0, oi: false, fromDate, toDate,
+      });
+    } catch (e) {
+      const own = this.useOwn && Dhan.own && refused(e) ? await Dhan.own.daily(String(sec), seg, fromDate, toDate).catch(() => null) : null;
+      if (own) { Dhan.ownUsed.add(`${seg}|${sec}`); return own; }
+      throw e;
+    }
     const ts: number[] = j.timestamp ?? [];
     return ts.map((t, i) => ({ t, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0), day: ist(t).date }))
       .sort((a, b) => a.t - b.t);

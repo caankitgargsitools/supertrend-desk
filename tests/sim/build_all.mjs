@@ -8,4 +8,5 @@ await one("lab.ts", "lab.mjs");
 await one("execution.ts", "exec.mjs");
 await one("audit.ts", "audit.mjs");
 await one("dhan.ts", "dhan.mjs");
+await one("owncandles.ts", "own.mjs");
 console.log("built parts");

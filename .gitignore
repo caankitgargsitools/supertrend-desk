@@ -5,3 +5,4 @@ tests/sim/exec.mjs
 tests/sim/audit.mjs
 tests/sim/dhan.mjs
 supabase/functions/engine/__sim.ts
+tests/sim/own.mjs

@@ -36,6 +36,7 @@ class Q {
   }
   order(k, o = {}) { this.ord = [k, o.ascending !== false]; return this; }
   limit(n) { this.lim = n; return this; }
+  range(a, b) { this.off = a; this.lim = b - a + 1; return this; }
   single() { this.one = "single"; return this; }
   maybeSingle() { this.one = "maybe"; return this; }
   run() {
@@ -52,7 +53,7 @@ class Q {
       if (this.op === "update") out.forEach((r) => Object.assign(r, JSON.parse(JSON.stringify(this.v))));
       if (this.op === "delete") db[this.t] = tab.filter((r) => !out.includes(r));
       if (this.ord) { const [k, a] = this.ord; out = [...out].sort((x, y) => (x[k] > y[k] ? 1 : x[k] < y[k] ? -1 : 0) * (a ? 1 : -1)); }
-      if (this.lim != null) out = out.slice(0, this.lim);
+      if (this.lim != null) out = out.slice(this.off ?? 0, (this.off ?? 0) + this.lim);
     }
     out = out.map((r) => ({ ...r }));
     if (this.one) return { data: out[0] ?? null, error: this.one === "single" && !out[0] ? { message: "no row" } : null };
@@ -62,9 +63,14 @@ class Q {
 }
 export const rpcCalls = [];
 export const rpcs = {};
+export const files = {};
 export function createClient() {
   return {
     from: (t) => new Q(t),
+    storage: { from: (bucket) => ({
+      upload: async (path, body) => { files[bucket + "/" + path] = body; return { error: null }; },
+      download: async (path) => files[bucket + "/" + path] ? { data: new Blob([files[bucket + "/" + path]]), error: null } : { data: null, error: { message: "missing" } },
+    }) },
     rpc: async (n, a) => { rpcCalls.push([n, a]); if (rpcs[n]) return rpcs[n](a); if (n === "notify_tagged") { T("notifications").push({ id: ++seq, created_at: new Date().toISOString(), user_id: a.p_user, kind: a.p_kind, title: a.p_title, body: a.p_body, tag: a.p_tag, strategy_id: a.p_strategy }); } return { data: 0, error: null }; },
   };
 }

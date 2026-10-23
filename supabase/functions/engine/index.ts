@@ -25,6 +25,7 @@ import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters
 import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
 import { legsFor, legSign, structMargin, structName, structOf } from "./structures.ts";
 import { auditStrategy } from "./audit.ts";
+import { ownDaily, ownIntraday } from "./owncandles.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -32,6 +33,7 @@ const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
   auth: { persistSession: false },
 });
 setDhanRpc(sb); // Dhan order calls from the database's fixed IP address
+Dhan.own = { intraday: (sec, seg, i, a, z) => ownIntraday(sb, sec, seg, i, a, z), daily: (sec, seg, a, z) => ownDaily(sb, sec, seg, a, z) };
 
 type Strategy = Record<string, any>;
 type Settings = Account;
@@ -96,7 +98,9 @@ function dhanFor(set: Settings): Dhan {
   // Crypto strategies read Delta Exchange's public prices (the Dhan class routes the DELTA segment there).
   if (set.broker === "DELTA") return new Dhan("-", "-");
   if (!set.dhan_access_token || !set.dhan_client_id) throw new Error("Add your Dhan client ID and access token under Dhan connection.");
-  return new Dhan(set.dhan_client_id, set.dhan_access_token);
+  const d = new Dhan(set.dhan_client_id, set.dhan_access_token);
+  d.useOwn = true; // Dhan refusing candle requests: stored history + own minute candles from the per-second prices
+  return d;
 }
 
 async function saveChart(s: Strategy, bars: ChartBar[], st: number[], trend: number[]) {
@@ -691,6 +695,7 @@ async function brokerFills(set: Settings, strategyIds: string[]) {
 }
 async function logSignal(s: Strategy, event: string, description: string, candle: Candle, status = "LOGGED", payload: unknown = null, response: string | null = null) {
   if (s.locked) { description = plainLog(event, description); candle = { t: candle.t, c: candle.c }; }
+  if (Dhan.ownUsed.has(`${s.data_segment}|${s.data_security_id}`)) description += " · on the desk's own candles (Dhan's candle data was unavailable)";
   lastSignalId = null;
   const { data: ins } = await sb.from("algo_signals").insert({
     strategy_id: s.id, event, description, mode: s.live ? "LIVE" : "PAPER", status, payload, response, lag_ms: tickT0 ? Date.now() - tickT0 : null,
@@ -1314,7 +1319,9 @@ async function pricesLoop() {
       if (Date.now() - rowsAt > 5000) {
         const { data: r0 } = await sb.from("algo_strategies").select(PRICE_COLS).eq("archived", false).or("active.eq.true,position.neq.FLAT");
         rows = (r0 ?? []) as Strategy[]; rowsAt = Date.now();
-        if (!rows.some((x) => x.position !== "FLAT")) break; // nothing open: no need to price
+        await priceHolidays(ist(Date.now() / 1000).date);
+        // Nothing open and no Dhan strategy inside its trading hours: no need to price.
+        if (!rows.some((x) => x.position !== "FLAT" || (x.active && !isCrypto(String(x.data_segment)) && inSessionNow(String(x.data_segment))))) break;
       }
       if (inflight.size < 2) {
         const p = pricesTick(rows).then(() => { rounds++; }, (e) => console.error("prices", e)).finally(() => inflight.delete(p));
@@ -1327,10 +1334,17 @@ async function pricesLoop() {
   await Promise.all(inflight);
   return { rounds };
 }
+async function priceHolidays(today: string) {
+  if (priceHolDay !== today) { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", today); setHolidays(hol ?? []); priceHolDay = today; mcxSecMemo.clear(); }
+}
+function inSessionNow(seg: string) {
+  const nowI = ist(Date.now() / 1000), sess = tradingSession(seg, nowI.date);
+  return nowI.min >= sess.open && nowI.min <= sess.close;
+}
 async function pricesTick(rows: Strategy[]) {
   const nowI = ist(Date.now() / 1000), today = nowI.date;
   const at = nowIso(); // the round's start: of two overlapping rounds, the later-started one's prices are the newer
-  if (priceHolDay !== today) { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", today); setHolidays(hol ?? []); priceHolDay = today; mcxSecMemo.clear(); }
+  await priceHolidays(today);
   const accounts = new Map<string, Account | null>();
   const bySeg = new Map<string, Record<string, string[]>>(); // owner -> seg -> secs
   const coins = new Set<string>();
@@ -1370,7 +1384,13 @@ async function pricesTick(rows: Strategy[]) {
     ...[...coins].map(async (c) => { const v = await cryptoLtp(c).catch(() => null); if (v) px.set(`DELTA|${c}`, v); }),
   ]);
   if (!px.size) return { prices: 0 };
-  await sb.from("live_prices").upsert([...px].map(([k, v]) => { const [seg, sec] = k.split("|"); return { seg, sec, px: v, at }; }));
+  const pxRows = [...px].map(([k, v]) => { const [seg, sec] = k.split("|"); return { seg, sec, px: v, at }; });
+  // The same prices make the desk's own 1-minute candles (used when Dhan's candle API refuses requests).
+  const bars = pxRows.filter((r) => !isCrypto(r.seg));
+  await Promise.all([
+    sb.from("live_prices").upsert(pxRows),
+    bars.length ? sb.rpc("price_bars_tick", { p_rows: bars, p_at: at }).then(({ error }) => { if (error) console.error("price bars", error.message); }) : null,
+  ]);
   // Running P&L of open positions priced on one instrument (futures, index basis, crypto). Option positions are
   // priced by the minute tick (their premium comes from the option chain, allowed once every 3 seconds).
   const marks: { strategy_id: string; owner_id: string; ltp: number; upnl: number | null; at: string }[] = [];
@@ -2176,7 +2196,7 @@ Deno.serve(async (req) => {
   // Market data fetched during this tick is shared between strategies (one request per asset and timeframe), and
   // last prices are fetched in batches.
   const tickMode = action === "tick" || cryptoTick;
-  if (tickMode) { Dhan.memo = new Map(); Dhan.ltpSeed = new Map(); tickT0 = Math.floor(Date.now() / 60000) * 60000; }
+  if (tickMode) { Dhan.memo = new Map(); Dhan.ltpSeed = new Map(); Dhan.ownUsed.clear(); tickT0 = Math.floor(Date.now() / 60000) * 60000; }
   // Every strategy's last price in one request per account at the start of the tick (Dhan's quote API allows one
   // request a second, so separate requests would queue up behind each other).
   if (action === "tick") {
