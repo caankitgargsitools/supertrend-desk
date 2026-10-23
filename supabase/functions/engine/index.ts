@@ -1335,13 +1335,15 @@ const PRICE_COLS = "id, owner_id, data_segment, data_security_id, position, trad
 async function pricesLoop() {
   // A fresh engine run every 10 seconds (cron) prices once a second for 10 seconds: each run stays well inside the
   // ~2 seconds of computing an engine run may use, and if one run dies the next takes over within 10 seconds.
-  // Light mode (secret ENGINE_LIGHT=1, while the database is short of disk allowance): one price round per run, i.e.
-  // prices and per-second stops every 10 seconds instead of every second.
-  // On since 23 Oct 2026 16:45 IST (disk allowance used up); ENGINE_LIGHT=0 switches it off.
-  const light = Deno.env.get("ENGINE_LIGHT") !== "0";
-  const end = light ? Date.now() + 1500 : Date.now() + 9800;
-  const { data: lk } = await sb.from("price_lock").update({ at: new Date(end).toISOString() }).eq("id", 1).lt("at", new Date(Date.now() + 700).toISOString()).select("id");
+  // Light mode: one price round per run (prices and per-second stops every 10 seconds instead of every second). It
+  // switches on by itself whenever the database answers slowly (its disk allowance running low), and back off once
+  // it is quick again; ENGINE_LIGHT=1 forces it on.
+  const t0 = Date.now();
+  const { data: lk } = await sb.from("price_lock").update({ at: new Date(Date.now() + 9800).toISOString() }).eq("id", 1).lt("at", new Date(Date.now() + 700).toISOString()).select("id");
   if (!lk?.length) return { skipped: "another price loop is running" };
+  const slowDb = Date.now() - t0 > 800;
+  const light = Deno.env.get("ENGINE_LIGHT") === "1" || slowDb;
+  const end = light ? t0 + 1500 : t0 + 9800;
   let rounds = 0, rows: Strategy[] = [], rowsAt = 0;
   // A round starts every second on the second, without waiting for a slow one to finish (at most 2 at once), so a
   // slow answer from one price source doesn't stretch the rhythm.
@@ -1500,6 +1502,18 @@ async function ownCandlesAlert(assets: string[]) {
   await sb.rpc("notify_tagged", { p_user: admin.user_id, p_kind: "error", p_title: "Engine on fallback candles: check with Dhan",
     p_body: `Dhan refused candle requests, so ${assets.join(", ")} ${assets.length === 1 ? "is" : "are"} running on the desk's own candles built from live prices. Ask Dhan API support about the candle (charts) API.`,
     p_url: "/", p_strategy: null, p_tag: "own_candles" });
+}
+/** True when a flat rule strategy has already been checked since its latest candle closed (nothing new to decide). */
+function quietNow(s: Strategy, sess: { open: number; close: number }): boolean {
+  if (s.position !== "FLAT" || s.strategy_kind !== "RULES" || s.pending_target != null || !s.last_run_at || s.last_error) return false;
+  const now = ist(Date.now() / 1000), tf = Number(s.timeframe_min) || 0;
+  const daily = !!(s.rules && (s.rules as { daily?: boolean }).daily) || tf >= 375;
+  const dayStart = Date.parse(`${now.date}T00:00:00+05:30`);
+  let closeMin: number;
+  if (daily) closeMin = sess.open; // decided once a day, at the session open
+  else { if (!(tf > 0) || now.min < sess.open + tf) return false; closeMin = sess.open + Math.floor((now.min - sess.open) / tf) * tf; }
+  if (now.min < closeMin) return false;
+  return Date.parse(s.last_run_at) >= dayStart + closeMin * 60000 + 20000;
 }
 /** Strategy lab: run one instalment, then hand over to a fresh invocation if there is more to do. */
 async function labLoop() {
@@ -2237,6 +2251,12 @@ Deno.serve(async (req) => {
     const fno = await syncFno(sb, c).catch((e) => `F&O list failed: ${e instanceof Error ? e.message : e}`);
     return Response.json({ action, contracts: n, fno });
   }
+  // One tick of each kind at a time: when the database is slow, a new minute's tick doesn't pile onto the last one.
+  const lockName = action === "tick" ? "tick" : cryptoTick ? "tick_crypto" : null;
+  if (lockName && !body.strategy_id) {
+    const { data: got } = await sb.from("engine_lock").update({ until: new Date(Date.now() + 110000).toISOString() }).eq("name", lockName).lt("until", nowIso()).select("name");
+    if (!got?.length) return Response.json({ action, skipped: "previous tick still running" });
+  }
   let q = sb.from("algo_strategies").select("*");
   q = body.strategy_id ? q.eq("id", body.strategy_id) : q.eq("active", true).eq("is_master", false);
   const { data: rows0, error } = await q;
@@ -2298,6 +2318,9 @@ Deno.serve(async (req) => {
       const sess = tradingSession(s.data_segment, nowIst.date); // holidays: no session, or the evening session only
       const outside = nowIst.min < sess.open || nowIst.min > sess.close + 5;
       if (action === "tick" && outside) return;
+      // Between its candle closes a flat rule strategy has nothing to decide: skipped, so a busy database only does
+      // the work that can change something (open positions, and strategies whose candle just closed).
+      if (tick && !outside && quietNow(s, sess)) { results[s.id] = "waiting for its candle"; return; }
       if (!s.owner_id) throw new Error("This strategy has no owner.");
       const broker = isCr ? "DELTA" : "DHAN";
       let set = await accountFor(sb, s.owner_id, broker, accounts);
@@ -2358,5 +2381,6 @@ Deno.serve(async (req) => {
   if (ownAssets.size) await ownCandlesAlert([...ownAssets].sort()).catch((e) => console.error("alert", e));
   // Actual fill prices from each account's Dhan trade book for recent live orders.
   for (const [u, ids] of liveIds) { try { const a = accounts.get(`${u}|DHAN`); if (a) await brokerFills(a, ids); } catch (e) { console.error("fills", e); } }
+  if (lockName && !body.strategy_id) await sb.from("engine_lock").update({ until: nowIso() }).eq("name", lockName);
   return Response.json({ action, results });
 });
