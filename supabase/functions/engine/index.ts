@@ -1501,6 +1501,18 @@ async function ownCandlesAlert(assets: string[]) {
     p_body: `Dhan refused candle requests, so ${assets.join(", ")} ${assets.length === 1 ? "is" : "are"} running on the desk's own candles built from live prices. Ask Dhan API support about the candle (charts) API.`,
     p_url: "/", p_strategy: null, p_tag: "own_candles" });
 }
+/** True when a flat rule strategy has already been checked since its latest candle closed (nothing new to decide). */
+function quietNow(s: Strategy, sess: { open: number; close: number }): boolean {
+  if (s.position !== "FLAT" || s.strategy_kind !== "RULES" || s.pending_target != null || !s.last_run_at || s.last_error) return false;
+  const now = ist(Date.now() / 1000), tf = Number(s.timeframe_min) || 0;
+  const daily = !!(s.rules && (s.rules as { daily?: boolean }).daily) || tf >= 375;
+  const dayStart = Date.parse(`${now.date}T00:00:00+05:30`);
+  let closeMin: number;
+  if (daily) closeMin = sess.open; // decided once a day, at the session open
+  else { if (!(tf > 0) || now.min < sess.open + tf) return false; closeMin = sess.open + Math.floor((now.min - sess.open) / tf) * tf; }
+  if (now.min < closeMin) return false;
+  return Date.parse(s.last_run_at) >= dayStart + closeMin * 60000 + 20000;
+}
 /** Strategy lab: run one instalment, then hand over to a fresh invocation if there is more to do. */
 async function labLoop() {
   const creds = credsOf(await adminAccount(sb));
@@ -2237,6 +2249,12 @@ Deno.serve(async (req) => {
     const fno = await syncFno(sb, c).catch((e) => `F&O list failed: ${e instanceof Error ? e.message : e}`);
     return Response.json({ action, contracts: n, fno });
   }
+  // One tick of each kind at a time: when the database is slow, a new minute's tick doesn't pile onto the last one.
+  const lockName = action === "tick" ? "tick" : cryptoTick ? "tick_crypto" : null;
+  if (lockName && !body.strategy_id) {
+    const { data: got } = await sb.from("engine_lock").update({ until: new Date(Date.now() + 110000).toISOString() }).eq("name", lockName).lt("until", nowIso()).select("name");
+    if (!got?.length) return Response.json({ action, skipped: "previous tick still running" });
+  }
   let q = sb.from("algo_strategies").select("*");
   q = body.strategy_id ? q.eq("id", body.strategy_id) : q.eq("active", true).eq("is_master", false);
   const { data: rows0, error } = await q;
@@ -2298,6 +2316,9 @@ Deno.serve(async (req) => {
       const sess = tradingSession(s.data_segment, nowIst.date); // holidays: no session, or the evening session only
       const outside = nowIst.min < sess.open || nowIst.min > sess.close + 5;
       if (action === "tick" && outside) return;
+      // Between its candle closes a flat rule strategy has nothing to decide: skipped, so a busy database only does
+      // the work that can change something (open positions, and strategies whose candle just closed).
+      if (tick && !outside && quietNow(s, sess)) { results[s.id] = "waiting for its candle"; return; }
       if (!s.owner_id) throw new Error("This strategy has no owner.");
       const broker = isCr ? "DELTA" : "DHAN";
       let set = await accountFor(sb, s.owner_id, broker, accounts);
@@ -2358,5 +2379,6 @@ Deno.serve(async (req) => {
   if (ownAssets.size) await ownCandlesAlert([...ownAssets].sort()).catch((e) => console.error("alert", e));
   // Actual fill prices from each account's Dhan trade book for recent live orders.
   for (const [u, ids] of liveIds) { try { const a = accounts.get(`${u}|DHAN`); if (a) await brokerFills(a, ids); } catch (e) { console.error("fills", e); } }
+  if (lockName && !body.strategy_id) await sb.from("engine_lock").update({ until: nowIso() }).eq("name", lockName);
   return Response.json({ action, results });
 });
