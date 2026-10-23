@@ -1183,6 +1183,14 @@ export async function labNext(sb: SupabaseClient): Promise<number | null> {
       return run.id;
     }
   }
+  // A re-test of the saved strategies you asked for carries on, run after run (also by day), until none is left.
+  if (!q && set?.enabled) {
+    const { data: last } = await sb.from("lab_runs").select("trigger, status").order("id", { ascending: false }).limit(1);
+    if (last?.[0]?.trigger === "retest" && last[0].status === "done") {
+      const { count } = await sb.from("lab_refresh").select("fingerprint", { count: "exact", head: true }).is("run_id", null).in("asset", (set.assets ?? []) as string[]);
+      if ((count ?? 0) > 0) return await labStart(sb, true, "retest");
+    }
+  }
   if (!q && set?.enabled && await labWindowOpen(sb, set.schedule_mode ?? "nightly")) return await labStart(sb, false, "continuous");
   if (!q || !set) return null;
   const parentAsset = String(q.config?.underlying ?? "");
@@ -1271,7 +1279,7 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
     }
     if (run.phase === "data") {
       let i = Number(run.cursor ?? 0);
-      if (i === 0 && !counts.margins_checked && run.trigger === "continuous") counts.margins_checked = -2; // rates from the last full run
+      if (i === 0 && !counts.margins_checked && (run.trigger === "continuous" || run.trigger === "retest")) counts.margins_checked = -2; // rates from the last full run
       if (i === 0 && !counts.margins_checked) {
         // Today's margin rates from Dhan's margin calculator (used for each trade's margin and the return on margin).
         await patch({ progress: "Checking margin rates with Dhan" });
@@ -1283,10 +1291,10 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
         // One asset's candles not coming back (Dhan hiccups, mostly early in the morning) doesn't stop the run: it is
         // tried once more, then that asset carries on with the candles already saved and the run goes on.
         try {
-          await refreshAsset(sb, ctx.creds, assets[i], win.to, run.trigger === "continuous" ? 6 : 0);
+          await refreshAsset(sb, ctx.creds, assets[i], win.to, run.trigger === "continuous" || run.trigger === "retest" ? 6 : 0);
         } catch (e1) {
           await new Promise((r) => setTimeout(r, 3000));
-          try { await refreshAsset(sb, ctx.creds, assets[i], win.to, run.trigger === "continuous" ? 6 : 0); }
+          try { await refreshAsset(sb, ctx.creds, assets[i], win.to, run.trigger === "continuous" || run.trigger === "retest" ? 6 : 0); }
           catch (e2) {
             const msg = `${LAB_ASSETS[assets[i]].name}: ${String(e2 instanceof Error ? e2.message : e2).slice(0, 160)}`;
             counts.stale = [...(Array.isArray(counts.stale) ? counts.stale : []), msg].slice(-10);
@@ -1389,6 +1397,8 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
       return carried;
     }
   }
+  // A re-test run writes nothing new: when the queue is empty it simply ends.
+  if (run.trigger === "retest") return carried;
   const since = new Date(Date.now() - 14 * 86400000).toISOString();
   const { data: recent } = await sb.from("lab_results").select("fingerprint").gte("created_at", since).limit(20000);
   const seen = new Set((recent ?? []).map((x) => x.fingerprint));

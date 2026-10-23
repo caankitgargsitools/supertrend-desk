@@ -2154,9 +2154,9 @@ Deno.serve(async (req) => {
     if (id) EdgeRuntime.waitUntil(labLoop().catch((e) => console.error("lab", e)));
     return Response.json({ action, started: id });
   }
-  if (action === "lab_start" || action === "lab_start_manual" || action === "lab_start_focus" || action === "lab") {
+  if (action === "lab_start" || action === "lab_start_manual" || action === "lab_start_focus" || action === "lab_start_retest" || action === "lab") {
     if (action !== "lab") {
-      const id = action === "lab_start_focus" ? await labStart(sb, true, "focus") : await labStart(sb, action === "lab_start_manual");
+      const id = action === "lab_start_focus" ? await labStart(sb, true, "focus") : action === "lab_start_retest" ? await labStart(sb, true, "retest") : await labStart(sb, action === "lab_start_manual");
       if (!id) return Response.json({ action, started: false, reason: "The lab is switched off." });
     }
     EdgeRuntime.waitUntil(labLoop().catch((e) => console.error("lab", e)));
