@@ -26,6 +26,7 @@ import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
 import { legsFor, legSign, structMargin, structName, structOf } from "./structures.ts";
 import { auditStrategy } from "./audit.ts";
 import { ownDaily, ownIntraday } from "./owncandles.ts";
+import { KILL_EARLY, KILL_FULL, killVerdict } from "./kill.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -1252,8 +1253,32 @@ async function chainBacktest(id: number) {
  * Daily self-check: every strategy with paper or live trades in the last 30 days is replayed with the backtest engine
  * and its trades matched one by one (see audit.ts). Two strategies per call (the 2-second limit); the rest chain on.
  */
+/**
+ * Kill rule (daily, with the self-check): every running lab strategy's own trades against its backtest's. Far below the
+ * normal range (under the worst 1% after 10 trades, the worst 5% after 20), new trades stop and the owner is told.
+ * After "Allow new trades again" it is judged only on the trades made since.
+ */
+async function killCheck() {
+  const { data: rows } = await sb.from("algo_strategies").select("id, owner_id, name, lab_id, lots, kill_at, kill_override_trades").eq("active", true).eq("archived", false).not("lab_id", "is", null).is("kill_at", null);
+  for (const s of rows ?? []) {
+    const { data: lr } = await sb.from("lab_results").select("config, trades_long").eq("id", s.lab_id).maybeSingle();
+    const bt = ((lr?.trades_long?.n ?? []) as number[]).map(Number), btLots = Number(lr?.config?.lots) || 1;
+    const { data: tr } = await sb.from("algo_trades").select("net, lots, exit_at").eq("strategy_id", s.id).eq("hidden", false).order("exit_at");
+    const desk = (tr ?? []).slice(Number(s.kill_override_trades) || 0).map((t) => Number(t.net) / (Number(t.lots) || 1));
+    const v = killVerdict(desk, bt.map((x) => x / btLots), Number(s.lab_id));
+    if (!v.flag) continue;
+    const rule = v.n >= KILL_FULL.trades ? `worst ${KILL_FULL.pct * 100}%` : `worst ${KILL_EARLY.pct * 100}%`;
+    const amt = (x: number) => x < 0 ? `a loss of ₹${Math.abs(x).toLocaleString("en-IN")}` : `₹${x.toLocaleString("en-IN")}`;
+    const note = `its last ${v.n} trades made ${amt(v.real)} per lot, below the ${rule} of what its backtest gives for ${v.n} trades (${amt(Number(v.n >= KILL_FULL.trades ? v.p5 : v.p1))})`;
+    await sb.from("algo_strategies").update({ kill_at: new Date().toISOString(), kill_note: note }).eq("id", s.id).is("kill_at", null);
+    await sb.rpc("notify_tagged", { p_user: s.owner_id, p_kind: "error", p_title: `Kill rule: new trades stopped · ${String(s.name ?? "").slice(0, 50)}`,
+      p_body: `Far worse than its backtest: ${note}. Open positions are still managed. Allow new trades again from the strategy page if you want it to carry on.`.slice(0, 400),
+      p_url: `/?s=${s.id}`, p_strategy: s.id, p_tag: `kill-${s.id}` });
+  }
+}
 async function runAudit(batch: string, offset: number) {
   const today = ist(Date.now() / 1000).date, days = 30;
+  if (!offset) await killCheck().catch((e) => console.error("kill", e));
   const { data: tr } = await sb.from("algo_trades").select("strategy_id, mode").eq("hidden", false).gte("entry_day", addDays(today, -days));
   // Also every running strategy without trades in the window (checked for trades the desk should have taken).
   const { data: run } = await sb.from("algo_strategies").select("id, live").eq("active", true).eq("archived", false).eq("strategy_kind", "RULES");
@@ -2287,7 +2312,8 @@ Deno.serve(async (req) => {
         results[s.id] = "orders working"; return;
       }
       // New trades need the account in good standing; exits always go through.
-      s = { ...s, _block: await entryGate(sb, s, gates).catch(() => null) };
+      // The kill rule stops new trades of a strategy doing far worse than its backtest (exits still run).
+      s = { ...s, _block: s.kill_at ? `the kill rule stopped new trades (${String(s.kill_note ?? "").slice(0, 160)})` : await entryGate(sb, s, gates).catch(() => null) };
       if (tick) s = await liveRisk(s, set);
       if (tick && s.live) { const s0 = s; s = await actLocked(() => syncStop(s0, set)).catch((e) => { console.error("stop", e); return s0; }); }
       // A manual refresh outside market hours (or in the NSE/BSE pre-open) keeps the session's last price.

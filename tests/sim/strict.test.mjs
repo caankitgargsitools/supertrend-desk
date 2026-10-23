@@ -51,7 +51,8 @@ const good = (over = {}) => [
 const v = (over) => robustVerdict(daily, good(over), { families: 5219 });
 const pass = v();
 console.log("strong strategy →", pass.passed, pass.why, "luck", pass.luck.dsr);
-assert.ok(pass.passed && pass.vault.net === 12000 && pass.luck.dsr > 0.95 && pass.plateau.ok === 7 && pass.rev === 4);
+// everything in phase 1 passed: it now waits for the phase-2 noise tests (phase23.test.mjs)
+assert.ok(!pass.passed && pass.needs_stage2 && pass.why.length === 1 && pass.vault.net === 12000 && pass.luck.dsr > 0.95 && pass.plateau.ok === 7 && pass.rev === 4);
 const why = (over) => v(over).why.join(" | ");
 assert.match(why({ vault: { net: -3000, n: 3, ok: false } }), /lost money in the held-back last 6 months/);
 assert.match(why({ vault: { net: 0, n: 0, ok: false } }), /no trade in the held-back/);

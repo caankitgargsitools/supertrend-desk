@@ -51,3 +51,36 @@ export function median(xs: number[]): number | null {
   const s = [...xs].sort((a, b) => a - b), m = s.length >> 1;
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
+
+/**
+ * Probability of Backtest Overfitting by combinatorially symmetric cross-validation (Bailey, Borwein, López de Prado &
+ * Zhu). `perf[k][j]` = strategy k's result in time slice j. Every way of splitting the slices into two halves is tried:
+ * the best strategy of one half is ranked in the other. PBO = share of splits where it lands in the bottom half — near
+ * 0 means the choosing works, 50% or more means the "best" is mostly luck.
+ */
+export function pbo(perf: number[][], maxSlices = 12) {
+  const N = perf.length, T = perf[0]?.length ?? 0;
+  const S = Math.min(maxSlices, T - (T % 2));
+  if (N < 4 || S < 4) return null;
+  // Slices: T columns grouped into S nearly equal blocks.
+  const block = (k: number, s: number) => { const a = Math.floor((s * T) / S), b = Math.floor(((s + 1) * T) / S); let x = 0; for (let j = a; j < b; j++) x += perf[k][j]; return x; };
+  const M = perf.map((_, k) => Array.from({ length: S }, (_, s) => block(k, s)));
+  let below = 0, total = 0;
+  const half = S / 2, pick: number[] = [];
+  const rec = (start: number) => {
+    if (pick.length === half) {
+      const inSet = new Set(pick);
+      const isP = M.map((row) => row.reduce((a, v, s) => a + (inSet.has(s) ? v : 0), 0));
+      const osP = M.map((row) => row.reduce((a, v, s) => a + (inSet.has(s) ? 0 : v), 0));
+      let best = 0; for (let k = 1; k < N; k++) if (isP[k] > isP[best]) best = k;
+      const rank = osP.filter((v) => v < osP[best]).length + 1; // 1 = worst out of sample
+      const w = rank / (N + 1);
+      if (Math.log(w / (1 - w)) <= 0) below++;
+      total++;
+      return;
+    }
+    for (let s = start; s < S; s++) { pick.push(s); rec(s + 1); pick.pop(); }
+  };
+  rec(0);
+  return { pbo: +(below / total).toFixed(3), strategies: N, slices: S, splits: total };
+}

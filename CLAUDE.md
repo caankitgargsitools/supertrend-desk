@@ -89,6 +89,15 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (daily) / 100 (minute) over the years tested; doubled slippage for daily strategies too. Breeding from winners is off
   (`lab_settings.evolve`). `lab_reverdict` (re-scoring stored results) is retired: re-tests go through `lab_refresh`.
   First preview: none of the 24 desk lab strategies passes the luck test (best t = 3.4).
+- Lab phase 2 (finalists only, i.e. strategies that passed everything above): 100 runs on shuffled candles
+  (`noise.ts` `shuffledData`; check kind `noise`, tf 0 = real) and 1,000 sets of random entries (`random`); the real
+  result must beat 95% of each. Overfitting gauge: Probability of Backtest Overfitting (CSCV, `stats.ts` `pbo`) per run,
+  asset and mode from every fresh try's monthly results (`lab_months` → `lab_pbo`), shown on the Lab page.
+  Near-identical winners are already grouped as twins (`lab_assign_twin`, 80%+ shared entries).
+- Kill rule (phase 3, `kill.ts`, run daily with the self-check): a running lab strategy's own trades (per lot) against
+  2,000 bootstrap sets of its backtest trades; under the worst 1% after 10 trades or the worst 5% after 20, `kill_at`
+  is set, new trades stop (exits still run) and the owner is notified. "Allow new trades again" (`kill_allow`) clears it
+  and it is judged on later trades only.
 
 ## Open items
 - Supervised 1-lot live test (NATGASMINI, Lab #6038) once Papa adds Dhan funds and whitelists the IP.
@@ -96,6 +105,4 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (GOLD 1 kg contract dominated the paper loss) — proposed, awaiting Papa's go-ahead.
 - Tick-level prices/stops need Dhan's WebSocket feed on an always-on server (~₹500–1,500/month) — offered, not built.
 - Slippage column on Orders + per-strategy slippage summary (signal price vs fill) — proposed.
-- Lab Phase 2 (noise/permutation test, random-entry test, clustering of passers, overfitting gauge per asset) and
-  Phase 3 (paper kill rule: flag a desk strategy whose results fall below its backtest's worst 5%) — planned.
 - Ideas from the Tradl.ai review (one-page backtest report, morning brief, featured shelves) — proposed.

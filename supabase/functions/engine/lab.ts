@@ -14,7 +14,8 @@ import { dataSecurity } from "./instruments.ts";
 import { describeRisk, type Risk } from "./risk.ts";
 import { loadMarginRates, type MarginRate, refreshMargins } from "./margins.ts";
 import { readCandles, saveCandles } from "./candles.ts";
-import { deflatedSharpe, median } from "./stats.ts";
+import { deflatedSharpe, median, pbo } from "./stats.ts";
+import { closesFor, pValue, randomEntries, shuffledData } from "./noise.ts";
 export { readCandles, saveCandles };
 import { CRYPTO, cryptoDaily, cryptoFunding, cryptoIntraday, cryptoLot, loadCrypto } from "./crypto.ts";
 
@@ -1304,6 +1305,7 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
     } else if (run.phase === "screen") {
       const left = await screenPhase(ctx, run, win);
       if (!left) {
+        await overfitGauge(sb, run.id).catch((e) => console.error("pbo", e));
         const { count: basic } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).eq("basic_passed", true);
         await patch({ phase: "robust", progress: `Checking ${basic ?? 0} first-round winners on other assets, other timeframes and year by year`, counts: { ...counts, screened: counts.generated, basic_passed: basic } });
       } else {
@@ -1718,10 +1720,25 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   else if (vault?.error) why.push(`held-back months couldn't be tested: ${vault.error}`);
   else if (!(vault?.n >= 1)) why.push(`no trade in the held-back last ${vMonths} months, so it can't be confirmed`);
   else if (!(vault?.net > 0)) why.push(`lost money in the held-back last ${vMonths} months (₹${Math.trunc(Number(vault.net) || 0).toLocaleString("en-IN")} over ${vault.n} trade${vault.n === 1 ? "" : "s"})`);
+  // Phase 2, only for a strategy that passed everything above: shuffled prices and random entries.
+  const nz = checks.filter((c) => c.kind === "noise" && c.result && !c.result.error);
+  const rnd = checks.find((c) => c.kind === "random")?.result ?? null;
+  let noise: { p: number; runs: number; real: number } | null = null, needsStage2 = false;
+  if (!nz.length && !rnd) { if (!why.length) { needsStage2 = true; why.push("waiting for the noise tests (shuffled prices, random entries)"); } }
+  else {
+    const real = nz.find((c) => Number(c.tf) === 0)?.result?.net, runs = nz.filter((c) => Number(c.tf) !== 0).map((c) => Number(c.result.net) || 0);
+    if (real == null || runs.length < 20) why.push("the shuffled-price test didn't finish");
+    else {
+      noise = { p: +pValue(Number(real), runs).toFixed(3), runs: runs.length, real: Math.trunc(Number(real)) };
+      if (noise.p > 0.05) why.push(`does no better than noise: ${Math.round(noise.p * 100)}% of ${runs.length} runs on shuffled prices did as well (needs under 5%)`);
+    }
+    if (!rnd || rnd.error) why.push("the random-entry test didn't finish");
+    else if (rnd.p > 0.05) why.push(`random entries did as well: ${Math.round(rnd.p * 100)}% of 1,000 sets of random entries, held as long, matched it (needs under 5%)`);
+  }
   const quality = qualityScore(yrs, allTrades, { okA, nA: assets.length, okT, nT: tfs.length },
     { stepsOk: stepList.filter((x) => x.ok).length, stepsN: stepList.length, twoWay: cfg.direction === "BOTH", capital: 500000 });
   return { passed: why.length === 0, why, self, bh, vs_bh: vsBh, risk_vs_bh: riskVsBh, assets: { ok: okA, n: assets.length, list: assets },
-    tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, vault, luck, plateau, top_cut: topCut, rev: 4, ...(quarters ? { quarters: { ok: quarters.filter((x) => x.ok).length, n: quarters.length, list: quarters } } : {}), steps: { ok: stepList.filter((x) => x.ok).length, n: stepList.length, list: stepList }, quality, daily, checked_at: new Date().toISOString() };
+    tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, vault, luck, plateau, top_cut: topCut, noise, random: rnd, needs_stage2: needsStage2, rev: 4, ...(quarters ? { quarters: { ok: quarters.filter((x) => x.ok).length, n: quarters.length, list: quarters } } : {}), steps: { ok: stepList.filter((x) => x.ok).length, n: stepList.length, list: stepList }, quality, daily, checked_at: new Date().toISOString() };
 }
 
 /* ---------- long trade lists and the quality score ---------- */
@@ -1895,6 +1912,24 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
       let result: Record<string, unknown>;
       try {
         const pw = preVault(win, c.config);
+        if (c.kind === "noise" || c.kind === "random") {
+          // Phase 2 (finalists only): the whole history before the vault, on shuffled candles (tf = shuffle number,
+          // 0 = the real candles) or against random entries.
+          const daily = !!c.config.rules?.daily;
+          const first = daily ? data.daily[0]?.day : data.raw[0]?.day;
+          const from = first ? addDays(first, daily ? 60 : 20) : pw.from, nw = { from, split: from, to: pw.to };
+          if (c.kind === "noise") {
+            const d = Number(c.tf) === 0 ? data : shuffledData(data, daily, Number(c.lab_id) * 1009 + Number(c.tf));
+            const { metrics } = await screenOne(c.config, d, Number(c.tf) === 0 ? memo : new Map(), nw, capital, rates);
+            result = { net: metrics.full.net, n: metrics.full.n, ok: true };
+          } else {
+            const { trades } = await screenOne(c.config, data, memo, nw, capital, rates);
+            result = { ...randomEntries(trades as any[], closesFor(data, daily, from, pw.to), 1000, Number(c.lab_id)), n: trades.length, ok: true };
+          }
+          cpu += performance.now() - t1;
+          ups.push(sb.from("lab_checks").update({ status: "done", result }).eq("id", c.id).then(() => {}));
+          continue;
+        }
         if (c.kind === "vault") {
           const vw = { from: addDays(pw.to, 1), split: addDays(pw.to, 1), to: win.to };
           const { metrics } = await screenOne(c.config, data, memo, vw, capital, rates);
@@ -1972,6 +2007,15 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     if (!cs.length) { await sb.from("lab_results").update({ robust_status: null }).eq("id", r.id).eq("robust_status", "queued"); continue; }
     if (cs.some((c) => c.status === "pending")) continue;
     const v = robustVerdict(r.config, cs, { families: await familiesFor(sb, r.config) });
+    if (v.needs_stage2) {
+      // A finalist: 100 runs on shuffled prices (plus the real one) and the random-entry test, then decided again.
+      const cfg = { ...r.config, vault_days: vaultDays(r.config) };
+      const rows = [...Array.from({ length: 101 }, (_, k) => ({ lab_id: r.id, kind: "noise", asset: r.config.underlying, tf: k, config: cfg, status: "pending" })),
+        { lab_id: r.id, kind: "random", asset: r.config.underlying, tf: null, config: cfg, status: "pending" }];
+      const { error: qe } = await sb.from("lab_checks").insert(rows);
+      if (qe) throw new Error(qe.message);
+      continue;
+    }
     // Every trade of the year-by-year test is kept with the result (packed in columns to stay small).
     const longTrades = joinTrades(cs.filter((c) => c.kind === "year" && !c.result?.skip).map((c) => c.result?.tr).filter(Boolean));
     // A re-test of a strategy on someone's desk is marked as a re-test (so it replaces the older results) and kept even if it fails.
@@ -2001,10 +2045,29 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
   return (mineLeft ?? 0) > 0;
 }
 
+/**
+ * Overfitting gauge for a run (Probability of Backtest Overfitting, CSCV) per asset and mode, from the month-by-month
+ * results of every fresh try: how often the best of one half of the months lands in the bottom half of the other.
+ */
+async function overfitGauge(sb: SupabaseClient, runId: number) {
+  const { data } = await sb.from("lab_months").select("asset, mode, nets").eq("run_id", runId).limit(5000);
+  const groups = new Map<string, number[][]>();
+  for (const r of data ?? []) { const k = `${r.asset}|${r.mode}`; const g = groups.get(k) ?? []; g.push((r.nets ?? []).map(Number)); groups.set(k, g); }
+  const rows: Record<string, unknown>[] = [];
+  for (const [k, g] of groups) {
+    const len = Math.min(...g.map((x) => x.length));
+    const res = pbo(g.map((x) => x.slice(0, len)));
+    if (!res) continue;
+    const [asset, mode] = k.split("|");
+    rows.push({ run_id: runId, asset, mode, pbo: res.pbo, strategies: res.strategies, slices: res.slices });
+  }
+  if (rows.length) await sb.from("lab_pbo").upsert(rows);
+}
 async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: string; to: string }): Promise<boolean> {
   const { sb } = ctx;
-  const { data: pend } = await sb.from("lab_results").select("id, asset, config, fingerprint, label, mode, request_id, refresh").eq("run_id", run.id).eq("stage", "pending").order("asset").order("id").limit(300);
+  const { data: pend } = await sb.from("lab_results").select("id, asset, config, fingerprint, label, mode, request_id, refresh, champion").eq("run_id", run.id).eq("stage", "pending").order("asset").order("id").limit(300);
   if (!pend?.length) return false;
+  const monthRows: Record<string, unknown>[] = [];
   const asset = pend[0].asset;
   const capital = Number(run.settings?.capital ?? 500000);
   let cpu = 0;
@@ -2022,6 +2085,8 @@ async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     let fields: Record<string, unknown>;
     try {
       const { metrics, trades } = await screenOne(row.config, data, memo, preVault(win, row.config), capital, rates);
+      // Month by month results of every fresh try (not re-tests of earlier winners) for the overfitting gauge.
+      if (!row.refresh && !row.champion && !row.request_id) monthRows.push({ run_id: run.id, asset: row.asset, mode: row.mode, nets: metrics.months.map((m) => Math.trunc(m.net)) });
       if (!metrics.passed && (row.refresh || (desk.has(row.fingerprint) && !row.request_id))) {
         // A saved strategy re-tested with the current rules that now fails the first round: kept, with the verdict,
         // so it replaces its older (passing) result instead of quietly disappearing.
@@ -2047,6 +2112,7 @@ async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     updates.push(sb.from("lab_results").update(fields).eq("id", row.id).then(() => {}));
   }
   await Promise.all(updates);
+  if (monthRows.length) await sb.from("lab_months").insert(monthRows).then(() => {}, () => {});
   await forget(sb, failed);
   run.counts = run.counts ?? {};
   run.counts.tested = Number(run.counts.tested ?? 0) + updates.length + failed.length;

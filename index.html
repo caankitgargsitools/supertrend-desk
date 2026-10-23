@@ -766,6 +766,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
           <span class="actions"><button class="btn small" id="b_restore" type="button">Restore</button><button class="btn small danger" id="b_purge" type="button">Delete permanently</button></span>
         </div>
         <div id="errBox" class="banner err" style="margin-top:12px" hidden></div>
+        <div id="killBox" class="banner err" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center" hidden><span></span><button class="btn small" id="kill_allow" type="button">Allow new trades again</button></div>
         <div id="labLink" class="banner info labfrom" style="margin-top:12px" hidden></div>
         <div id="lockedBox" style="margin-top:12px" hidden></div>
         <div id="publishBox" style="margin-top:12px" hidden></div>
@@ -1061,7 +1062,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
           <div class="formbar"><button class="btn primary" type="submit">Start focused run</button><span class="hint" id="lf_msg"></span></div>
         </form>
         <details class="xp" data-xp="labhow"><summary><span class="xt">How the lab works</span><span class="hint">runs, rounds, costs, crypto</span></summary><div class="xpb"><p class="hint" style="margin:0">The lab runs once a day at 16:05 IST or non-stop (see Lab settings). Each run invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year (once a day, and only at night, 11:30 PM – 8:30 AM). A run stopped by hand pauses the lab for an hour, then it carries on by itself. Nothing is left half-way: strategies a stopped or failed run hadn’t backtested yet, or that were waiting for option prices, are taken over by the next run first (they count towards its size), and earlier winners still in the tougher test carry on in every run until they pass or fail. “Focused run” researches only the assets you pick, with new strategies only. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations, and with small steps on every indicator setting (lengths ±1, ±2 and ±10%, Supertrend factor and Bollinger width ±0.25/±0.5, RSI / ADX levels ±2/±5), which get a double share. About a quarter of new strategies are built around liquidity sweeps. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). Every index strategy that passes (on intraday candles) then joins the option-pricing queue: in the background, one strategy at a time and oldest first, it is priced with real expired-option prices as option buying, option writing and spreads, only while no run is going. After each run the lab rests about as long as the run worked (10–45 minutes), and whenever the database answers slowly it gives way for 20 minutes, so logins and live trading always come first. Strategies are <strong>ranked on the first 9 months</strong> and must also make money in the last 3 months, which the ranking never saw (round 1); then work on other assets and other timeframes (round 2); then make money in <strong>every one of the past 10 years</strong> (5 years for 5-minute strategies, the history Dhan keeps), so nothing passes on one big move of the underlying (round 3). Strategies that decide on minute candles must also stay profitable, in total and in every year, with the slippage doubled (charges are known exactly and counted once). Every backtest fills each order a little worse than the test price (slippage set per asset from how liquid it is: 0.01% on Nifty and Gold up to 0.04–0.05% on Midcap Select, Nifty Next 50, Bankex, Nickel and the mini contracts; 0.5–2% of premium on options). Variations come from at most 6 winners per asset, so no single asset fills the runs. Crypto (Bitcoin, Ether, Solana, XRP and any coin added under Connections) is tested as Delta Exchange perpetual futures round the clock, every day, on daily, weekly and 15-minute-based candles (Binance spot history before the coin traded properly on Delta India), with Delta's 0.05% fee + GST, Delta's actual funding (longs pay, shorts receive) and per-coin slippage. Crypto strategies are mostly slow trend followers that trade both ways: Supertrend and Heikin Ashi on daily and weekly candles, moving averages, Donchian breakouts, dips bought only in an uptrend, the late-US-evening hours, with volatility and Bitcoin-trend filters. Strategies that fail are cleared straight away; a one-line record stays so the lab never tries them again.</p></div></details>
-        <div id="lab_status" style="margin-top:12px"></div>
+        <div id="lab_status" style="margin-top:12px"></div><div id="lab_pbo"></div>
         <div id="lab_reqs" style="margin-top:12px"></div>
         <form id="labSetForm" hidden style="margin-top:14px">
           <div class="grid">
@@ -1574,6 +1575,7 @@ function chipsFor(s) {
   if (s.position === "SHORT") c.push(`<span class="chip red">${s.trade_type === "OPTIONS" ? optTxt("Bearish") : "Short"}</span>`);
   if (s.risk && s.risk.max_day_loss && String(s.day_pnl_date) === istDate(0) && Number(s.day_pnl) <= -s.risk.max_day_loss) c.push('<span class="chip red">Loss limit</span>');
   if (s.last_error) c.push('<span class="chip red">Error</span>');
+  if (s.kill_at) c.push('<span class="chip red" title="The kill rule stopped new trades">Kill rule</span>');
   return c.join("");
 }
 
@@ -1658,6 +1660,8 @@ function renderStrategy() {
   $("archBanner").hidden = !s.archived;
   ["b_active", "b_live", "b_flat", "b_archive"].forEach((id) => $(id).hidden = !!s.archived);
   const eb = $("errBox"); eb.hidden = !s.last_error; eb.textContent = s.last_error || "";
+  const kb = $("killBox"); kb.hidden = !s.kill_at || !!s.archived;
+  kb.querySelector("span").textContent = s.kill_at ? `Kill rule: new trades stopped on ${istText(s.kill_at)} because ${s.kill_note || "it did far worse than its backtest"}. Open positions are still managed (stops, targets, exits).` : "";
   const ll = $("labLink"), labOk = s.lab_id && !s.is_master && !$("openLab").hidden, failed = s.lab_status === "failed";
   ll.hidden = !s.lab_id || s.is_master;
   ll.className = `banner ${failed ? "err" : "info"} labfrom`;
@@ -3745,7 +3749,8 @@ function robOf(r) {
   if (x.assets && typeof x.assets === "object") return { status: x.status || (x.checked_at ? "done" : "waiting"), passed: x.passed, assets_ok: x.assets.ok, assets_n: x.assets.n, tfs_ok: x.tfs.ok, tfs_n: x.tfs.n,
     years_ok: x.years ? x.years.ok : null, years_n: x.years ? x.years.n : null, years: x.years ? x.years.list : null, quality: x.quality || null, q_ok: x.quarters ? x.quarters.ok : null, q_n: x.quarters ? x.quarters.n : null, quarters: x.quarters ? x.quarters.list : null,
     vs_bh: x.vs_bh, risk_vs_bh: x.risk_vs_bh, bh_net: x.bh && x.bh.net, bh_dd: x.bh && x.bh.max_dd, bh_ratio: x.bh && x.bh.ratio, net: x.self && x.self.net, max_dd: x.self && x.self.max_dd, why: x.why || [], daily: x.daily,
-    assetList: x.assets.list, tfList: x.tfs.list, stepList: x.steps ? x.steps.list : null };
+    assetList: x.assets.list, tfList: x.tfs.list, stepList: x.steps ? x.steps.list : null,
+    strict: x.rev >= 4 ? { vault: x.vault, luck: x.luck, plateau: x.plateau, top: x.top_cut, noise: x.noise, random: x.random } : null };
   return { ...x, status: x.status || "waiting", why: x.why || [] };
 }
 /** Passed = the walk-forward pass and the tougher test (other assets, other timeframes, every past year profitable). */
@@ -3930,8 +3935,21 @@ function labRefreshHTML() {
   if (left <= 0) return `<div class="banner ok" style="margin-top:8px">All ${x.total} saved strategies were re-tested with the current rules: ${x.passed} still pass, ${Math.max(0, x.total - x.passed)} failed and left the “Passed” list. New strategies are being written again.</div>`;
   return `<div class="banner info" style="margin-top:8px"><b>Re-testing every saved strategy with the current rules</b> (latest year, then the tougher test), strategies on desks first: ${x.done} of ${x.total} done${x.done ? `: ${x.passed} still pass, ${Math.max(0, x.done - x.passed)} failed` : ""}; ${x.queued - x.done > 0 ? `${x.queued - x.done} in the current run, ` : ""}${x.total - x.queued} waiting. No new strategies are written until this is finished. It runs 11:30 PM – 8:30 AM while strategies are active, so it may take a few nights.</div>`;
 }
+/** Overfitting gauge: the latest Probability of Backtest Overfitting per asset (from each run's fresh tries). */
+async function renderPbo() {
+  const box = $("lab_pbo"); if (!box || Date.now() - (renderPbo.at || 0) < 60000) return;
+  renderPbo.at = Date.now();
+  const { data } = await db.from("lab_pbo").select("run_id, asset, mode, pbo, strategies, computed_at").order("computed_at", { ascending: false }).limit(200);
+  const latest = new Map(); for (const x of data || []) { const k = `${x.asset}|${x.mode}`; if (!latest.has(k)) latest.set(k, x); }
+  if (!latest.size) { box.innerHTML = '<p class="hint" style="margin:8px 0 0">Overfitting gauge: shown after the next run (it needs a run\'s fresh tries).</p>'; return; }
+  const rows = [...latest.values()].sort((a, b) => b.pbo - a.pbo);
+  box.innerHTML = `<details style="margin-top:10px"><summary><b>Overfitting gauge</b>: chance the lab's best pick on an asset is mostly luck (under 20% good, over 50% bad)</summary>
+    <table class="mini" style="margin-top:6px"><thead><tr><th>Asset</th><th>Kind</th><th class="n">Overfitting</th><th class="n">Ideas</th><th>Run</th></tr></thead><tbody>${rows.map((x) =>
+      `<tr><td>${esc(assetLabel(x.asset))}</td><td>${x.mode === "DAILY" ? "daily" : "intraday"}</td><td class="n"><span class="chip ${x.pbo > 0.5 ? "red" : x.pbo > 0.2 ? "yellow" : "green"}">${Math.round(x.pbo * 100)}%</span></td><td class="n">${x.strategies}</td><td>#${x.run_id}</td></tr>`).join("")}</tbody></table></details>`;
+}
 function renderLabStatus() {
   const box = $("lab_status"); const r = lab.runs[0];
+  renderPbo().catch(() => {});
   $("lab_stop").hidden = !(r && r.status === "running");
   $("lab_run").disabled = !!(r && r.status === "running");
   if (!r) { box.innerHTML = '<div class="banner info">No runs yet. The first one starts at 16:05 IST, or press “Run now”.</div>'; return; }
@@ -4149,6 +4167,19 @@ const xpOpen = new Set();
 const xpA = (key, title, note = "") => `<details class="xp" data-xp="${key}"${xpOpen.has(key) ? " open" : ""}><summary><span class="xt">${title}</span>${note ? `<span class="hint">${note}</span>` : ""}</summary><div class="xpb">`;
 const XPZ = "</div></details>";
 document.addEventListener("toggle", (e) => { const d = e.target; if (d && d.matches && d.matches("details.xp")) { if (d.open) xpOpen.add(d.dataset.xp); else xpOpen.delete(d.dataset.xp); } }, true);
+/** The stricter checks (since 23 Oct 2026): held-back months, luck, nearby settings, best trades, noise, random entries. */
+function strictHTML(k) {
+  if (!k) return '<p class="hint" style="margin-top:8px">Tested before the stricter rules (held-back months, luck, noise tests); it is being re-tested.</p>';
+  const pct = (v) => v == null ? "–" : `${Math.round(v * 100)}%`;
+  const v = k.vault, l = k.luck, pl = k.plateau, t = k.top, nz = k.noise, rn = k.random;
+  return `<h3 style="font-size:15px;margin:16px 0 6px">Stricter checks</h3><div class="stats">
+    <div class="stat"><span class="label">Held-back latest months</span><span class="v">${v ? rupees(v.net) : "–"}</span><span class="hint">${v ? `${v.n} trade${v.n === 1 ? "" : "s"}, ${esc(String(v.from || ""))} → ${esc(String(v.to || ""))}; must make money` : "not tested yet"}</span></div>
+    <div class="stat"><span class="label">Not luck</span><span class="v">${l ? pct(l.dsr) : "–"}</span><span class="hint">${l ? `confidence it beats the best of ${l.trials} ideas tried by chance (t ${l.t ?? "–"}); needs 95%` : ""}</span></div>
+    <div class="stat"><span class="label">Nearby settings</span><span class="v">${pl ? `${pl.ok} of ${pl.n}` : "–"}</span><span class="hint">${pl ? "made money; needs 3 of 4" : "too few to judge"}</span></div>
+    <div class="stat"><span class="label">Without its best 5% of trades</span><span class="v">${t ? rupees(t.net) : "–"}</span><span class="hint">${t ? `best ${t.dropped} left out; must still make money` : ""}</span></div>
+    <div class="stat"><span class="label">Beats shuffled prices</span><span class="v">${nz ? pct(1 - nz.p) : "–"}</span><span class="hint">${nz ? `of ${nz.runs} runs on shuffled candles; needs 95%` : "only for finalists"}</span></div>
+    <div class="stat"><span class="label">Beats random entries</span><span class="v">${rn && rn.p != null ? pct(1 - rn.p) : "–"}</span><span class="hint">${rn && rn.p != null ? "of 1,000 sets held as long; needs 95%" : "only for finalists"}</span></div></div>`;
+}
 function robustHTML(r, m, admin) {
   const x = robOf(r);
   if (!m.passed) return `<div class="banner warn" style="margin-top:12px">Not passed: ${esc((m.why || []).join("; "))}.</div>`;
@@ -4157,7 +4188,7 @@ function robustHTML(r, m, admin) {
   const head = x.passed ? '<div class="banner ok" style="margin-top:12px">Passed all three rounds: profitable in the ranked 9 months and the 3 months after, works on other assets and other timeframes, and made money in every one of the past years tested. (Buy &amp; hold is shown below for comparison only.)</div>'
     : `<div class="banner warn" style="margin-top:12px">Failed the tougher test: ${esc(x.why.join("; "))}.</div>`;
   const list = (rows, kind) => rows && rows.length ? `<table class="mini" style="margin-top:6px"><thead><tr><th>${kind}</th><th class="n">Trades</th><th class="n">Net</th><th class="n">PF</th><th class="n">Max DD</th><th>Works?</th></tr></thead><tbody>${rows.map((y) => `<tr><td>${esc(kind === "Asset" ? labAssetName(y.asset) : y.tf + " min" + (y.from ? ` (from ${y.from})` : ""))}</td><td class="n">${y.n ?? "–"}</td><td class="n">${pc(y.net)}</td><td class="n">${y.pf ?? "–"}</td><td class="n">${y.max_dd == null ? "–" : rupees(y.max_dd)}</td><td>${y.ok ? '<span class="chip green">Yes</span>' : `<span class="chip red">No</span>${y.error ? ` <span class="hint">${esc(y.error)}</span>` : ""}`}</td></tr>`).join("")}</tbody></table>` : "";
-  return `${head}
+  return `${head}${strictHTML(x.strict)}
     <h3 style="font-size:15px;margin:16px 0 6px">Tougher test (latest year, 1 lot)</h3>
     <div class="stats">
       <div class="stat"><span class="label">Other assets that work</span><span class="v">${x.assets_ok ?? 0} of ${x.assets_n ?? 0}</span><span class="hint">needs 1</span></div>
@@ -4954,6 +4985,11 @@ $("nav_wallet").addEventListener("click", () => showPage("wallet"));
 $("nav_admin").addEventListener("click", () => showPage("admin"));
 $("b_back").addEventListener("click", () => showPage("list"));
 $("myPass").addEventListener("click", () => showPage("pass"));
+$("kill_allow").addEventListener("click", (e) => run(e.currentTarget, async () => {
+  const s = cur(); if (!s) return;
+  must(await db.rpc("kill_allow", { p_strategy: s.id }));
+  toast("New trades allowed again. From now on it is judged on its new trades."); await loadAll();
+}));
 $("passForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const a = $("np1").value, b = $("np2").value;
@@ -5651,7 +5687,7 @@ function renderList() {
     tr.append(ck);
     for (const [k, , f, t] of cols) {
       const td = document.createElement("td"); const v = f(s);
-      if (k === "name") { td.className = "nm"; td.textContent = v; td.title = s.name; if (s.lab_status === "failed") { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Failed lab test"; e.title = s.lab_note || "Its lab result did not pass the tougher test"; td.append(e); } if (s.last_error) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Error"; td.append(e); } if (s.exec_state === "working") { const e = document.createElement("span"); e.className = "chip yellow"; e.style.marginLeft = "6px"; e.textContent = "Order working"; e.title = "A live order is being worked at the broker (checked every 15 seconds)"; td.append(e); } }
+      if (k === "name") { td.className = "nm"; td.textContent = v; td.title = s.name; if (s.lab_status === "failed") { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Failed lab test"; e.title = s.lab_note || "Its lab result did not pass the tougher test"; td.append(e); } if (s.last_error) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Error"; td.append(e); } if (s.kill_at) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Kill rule"; e.title = s.kill_note || "New trades stopped: far worse than its backtest"; td.append(e); } if (s.exec_state === "working") { const e = document.createElement("span"); e.className = "chip yellow"; e.style.marginLeft = "6px"; e.textContent = "Order working"; e.title = "A live order is being worked at the broker (checked every 15 seconds)"; td.append(e); } }
       else if (t === "num") { td.className = "n " + (v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""); td.textContent = rupees(v); }
       else if (t === "int") { td.className = "n"; td.textContent = String(v); }
       else if (t === "wrap") { td.className = "wr"; td.textContent = v; }
@@ -5705,7 +5741,7 @@ function renderListCards(cols, rows) {
     const el = document.createElement("div"); el.className = "lpc" + (s.position !== "FLAT" ? " open" : "") + (lsel.has(s.id) ? " sel" : ""); el.tabIndex = 0;
     el.innerHTML = `<div class="top"><div class="nm"></div>${s.archived ? "" : `<input type="checkbox" class="ck" aria-label="Select" ${lsel.has(s.id) ? "checked" : ""}>`}</div>
       <div class="sub">${esc(assetLabel(s.underlying))} · ${esc(instName(s))}${tf ? ` · ${esc(tf)}` : ""}</div>
-      <div class="chips">${s.archived ? '<span class="chip">Archived</span>' : s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>'}${s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>'}${s.lab_status === "failed" ? `<span class="chip red" title="${esc(s.lab_note || "")}">Failed lab test</span>` : ""}${s.last_error ? '<span class="chip red">Error</span>' : ""}${s.exec_state === "working" ? '<span class="chip yellow" title="A live order is being worked at the broker (checked every 15 seconds)">Order working</span>' : ""}</div>
+      <div class="chips">${s.archived ? '<span class="chip">Archived</span>' : s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>'}${s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>'}${s.lab_status === "failed" ? `<span class="chip red" title="${esc(s.lab_note || "")}">Failed lab test</span>` : ""}${s.last_error ? '<span class="chip red">Error</span>' : ""}${s.kill_at ? '<span class="chip red">Kill rule</span>' : ""}${s.exec_state === "working" ? '<span class="chip yellow" title="A live order is being worked at the broker (checked every 15 seconds)">Order working</span>' : ""}</div>
       <div class="pos"><div><div class="side ${side}">${s.position === "FLAT" ? "Flat" : `${s.position === "LONG" ? "Long" : "Short"}${s.pos_lots ? ` · ${s.pos_lots} lot${s.pos_lots === 1 ? "" : "s"}` : ""}`}</div>${s.position === "FLAT" ? '<div class="px">Waiting for a signal</div>' : `<div class="px" data-ltp="${s.id}">${posPriceText(s)}</div>`}</div>
         ${s.position === "FLAT" ? "" : `<div data-upnl="${s.id}">${upnlHtml(s)}</div>`}</div>
       <div class="mini"><div><span class="k">Booked</span><span class="v ${cls(s.live ? a.live : a.paper)}">${a.n ? rupeesShort(s.live ? (a.live || 0) : (a.paper || 0)) : "–"}</span></div>

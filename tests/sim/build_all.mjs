@@ -10,4 +10,6 @@ await one("audit.ts", "audit.mjs");
 await one("dhan.ts", "dhan.mjs");
 await one("owncandles.ts", "own.mjs");
 await one("stats.ts", "stats.mjs");
+await one("noise.ts", "noise.mjs");
+await one("kill.ts", "kill.mjs");
 console.log("built parts");
