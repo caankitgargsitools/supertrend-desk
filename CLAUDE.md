@@ -82,6 +82,13 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
 - Totals (`ledger_net_user`, `ledger_net`, `admin_users`) exclude hidden trades.
+- Lab strictness (rev 4, 23 Oct 2026): a **vault** (last 6 months; 3 for MCX minute strategies) is held back from
+  generation, ranking and every check (`preVault`), and tested once at the end (check kind `vault`); a **luck
+  adjustment** (Deflated Sharpe on the trades, `stats.ts`, tries = lab-wide rule families from `lab_trial_families()`,
+  95% needed); ≥ 3 of 4 neighbouring settings profitable; profitable without its best 5% of trades; ≥ 30 trades
+  (daily) / 100 (minute) over the years tested; doubled slippage for daily strategies too. Breeding from winners is off
+  (`lab_settings.evolve`). `lab_reverdict` (re-scoring stored results) is retired: re-tests go through `lab_refresh`.
+  First preview: none of the 24 desk lab strategies passes the luck test (best t = 3.4).
 
 ## Open items
 - Supervised 1-lot live test (NATGASMINI, Lab #6038) once Papa adds Dhan funds and whitelists the IP.
@@ -89,4 +96,6 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (GOLD 1 kg contract dominated the paper loss) — proposed, awaiting Papa's go-ahead.
 - Tick-level prices/stops need Dhan's WebSocket feed on an always-on server (~₹500–1,500/month) — offered, not built.
 - Slippage column on Orders + per-strategy slippage summary (signal price vs fill) — proposed.
+- Lab Phase 2 (noise/permutation test, random-entry test, clustering of passers, overfitting gauge per asset) and
+  Phase 3 (paper kill rule: flag a desk strategy whose results fall below its backtest's worst 5%) — planned.
 - Ideas from the Tradl.ai review (one-page backtest report, morning brief, featured shelves) — proposed.

@@ -14,6 +14,7 @@ import { dataSecurity } from "./instruments.ts";
 import { describeRisk, type Risk } from "./risk.ts";
 import { loadMarginRates, type MarginRate, refreshMargins } from "./margins.ts";
 import { readCandles, saveCandles } from "./candles.ts";
+import { deflatedSharpe, median } from "./stats.ts";
 export { readCandles, saveCandles };
 import { CRYPTO, cryptoDaily, cryptoFunding, cryptoIntraday, cryptoLot, loadCrypto } from "./crypto.ts";
 
@@ -777,6 +778,18 @@ const toCol = (rows: { t: number; o: number; h: number; l: number; c: number; v?
 });
 const fromCol = (c: Col) => c.t.map((t, i) => ({ t, o: c.o[i], h: c.h[i], l: c.l[i], c: c.c[i], v: c.v ? c.v[i] : 0 }));
 export const WARM_DAYS = 150, YEAR_DAYS = 365;
+/**
+ * The vault: the most recent months are held back from everything that picks or tunes strategies (generation, the
+ * ranked 9 months and the 3 after, the year-by-year test, other assets / timeframes, setting steps). A strategy sees
+ * them once, at the very end, and must make money there. 6 months; 3 for minute strategies on MCX, whose minute
+ * history is only about a year deep.
+ */
+export const vaultDays = (cfg: LabConfig) => (!cfg.rules?.daily && LAB_ASSETS[cfg.underlying]?.commodity ? 92 : 182);
+/** A run's window moved back to end where the vault starts (same shape: 12 months, the last 3 as the test). */
+export function preVault(win: { from: string; split: string; to: string }, cfg: LabConfig) {
+  const to = addDays(win.to, -(Number(cfg.vault_days) || vaultDays(cfg)));
+  return { from: addDays(to, -YEAR_DAYS), split: addDays(to, -92), to };
+}
 
 /** Bring an asset's cached candles up to date (5-minute candles for indices, daily candles for every asset). */
 export async function refreshAsset(sb: SupabaseClient, creds: { client: string; token: string }, key: string, today: string, freshHours = 0) {
@@ -1421,7 +1434,8 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
     if (k >= 2 || ka >= 6) return false;
     perFam.set(f, k + 1); perAsset.set(a, ka + 1); pSeen.add(x.fingerprint); return true;
   }).slice(0, 40);
-  const nVar = pool.length && !set.focus ? Math.round(n * 0.4) : 0;
+  // Breeding from winners searches the same history the tests use, so it is off unless switched on (lab_settings.evolve).
+  const nVar = pool.length && !set.focus && set.evolve === true ? Math.round(n * 0.4) : 0;
   const weight = pool.map((p, i) => Math.sqrt(passes.get(p.fingerprint) ?? 1) * (1 + (pool.length - i) / pool.length));
   const wTot = weight.reduce((a, b) => a + b, 0) || 1;
   let nMade = 0;
@@ -1551,7 +1565,7 @@ async function forgetOld(sb: SupabaseClient, limit = 400) {
 const clsOf = (a?: LabAsset) => a?.crypto ? "C" : a?.commodity ? "M" : "I";
 /** Mini and micro contracts follow the same commodity, so they don't count as another asset. */
 export const assetRoot = (k: string) => /^GOLD/.test(k) ? "GOLD" : /^SILVER/.test(k) ? "SILVER" : /^CRUDE/.test(k) ? "CRUDE" : /^NAT/.test(k) ? "NATGAS" : /^ZINC/.test(k) ? "ZINC" : /^LEAD/.test(k) ? "LEAD" : /^ALUMIN/.test(k) ? "ALUMINIUM" : k;
-type Check = { kind: "self" | "asset" | "tf" | "year" | "step"; asset: string; tf: number | null; config: LabConfig };
+type Check = { kind: "self" | "asset" | "tf" | "year" | "step" | "vault"; asset: string; tf: number | null; config: LabConfig };
 /** Years back for the year-by-year test: 10 on daily candles; 5 on 5-minute candles (the depth Dhan keeps). */
 export const yearsFor = (cfg: LabConfig) => cfg.rules?.daily ? 10 : 5;
 /** The checks for one first-round winner, limited to assets the lab has candles for. */
@@ -1592,7 +1606,11 @@ export function robustChecks(cfg: LabConfig, haveD: Set<string>, haveI5: Set<str
   const steps = settingVariants(cfg).filter((c) => { try { validateRules(c.rules); return true; } catch { return false; } });
   const pickN = Math.min(8, steps.length);
   for (let i = 0; i < pickN; i++) out.push({ kind: "step", asset: cfg.underlying, tf: null, config: steps[Math.floor((i * steps.length) / pickN)] });
-  return out;
+  // Last: the held-back months, the strategy itself, once.
+  out.push({ kind: "vault", asset: cfg.underlying, tf: null, config: cfg });
+  // Every check keeps the strategy's own vault, so a check on another asset or timeframe never looks into it.
+  const vd = vaultDays(cfg);
+  return out.map((c) => ({ ...c, config: { ...c.config, vault_days: vd } }));
 }
 /** Buy & hold over the window: 1 lot bought at the first close and held to the last, with its worst fall. */
 function buyHold(data: SimData, from: string, to: string, lot: number) {
@@ -1604,8 +1622,19 @@ function buyHold(data: SimData, from: string, to: string, lot: number) {
   const net = Math.trunc((ds[ds.length - 1].c - c0) * lot);
   return { net, max_dd: Math.trunc(dd), ratio: dd > 0 ? +(net / dd).toFixed(2) : null, from: ds[0].day, to: ds[ds.length - 1].day };
 }
+/** Rule families tried (same indicators and conditions, any settings): the lab's number of independent tries. */
+const FAM_CACHE = { at: 0, map: new Map<string, number>() };
+export async function familiesFor(sb: SupabaseClient, cfg: LabConfig): Promise<number> {
+  if (Date.now() - FAM_CACHE.at > 3600000) {
+    const { data } = await sb.rpc("lab_trial_families");
+    FAM_CACHE.map = new Map(Object.entries((data ?? {}) as Record<string, number>));
+    FAM_CACHE.at = Date.now();
+  }
+  // Counted across every asset: ideas found on one asset are tried on the others, so the choice is lab-wide.
+  return Math.max(10, Number(FAM_CACHE.map.get(`*|${cfg.rules?.daily ? "DAILY" : "INTRADAY"}`)) || 10);
+}
 /** The verdict once every check of a winner is done. */
-export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: string; tf: number | null; result: any }[]) {
+export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: string; tf: number | null; result: any }[], opts: { families?: number } = {}) {
   const daily = !!cfg.rules?.daily;
   const self = checks.find((c) => c.kind === "self")?.result ?? null;
   const assets = checks.filter((c) => c.kind === "asset").map((c) => ({ asset: c.asset, ...c.result }));
@@ -1638,9 +1667,9 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
     } else why.push(`only ${yrs.length} year${yrs.length === 1 ? "" : "s"} of history to test year by year (needs 3)`);
   } else if (yrs.length < 3) why.push(`only ${yrs.length} year${yrs.length === 1 ? "" : "s"} of history to test year by year (needs 3)`);
   else if (okY < yrs.length) why.push(`profitable in ${okY} of the past ${yrs.length} years (needs every year; lost or flat in ${yrs.filter((x) => !x.ok).map((x) => `year ${x.y}`).join(", ")})`);
-  // Minute-candle strategies trade often for small moves, so fills decide them: they must still make money in total and
-  // in every year with the asset's slippage doubled (charges are known exactly and counted once).
-  if (!daily && (yrs.length >= 3 || quarters)) {
+  // Fills decide a strategy's edge: it must still make money in total and in every year with the asset's slippage
+  // doubled (charges are known exactly and counted once). Minute and daily strategies alike.
+  if (yrs.length >= 3 || quarters) {
     const st = yrs.map((y) => ({ y: y.y, v: (Number(y.net) || 0) - (Number(y.xcost) || 0), has: y.xcost != null }));
     if (st.every((x) => x.has)) {
       const tot = st.reduce((a, x) => a + x.v, 0), bad = st.filter((x) => !(x.v > 0));
@@ -1657,10 +1686,42 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
     // Shown for comparison only: the strategies trade long and short, so a falling asset is no reason to fail one.
   }
   const stepList = checks.filter((c) => c.kind === "step" && c.result && !c.result.skip && !c.result.error).map((c) => ({ note: c.result.note, net: c.result.net, pf: c.result.pf, n: c.result.n, ok: !!c.result.ok }));
+  // --- Stricter rules (23 Oct 2026): the vault, luck, neighbouring settings, a few lucky trades, enough trades. ---
+  // Neighbouring settings: at least 3 of 4 must make money, and the typical one at least half as much as the strategy.
+  let plateau: { ok: number; n: number; median: number | null; self: number | null } | null = null;
+  if (stepList.length >= 3) {
+    const med = median(stepList.map((x) => Number(x.net) || 0)), selfNet = Number(self?.net) || 0, okS = stepList.filter((x) => x.ok).length;
+    plateau = { ok: okS, n: stepList.length, median: med == null ? null : Math.trunc(med), self: Math.trunc(selfNet) };
+    if (okS < Math.ceil(stepList.length * 0.75)) why.push(`works only near this exact setting: ${okS} of ${stepList.length} nearby settings made money (needs ${Math.ceil(stepList.length * 0.75)})`);
+    else if (med != null && selfNet > 0 && med < selfNet * 0.5) why.push(`nearby settings made much less (typical ₹${Math.trunc(med).toLocaleString("en-IN")} against ₹${Math.trunc(selfNet).toLocaleString("en-IN")}): the result depends on the exact setting`);
+  }
+  const nets = allTrades.map((t) => Number(t.net) || 0);
+  // Enough trades over the whole history to judge it at all.
+  const minAll = daily ? 30 : 100;
+  if (nets.length < minAll) why.push(`only ${nets.length} trades over the years tested (needs ${minAll})`);
+  // Not carried by a few lucky trades: without its best 5% of trades it must still make money.
+  let topCut: { dropped: number; net: number } | null = null;
+  if (nets.length) {
+    const k = Math.max(1, Math.ceil(nets.length * 0.05)), rest = [...nets].sort((a, b) => b - a).slice(k).reduce((a, x) => a + x, 0);
+    topCut = { dropped: k, net: Math.trunc(rest) };
+    if (!(rest > 0)) why.push(`the profit comes from a few trades: without its best ${k} it ${rest < 0 ? `lost ₹${Math.trunc(-rest).toLocaleString("en-IN")}` : "made nothing"}`);
+  }
+  // Luck: the chance its trades beat the best result expected from luck alone among the rule families the lab has
+  // tried (Deflated Sharpe Ratio); 95% needed.
+  const luck = { ...deflatedSharpe(nets, opts.families ?? 100), families: opts.families ?? null };
+  if (nets.length >= 3 && luck.dsr < 0.95) why.push(`could be luck: ${Math.round(luck.dsr * 100)}% confidence it beats the best of ${luck.trials} rule families the lab has tried, by chance (needs 95%)`);
+  // The vault: the held-back latest months, seen once.
+  const vc = checks.find((c) => c.kind === "vault");
+  const vault = vc?.result ?? null;
+  const vMonths = Math.round((Number(cfg.vault_days) || vaultDays(cfg)) / 30.4);
+  if (!vc) why.push("not yet tested on the held-back latest months");
+  else if (vault?.error) why.push(`held-back months couldn't be tested: ${vault.error}`);
+  else if (!(vault?.n >= 1)) why.push(`no trade in the held-back last ${vMonths} months, so it can't be confirmed`);
+  else if (!(vault?.net > 0)) why.push(`lost money in the held-back last ${vMonths} months (₹${Math.trunc(Number(vault.net) || 0).toLocaleString("en-IN")} over ${vault.n} trade${vault.n === 1 ? "" : "s"})`);
   const quality = qualityScore(yrs, allTrades, { okA, nA: assets.length, okT, nT: tfs.length },
     { stepsOk: stepList.filter((x) => x.ok).length, stepsN: stepList.length, twoWay: cfg.direction === "BOTH", capital: 500000 });
   return { passed: why.length === 0, why, self, bh, vs_bh: vsBh, risk_vs_bh: riskVsBh, assets: { ok: okA, n: assets.length, list: assets },
-    tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, ...(quarters ? { quarters: { ok: quarters.filter((x) => x.ok).length, n: quarters.length, list: quarters } } : {}), steps: { ok: stepList.filter((x) => x.ok).length, n: stepList.length, list: stepList }, quality, daily, checked_at: new Date().toISOString() };
+    tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, vault, luck, plateau, top_cut: topCut, rev: 4, ...(quarters ? { quarters: { ok: quarters.filter((x) => x.ok).length, n: quarters.length, list: quarters } } : {}), steps: { ok: stepList.filter((x) => x.ok).length, n: stepList.length, list: stepList }, quality, daily, checked_at: new Date().toISOString() };
 }
 
 /* ---------- long trade lists and the quality score ---------- */
@@ -1833,13 +1894,23 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
       const t1 = performance.now();
       let result: Record<string, unknown>;
       try {
+        const pw = preVault(win, c.config);
+        if (c.kind === "vault") {
+          const vw = { from: addDays(pw.to, 1), split: addDays(pw.to, 1), to: win.to };
+          const { metrics } = await screenOne(c.config, data, memo, vw, capital, rates);
+          const f = metrics.full;
+          result = { from: vw.from, to: vw.to, net: f.net, n: f.n, pf: f.pf, win_rate: f.win_rate, max_dd: f.max_dd, ok: f.n >= 1 && f.net > 0 };
+          cpu += performance.now() - t1;
+          ups.push(sb.from("lab_checks").update({ status: "done", result }).eq("id", c.id).then(() => {}));
+          continue;
+        }
         // Timeframe checks run on 5-minute candles, which for MCX only go back as far as the listed contracts have traded:
         // they are judged on that stretch (after 10 days of warm-up), with the trade minimum scaled to its length.
-        let w = win, scale = 1;
+        let w = pw, scale = 1;
         if (c.kind === "year") {
           // Year k = the 12 months ending k-1 years before the test's last day, after warm-up for the indicators.
           const daily = !!c.config.rules?.daily, first = daily ? data.daily[0]?.day : data.raw[0]?.day;
-          const hi = addDays(win.to, -365 * (Number(c.tf) - 1)), lo = addDays(hi, -364);
+          const hi = addDays(pw.to, -365 * (Number(c.tf) - 1)), lo = addDays(hi, -364);
           const warm = first ? addDays(first, daily ? 60 : 20) : hi; // 60 days lets the 10th year back fit in the daily history Dhan has (from mid-2015)
           const from = lo < warm ? warm : lo;
           if ((Date.parse(hi) - Date.parse(from)) / 86400000 < 300) {
@@ -1860,18 +1931,18 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
         }
         if (c.kind === "tf") {
           const first = data.raw[0]?.day;
-          const from = first ? addDays(first, 10) : win.to;
-          if (from > win.from) w = { ...win, from, split: from > win.split ? from : win.split };
-          const days = (Date.parse(win.to) - Date.parse(w.from)) / 86400000;
+          const from = first ? addDays(first, 10) : pw.to;
+          if (from > pw.from) w = { ...pw, from, split: from > pw.split ? from : pw.split };
+          const days = (Date.parse(pw.to) - Date.parse(w.from)) / 86400000;
           if (days < 60) { ups.push(sb.from("lab_checks").update({ status: "done", result: { skip: true, ok: false, error: `only ${Math.max(0, Math.round(days))} days of 5-minute candles so far` } }).eq("id", c.id).then(() => {})); continue; }
           scale = Math.min(1, days / 365);
         }
         const { metrics } = await screenOne(c.config, data, memo, w, capital, rates);
         const f = metrics.full, daily = !!c.config.rules?.daily;
         const minN = Math.max(3, Math.round((daily ? 5 : 10) * scale));
-        result = { net: f.net, pf: f.pf, max_dd: f.max_dd, n: f.n, win_rate: f.win_rate, test_net: metrics.test.net, ok: f.net > 0 && (f.pf == null || f.pf >= 1.1) && f.n >= minN, ...(w.from !== win.from ? { from: w.from } : {}),
+        result = { net: f.net, pf: f.pf, max_dd: f.max_dd, n: f.n, win_rate: f.win_rate, test_net: metrics.test.net, ok: f.net > 0 && (f.pf == null || f.pf >= 1.1) && f.n >= minN, ...(w.from !== pw.from ? { from: w.from } : {}),
           ...(c.kind === "step" ? { note: String(c.config.lab_note ?? "").replace(/^Variation of a winner: /, "") } : {}) };
-        if (c.kind === "self") result.bh = buyHold(data, win.from, win.to, Number(c.config.lot_size));
+        if (c.kind === "self") result.bh = buyHold(data, pw.from, pw.to, Number(c.config.lot_size));
       } catch (e) { result = { ok: false, error: e instanceof Error ? e.message.slice(0, 160) : String(e) }; }
       cpu += performance.now() - t1;
       ups.push(sb.from("lab_checks").update({ status: "done", result }).eq("id", c.id).then(() => {}));
@@ -1900,7 +1971,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     // A winner whose checks went missing goes back in the queue to get a fresh set (never stuck as "queued").
     if (!cs.length) { await sb.from("lab_results").update({ robust_status: null }).eq("id", r.id).eq("robust_status", "queued"); continue; }
     if (cs.some((c) => c.status === "pending")) continue;
-    const v = robustVerdict(r.config, cs);
+    const v = robustVerdict(r.config, cs, { families: await familiesFor(sb, r.config) });
     // Every trade of the year-by-year test is kept with the result (packed in columns to stay small).
     const longTrades = joinTrades(cs.filter((c) => c.kind === "year" && !c.result?.skip).map((c) => c.result?.tr).filter(Boolean));
     // A re-test of a strategy on someone's desk is marked as a re-test (so it replaces the older results) and kept even if it fails.
@@ -1950,7 +2021,7 @@ async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     const t1 = performance.now();
     let fields: Record<string, unknown>;
     try {
-      const { metrics, trades } = await screenOne(row.config, data, memo, win, capital, rates);
+      const { metrics, trades } = await screenOne(row.config, data, memo, preVault(win, row.config), capital, rates);
       if (!metrics.passed && (row.refresh || (desk.has(row.fingerprint) && !row.request_id))) {
         // A saved strategy re-tested with the current rules that now fails the first round: kept, with the verdict,
         // so it replaces its older (passing) result instead of quietly disappearing.
@@ -2199,6 +2270,9 @@ export function periodWindows(trades: { exit: string; net: number }[], from: str
  * the verdict and quality score are worked out again. Marks each row done (robust.rev) so it can be called repeatedly.
  */
 export async function labReverdict(sb: SupabaseClient, limit = 120, shortOnly = false): Promise<{ done: number; flipped: number; left: number }> {
+  // Since the vault rule (rev 4) a verdict needs a check that stored results don't have: saved strategies are re-tested
+  // through the re-test queue (lab_refresh) instead of being re-scored here.
+  if (limit >= 0) throw new Error("Re-scoring stored results is retired: saved strategies are re-tested in full through the re-test queue.");
   await loadCryptoAssets(sb);
   const { data: rows, error } = await sb.from("lab_results").select("id, config, robust, trades_long, basic_passed, passed")
     .eq("robust_status", "done").not("robust->years->list", "is", null).or("robust->>rev.is.null,robust->>rev.neq.3").in("robust->years->>n", shortOnly ? ["0", "1", "2"] : ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]).order("id").limit(limit);
