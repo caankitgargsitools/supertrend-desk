@@ -1445,6 +1445,16 @@ async function secondRisk(s: Strategy, px: number, at: string) {
   bestMemo.delete(s.id);
   await actLocked(() => riskExit(st, set!, fpr, hit, { last_run_at: nowIso() }));
 }
+async function ownCandlesAlert(assets: string[]) {
+  const { data: fresh, error } = await sb.rpc("engine_alert", { p_key: "own_candles", p_detail: { assets } });
+  if (error) throw new Error(error.message);
+  if (!fresh) return;
+  const admin = await adminAccount(sb).catch(() => null);
+  if (!admin?.user_id) return;
+  await sb.rpc("notify_tagged", { p_user: admin.user_id, p_kind: "error", p_title: "Engine on fallback candles: check with Dhan",
+    p_body: `Dhan refused candle requests, so ${assets.join(", ")} ${assets.length === 1 ? "is" : "are"} running on the desk's own candles built from live prices. Ask Dhan API support about the candle (charts) API.`,
+    p_url: "/", p_strategy: null, p_tag: "own_candles" });
+}
 /** Strategy lab: run one instalment, then hand over to a fresh invocation if there is more to do. */
 async function labLoop() {
   const creds = credsOf(await adminAccount(sb));
@@ -2283,6 +2293,7 @@ Deno.serve(async (req) => {
       if (s.strategy_kind === "TIMED") await processTimed(s, set, act);
       else if (s.strategy_kind === "RULES") await processRules(s, set, act);
       else await processFlip(s, set, act);
+      if (Dhan.ownUsed.has(`${s.data_segment}|${s.data_security_id}`)) ownAssets.add(String(s.underlying ?? s.data_security_id));
       results[s.id] = `ok ${Date.now() - t1}ms (done ${tickT0 ? Date.now() - tickT0 : 0}ms after the minute)`;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -2290,10 +2301,14 @@ Deno.serve(async (req) => {
       await sb.from("algo_strategies").update({ last_error: msg, last_run_at: new Date().toISOString() }).eq("id", s.id);
     }
   };
+  const ownAssets = new Set<string>();
   // Up to 8 strategies at a time (Dhan's request pacing is shared, per account).
   const queue = [...strategies];
   await Promise.all(Array.from({ length: Math.min(8, queue.length) }, async () => { for (let r = queue.shift(); r; r = queue.shift()) await runOne(r); }));
   if (tickMode) { Dhan.memo = null; Dhan.ltpSeed = null; tickT0 = null; }
+  // Strategies ran on own candles (Dhan refused candle requests): the warning at the top of every page, and the
+  // owner is notified once when it starts.
+  if (ownAssets.size) await ownCandlesAlert([...ownAssets].sort()).catch((e) => console.error("alert", e));
   // Actual fill prices from each account's Dhan trade book for recent live orders.
   for (const [u, ids] of liveIds) { try { const a = accounts.get(`${u}|DHAN`); if (a) await brokerFills(a, ids); } catch (e) { console.error("fills", e); } }
   return Response.json({ action, results });

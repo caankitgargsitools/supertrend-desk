@@ -151,6 +151,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .head > .actions .btn, .head .actions .btn { flex: 1 1 auto; justify-content: center; }
   #menuBtn { min-height: 36px; padding: 6px 12px; }
 }
+.topalert { max-width: 1380px; margin: 12px auto 0; width: calc(100% - 32px); box-sizing: border-box; font-size: 14px; line-height: 1.45; border: 1px solid currentColor; }
+.topalert b { font-weight: 700; }
 .wrap { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; padding-block: 18px 40px; padding-inline: 16px; max-width: 1380px; margin: 0 auto; }
 @media (max-width: 880px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
 
@@ -591,6 +593,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
   .acct .btn { width: 100%; justify-content: flex-start; }
   #app, .wrap, body > main, body > section, #gate, footer, .legal, body > .card { margin-left: var(--side); }
   .wrap { max-width: 1480px; padding-inline: 28px; padding-block: 26px 48px; margin-left: var(--side); margin-right: 0; }
+  .topalert { margin: 20px 28px 0 calc(var(--side) + 28px); width: auto; max-width: 1424px; }
 
   .lab-table tbody td { padding-top: 6px; padding-bottom: 6px; }
   body.wide .wrap { max-width: none; }
@@ -666,6 +669,8 @@ details.xp > summary:hover { background: var(--blue-soft); }
     <p class="hint" style="margin-top:14px"><a href="#setup" id="g_switch">First time here? Create the owner account</a></p>
   </div>
 </div>
+
+<div id="engineAlert" class="banner err topalert" role="alert" hidden></div>
 
 <div class="wrap" id="app">
   <aside class="rail">
@@ -1447,8 +1452,22 @@ function errorText(e) {
 function must(res) { if (res.error) throw res.error; return res.data; }
 
 let todayMarg = {};
+/* engine-wide warnings at the top of every page (the engine reports them every minute while they hold) */
+let alertTimer = null;
+async function loadEngineAlerts() {
+  const box = $("engineAlert");
+  const { data } = await db.from("engine_alerts").select("key, since, last_at, detail");
+  const on = (data || []).filter((a) => Date.now() - Date.parse(a.last_at) < 10 * 60000);
+  const own = on.find((a) => a.key === "own_candles");
+  box.hidden = !own;
+  if (!own) { box.textContent = ""; return; }
+  const assets = (own.detail && own.detail.assets) || [];
+  box.innerHTML = `<b>⚠ Engine on fallback candles since ${esc(istText(own.since))} IST.</b> Dhan's candle (charts) API is refusing requests, so ${assets.length ? esc(assets.join(", ")) : "strategies"} ${assets.length === 1 ? "is" : "are"} running on the desk's own candles, built from live prices. They're close to Dhan's but approximate (no volume, a spike inside a second can be missed). <b>Please check with Dhan API support.</b> Last seen ${esc(istText(own.last_at))} IST; this goes away by itself about 10 minutes after Dhan's candles work again.`;
+}
 async function loadAll() {
   loadHolidays();
+  loadEngineAlerts().catch(() => {});
+  if (!alertTimer) alertTimer = setInterval(() => { if (!document.hidden) loadEngineAlerts().catch(() => {}); }, 60000);
   db.from("lab_margins").select("asset, detail").then((x) => { if (x.data) { todayMarg = Object.fromEntries(x.data.map((m) => [m.asset, m.detail || {}])); if (!$("listPane").hidden) renderList(); } }).catch(() => {});
   const [settings, strategies] = await Promise.all([
     db.rpc("broker_status").then(must),
