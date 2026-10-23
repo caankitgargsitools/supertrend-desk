@@ -1255,7 +1255,11 @@ async function chainBacktest(id: number) {
 async function runAudit(batch: string, offset: number) {
   const today = ist(Date.now() / 1000).date, days = 30;
   const { data: tr } = await sb.from("algo_trades").select("strategy_id, mode").eq("hidden", false).gte("entry_day", addDays(today, -days));
-  const pairs = [...new Set((tr ?? []).map((t) => `${t.strategy_id}|${t.mode}`))].sort();
+  // Also every running strategy without trades in the window (checked for trades the desk should have taken).
+  const { data: run } = await sb.from("algo_strategies").select("id, live").eq("active", true).eq("archived", false).eq("strategy_kind", "RULES");
+  const traded = new Set((tr ?? []).map((t) => t.strategy_id));
+  const pairs = [...new Set([...(tr ?? []).map((t) => `${t.strategy_id}|${t.mode}`),
+    ...(run ?? []).filter((r) => !traded.has(r.id)).map((r) => `${r.id}|${r.live ? "LIVE" : "PAPER"}`)])].sort();
   const creds = credsOf(await adminAccount(sb));
   const t0 = Date.now();
   let i = offset;

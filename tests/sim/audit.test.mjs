@@ -24,4 +24,7 @@ assert.match(r.find((t) => t.entry_day === "2026-10-20").issue, /backtest did no
 const d = matchTrades([{ id: 9, side: "LONG", entry_day: "2026-10-19", exit_at: T("2026-10-20", 17, 1), entry_px: 148393, exit_px: 146641, units: 100, net: -177776, exit_why: "rev" }],
   [plan("LONG", "2026-10-19", 540, "2026-10-20", 540, 148300, 146700)], { daily: true, tf: 375, options: false, today: "2026-10-21" });
 console.log(d[0].issue, d[0].rupee_gap); assert.equal(d[0].issue, null);
+// a running strategy without desk trades: every finished backtest trade is a miss, an open one is left to the open-position check
+const none = matchTrades([], plans, { daily: false, tf: 75, options: false, today: "2026-10-21" });
+assert.equal(none.length, 3); assert.ok(none.every((t) => /desk did not/.test(t.issue)));
 console.log("ok");

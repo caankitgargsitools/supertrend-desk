@@ -83,8 +83,12 @@ export async function auditStrategy(sb: SupabaseClient, creds: { client: string;
   const { data: rows } = await sb.from("algo_trades").select("id, side, entry_day, exit_at, entry_px, exit_px, units, net, exit_why")
     .eq("strategy_id", s.id).eq("mode", mode).eq("hidden", false).gte("entry_day", since).order("exit_at");
   const desk = (rows ?? []) as DeskRow[];
-  if (!desk.length) return null;
-  const base: AuditResult = { strategy_id: s.id, user_id: s.owner_id, mode, name: s.name, from_day: desk[0].entry_day, to_day: today, matched: 0, missed: 0, extra: 0, issues: 0,
+  // A running strategy without trades is replayed too (from the day after it was added, when the desk started flat):
+  // a strategy that silently never trades is a gap worth seeing.
+  const added = s.created_at ? addDays(ist(Date.parse(s.created_at) / 1000).date, 1) : since;
+  if (!desk.length && (!s.active || s.archived || added > today)) return null;
+  const start = desk.length ? desk[0].entry_day : added > since ? added : since;
+  const base: AuditResult = { strategy_id: s.id, user_id: s.owner_id, mode, name: s.name, from_day: start, to_day: today, matched: 0, missed: 0, extra: 0, issues: 0,
     desk_pts: 0, bt_pts: 0, rupee_gap: 0, verdict: "skipped", note: "", trades: [] };
   if (!s.rules || s.strategy_kind !== "RULES") return { ...base, note: "Only rule-based (lab) strategies are replayed so far." };
   const key = String(s.underlying);
