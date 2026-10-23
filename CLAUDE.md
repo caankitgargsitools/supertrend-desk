@@ -99,6 +99,17 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   is set, new trades stop (exits still run) and the owner is notified. "Allow new trades again" (`kill_allow`) clears it
   and it is judged on later trades only.
 
+## Incident 23 Oct 2026 (state to restore)
+- A daytime lab re-test (3,930 saved strategies) plus per-second price writes used up the database's disk allowance on
+  the smallest Supabase compute (~0.5–1 GB RAM, DB 778 MB, lab_results ~870 MB with toast): API 503s 16:34–17:17 IST,
+  sign-in down until ~17:25, cron "job startup timeout" (about half the ticks missed) until ~22:25 IST.
+- Still in place: engine **light mode** on (one price round per 10-s run; `ENGINE_LIGHT=0` turns it off); lab cron jobs
+  2, 3, 10, 12, 15 paused and `lab_settings.paused_until` set; 3,930 strategies still queued in `lab_refresh`
+  (re-test runs now night-only, 100 per run). Restored: jobs 24, 19, 18, 6; authenticator statement_timeout back to 8s.
+- Recommended to Papa: one-size compute upgrade; later, move old lab results out of the database (needs approval).
+- Seen in the outage: an ENTRY signal logged twice when the position update was slow (one position booked) — make
+  entry logging idempotent per candle.
+
 ## Open items
 - Supervised 1-lot live test (NATGASMINI, Lab #6038) once Papa adds Dhan funds and whitelists the IP.
 - Risk-based lot sizing per strategy (drawdown-based), and not running two strategies on the same asset at once
