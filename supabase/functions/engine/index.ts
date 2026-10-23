@@ -1361,7 +1361,16 @@ async function pricesLoop() {
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   }
   await Promise.all(inflight);
+  await flushBars();
   return { rounds };
+}
+/** Minute candles built from this run's prices, written in one go (merged with what earlier runs wrote). */
+const barBuf = new Map<string, { seg: string; sec: string; t: number; o: number; h: number; l: number; c: number; at: string }>();
+async function flushBars() {
+  if (!barBuf.size) return;
+  const rows = [...barBuf.values()]; barBuf.clear();
+  const { error } = await sb.rpc("price_bars_merge", { p_rows: rows });
+  if (error) console.error("price bars", error.message);
 }
 async function priceHolidays(today: string) {
   if (priceHolDay !== today) { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", today); setHolidays(hol ?? []); priceHolDay = today; mcxSecMemo.clear(); }
@@ -1414,12 +1423,16 @@ async function pricesTick(rows: Strategy[]) {
   ]);
   if (!px.size) return { prices: 0 };
   const pxRows = [...px].map(([k, v]) => { const [seg, sec] = k.split("|"); return { seg, sec, px: v, at }; });
-  // The same prices make the desk's own 1-minute candles (used when Dhan's candle API refuses requests).
-  const bars = pxRows.filter((r) => !isCrypto(r.seg));
-  await Promise.all([
-    sb.from("live_prices").upsert(pxRows),
-    bars.length ? sb.rpc("price_bars_tick", { p_rows: bars, p_at: at }).then(({ error }) => { if (error) console.error("price bars", error.message); }) : null,
-  ]);
+  // The same prices make the desk's own 1-minute candles (used when Dhan's candle API refuses requests), built here and
+  // written once per run (flushBars) to keep the database's disk use low.
+  const t = Math.floor(Date.parse(at) / 60000) * 60;
+  for (const r of pxRows) {
+    if (isCrypto(r.seg)) continue;
+    const k = `${r.seg}|${r.sec}|${t}`, b = barBuf.get(k);
+    if (!b) barBuf.set(k, { seg: r.seg, sec: r.sec, t, o: r.px, h: r.px, l: r.px, c: r.px, at });
+    else { b.h = Math.max(b.h, r.px); b.l = Math.min(b.l, r.px); if (at >= b.at) { b.c = r.px; b.at = at; } }
+  }
+  await sb.from("live_prices").upsert(pxRows);
   // Running P&L of open positions priced on one instrument (futures, index basis, crypto). Option positions are
   // priced by the minute tick (their premium comes from the option chain, allowed once every 3 seconds).
   const marks: { strategy_id: string; owner_id: string; ltp: number; upnl: number | null; at: string }[] = [];

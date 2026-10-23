@@ -1186,7 +1186,9 @@ export async function labNext(sb: SupabaseClient): Promise<number | null> {
   // A re-test of the saved strategies you asked for carries on, run after run (also by day), until none is left.
   if (!q && set?.enabled) {
     const { data: last } = await sb.from("lab_runs").select("trigger, status").order("id", { ascending: false }).limit(1);
-    if (last?.[0]?.trigger === "retest" && last[0].status === "done") {
+    // Only while the lab may work unasked (11:30 PM – 8:30 AM when strategies run): a daytime re-test of thousands of
+    // strategies used up the database's disk allowance on 23 Oct.
+    if (last?.[0]?.trigger === "retest" && last[0].status === "done" && await labQuiet(sb)) {
       const { count } = await sb.from("lab_refresh").select("fingerprint", { count: "exact", head: true }).is("run_id", null).in("asset", (set.assets ?? []) as string[]);
       if ((count ?? 0) > 0) return await labStart(sb, true, "retest");
     }
@@ -1386,7 +1388,7 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   // any is left, runs re-test those and write no new strategies or variations. A focused run is new strategies only.
   if (!set.focus) {
     const { data: rq, error: rqe } = await sb.from("lab_refresh").select("fingerprint, asset, config").is("run_id", null).in("asset", assets)
-      .order("prio").order("score", { ascending: false, nullsFirst: false }).limit(Math.max(0, Math.min(n, 200)));
+      .order("prio").order("score", { ascending: false, nullsFirst: false }).limit(Math.max(0, Math.min(n, run.trigger === "retest" ? 100 : 200)));
     if (rqe) throw new Error(rqe.message);
     if (rq?.length) {
       const rows = rq.map((c) => ({ run_id: run.id, asset: c.asset, mode: c.config.rules?.daily ? "DAILY" : "INTRADAY", label: labelFor(c.config), fingerprint: c.fingerprint,
