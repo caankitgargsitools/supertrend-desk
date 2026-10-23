@@ -1335,13 +1335,15 @@ const PRICE_COLS = "id, owner_id, data_segment, data_security_id, position, trad
 async function pricesLoop() {
   // A fresh engine run every 10 seconds (cron) prices once a second for 10 seconds: each run stays well inside the
   // ~2 seconds of computing an engine run may use, and if one run dies the next takes over within 10 seconds.
-  // Light mode (secret ENGINE_LIGHT=1, while the database is short of disk allowance): one price round per run, i.e.
-  // prices and per-second stops every 10 seconds instead of every second.
-  // On since 23 Oct 2026 16:45 IST (disk allowance used up); ENGINE_LIGHT=0 switches it off.
-  const light = Deno.env.get("ENGINE_LIGHT") !== "0";
-  const end = light ? Date.now() + 1500 : Date.now() + 9800;
-  const { data: lk } = await sb.from("price_lock").update({ at: new Date(end).toISOString() }).eq("id", 1).lt("at", new Date(Date.now() + 700).toISOString()).select("id");
+  // Light mode: one price round per run (prices and per-second stops every 10 seconds instead of every second). It
+  // switches on by itself whenever the database answers slowly (its disk allowance running low), and back off once
+  // it is quick again; ENGINE_LIGHT=1 forces it on.
+  const t0 = Date.now();
+  const { data: lk } = await sb.from("price_lock").update({ at: new Date(Date.now() + 9800).toISOString() }).eq("id", 1).lt("at", new Date(Date.now() + 700).toISOString()).select("id");
   if (!lk?.length) return { skipped: "another price loop is running" };
+  const slowDb = Date.now() - t0 > 800;
+  const light = Deno.env.get("ENGINE_LIGHT") === "1" || slowDb;
+  const end = light ? t0 + 1500 : t0 + 9800;
   let rounds = 0, rows: Strategy[] = [], rowsAt = 0;
   // A round starts every second on the second, without waiting for a slow one to finish (at most 2 at once), so a
   // slow answer from one price source doesn't stretch the rhythm.
