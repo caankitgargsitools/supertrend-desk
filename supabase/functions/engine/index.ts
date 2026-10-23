@@ -1335,7 +1335,10 @@ const PRICE_COLS = "id, owner_id, data_segment, data_security_id, position, trad
 async function pricesLoop() {
   // A fresh engine run every 10 seconds (cron) prices once a second for 10 seconds: each run stays well inside the
   // ~2 seconds of computing an engine run may use, and if one run dies the next takes over within 10 seconds.
-  const end = Date.now() + 9800;
+  // Light mode (secret ENGINE_LIGHT=1, while the database is short of disk allowance): one price round per run, i.e.
+  // prices and per-second stops every 10 seconds instead of every second.
+  const light = Deno.env.get("ENGINE_LIGHT") === "1";
+  const end = light ? Date.now() + 1500 : Date.now() + 9800;
   const { data: lk } = await sb.from("price_lock").update({ at: new Date(end).toISOString() }).eq("id", 1).lt("at", new Date(Date.now() + 700).toISOString()).select("id");
   if (!lk?.length) return { skipped: "another price loop is running" };
   let rounds = 0, rows: Strategy[] = [], rowsAt = 0;
