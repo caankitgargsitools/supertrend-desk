@@ -103,7 +103,8 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 - A daytime lab re-test (3,930 saved strategies) plus per-second price writes used up the database's disk allowance on
   the smallest Supabase compute (~0.5–1 GB RAM, DB 778 MB, lab_results ~870 MB with toast): API 503s 16:34–17:17 IST,
   sign-in down until ~17:25, cron "job startup timeout" (about half the ticks missed) until ~22:25 IST.
-- Still in place: engine **light mode** on (one price round per 10-s run; `ENGINE_LIGHT=0` turns it off); lab cron jobs
+- Still in place: engine light mode now switches itself on only while the database is slow (`slowDb`, from another
+  session's fix; `ENGINE_LIGHT=1` forces it); lab cron jobs
   2, 3, 10, 12, 15 paused and `lab_settings.paused_until` set; 3,930 strategies still queued in `lab_refresh`
   (re-test runs now night-only, 100 per run). Restored: jobs 24, 19, 18, 6; authenticator statement_timeout back to 8s.
 - Recommended to Papa: one-size compute upgrade; later, move old lab results out of the database (needs approval).
