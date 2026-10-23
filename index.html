@@ -174,6 +174,21 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* buttons */
 .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 7px 14px; cursor: pointer; font-weight: 700; font-size: 13px; }
 .btn:hover { border-color: var(--blue); color: var(--blue); }
+/* Working indicators: the activity bar while anything talks to the server, a spinner on a button while its action
+   runs, a spinning circle where the duration is unknown, a loading pill over a page while its data loads. */
+#netbar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 1000; pointer-events: none; opacity: 0; overflow: hidden; transition: opacity .2s; }
+#netbar.on { opacity: 1; transition-delay: .12s; }
+#netbar::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 35%; background: var(--blue); border-radius: 0 3px 3px 0; animation: netslide 1.1s ease-in-out infinite; }
+@keyframes netslide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.spin { display: inline-block; width: .95em; height: .95em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -.15em; animation: spin .7s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.btn.busy { cursor: progress; }
+.btn.busy::before { content: ""; display: inline-block; width: .9em; height: .9em; margin-right: 6px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -.15em; animation: spin .7s linear infinite; }
+.loading { position: relative; min-height: 96px; }
+.loading > :not(.loadpill) { opacity: .5; transition: opacity .2s; }
+.loadpill { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 4; display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 99px; background: var(--panel); border: 1px solid var(--line); color: var(--blue); font-size: 13px; font-weight: 600; box-shadow: 0 4px 14px rgba(0,0,0,.12); white-space: nowrap; }
+.working { display: inline-flex; align-items: center; gap: 8px; }
+@media (prefers-reduced-motion: reduce) { #netbar::before, .spin, .btn.busy::before { animation-duration: 2.4s; } }
 .btn.primary { background: var(--blue); border-color: var(--blue); color: var(--on-blue); }
 .btn.primary:hover { filter: brightness(1.06); color: var(--on-blue); }
 .btn.go { background: var(--red); border-color: var(--red); color: var(--panel); }
@@ -639,6 +654,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
 </head>
 <body>
 
+<div id="netbar" role="progressbar" aria-label="Talking to the server" aria-hidden="true"></div>
 <header class="bar">
   <div class="brand"><img class="logo" src="icons/logo.svg" alt="" width="40" height="40"><div><h1><span class="ank">Ank</span><span class="gn">Genie</span></h1><small>Your wish, traded · Dhan · NSE / BSE / MCX · Delta crypto</small></div></div>
   <span class="mk mkts" id="mkts"><span class="mx" id="mx_nse"><span class="dot"></span>NSE/BSE</span><span class="mx" id="mx_mcx"><span class="dot"></span>MCX</span><span class="mx" id="mx_dlt"><span class="dot"></span>Delta</span></span>
@@ -676,7 +692,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
   <aside class="rail">
     <div class="rail-head"><span class="label">Strategies</span>
       <span class="actions"><button class="btn small" id="newFlip" type="button">+ New strategy</button></span></div>
-    <div id="stratList" class="rail" aria-live="polite"><div class="strat"><span class="nm">Connecting to your Supabase project…</span></div></div>
+    <div id="stratList" class="rail" aria-live="polite"><div class="strat"><span class="nm working"><span class="spin" aria-hidden="true"></span>Connecting to your Supabase project…</span></div></div>
     <details class="arch" id="archBox" hidden><summary id="archSum">Archived</summary><div id="archList" class="rail"></div></details>
     <p class="hint">Pick a strategy to see its chart, its rules in plain words and its trades. Active strategies are checked every minute while the market is open.</p>
   </aside>
@@ -728,7 +744,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
       </div>
     </section>
 
-    <section class="card" id="emptyPane"><div class="empty">Loading your strategies…</div></section>
+    <section class="card" id="emptyPane"><div class="empty"><span class="working"><span class="spin" aria-hidden="true"></span>Loading your strategies…</span></div></section>
 
     <div id="stratPane" class="pane" hidden>
       <section class="card">
@@ -1297,6 +1313,46 @@ details.xp > summary:hover { background: var(--blue-soft); }
 const PROJECT_ID = "umryzxusbdttbcshkajt";
 const SUPABASE_URL = "https://umryzxusbdttbcshkajt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_RcHPBb3pNGfkuDcUU-49BA_FKyXp-sF";
+/* Working indicators (standing rule: never leave a screen silently waiting). Every server request lights the activity
+   bar; a request starting just after a button click also puts a spinner on that button until it finishes. */
+const net = { n: 0, btn: null, at: 0 };
+document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest("button"); if (b) { net.btn = b; net.at = Date.now(); } }, true);
+function setBusy(btn, key, on) {
+  btn._busy = btn._busy || {}; btn._busy[key] = (btn._busy[key] || 0) + (on ? 1 : -1);
+  const any = Object.values(btn._busy).some((v) => v > 0);
+  btn.classList.toggle("busy", any); if (any) btn.setAttribute("aria-busy", "true"); else btn.removeAttribute("aria-busy");
+}
+const rawFetch = window.fetch.bind(window);
+window.fetch = (...args) => {
+  const bar = document.getElementById("netbar");
+  const btn = net.btn && Date.now() - net.at < 600 ? net.btn : null;
+  net.n++; if (bar) bar.classList.add("on");
+  if (btn) setBusy(btn, "net", true);
+  const done = () => { net.n = Math.max(0, net.n - 1); if (!net.n && bar) bar.classList.remove("on"); if (btn) setBusy(btn, "net", false); };
+  return rawFetch(...args).finally(done);
+};
+/** A page or box shows a loading pill while its data loads; returns the same promise. */
+function withLoading(el, p) {
+  if (!el) return p;
+  const pill = document.createElement("div"); pill.className = "loadpill"; pill.setAttribute("role", "status");
+  pill.innerHTML = '<span class="spin" aria-hidden="true"></span><span>Loading…</span>';
+  el._loads = (el._loads || 0) + 1; el.classList.add("loading"); el.prepend(pill);
+  return Promise.resolve(p).finally(() => { pill.remove(); el._loads--; if (!el._loads) el.classList.remove("loading"); });
+}
+/** "about 4 min left" from how long it has run and how far it has got. */
+function etaText(startedAt, frac) {
+  const el = Date.now() - Date.parse(startedAt);
+  if (!(frac > 0.03) || !(el > 5000)) return "working out the time left…";
+  const left = el * (1 - frac) / frac / 1000;
+  return left < 60 ? "under a minute left" : left < 3600 ? `about ${Math.round(left / 60)} min left` : `about ${Math.floor(left / 3600)} h ${Math.round((left % 3600) / 60)} min left`;
+}
+/** A progress bar with % and time left where the duration is roughly known; a spinning circle where it isn't. */
+function progressHTML(frac, startedAt, label) {
+  if (frac == null || !isFinite(frac)) return `<span class="working"><span class="spin" aria-hidden="true"></span><span>${esc(label || "Working…")}</span></span>`;
+  const pct = Math.max(0, Math.min(100, Math.round(frac * 100)));
+  return `<div class="labprog live"><div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="${esc(label || "Progress")}"><div class="fill" style="width:${Math.max(3, pct)}%"></div></div>
+    <div class="row"><span>${esc(label || "")}</span><span><b>${pct}%</b> · ${esc(etaText(startedAt, frac))}</span></div></div>`;
+}
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
 // Tradable underlyings. Indices: Dhan IDX_I security IDs (checked against Dhan's instrument list). Lot sizes change;
 // verify before going live. Commodities: MCX futures; the data ID is the underlying symbol and the engine picks the
@@ -2059,7 +2115,7 @@ function clearChart(msg) {
   if (chart) { candleS.setData([]); candleS.setMarkers([]); stS.setData([]); }
   if (haChart) { haS.setData([]); haS.setMarkers([]); }
   cxView = { main: [], ha: [] }; $("ohlcMain").innerHTML = ""; $("ohlcHA").innerHTML = "";
-  $("chartInfo").textContent = msg || "Loading candles…";
+  $("chartInfo").innerHTML = `<span class="working"><span class="spin" aria-hidden="true"></span>${esc(msg || "Loading candles…")}</span>`;
 }
 
 /* Same rules as TradingView's ta.supertrend (and as the engine). trend: 1 up, -1 down. */
@@ -2768,7 +2824,7 @@ async function watchBacktest(id) {
   stopBtPoll();
   const tick = async () => {
     let row;
-    try { row = must(await db.from("algo_backtests").select("id, status, progress, error, params, summary, trades, resumable").eq("id", Number(id)).maybeSingle()); }
+    try { row = must(await db.from("algo_backtests").select("id, created_at, status, progress, error, params, summary, trades, resumable").eq("id", Number(id)).maybeSingle()); }
     catch (e) { $("btResult").innerHTML = ""; const b = document.createElement("div"); b.className = "banner err"; b.textContent = errorText(e); $("btResult").append(b); return; }
     if (!row) return;
     renderBacktest(row);
@@ -2868,6 +2924,15 @@ async function downloadPdf(r) {
   toast("PDF downloaded.");
 }
 
+/** How far a running backtest has got, from the engine's progress note (null when it can't be told). */
+function btFraction(p) {
+  p = String(p || "");
+  let m = p.match(/Downloading candles \((\d+) of (\d+)\)/); if (m) return 0.05 + 0.4 * (m[1] / m[2]);
+  m = p.match(/(?:Pricing trade|Priced) (\d+) of (\d+)/); if (m) return 0.55 + 0.45 * (m[1] / m[2]);
+  if (/^Planned \d+ trades/.test(p)) return 0.55;
+  if (/Checking your conditions|Replaying|Working out the bias/.test(p)) return 0.5;
+  return null;
+}
 function renderBacktest(r) {
   const box = $("btResult"); box.innerHTML = "";
   const head = document.createElement("div"); head.className = "head";
@@ -2877,7 +2942,9 @@ function renderBacktest(r) {
     (r.params.charges ? "STT, exchange, SEBI, GST & stamp duty at broker rates" : `other charges ${r.params.other_pct}% of turnover (old method)`);
   box.append(head);
   if (r.status === "queued" || r.status === "running") {
-    const b = document.createElement("div"); b.className = "banner info"; b.textContent = `Running… ${r.progress || ""}`; box.append(b); return;
+    const b = document.createElement("div"); b.className = "banner info";
+    b.innerHTML = r.status === "queued" && !r.progress ? progressHTML(null, null, "Waiting for its turn…") : progressHTML(btFraction(r.progress), r.created_at, r.progress || "Starting");
+    box.append(b); return;
   }
   const resumeBtn = () => {
     const btn = document.createElement("button"); btn.type = "button"; btn.className = "btn small primary"; btn.textContent = "Resume from where it stopped";
@@ -3044,8 +3111,8 @@ function askConfirm(html, label, fn, danger) {
 }
 
 async function run(btn, fn, keepDisabled) {
-  if (btn) btn.disabled = true;
-  try { await fn(); } catch (e) { toast(errorText(e)); if (btn) btn.disabled = false; return; }
+  if (btn) { btn.disabled = true; setBusy(btn, "run", true); }
+  try { await fn(); } catch (e) { toast(errorText(e)); if (btn) btn.disabled = false; return; } finally { if (btn) setBusy(btn, "run", false); }
   if (btn && !keepDisabled) btn.disabled = false;
   if (cur()) renderStrategy();
 }
@@ -3577,7 +3644,7 @@ function openCap() {
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true; $("capPane").hidden = false;
   document.querySelectorAll("#stratList .strat, #archList .strat").forEach((b) => b.setAttribute("aria-current", "false"));
   $("openCap").classList.add("primary");
-  loadCap().catch((e) => toast(errorText(e)));
+  withLoading($("capPane"), loadCap()).catch((e) => toast(errorText(e)));
 }
 function closeCap() { if (!cap.open) return; cap.open = false; $("capPane").hidden = true; $("openCap").classList.remove("primary"); }
 async function loadCap() {
@@ -3639,7 +3706,7 @@ function renderCap(st, trades) {
 $("openCap").addEventListener("click", () => cap.open ? null : openCap());
 $("cap_mode").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
   cap.mode = b.dataset.m; $("cap_mode").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
-  loadCap().catch((e) => toast(errorText(e)));
+  withLoading($("capPane"), loadCap()).catch((e) => toast(errorText(e)));
 }));
 $("cap_funds").addEventListener("click", (e) => run(e.currentTarget, async () => {
   must(await db.rpc("desk_engine", { p_action: "funds", p_strategy: null }));
@@ -3699,7 +3766,7 @@ function openLab() {
   if (!lab.focus && lab.rows.length && lab.loadedAt && lab.loadedKey === labKey() && (age < 300000 || (!lab.dirty && age < 900000))) {
     renderLabStatus(); renderLabTable(); if (!lab.loading) scheduleLabPoll(); return;
   }
-  loadLab().catch((e) => toast(errorText(e)));
+  withLoading($("labPane"), loadLab()).catch((e) => toast(errorText(e)));
 }
 /** What the loaded list depends on; a change means it must be read again. */
 const labKey = () => [lab.view, lab.asset, lab.period, lab.only, lab.request || ""].join("|");
@@ -3943,7 +4010,7 @@ function labProgressHTML(r) {
   const at = steps.findIndex(([k]) => k === r.phase);
   return `<div class="labprog live" id="labProg"><div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="Run progress"><div class="fill" style="width:${Math.max(3, pct)}%"></div></div>
     <div class="row"><div class="steps">${steps.map(([k, t], i) => `<span class="${i === at ? "on" : i < at ? "done" : ""}">${i < at ? "✓ " : ""}${t}</span>`).join("")}</div>
-    <span><b>${pct}%</b> · <span class="beat" id="labBeat"><i></i><span></span></span></span></div></div>`;
+    <span><b>${pct}%</b> · ${esc(etaText(r.created_at, pct / 100))} · <span class="beat" id="labBeat"><i></i><span></span></span></span></div></div>`;
 }
 /** The live dot: green while the engine reports in, amber when it has been quiet a few minutes, red when it looks stuck. */
 function paintLabBeat() {
@@ -4720,7 +4787,10 @@ async function loadLabRequests() {
       tr.innerHTML = `<td class="mono">${q.id}</td><td></td>${isAdmin() ? "<td></td>" : ""}<td>${chip(q.status)}</td><td class="n">${q.tested}/${q.n}</td><td class="n">${q.passed}</td><td class="n">${q.best_score ?? "–"}</td><td class="hint"></td><td></td>`;
       tr.children[1].textContent = q.title || "";
       if (isAdmin()) tr.children[2].textContent = ownerName(q.user_id);
-      tr.children[isAdmin() ? 7 : 6].textContent = q.error ? q.error : q.progress || "";
+      const pc = tr.children[isAdmin() ? 7 : 6];
+      if (q.status === "running" && !q.error) pc.innerHTML = progressHTML(q.n ? q.tested / q.n : null, q.created_at, q.progress || "Testing");
+      else if (q.status === "queued") pc.innerHTML = progressHTML(null, null, q.progress || "Waiting for its turn…");
+      else pc.textContent = q.error ? q.error : q.progress || "";
       const act = tr.lastElementChild;
       if (q.tested > 0) { const b = document.createElement("button"); b.className = "btn small"; b.type = "button"; b.textContent = lab.request === q.id ? "Showing" : "Show results"; b.addEventListener("click", () => { lab.request = q.id; loadLab().catch((e) => toast(errorText(e))); }); act.append(b); }
       if (q.status === "pending") { const c = document.createElement("button"); c.className = "btn small"; c.type = "button"; c.textContent = "Cancel"; c.addEventListener("click", (e) => run(e.currentTarget, async () => { must(await db.rpc("cancel_lab_request", { p_id: q.id })); await loadLabRequests(); })); act.append(" ", c); }
@@ -4860,9 +4930,9 @@ function showPage(name) {
   const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab" }[name];
   markNav(navId);
   if (name === "list") { $("listPane").hidden = false; renderList(); }
-  else if (name === "market") { $("marketPane").hidden = false; loadMarket().catch((e) => toast(errorText(e))); }
-  else if (name === "wallet") { $("walletPane").hidden = false; loadWallet().catch((e) => toast(errorText(e))); }
-  else if (name === "admin") { $("adminPane").hidden = false; loadAdmin().catch((e) => toast(errorText(e))); }
+  else if (name === "market") { $("marketPane").hidden = false; withLoading($("marketPane"), loadMarket()).catch((e) => toast(errorText(e))); }
+  else if (name === "wallet") { $("walletPane").hidden = false; withLoading($("walletPane"), loadWallet()).catch((e) => toast(errorText(e))); }
+  else if (name === "admin") { $("adminPane").hidden = false; withLoading($("adminPane"), loadAdmin()).catch((e) => toast(errorText(e))); }
   else if (name === "conn") { $("connCard").hidden = false; renderConn(); }
   else if (name === "terms") { $("termsPane").hidden = false; }
   else if (name === "pass") { $("passPane").hidden = false; $("np_msg").textContent = ""; }
@@ -4876,7 +4946,7 @@ async function openStrat(id) {
   selected = id; formDirty = false; closeConfirm(); stopBtPoll(); $("btResult").innerHTML = ""; $("logBody").innerHTML = ""; $("publishBox").hidden = true;
   renderStrategy(); window.scrollTo({ top: 0 });
   trMode = null; if (currentTab === "tr") loadStratTrades().catch((e) => toast(errorText(e)));
-  try { await loadDetail(); } catch (e) { toast(errorText(e)); }
+  try { await withLoading($("stratPane"), loadDetail()); } catch (e) { toast(errorText(e)); }
 }
 $("nav_strats").addEventListener("click", () => showPage("list"));
 $("nav_market").addEventListener("click", () => showPage("market"));
@@ -5394,9 +5464,9 @@ function setLpTab(t) {
   lpTab = t;
   document.querySelectorAll("#lp_tabs [data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === t)));
   $("lp_all_box").hidden = t !== "all"; $("lp_live_box").hidden = t !== "live"; $("lp_trades_box").hidden = t !== "trades"; $("lp_orders_box").hidden = t !== "orders";
-  clearTimeout(ordTimer); if (t === "orders") loadOrders().catch((e) => toast(errorText(e)));
-  if (t === "live") renderLive().catch((e) => toast(errorText(e)));
-  if (t === "trades") loadAllTrades().catch((e) => toast(errorText(e)));
+  clearTimeout(ordTimer); if (t === "orders") withLoading($("lp_orders_box"), loadOrders()).catch((e) => toast(errorText(e)));
+  if (t === "live") withLoading($("lp_live_box"), renderLive()).catch((e) => toast(errorText(e)));
+  if (t === "trades") withLoading($("lp_trades_box"), loadAllTrades()).catch((e) => toast(errorText(e)));
 }
 document.querySelectorAll("#lp_tabs [data-t]").forEach((b) => b.addEventListener("click", () => setLpTab(b.dataset.t)));
 /** Money one strategy ties up: its own capital if it has one, else lots × today's margin for one lot. */
@@ -5842,7 +5912,7 @@ async function openListing(id) {
         <div class="stat"><span class="label">Net profit</span><span class="v ${Number(sm.net) >= 0 ? "up" : "down"}">${rupees(sm.net)}</span><span class="hint">${esc(p.from || "")} → ${esc(p.to || "")}</span></div>
         <div class="stat"><span class="label">Return</span><span class="v">${pctTxt(sm.return_pct)}</span><span class="hint">on ${rupees(p.capital)}</span></div>
         <div class="stat"><span class="label">Worst drawdown</span><span class="v">${rupees(sm.max_dd)}</span><span class="hint">${pctTxt(sm.max_dd_pct)}</span></div>
-        <div class="stat"><span class="label">Trades · win rate</span><span class="v">${sm.trades ?? "–"} · ${pctTxt(sm.win_rate)}</span><span class="hint">profit factor ${sm.profit_factor ?? "–"}</span></div></div>` : `<p class="hint">${esc(p.status === "short" ? `Not enough history for ${mk.yrs} years: Dhan has prices for this contract only from ${dayTxt(p.data_from)}, so this period can't be tested. See the 1-year result.` : p.status === "failed" ? `Couldn't run: ${p.error || ""}` : `Running… ${p.progress || ""}`)}</p>`}
+        <div class="stat"><span class="label">Trades · win rate</span><span class="v">${sm.trades ?? "–"} · ${pctTxt(sm.win_rate)}</span><span class="hint">profit factor ${sm.profit_factor ?? "–"}</span></div></div>` : `<p class="hint">${p.status === "short" || p.status === "failed" ? esc(p.status === "short" ? `Not enough history for ${mk.yrs} years: Dhan has prices for this contract only from ${dayTxt(p.data_from)}, so this period can't be tested. See the 1-year result.` : `Couldn't run: ${p.error || ""}`) : progressHTML(null, null, `Running… ${p.progress || ""}`)}</p>`}
       <div class="scroll" style="margin-top:12px;max-height:420px;overflow:auto"><table class="mini"><thead><tr><th>Entry</th><th>Exit</th><th>Side</th><th>Contract</th><th class="n">Lots</th><th class="n">Net</th><th>Exit reason</th></tr></thead><tbody id="ld_tr"></tbody></table></div>
       <p class="riskline" style="margin-top:10px">Backtest on past prices with estimated charges and fills; real results differ (slippage, gaps, liquidity, timing). Past performance does not guarantee future returns. Not investment advice.</p></div>`;
     box.querySelector(".label").textContent = `${assetLabel(r.asset)} · ${r.instrument || ""}`;

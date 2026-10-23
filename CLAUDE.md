@@ -25,6 +25,24 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   ```
 
+## Standing rules for all work (set by Papa, 23 Oct 2026)
+1. **AI and paid services are layered by cost: free → cheapest → costlier.** Wherever the platform uses AI (news or
+   filing summaries, sentiment, strategy explanations, trade journal, chart commentary) or paid data (market feeds,
+   fundamentals), try a free option first: a rules/code engine, Gemini free tier, free exchange or public data. Fall
+   through to the cheapest paid tier (e.g. Claude Haiku 5.5), then costlier ones (Claude Sonnet 5.5 / Opus 5.5), only
+   when the cheaper one fails, refuses or gives an answer that doesn't pass validation.
+   - Free AI tiers may train on inputs: send them **only public data** — never Papa's positions, P&L, API keys or
+     personal data. Anything private goes to a paid tier that doesn't train on inputs (or stays in code).
+   - **Log every call**: which tier answered and its cost (a table such as `ai_calls`), so cost is visible.
+   - Before adding or changing any AI or paid-data use, show Papa where it is used and the plan, then wait for his go.
+2. **Every running process must show it is working.** Never leave a screen silently waiting.
+   - A thin activity bar at the top while anything talks to the server (`#netbar`, driven by the fetch wrapper).
+   - A spinner on any button while its action runs (`run(btn, fn)` adds `.busy`; buttons clicked just before a
+     server request get it automatically).
+   - A progress bar with time left where the duration is roughly known (backtests, lab runs, imports, report
+     generation: `progressHTML(frac, startedAt)`), and a spinning circle (`.spin`) where it isn't.
+   - Pages show a loading state while their data loads (`withLoading(pane, promise)`).
+
 ## Layout
 - `index.html` — the whole web app (static, no build), deployed by Vercel on push to `main`.
 - `supabase/functions/engine/*.ts` — the engine (Deno edge function). **This folder is the source of truth.**
