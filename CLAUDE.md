@@ -107,6 +107,9 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   session's fix; `ENGINE_LIGHT=1` forces it); lab cron jobs
   2, 3, 10, 12, 15 paused and `lab_settings.paused_until` set; 3,930 strategies still queued in `lab_refresh`
   (re-test runs now night-only, 100 per run). Restored: jobs 24, 19, 18, 6; authenticator statement_timeout back to 8s.
+- 24 Oct: re-test resumed in small batches (Papa chose this over the upgrade for now): `lab_settings.retest_until_done`
+  makes the lab run only re-test batches of 100 with 10 minutes' rest, while `labQuiet` (night, weekends, holidays, or
+  no Dhan market of a running strategy open ±15 min). Lab jobs 3 and 10 back on; 2, 12, 15 stay paused.
 - Recommended to Papa: one-size compute upgrade; later, move old lab results out of the database (needs approval).
 - Seen in the outage: an ENTRY signal logged twice when the position update was slow (one position booked) — make
   entry logging idempotent per candle.

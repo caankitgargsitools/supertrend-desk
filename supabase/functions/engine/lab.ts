@@ -8,7 +8,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { Dhan, DhanBusyError, type OptBar } from "./dhan.ts";
 import { type Acc, type BtParams, type ChargeRates, type MBar, newAcc, type OptStore, slippageFor, type Plan, priceBatch, simulateRules, type SimData } from "./backtest.ts";
-import { addDays, type DayBar, ist, sessionFor } from "./logic.ts";
+import { addDays, type DayBar, isCrypto, ist, sessionFor } from "./logic.ts";
 import { describeCond, HAS_WEIGHTS, type Cond, type Rules, validateRules } from "./rules.ts";
 import { dataSecurity } from "./instruments.ts";
 import { describeRisk, type Risk } from "./risk.ts";
@@ -1106,8 +1106,21 @@ const labNight = () => { const m = ist(Date.now() / 1000).min; return m >= 23 * 
  */
 export async function labQuiet(sb: SupabaseClient): Promise<boolean> {
   if (labNight()) return true;
-  const { count } = await sb.from("algo_strategies").select("id", { count: "exact", head: true }).eq("active", true).eq("archived", false).eq("is_master", false);
-  return (count ?? 0) === 0;
+  // Also quiet while no Dhan market a running strategy trades is open (weekends, exchange holidays, after hours, with
+  // 15 minutes either side); crypto strategies run round the clock but their ticks are light.
+  const { data } = await sb.from("algo_strategies").select("data_segment").eq("active", true).eq("archived", false).eq("is_master", false);
+  const segs = new Set((data ?? []).map((x) => String(x.data_segment)).filter((g) => !isCrypto(g)));
+  if (!segs.size) return true;
+  const now = ist(Date.now() / 1000);
+  if (now.wd === 0 || now.wd === 6) return true;
+  const { data: hol } = await sb.from("market_holidays").select("exch, opens_at").eq("day", now.date);
+  for (const g of segs) {
+    const h = (hol ?? []).find((x) => x.exch === (g === "MCX_COMM" ? "MCX" : "NSE"));
+    if (h && h.opens_at == null) continue; // closed all day
+    const ss = sessionFor(g, now.date);
+    if (now.min >= ss.open - 15 && now.min <= ss.close + 15) return false;
+  }
+  return true;
 }
 
 export async function labStart(sb: SupabaseClient, manual: boolean, trigger?: string): Promise<number | null> {
@@ -1136,6 +1149,7 @@ export async function labStart(sb: SupabaseClient, manual: boolean, trigger?: st
     ? { ...set, focus: true, assets: focus.assets!.filter((k) => LAB_ASSETS[k]), per_night: Math.max(10, Math.min(1000, Number(focus.n) || 300)) }
     : { ...set, focus: undefined };
   if (focus) await sb.from("lab_settings").update({ focus: null }).eq("id", 1);
+  if (trigger === "retest") await sb.from("lab_settings").update({ retest_until_done: true }).eq("id", 1);
   if (manual) await sb.from("lab_settings").update({ paused_until: null }).eq("id", 1);
   const { data: run, error } = await sb.from("lab_runs").insert({
     run_day: today, status: "running", phase: "data", progress: focus ? `Focused run: ${settings.assets.map((k: string) => LAB_ASSETS[k]?.name ?? k).join(", ")}` : "Updating candles", from_day: from, split_day: split, to_day: today,
@@ -1161,6 +1175,18 @@ export async function labNext(sb: SupabaseClient): Promise<number | null> {
   const { data: set } = await sb.from("lab_settings").select("*").eq("id", 1).maybeSingle();
   // A run stopped by hand pauses the lab for an hour; after that it carries on by itself.
   if (set?.paused_until && Date.parse(set.paused_until) > Date.now()) return null;
+  // A re-test of the saved strategies you asked for (lab_settings.retest_until_done) goes first and alone: batch after
+  // batch with 10 minutes' rest between them, only while the lab may work unasked (night, weekends, holidays, markets
+  // closed). A daytime re-test of thousands of strategies used up the database's disk allowance on 23 Oct.
+  if (set?.retest_until_done) {
+    const { count } = await sb.from("lab_refresh").select("fingerprint", { count: "exact", head: true }).is("run_id", null).in("asset", (set.assets ?? []) as string[]);
+    if ((count ?? 0) === 0) await sb.from("lab_settings").update({ retest_until_done: false }).eq("id", 1);
+    else {
+      const { data: last } = await sb.from("lab_runs").select("finished_at").eq("trigger", "retest").order("id", { ascending: false }).limit(1);
+      const rested = !last?.[0]?.finished_at || Date.now() - Date.parse(last[0].finished_at) > 10 * 60000;
+      return rested && await labQuiet(sb) ? await labStart(sb, true, "retest") : null;
+    }
+  }
   const quiet = await labQuiet(sb);
   if (set?.nightly_due && quiet) {
     await sb.from("lab_settings").update({ nightly_due: false }).eq("id", 1);
@@ -1181,16 +1207,6 @@ export async function labNext(sb: SupabaseClient): Promise<number | null> {
       }).select("id").single();
       if (error) throw new Error(error.message);
       return run.id;
-    }
-  }
-  // A re-test of the saved strategies you asked for carries on, run after run (also by day), until none is left.
-  if (!q && set?.enabled) {
-    const { data: last } = await sb.from("lab_runs").select("trigger, status").order("id", { ascending: false }).limit(1);
-    // Only while the lab may work unasked (11:30 PM – 8:30 AM when strategies run): a daytime re-test of thousands of
-    // strategies used up the database's disk allowance on 23 Oct.
-    if (last?.[0]?.trigger === "retest" && last[0].status === "done" && await labQuiet(sb)) {
-      const { count } = await sb.from("lab_refresh").select("fingerprint", { count: "exact", head: true }).is("run_id", null).in("asset", (set.assets ?? []) as string[]);
-      if ((count ?? 0) > 0) return await labStart(sb, true, "retest");
     }
   }
   if (!q && set?.enabled && await labWindowOpen(sb, set.schedule_mode ?? "nightly")) return await labStart(sb, false, "continuous");

@@ -1,0 +1,24 @@
+// When the lab may work unasked: night, weekends, exchange holidays, or no Dhan market of a running strategy open.
+import assert from "node:assert";
+import { createClient, db } from "./fakesb.mjs";
+import { labQuiet } from "./lab.mjs";
+const sb = createClient();
+const at = (iso) => { Date.now = () => Date.parse(iso); };
+const real = Date.now;
+const strat = (seg) => ({ id: seg, data_segment: seg, active: true, archived: false, is_master: false });
+db.market_holidays = [];
+db.algo_strategies = [strat("IDX_I"), strat("MCX_COMM"), strat("DELTA")];
+at("2026-10-24T12:00:00+05:30"); assert.equal(await labQuiet(sb), true, "Saturday noon");
+at("2026-10-26T11:00:00+05:30"); assert.equal(await labQuiet(sb), false, "Monday 11:00, markets open");
+at("2026-10-26T02:00:00+05:30"); assert.equal(await labQuiet(sb), true, "Monday 02:00, night");
+at("2026-10-26T16:30:00+05:30"); assert.equal(await labQuiet(sb), false, "Monday 16:30, MCX still open");
+db.algo_strategies = [strat("IDX_I"), strat("DELTA")];
+assert.equal(await labQuiet(sb), true, "Monday 16:30, only NSE strategies (closed) and crypto");
+at("2026-10-26T15:40:00+05:30"); assert.equal(await labQuiet(sb), false, "15 minutes after NSE close: not yet");
+db.market_holidays = [{ day: "2026-10-26", exch: "NSE", opens_at: null }];
+at("2026-10-26T11:00:00+05:30"); assert.equal(await labQuiet(sb), true, "NSE holiday, only NSE strategies");
+db.algo_strategies = [strat("DELTA")];
+db.market_holidays = [];
+assert.equal(await labQuiet(sb), true, "only crypto strategies");
+Date.now = real;
+console.log("ok   lab quiet hours"); console.log("all passed");
