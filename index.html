@@ -1094,6 +1094,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
           <label class="f"><span>My desk</span><select id="lab_mine"><option value="">Mark mine among all</option><option value="only">Only those on my desk</option></select></label>
         </div>
         <div id="lab_reqfilter" class="banner info" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center" hidden></div>
+        <div id="lab_runsum" hidden></div>
         <p class="hint" id="lab_count" style="margin:10px 0 0"></p>
         <div id="lab_mtools" class="labmtools">
           <input id="lab_msearch" type="search" placeholder="Search strategies…" autocomplete="off" aria-label="Search strategies">
@@ -3839,10 +3840,10 @@ async function loadLabRun(stale) {
   }
   const [settings, runs] = await Promise.all([
     db.from("lab_settings").select("*").eq("id", 1).maybeSingle().then(must),
-    db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at, cursor, timings, focus:settings->focus, fassets:settings->assets").order("id", { ascending: false }).limit(8).then(must),
+    db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at, cursor, timings, focus:settings->focus, fassets:settings->assets").order("id", { ascending: false }).limit(12).then(must),
   ]);
   if (stale()) return;
-  lab.settings = settings; lab.runs = runs;
+  lab.settings = settings; lab.runs = runs; fillLabRuns();
   const key = labKey();
   lab.optLeft = await labOptCount();
   lab.refreshSt = await db.rpc("lab_refresh_status").then((x) => x.data).catch(() => null);
@@ -3854,6 +3855,7 @@ async function loadLabRun(stale) {
     if (!lab.request) q = q.is("superseded_by", null); // a saved strategy re-tested with the current rules shows only its newest result
     if (lab.request) q = q.eq("request_id", lab.request);
     else if (lab.period === "run") q = q.eq("run_id", runs[0] ? runs[0].id : -1);
+    else if (lab.period.startsWith("run:")) q = q.eq("run_id", Number(lab.period.slice(4)));
     else q = q.gte("created_at", new Date(Date.now() - Number(lab.period) * 86400000).toISOString());
     // A result shows only once it has been through every test: first-round winners still waiting for the tougher
     // test are left out (counted in the status line).
@@ -3900,7 +3902,7 @@ async function loadLabRun(stale) {
   if (stale()) return;
   lab.loadedAt = Date.now(); lab.loadedKey = key; lab.dirty = false;
   if (!lab.open) return; // left the lab meanwhile: the rows are kept for when you come back
-  renderLabStatus(); renderLabTable(); loadLabRequests().catch(() => {});
+  renderLabStatus(); renderLabTable(); renderLabRunSum().catch(() => {}); loadLabRequests().catch(() => {});
   scheduleLabPoll(); labFocus();
 }
 const labOptCount = () => db.from("lab_results").select("id", { count: "exact", head: true }).in("stage", ["opt_queue", "pricing"]).then((x) => x.count || 0).catch(() => 0);
@@ -3916,7 +3918,7 @@ function scheduleLabPoll() {
 async function pollLabStatus() {
   const [settings, runs, n] = await Promise.all([
     db.from("lab_settings").select("*").eq("id", 1).maybeSingle().then(must),
-    db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at, cursor, timings, focus:settings->focus, fassets:settings->assets").order("id", { ascending: false }).limit(8).then(must),
+    db.from("lab_runs").select("id, created_at, run_day, status, phase, progress, counts, from_day, split_day, to_day, error, trigger, finished_at, updated_at, cursor, timings, focus:settings->focus, fassets:settings->assets").order("id", { ascending: false }).limit(12).then(must),
     labOptCount(),
   ]);
   const a = lab.runs && lab.runs[0], b = runs[0], pc = (x) => x && x.counts ? `${x.counts.passed ?? ""}|${x.counts.basic_passed ?? ""}` : "";
@@ -3927,6 +3929,45 @@ async function pollLabStatus() {
   if (!lab.open) return;
   if (!lab.loading && ((lab.dirty && Date.now() - (lab.loadedAt || 0) > 300000) || Date.now() - (lab.loadedAt || 0) > 900000)) return loadLab();
   renderLabStatus(); scheduleLabPoll();
+}
+const LAB_TRIGGER = { continuous: "automatic", schedule: "16:05", manual: "Run now", robust: "re-check of earlier winners", request: "variation run", retest: "re-test of saved strategies" };
+/** The "From" list (admin): latest run, each of the recent runs by number, last 7 / 30 days. */
+function fillLabRuns() {
+  const sel = $("lab_period"), cur = lab.period;
+  const runOpts = lab.runs.map((x) => { const c = x.counts || {}, st = x.status === "running" ? "running" : x.status === "done" ? `${c.generated ?? 0} tested, ${c.passed ?? 0} passed` : x.status;
+    return [`run:${x.id}`, `Run #${x.id} · ${LAB_TRIGGER[x.trigger] || x.trigger} (${st})`]; });
+  const opts = [["run", "Latest run only"], ...runOpts, ["7", "Last 7 days"], ["30", "Last 30 days"]];
+  if (cur.startsWith("run:") && !opts.some(([v]) => v === cur)) opts.splice(1, 0, [cur, `Run #${cur.slice(4)}`]);
+  sel.innerHTML = opts.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join("");
+  sel.value = cur;
+}
+/** For one run: how its strategies did, and the most common reasons they failed (shown above the list). */
+async function renderLabRunSum() {
+  const box = $("lab_runsum"); if (!box) return;
+  const id = lab.request ? null : lab.period === "run" ? (lab.runs[0] && lab.runs[0].id) : lab.period.startsWith("run:") ? Number(lab.period.slice(4)) : null;
+  if (!id) { box.hidden = true; box.innerHTML = ""; return; }
+  const run = lab.runs.find((x) => Number(x.id) === Number(id));
+  // Every result of the run (passed or not, whatever the filters), read once per run and again while it is running.
+  const key = `${id}|${run ? `${run.status}|${run.updated_at}` : ""}`;
+  if (renderLabRunSum.key !== key) {
+    const got = await db.from("lab_results").select("passed, basic_passed, robust_status, why:robust->why").eq("run_id", id).in("stage", ["screened", "opt_queue", "pricing", "priced"]).limit(2000).then((x) => x.data).catch(() => null);
+    if (!got) return;
+    renderLabRunSum.key = key; renderLabRunSum.rows = got;
+  }
+  const all = renderLabRunSum.rows, rows = all.filter((r) => !r.basic_passed || r.robust_status === "done");
+  if (!all.length) { box.hidden = true; box.innerHTML = ""; return; }
+  const pass = rows.filter((r) => r.passed === true).length, first = rows.filter((r) => !r.basic_passed).length, tough = rows.length - pass - first;
+  // Reasons with their numbers taken out, so "profitable in 7 of the past 10 years" and "… 8 of 10 …" count together.
+  const tally = new Map();
+  for (const r of rows) if (r.passed !== true) for (const w of new Set((r.why || []).map((w) => String(w).replace(/\s*\([^)]*\)/g, "").replace(/₹?-?\d[\d,.]*%?/g, "…").trim()))) tally.set(w, (tally.get(w) || 0) + 1);
+  const top = [...tally].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const waiting = all.length - rows.length;
+  box.hidden = false;
+  box.innerHTML = `<div class="banner ${pass ? "ok" : "info"}" style="margin-top:10px"><div><b>Run #${id}${run ? ` · ${esc(LAB_TRIGGER[run.trigger] || run.trigger)} · ${esc(istText(run.created_at))}` : ""}:</b> ${rows.length} strategies with a result — <b>${pass} passed</b>, ${first} failed the first round, ${tough} failed the tougher test${waiting ? `; ${waiting} still being tested` : ""}.</div>
+    ${top.length ? `<div style="margin-top:6px">Most common reasons (a strategy can fail several):<ul style="margin:4px 0 0 18px;padding:0">${top.map(([w, n]) => `<li>${esc(w)} — <b>${n}</b></li>`).join("")}</ul></div>` : ""}
+    ${lab.only && rows.length > pass ? `<div style="margin-top:6px"><button class="btn small" type="button" id="lab_runsum_all">Show all ${rows.length} with their reasons</button> <span class="hint">“Show: Passed only” hides the ones that failed.</span></div>` : ""}</div>`;
+  const b = $("lab_runsum_all");
+  if (b) b.addEventListener("click", () => { $("lab_only").value = "false"; $("lab_only").dispatchEvent(new Event("change")); });
 }
 /** Progress of the re-test of every saved strategy with the current rules (new strategies wait until it's done). */
 function labRefreshHTML() {
@@ -3980,7 +4021,7 @@ function renderLabStatus() {
   ${r.status === "running" ? labProgressHTML(r) : ""}
   ${labTimingsHTML(r)}
   ${lab.runs.length > 1 ? `<p class="hint" style="margin:8px 0 0">Every run gets the next number, so the number goes up as runs follow one another. Recent: ${lab.runs.slice(0, 5).map((x) => {
-    const kind = x.focus === true ? `focused on ${(x.fassets || []).map(labAssetName).join(", ")}` : ({ continuous: "automatic", schedule: "16:05", manual: "Run now", robust: "re-check of earlier winners", request: "variation run" })[x.trigger] || x.trigger;
+    const kind = x.focus === true ? `focused on ${(x.fassets || []).map(labAssetName).join(", ")}` : LAB_TRIGGER[x.trigger] || x.trigger;
     const st = x.status === "running" ? "running" : x.status === "done" ? `${(x.counts || {}).generated ?? 0} tested, ${(x.counts || {}).passed ?? 0} passed` : x.status;
     return `#${x.id} ${esc(kind)} (${esc(st)})`;
   }).join(" · ")}</p>` : ""}
