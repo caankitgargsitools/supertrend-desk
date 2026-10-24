@@ -1652,16 +1652,24 @@ function buyHold(data: SimData, from: string, to: string, lot: number) {
   const net = Math.trunc((ds[ds.length - 1].c - c0) * lot);
   return { net, max_dd: Math.trunc(dd), ratio: dd > 0 ? +(net / dd).toFixed(2) : null, from: ds[0].day, to: ds[ds.length - 1].day };
 }
-/** Rule families tried (same indicators and conditions, any settings): the lab's number of independent tries. */
+/**
+ * Rule families tried (same indicators and conditions, any settings): the lab's number of independent tries.
+ * Counted once a night into lab_settings.families (lab_families_refresh: reading every result takes longer than the
+ * API allows). Never guessed: without the count no verdict is given, so the luck test can't quietly get easier.
+ */
 const FAM_CACHE = { at: 0, map: new Map<string, number>() };
 export async function familiesFor(sb: SupabaseClient, cfg: LabConfig): Promise<number> {
   if (Date.now() - FAM_CACHE.at > 3600000) {
-    const { data } = await sb.rpc("lab_trial_families");
-    FAM_CACHE.map = new Map(Object.entries((data ?? {}) as Record<string, number>));
+    const { data, error } = await sb.from("lab_settings").select("families").eq("id", 1).maybeSingle();
+    const fams = (data?.families ?? null) as Record<string, number> | null;
+    if (error || !fams || !Object.keys(fams).length) throw new Error(`lab: rule-family counts not available (${error?.message ?? "lab_settings.families empty; run lab_families_refresh()"})`);
+    FAM_CACHE.map = new Map(Object.entries(fams));
     FAM_CACHE.at = Date.now();
   }
   // Counted across every asset: ideas found on one asset are tried on the others, so the choice is lab-wide.
-  return Math.max(10, Number(FAM_CACHE.map.get(`*|${cfg.rules?.daily ? "DAILY" : "INTRADAY"}`)) || 10);
+  const n = Number(FAM_CACHE.map.get(`*|${cfg.rules?.daily ? "DAILY" : "INTRADAY"}`));
+  if (!(n > 0)) throw new Error("lab: no rule-family count for this mode");
+  return Math.max(10, n);
 }
 /** The verdict once every check of a winner is done. */
 export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: string; tf: number | null; result: any }[], opts: { families?: number } = {}) {
@@ -2014,7 +2022,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
   }
   // 3. Verdicts for winners whose checks are all done.
   // Any run's winners, not just the newest: pick those with no check still waiting (so nothing finished sits undecided).
-  const { data: qAll } = await sb.from("lab_results").select("id").eq("robust_status", "queued").order("id", { ascending: false }).limit(1000);
+  const { data: qAll } = await sb.from("lab_results").select("id").eq("basic_passed", true).eq("robust_status", "queued").order("id", { ascending: false }).limit(1000); // basic_passed: uses the small index (lab_results_robust_q)
   const qIds = (qAll ?? []).map((r) => r.id);
   const waiting = new Set<number>();
   for (let i = 0; i < qIds.length; i += 200) {
