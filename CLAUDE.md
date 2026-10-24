@@ -110,6 +110,12 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 - 24 Oct: re-test resumed in small batches (Papa chose this over the upgrade for now): `lab_settings.retest_until_done`
   makes the lab run only re-test batches of 100 with 10 minutes' rest, while `labQuiet` (night, weekends, holidays, or
   no Dhan market of a running strategy open ±15 min). Lab jobs 3 and 10 back on; 2, 12, 15 stay paused.
+- 24 Oct afternoon: re-test paused again (statement timeouts, up to 72/h) with `paused_until` ~03:07 IST 25 Oct; runs
+  356–364 re-tested ~900 saved strategies, none passed. Fixes: the queued-winners lookup filters `basic_passed` (uses
+  `lab_results_robust_q`); rule-family counts for the luck test are stored in `lab_settings.families` by
+  `lab_families_refresh()` (cron `lab-families`, 03:10 IST) — the live function took ~9 s and timed out, and the engine
+  had silently used 10 tries; it now refuses to judge without the stored counts. Lab page: "From" lists each recent run
+  with a per-run summary (passed / failed and the top reasons).
 - Recommended to Papa: one-size compute upgrade; later, move old lab results out of the database (needs approval).
 - Seen in the outage: an ENTRY signal logged twice when the position update was slow (one position booked) — make
   entry logging idempotent per candle.
