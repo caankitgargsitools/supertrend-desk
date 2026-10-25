@@ -117,9 +117,9 @@ assert.equal(db.idea_tries.filter((t) => t.status === "later").length, 0, "every
 const done = db.idea_tries.filter((t) => t.status === "done");
 assert.equal(done.length, 47, "every setting has its verdict");
 const tr = done.filter((t) => t.idea === "trend");
-assert.ok(tr.every((t) => t.result.contracts.GOLD === "GOLDM" && t.verdict.why.length && t.verdict.luck.tries >= 7), "gold traded with the mini; luck counted from the ledger");
+assert.ok(tr.every((t) => t.result.contracts.GOLD === "GOLDM" && (t.verdict.passed ? t.verdict.stage2.noise.runs === 100 : t.verdict.why.length > 0) && t.verdict.luck.tries >= 7), "gold traded with the mini; luck counted from the ledger; a pass only after stage 2");
 assert.ok(tr.some((t) => t.result.trades > 0 && t.result.years_n >= 8), "trend settings traded over the years");
-assert.ok(db.idea_legs.every((l) => l.result == null), "leg trades cleared once decided (kept in the settings' results)");
+assert.ok(db.idea_legs.filter((l) => l.kind === "real").every((l) => l.result == null), "real legs' trades cleared once decided (kept in the settings' results)");
 console.log("sample:", tr[0].label, "→", tr[0].result.net, tr[0].result.years_ok + "/" + tr[0].result.years_n, tr[0].verdict.why);
 console.log("ok   end to end: ledger, one idea at a time, verdicts");
 console.log("all passed");

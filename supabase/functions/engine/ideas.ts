@@ -14,6 +14,7 @@ import { CRYPTO } from "./crypto.ts";
 import { assetRoot, cachedAsset, dbStore, labMayWork, labParams, labQuiet, LAB_ASSETS, type LabConfig, readCandles, saveCandles, screenOne, TOKEN_ERR } from "./lab.ts";
 import { loadMarginRates } from "./margins.ts";
 import { deflatedSharpe, median } from "./stats.ts";
+import { pValue, seeded, shuffledData } from "./noise.ts";
 
 export const IDEA_CAPITAL = 3500000;
 /** Each position is sized so that its usual daily move (20-day ATR) is about 0.2% of the capital. */
@@ -493,6 +494,11 @@ async function fundingOf(sb: SupabaseClient, key: string): Promise<{ signal: Map
 }
 
 /* ---------- combining a setting's legs into one portfolio ---------- */
+/** Lots for one trade: the risk budget ÷ one lot's daily ATR at entry, at most 3× the contract's typical size (0 = too big then). */
+export function sizeLots(atrAtEntry: number, typical: number, target: number): number {
+  const want = atrAtEntry > 0 ? Math.round(target / atrAtEntry) : typical;
+  return Math.min(3 * typical, Math.max(atrAtEntry > 0 && want < 1 ? 0 : 1, want));
+}
 export type TryResult = {
   capital: number; target: number; contracts: Record<string, string>; lots: Record<string, number>;
   from: string; pre_to: string; vault_from: string; months: Record<string, number>;
@@ -522,10 +528,7 @@ export function combineTry(legs: { asset: string; result: LegResult }[], o: { to
   const lots: Record<string, number> = {};
   for (const k of chosen) lots[k] = atrMed[k] > 0 ? Math.max(1, Math.round(target / atrMed[k])) : 1;
   const trades = all.filter((t) => chosen.has(t.k) || t.fq != null).map((t) => {
-    if (t.fq != null) return { ...t, q: t.fq, net: t.n * t.fq, slip: t.sl * t.fq };
-    const typical = lots[t.k], cap = 3 * typical;
-    const want = t.a > 0 ? Math.round(target / t.a) : typical;
-    const q = Math.min(cap, Math.max(t.a > 0 && want < 1 ? 0 : 1, want));
+    const q = t.fq ?? sizeLots(t.a, lots[t.k], target);
     return { ...t, q, net: t.n * q, slip: t.sl * q };
   }).filter((t) => t.q > 0).sort((a, b) => a.x.localeCompare(b.x));
   const firsts = legs.map((l) => l.result?.first).filter((x): x is string => !!x).sort();
@@ -643,9 +646,47 @@ export function ledgerTries(rows: { idea: string; status: string }[], eff: Recor
   return Math.max(2, Math.round(n));
 }
 
+/* ---------- stage 2 (finalists only): shuffled prices and random entries, for the whole portfolio ---------- */
+export const NOISE_RUNS = 100, RANDOM_RUNS = 1000;
+/**
+ * Random entries, weighted: each of the portfolio's trades (side, holding length in candles, rupees per point = lot ×
+ * lots) placed at a random candle of its own asset's history, `runs` times; costs left out on both sides. The real
+ * figure uses the same candles (close to close), so like is compared with like.
+ */
+export function weightedRandomEntries(groups: { closes: { t: number; c: number }[]; trades: { e: number; x: number; dir: number; w: number }[] }[], runs: number, seed: number) {
+  const rnd = seeded(seed);
+  const prep = groups.filter((g) => g.closes.length > 2).map((g) => {
+    const n = g.closes.length;
+    const idx = (t: number) => { let lo = 0, hi = n - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (g.closes[m].t <= t) lo = m; else hi = m - 1; } return lo; };
+    return { c: g.closes, n, tr: g.trades.map((t) => { const i0 = idx(t.e), i1 = idx(t.x); return { dir: t.dir, w: t.w, hold: Math.max(1, i1 - i0), pts: (g.closes[i1].c - g.closes[i0].c) * t.dir }; }) };
+  });
+  const real = prep.reduce((a, g) => a + g.tr.reduce((x, t) => x + t.pts * t.w, 0), 0);
+  const out: number[] = [];
+  for (let k = 0; k < runs; k++) {
+    let sum = 0;
+    for (const g of prep) for (const t of g.tr) {
+      if (g.n <= t.hold + 1) continue;
+      const i = Math.floor(rnd() * (g.n - t.hold - 1));
+      sum += (g.c[i + t.hold].c - g.c[i].c) * t.dir * t.w;
+    }
+    out.push(sum);
+  }
+  const sorted = [...out].sort((a, b) => a - b);
+  return { real: Math.trunc(real), p: +pValue(real, out).toFixed(4), median: Math.trunc(sorted[sorted.length >> 1] ?? 0), runs };
+}
+/** The final verdict of a finalist from its two stage-2 results (p ≤ 5% needed in each). */
+export function stage2Verdict(v: IdeaVerdict, noise: { p: number; runs: number } | null, random: { p: number; runs: number } | null): IdeaVerdict & { stage2: Record<string, unknown> } {
+  const why: string[] = [];
+  if (!noise) why.push("the shuffled-price test didn't finish");
+  else if (noise.p > 0.05) why.push(`does no better than noise: ${Math.round(noise.p * 100)}% of ${noise.runs} runs on shuffled prices did as well (needs under 5%)`);
+  if (!random) why.push("the random-entry test didn't finish");
+  else if (random.p > 0.05) why.push(`random entries did as well: ${Math.round(random.p * 100)}% of ${random.runs} sets of random entries, held as long, matched it (needs under 5%)`);
+  return { ...v, passed: why.length === 0, why, stage2: { noise, random } };
+}
+
 /* ---------- the engine step ---------- */
 const CPU_BUDGET = 900, WALL_BUDGET = 100000;
-type Leg = { id: number; try_id: number; asset: string; win_from: string | null; win_to: string | null; config: LabConfig };
+type Leg = { id: number; try_id: number; asset: string; win_from: string | null; win_to: string | null; config: LabConfig; kind?: string; k?: number | null };
 
 /** Daily candles of an asset (decoded from the stored file; kept between calls while the instance stays warm). */
 const DAILY_MEMO = new Map<string, { at: number; bars: DayBar[] }>();
@@ -705,7 +746,7 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
     const have = new Set((cands ?? []).filter((c) => c.kind === (idea.daily ? "D" : "I5") || (!idea.daily && /^I5Y/.test(c.kind))).map((c) => c.asset));
     for (const t of planned) {
       const s = idea.settings.find((x) => x.key === t.setting_key)!;
-      const legs = legsFor(idea, s, today, have).map((l) => ({ try_id: t.id, ...l, status: "pending" }));
+      const legs = legsFor(idea, s, today, have).map((l) => ({ try_id: t.id, kind: "real", ...l, status: "pending" }));
       if (legs.length) { const { error } = await sb.from("idea_legs").insert(legs); if (error) throw new Error(error.message); }
       await sb.from("idea_tries").update({ status: "running", started_at: new Date().toISOString() }).eq("id", t.id);
     }
@@ -726,18 +767,25 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
       chain = true;
     }
   }
-  const { data: pend } = idea.kind === "options" ? { data: [] as Leg[] } : await sb.from("idea_legs").select("id, try_id, asset, win_from, win_to, config").in("try_id", ids).eq("status", "pending").order("asset").order("id").limit(200);
+  const { data: pend } = idea.kind === "options" ? { data: [] as Leg[] } : await sb.from("idea_legs").select("id, try_id, asset, win_from, win_to, config, kind, k").in("try_id", ids).eq("status", "pending").order("asset").order("k").order("id").limit(200);
   if (pend?.length) {
     const asset = pend[0].asset;
     const rates = await loadMarginRates(sb);
     let cpu = 0;
     const ups: Promise<unknown>[] = [];
-    const memo = new Map<string, unknown>();
+    const memo = new Map<string, unknown>(), shMemo = new Map<string, unknown>(); // shuffled candles never share the real ones' indicators
+    const triesById = new Map<number, any>();
     for (const leg of (pend as Leg[]).filter((l) => l.asset === asset)) {
       if (cpu > CPU_BUDGET || Date.now() - started > WALL_BUDGET) break;
       const t1 = performance.now();
-      let result: LegResult;
-      try { result = await runLeg(sb, leg, memo, rates, today, capital); } catch (e) { result = { n: 0, first: null, last: null, atr_med: {}, t: emptyTrades(), error: e instanceof Error ? e.message.slice(0, 160) : String(e) }; }
+      let result: any;
+      try {
+        if (leg.kind === "noise" || leg.kind === "random") {
+          if (!triesById.has(leg.try_id)) triesById.set(leg.try_id, (await sb.from("idea_tries").select("id, result").eq("id", leg.try_id).single()).data);
+          const tr = triesById.get(leg.try_id);
+          result = leg.kind === "noise" ? await noiseLeg(sb, leg, shMemo, rates, today, capital, tr.result) : await randomLeg(sb, leg, idea, tr.result);
+        } else result = await runLeg(sb, leg, memo, rates, today, capital);
+      } catch (e) { result = { n: 0, first: null, last: null, atr_med: {}, t: emptyTrades(), error: e instanceof Error ? e.message.slice(0, 160) : String(e) }; }
       cpu += performance.now() - t1;
       ups.push(sb.from("idea_legs").update({ status: "done", result, done_at: new Date().toISOString() }).eq("id", leg.id).then(() => {}));
       ran++;
@@ -755,7 +803,7 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
     t.status = "combined"; (t as any).result = result; combined++;
   }
   // 4. All settings combined: the verdicts, with the luck test counting the ledger's tries.
-  if (mine.every((t) => t.status === "combined" || t.status === "done")) {
+  if (mine.some((t) => t.status === "combined") && mine.every((t) => t.status === "combined" || t.status === "done")) {
     const { data: full } = await sb.from("idea_tries").select("id, idea, status, result").eq("idea", idea.key);
     const rs = (full ?? []).map((x) => x.result as TryResult).filter(Boolean);
     const eff = effectiveTries(rs.map((r) => r.months));
@@ -764,12 +812,30 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
     for (const r of ledger ?? []) if (r.idea !== idea.key && r.status === "done" && r.verdict?.idea_tries != null) effByIdea[r.idea] = Number(r.verdict.idea_tries);
     const tries = ledgerTries(ledger ?? [], effByIdea);
     const plateau = { ok: rs.filter((r) => r.net > 0).length, n: rs.length };
+    const fin: number[] = [];
     for (const t of full ?? []) {
-      const v = ideaVerdict(t.result as TryResult, { tries, plateau });
-      await sb.from("idea_tries").update({ status: "done", verdict: { ...v, idea_tries: eff.n, idea_rho: eff.rho }, done_at: new Date().toISOString() }).eq("id", t.id);
+      const v = { ...ideaVerdict(t.result as TryResult, { tries, plateau }), idea_tries: eff.n, idea_rho: eff.rho };
+      if (v.finalist) { fin.push(t.id); await queueStage2(sb, idea, t as any, v); continue; }
+      await sb.from("idea_tries").update({ status: "done", verdict: v, done_at: new Date().toISOString() }).eq("id", t.id);
     }
-    await sb.from("idea_legs").update({ result: null }).in("try_id", (full ?? []).map((t) => t.id)); // the trades live on in the settings' results
-    return { idea: idea.key, decided: (full ?? []).length, tries };
+    // The trades live on in the settings' results; finalists keep theirs for the random-entry test.
+    const clear = (full ?? []).map((t) => t.id).filter((id) => !fin.includes(id));
+    if (clear.length) await sb.from("idea_legs").update({ result: null }).in("try_id", clear);
+    return { idea: idea.key, decided: (full ?? []).length, finalists: fin.length, tries };
+  }
+  // 5. Finalists whose stage-2 runs are all done: the final verdict.
+  for (const t of mine.filter((x) => x.status === "stage2" && !waiting.has(x.id))) {
+    const { data: row } = await sb.from("idea_tries").select("id, result, verdict").eq("id", t.id).single();
+    const { data: s2 } = await sb.from("idea_legs").select("kind, k, result").eq("try_id", t.id).in("kind", ["noise", "random"]).limit(5000);
+    const byK = new Map<number, number>();
+    for (const l of s2 ?? []) if (l.kind === "noise" && l.result && !l.result.error) byK.set(Number(l.k), (byK.get(Number(l.k)) ?? 0) + (Number(l.result.net) || 0));
+    const runs = [...byK.values()], real = Number(row!.result.net);
+    const noise = runs.length >= NOISE_RUNS * 0.8 ? { p: +pValue(real, runs).toFixed(4), runs: runs.length, real: Math.trunc(real), median: Math.trunc(median(runs) ?? 0) } : null;
+    const rnd = (s2 ?? []).find((l) => l.kind === "random")?.result;
+    const v = stage2Verdict(row!.verdict, noise, rnd && !rnd.error ? rnd : null);
+    await sb.from("idea_tries").update({ status: "done", verdict: v, done_at: new Date().toISOString() }).eq("id", t.id);
+    await sb.from("idea_legs").update({ result: null }).eq("try_id", t.id).eq("kind", "real");
+    return { idea: idea.key, final: t.id, passed: v.passed };
   }
   return { idea: idea.key, ran, combined, more: true, chain };
 }
@@ -815,12 +881,16 @@ export async function optionSlice(sb: SupabaseClient, leg: Leg & { result: LegRe
 }
 
 /** One backtest leg: a rule strategy on one asset's candles, or a custom idea over its assets' daily candles. */
-async function runLeg(sb: SupabaseClient, leg: Leg, memo: Map<string, unknown>, rates: Record<string, any>, today: string, capital: number): Promise<LegResult> {
+/** A small stable number for a text (to give each asset its own shuffle). */
+const hashOf = (x: string) => { let h = 7; for (let i = 0; i < x.length; i++) h = (h * 31 + x.charCodeAt(i)) >>> 0; return h % 100000; };
+/** sh: run on shuffled candles (stage 2) with this seed; each asset is shuffled on its own. */
+async function runLeg(sb: SupabaseClient, leg: Leg, memo: Map<string, unknown>, rates: Record<string, any>, today: string, capital: number, sh?: { seed: number }): Promise<LegResult> {
   const vaultFrom = addDays(today, -IDEA_VAULT_DAYS + 1);
   if (leg.asset === "*") {
     const c = leg.config, idea = ideaByKey(String(c.idea))!;
     const daily: DailySet = {};
     for (const k of idea.universe) if (LAB_ASSETS[k]) { const d = await dailyOf(sb, k); if (d.length) daily[k] = d; }
+    if (sh) for (const [k, d] of Object.entries(daily)) daily[k] = shuffledData({ raw: [], byDay: new Map(), daily: d }, true, sh.seed + hashOf(k)).daily;
     const atrMed: Record<string, number> = {};
     for (const [k, d] of Object.entries(daily)) atrMed[k] = atrMedian(d, LAB_ASSETS[k].lot, vaultFrom);
     let t: LegTrades;
@@ -848,8 +918,14 @@ async function runLeg(sb: SupabaseClient, leg: Leg, memo: Map<string, unknown>, 
     const first = idea.key === "funding" ? firstTrade : firsts[0] ? addDays(firsts[0], idea.key === "relstrength" ? 380 : 30) : null;
     return { n: t.n.length, first, last: today, atr_med: atrMed, t };
   }
-  const data = await cachedAsset(sb, leg.asset, true);
   const daily = !!leg.config.rules?.daily, a = LAB_ASSETS[leg.asset];
+  let data = await cachedAsset(sb, leg.asset, true);
+  if (sh) {
+    // One shuffled copy per asset and run, reused by its yearly legs within this call.
+    const key = `SH|${leg.asset}|${sh.seed}`;
+    if (memo.get("__sh_key") !== key) { memo.clear(); memo.set("__sh_key", key); memo.set("__sh_data", shuffledData(data, daily, sh.seed + hashOf(leg.asset))); }
+    data = memo.get("__sh_data") as SimData;
+  }
   const first = daily ? data.daily[0]?.day : data.raw[0]?.day;
   if (!first) return { n: 0, first: null, last: null, atr_med: {}, t: emptyTrades(), skip: true, error: "no candles" };
   const warm = addDays(first, daily ? 300 : 20);
@@ -863,6 +939,59 @@ async function runLeg(sb: SupabaseClient, leg: Leg, memo: Map<string, unknown>, 
     t.n.push(Number(x.net) || 0); t.sl.push(Number(x.slip) || 0); t.a.push(Math.trunc(before(days, atrM, String(x.entry).slice(0, 10)) ?? 0));
   }
   return { n: t.n.length, first: from, last: to, atr_med: { [leg.asset]: atrMedian(data.daily, a.lot, vaultFrom) }, t };
+}
+
+/** Queues a finalist's stage 2: 100 runs of its whole portfolio on shuffled candles and one random-entry test. */
+async function queueStage2(sb: SupabaseClient, idea: IdeaDef, t: { id: number; result: TryResult }, v: IdeaVerdict & Record<string, unknown>) {
+  if (idea.kind === "options") {
+    // Option prices exist only for the real price path, and every week is traded (no choice of entry to compare).
+    const why = "The shuffled-price and random-entry tests don't apply to option selling: option prices exist only for the real price path, and every week is traded, so there is no entry choice to compare with random ones.";
+    await sb.from("idea_tries").update({ status: "done", verdict: { ...v, passed: true, why: [], stage2: { applies: false, why } }, done_at: new Date().toISOString() }).eq("id", t.id);
+    return;
+  }
+  const { data: real } = await sb.from("idea_legs").select("asset, win_from, win_to, config").eq("try_id", t.id).eq("kind", "real").limit(1000);
+  const chosen = new Set(Object.values(t.result.contracts ?? {}));
+  const base = (real ?? []).filter((l) => l.asset === "*" || chosen.has(l.asset));
+  const rows: Record<string, unknown>[] = [];
+  for (let k = 1; k <= NOISE_RUNS; k++) for (const l of base) rows.push({ try_id: t.id, kind: "noise", k, asset: l.asset, win_from: l.win_from, win_to: l.win_to, config: l.config, status: "pending" });
+  rows.push({ try_id: t.id, kind: "random", k: 0, asset: "~", config: {}, status: "pending" });
+  for (let i = 0; i < rows.length; i += 500) { const { error } = await sb.from("idea_legs").insert(rows.slice(i, i + 500)); if (error) throw new Error(error.message); }
+  await sb.from("idea_tries").update({ status: "stage2", verdict: v }).eq("id", t.id);
+}
+
+/** One stage-2 run of one leg on shuffled candles: the portfolio's net before the vault, sized as the real one was. */
+async function noiseLeg(sb: SupabaseClient, leg: Leg, memo: Map<string, unknown>, rates: Record<string, any>, today: string, capital: number, tr: TryResult) {
+  const seed = leg.try_id * 1009 + Number(leg.k);
+  const r = await runLeg(sb, leg, memo, rates, today, capital, { seed });
+  if (r.error) return { net: 0, n: 0, error: r.error };
+  if (leg.asset === "*") { const c = combineTry([{ asset: "*", result: r }], { today, capital }); return { net: c.net, n: c.trades }; }
+  const typical = Number(tr.lots?.[leg.asset]) || 1, target = Number(tr.target) || capital * RISK_PCT;
+  let net = 0, n = 0;
+  r.t.n.forEach((x, i) => { if (r.t.x[i].slice(0, 10) > tr.pre_to) return; const q = sizeLots(r.t.a[i], typical, target); if (q > 0) { net += x * q; n++; } });
+  return { net: Math.trunc(net), n };
+}
+
+/** The random-entry test of a finalist: its own trades (before the vault) at random dates of their assets, 1,000 times. */
+async function randomLeg(sb: SupabaseClient, leg: Leg, idea: IdeaDef, tr: TryResult) {
+  const { data: legs } = await sb.from("idea_legs").select("asset, result").eq("try_id", leg.try_id).eq("kind", "real").limit(1000);
+  const target = Number(tr.target) || IDEA_CAPITAL * RISK_PCT;
+  const byAsset = new Map<string, { e: number; x: number; dir: number; w: number }[]>();
+  const sec = (s: string) => Date.parse(`${s.slice(0, 10)}T${s.length > 10 ? s.slice(11, 16) : "09:15"}:00+05:30`) / 1000;
+  for (const l of legs ?? []) {
+    const t = l.result?.t as LegTrades | undefined; if (!t) continue;
+    t.n.forEach((_, i) => {
+      const k = t.k[i]; if (!(k in (tr.lots ?? {})) || t.x[i].slice(0, 10) > tr.pre_to) return;
+      const q = t.q?.[i] ?? sizeLots(t.a[i], tr.lots[k], target); if (!(q > 0)) return;
+      byAsset.set(k, [...(byAsset.get(k) ?? []), { e: sec(t.e[i]), x: sec(t.x[i]), dir: t.s[i] === "S" ? -1 : 1, w: LAB_ASSETS[k].lot * q }]);
+    });
+  }
+  const groups = [];
+  for (const [k, trades] of byAsset) {
+    const closes = idea.daily ? (await dailyOf(sb, k)).filter((d) => d.day >= tr.from && d.day <= tr.pre_to).map((d) => ({ t: d.t, c: d.c }))
+      : (await cachedAsset(sb, k, true)).raw.filter((b) => b.day >= tr.from && b.day <= tr.pre_to).map((b) => ({ t: b.t, c: b.c }));
+    groups.push({ closes, trades });
+  }
+  return weightedRandomEntries(groups, RANDOM_RUNS, leg.try_id * 7919);
 }
 
 // For tests: the asset list the ideas use (crypto coins join it at run time).

@@ -106,7 +106,11 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   lot's daily ATR ≈ 0.2% of capital. Tests: 8 of 10 years profitable (Papa's choice for portfolios), doubled slippage
   (total and 8 of 10 years), ≥ 100 trades, best 5% of trades removed, ≥ 75% of the idea's settings profitable, luck
   (Deflated Sharpe on monthly returns; tries = the ledger, finished ideas counted by effective tries ρ + (1 − ρ)·M),
-  held-back last 6 months. Passing all = "finalist" (shuffled-price / random-entry tests still to build). Score 0–100:
+  held-back last 6 months. Passing all = "finalist", then stage 2 (migration 48): 100 runs of the whole portfolio on
+  shuffled candles (each asset shuffled on its own, same contracts and sizing; `idea_legs` kind 'noise', k 1..100) and
+  1,000 sets of random entries (kind 'random', `weightedRandomEntries`, close to close, costs left out on both sides);
+  p ≤ 5% in each = passed (`stage2Verdict`). Option selling can't be shuffled or randomised (real option prices, every
+  week traded): its finalists pass with `stage2.applies = false` and the reason shown. Score 0–100:
   years 30, return/drawdown 20, slippage years 15, months 10, settings 10, luck 15. Runs one idea at a time, cron
   `ideas-lab` every 2 min → `engine_call('ideas')`, only while `labQuiet` and no lab run; switch `lab_settings.ideas_enabled`.
   Shown on the Lab page ("Ideas lab"). The random generator is paused (`lab_settings.enabled = false`, 25 Oct).

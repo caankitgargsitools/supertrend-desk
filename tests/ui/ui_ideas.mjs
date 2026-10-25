@@ -14,7 +14,8 @@ const res0 = (ok, n, vault) => ({ capital: 3500000, net: 2400000, trades: 420, m
 const ver = (score, why, fin) => ({ passed: false, finalist: !!fin, why, luck: { dsr: 0.41, tries: 31 }, plateau: { ok: 6, n: 8 }, score, parts: { years: 24, luck: 6 } });
 const IDEA_TRIES = [
   { id: 1, idea: "trend", idea_order: 1, setting_key: "ema-20-100", label: "EMA 20/100", status: "done", result: res0(8, 10, 120000), verdict: ver(61.2, ["could be luck: 41% confidence it beats the best of 31 independent tries by chance (needs 95%)"]) },
-  { id: 2, idea: "trend", idea_order: 1, setting_key: "don-55-20", label: "Donchian 55/20", status: "done", result: res0(10, 10, 90000), verdict: ver(80.5, ["passed every test so far: waiting for the shuffled-price and random-entry tests"], true) },
+  { id: 2, idea: "trend", idea_order: 1, setting_key: "don-55-20", label: "Donchian 55/20", status: "done", result: res0(10, 10, 90000), verdict: { ...ver(80.5, [], true), passed: true, stage2: { noise: { p: 0.0099, runs: 100 }, random: { p: 0.004, runs: 1000 } } } },
+  { id: 7, idea: "trend", idea_order: 1, setting_key: "don-20-10", label: "Donchian 20/10", status: "stage2", result: res0(9, 10, 50000), verdict: ver(75, ["passed every test so far: waiting for the shuffled-price and random-entry tests"], true) },
   { id: 3, idea: "trend", idea_order: 1, setting_key: "ema-10-50", label: "EMA 10/50", status: "done", result: res0(6, 10, -40000), verdict: ver(40.1, ["profitable in 6 of the past 10 years (needs 8)", "lost money in the held-back last 6 months"]) },
   { id: 4, idea: "relstrength", idea_order: 2, setting_key: "lb63-k1", label: "3-month strength, top 1", status: "running", started_at: now },
   { id: 5, idea: "relstrength", idea_order: 2, setting_key: "lb63-k2", label: "3-month strength, top 2", status: "combined", started_at: now },
@@ -81,11 +82,11 @@ await p.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort()); await p.got
 await p.click("#openLab"); await p.waitForTimeout(1500);
 const txt = await p.$eval("#lab_ideas", (e) => e.textContent.replace(/\s+/g, " "));
 console.log(txt.slice(0, 600));
-for (const want of [/Ideas lab/, /6 settings written down before testing/, /luck test counts 31 independent tries/, /Testing Relative strength among commodities/, /1 finalist so far/,
-  /1\. Trend following \(daily\)/, /1 of 3 finalists/, /10 of 10/, /8 of 10/, /6 of 10/, /Finalist/, /needs 8/, /Built next/, /built next/, /testing…/]) if (!want.test(txt)) throw new Error("missing: " + want);
+for (const want of [/Ideas lab/, /7 settings written down before testing/, /luck test counts 31 independent tries/, /Testing Trend following \(daily\)/, /So far 2 finalists, 1 passed every test/,
+  /1\. Trend following \(daily\)/, /Stage 2: noise tests/, /10 of 10/, /8 of 10/, /6 of 10/, /Passed/, /shuffled prices \(1% of 100 runs as good\) and random entries \(1% of 1,000 as good\)/, /testing against shuffled prices and random entries…/, /needs 8/, /Built next/, /built next/, /testing…/]) if (!want.test(txt)) throw new Error("missing: " + want);
 // best score first within an idea
 const first = await p.$eval("#lab_ideas details tbody tr td", (e) => e.textContent);
-if (!/Donchian/.test(first)) throw new Error("finalist (highest score) should come first, got " + first);
+if (!/Donchian 55/.test(first)) throw new Error("the pass (highest score) should come first, got " + first);
 let upd = null;
 p.on("request", (r) => { if (/lab_settings/.test(r.url()) && r.method() === "PATCH") upd = r.postData(); });
 await p.click("#ideas_toggle"); await p.waitForTimeout(800);

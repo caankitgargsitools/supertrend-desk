@@ -4002,7 +4002,7 @@ async function renderIdeas(force) {
   ]);
   const on = !!sett.ideas_enabled, cap = Number(sett.ideas_capital) || 3500000;
   const groups = []; for (const t of tries) { let g = groups.find((x) => x.idea === t.idea); if (!g) groups.push(g = { idea: t.idea, order: t.idea_order, rows: [] }); g.rows.push(t); }
-  const cur = groups.find((g) => g.rows.some((t) => t.status === "running" || t.status === "combined" || t.status === "planned"));
+  const cur = groups.find((g) => g.rows.some((t) => t.status === "running" || t.status === "combined" || t.status === "planned" || t.status === "stage2"));
   let prog = "";
   if (cur && cur.rows.some((t) => t.status !== "planned")) {
     const ids = cur.rows.map((t) => t.id);
@@ -4013,27 +4013,32 @@ async function renderIdeas(force) {
     const started = cur.rows.map((t) => t.started_at).filter(Boolean).sort()[0];
     prog = all ? progressHTML((all - left) / all, started || new Date().toISOString(), `${IDEA_NAMES[cur.idea] || cur.idea}: ${all - left} of ${all} backtests done`) : "";
   }
-  const done = tries.filter((t) => t.status === "done"), fin = done.filter((t) => t.verdict && t.verdict.finalist);
+  const done = tries.filter((t) => t.status === "done" || t.status === "stage2"), fin = done.filter((t) => t.verdict && t.verdict.finalist), passed = done.filter((t) => t.status === "done" && t.verdict && t.verdict.passed);
   const triesN = done.length ? Math.max(...done.map((t) => (t.verdict && t.verdict.luck && t.verdict.luck.tries) || 0)) : tries.length;
   const pct = (v) => v == null ? "–" : `${v > 0 ? "" : ""}${Number(v).toFixed(1)}%`;
   const yrs = (r) => { if (!r || !r.years_n) return "–"; const need = Math.ceil(r.years_n * 0.8); return `<span class="chip ${r.years_ok >= need ? "green" : "red"}" title="Profitable 12-month periods before the held-back months (${need} needed)">${r.years_ok} of ${r.years_n}</span>`; };
   const rowHTML = (t) => {
     const r = t.result, v = t.verdict;
-    if (t.status !== "done" || !r) return `<tr><td>${esc(t.label)}</td><td colspan="8" class="hint">${t.status === "later" ? "built next" : t.status === "planned" ? "waiting" : '<span class="working"><span class="spin" aria-hidden="true"></span><span>testing…</span></span>'}</td></tr>`;
-    return `<tr${v && v.finalist ? ' class="ondesk"' : ""}><td>${esc(t.label)}</td><td class="n">${yrs(r)}</td><td class="n" title="${rupees(r.per_year)} a year on ${rupees(r.capital)}">${pct(r.ret_pct)}</td>
+    if ((t.status !== "done" && t.status !== "stage2") || !r) return `<tr><td>${esc(t.label)}</td><td colspan="8" class="hint">${t.status === "later" ? "built next" : t.status === "planned" ? "waiting" : '<span class="working"><span class="spin" aria-hidden="true"></span><span>testing…</span></span>'}</td></tr>`;
+    const s2 = v && v.stage2, pp = (x) => x ? `${Math.max(1, Math.round(x.p * 100))}%` : "–";
+    const verdict = t.status === "stage2" ? '<span class="chip blue">Finalist</span> <span class="working"><span class="spin" aria-hidden="true"></span><span>testing against shuffled prices and random entries…</span></span>'
+      : v.passed ? `<span class="chip green">Passed</span> <span class="hint">${s2 && s2.applies === false ? esc(s2.why) : `every test, incl. shuffled prices (${pp(s2 && s2.noise)} of 100 runs as good) and random entries (${pp(s2 && s2.random)} of 1,000 as good)`}</span>`
+      : `${v.finalist ? '<span class="chip red">Failed stage 2</span> ' : ""}<span class="hint">${esc((v.why || []).join("; "))}</span>`;
+    return `<tr${v && v.passed ? ' class="ondesk"' : ""}><td>${esc(t.label)}</td><td class="n">${yrs(r)}</td><td class="n" title="${rupees(r.per_year)} a year on ${rupees(r.capital)}">${pct(r.ret_pct)}</td>
       <td class="n">${rupeesShort(r.max_dd)}</td><td class="n">${r.sharpe ?? "–"}</td><td class="n" title="Chance it beats the best of ${v.luck.tries} independent tries by luck (95% needed)">${Math.round((v.luck.dsr || 0) * 100)}%</td>
       <td class="n"><span class="${r.vault.net > 0 ? "pos-num" : r.vault.net < 0 ? "neg-num" : ""}" title="Held-back last 6 months (${r.vault.n} trades), never used before">${rupeesShort(r.vault.net)}</span></td>
       <td class="n" title="${esc(Object.entries(v.parts || {}).map(([k, x]) => `${k} ${x}`).join(" · "))}">${v.score}</td>
-      <td>${v.finalist ? '<span class="chip green">Finalist</span> ' : ""}<span class="hint">${esc((v.why || []).join("; "))}</span></td></tr>`;
+      <td>${verdict}</td></tr>`;
   };
-  box.innerHTML = `<section style="margin-top:14px"><div class="banner ${fin.length ? "ok" : "info"}" style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center">
+  box.innerHTML = `<section style="margin-top:14px"><div class="banner ${passed.length ? "ok" : "info"}" style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center">
       <span><b>Ideas lab</b> (7 ideas from research, tested as portfolios for ${rupees(cap)}): ${tries.length} settings written down before testing; the luck test counts ${triesN} independent tries.
       ${!on ? "Switched off." : cur ? `Testing <b>${esc(IDEA_NAMES[cur.idea] || cur.idea)}</b> (one idea at a time, at night, weekends and holidays).` : done.length ? "Every idea built so far is decided." : "Starts when the markets close."}
-      ${done.length ? ` ${fin.length} finalist${fin.length === 1 ? "" : "s"} so far.` : ""}</span>
+      ${done.length ? ` So far ${fin.length} finalist${fin.length === 1 ? "" : "s"}, ${passed.length} passed every test.` : ""}</span>
       <button class="btn small" type="button" id="ideas_toggle">${on ? "Switch off" : "Switch on"}</button></div>
     ${on && prog ? prog : ""}
     ${groups.map((g) => {
-      const d = g.rows.filter((t) => t.status === "done"), st = g.rows.every((t) => t.status === "later") ? '<span class="chip">Built next</span>' : d.length === g.rows.length ? `<span class="chip ${d.some((t) => t.verdict && t.verdict.finalist) ? "green" : "red"}">${d.filter((t) => t.verdict && t.verdict.finalist).length} of ${d.length} finalists</span>` : g === cur ? '<span class="chip blue">Testing</span>' : '<span class="chip">Waiting</span>';
+      const d = g.rows.filter((t) => t.status === "done"), np = d.filter((t) => t.verdict && t.verdict.passed).length;
+      const st = g.rows.every((t) => t.status === "later") ? '<span class="chip">Built next</span>' : d.length === g.rows.length ? `<span class="chip ${np ? "green" : "red"}">${np} of ${d.length} passed</span>` : g === cur ? `<span class="chip blue">${g.rows.some((t) => t.status === "stage2") ? "Stage 2: noise tests" : "Testing"}</span>` : '<span class="chip">Waiting</span>';
       return `<details class="xp" style="margin-top:8px"${g === cur || d.length ? " open" : ""}><summary><span class="xt">${g.order}. ${esc(IDEA_NAMES[g.idea] || g.idea)}</span> ${st}</summary><div class="xpb">
         <p class="hint" style="margin:0 0 6px">${esc(IDEA_WHY[g.idea] || "")}</p>
         <div class="scroll"><table class="mini"><thead><tr><th>Setting</th><th class="n">Years profitable</th><th class="n">Return / yr</th><th class="n">Max DD</th><th class="n">Sharpe</th><th class="n">Luck</th><th class="n">Last 6 mo (held back)</th><th class="n">Score</th><th>Verdict</th></tr></thead>
