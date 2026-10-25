@@ -98,6 +98,18 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   2,000 bootstrap sets of its backtest trades; under the worst 1% after 10 trades or the worst 5% after 20, `kill_at`
   is set, new trades stop (exits still run) and the owner is notified. "Allow new trades again" (`kill_allow`) clears it
   and it is judged on later trades only.
+- **Ideas lab (step 3, 25 Oct 2026; `ideas.ts`, migration 45)**: 7 ideas from research, 47 settings written into the
+  ledger `idea_tries` before testing (trend following daily on MCX incl. minis + indices + crypto; relative strength among
+  commodities; index short-term reversal; index opening-range breakout; index calendar effects; option selling and
+  crypto funding carry are registered but built later). Each setting = a portfolio for ₹35 lakh (`lab_settings.ideas_capital`):
+  one contract per commodity picked by risk (`pickContracts`, minis where the big lot is too big), each trade sized so a
+  lot's daily ATR ≈ 0.2% of capital. Tests: 8 of 10 years profitable (Papa's choice for portfolios), doubled slippage
+  (total and 8 of 10 years), ≥ 100 trades, best 5% of trades removed, ≥ 75% of the idea's settings profitable, luck
+  (Deflated Sharpe on monthly returns; tries = the ledger, finished ideas counted by effective tries ρ + (1 − ρ)·M),
+  held-back last 6 months. Passing all = "finalist" (shuffled-price / random-entry tests still to build). Score 0–100:
+  years 30, return/drawdown 20, slippage years 15, months 10, settings 10, luck 15. Runs one idea at a time, cron
+  `ideas-lab` every 2 min → `engine_call('ideas')`, only while `labQuiet` and no lab run; switch `lab_settings.ideas_enabled`.
+  Shown on the Lab page ("Ideas lab"). The random generator is paused (`lab_settings.enabled = false`, 25 Oct).
 
 ## Incident 23 Oct 2026 (state to restore)
 - A daytime lab re-test (3,930 saved strategies) plus per-second price writes used up the database's disk allowance on

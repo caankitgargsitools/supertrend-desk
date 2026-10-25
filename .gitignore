@@ -9,3 +9,4 @@ tests/sim/own.mjs
 tests/sim/stats.mjs
 tests/sim/noise.mjs
 tests/sim/kill.mjs
+tests/sim/ideas.mjs

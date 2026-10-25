@@ -27,6 +27,7 @@ class Q {
       if (op === "is") return (r) => v === "null" ? r[k] == null : String(r[k]) === v;
       if (op === "eq") return (r) => String(r[k]) === v;
       if (op === "neq") return (r) => String(r[k]) !== v;
+      if (op === "like") { const re = new RegExp("^" + v.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/%/g, ".*") + "$"); return (r) => re.test(String(r[k] ?? "")); }
       if (op === "lt") return (r) => r[k] != null && r[k] < v;
       if (op === "gt") return (r) => r[k] != null && r[k] > v;
       throw new Error("or: unsupported " + x);

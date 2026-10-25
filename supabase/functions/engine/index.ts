@@ -27,6 +27,7 @@ import { legsFor, legSign, structMargin, structName, structOf } from "./structur
 import { auditStrategy } from "./audit.ts";
 import { ownDaily, ownIntraday } from "./owncandles.ts";
 import { KILL_EARLY, KILL_FULL, killVerdict } from "./kill.ts";
+import { ideasStep } from "./ideas.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -2178,6 +2179,11 @@ Deno.serve(async (req) => {
       const creds = credsOf(await adminAccount(sb));
       await labOptStep({ sb, creds, started: Date.now(), chain: async () => {} });
     })().catch((e) => console.error("lab_opt", e)));
+    return Response.json({ action, accepted: true });
+  }
+  // Ideas lab: one instalment per call (the schedule paces it, every minute while the markets are closed).
+  if (action === "ideas") {
+    EdgeRuntime.waitUntil(ideasStep(sb).then((r) => console.log("ideas", JSON.stringify(r))).catch((e) => console.error("ideas", e)));
     return Response.json({ action, accepted: true });
   }
   if (action === "lab_next") {

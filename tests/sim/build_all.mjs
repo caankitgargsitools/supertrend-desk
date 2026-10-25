@@ -12,4 +12,5 @@ await one("owncandles.ts", "own.mjs");
 await one("stats.ts", "stats.mjs");
 await one("noise.ts", "noise.mjs");
 await one("kill.ts", "kill.mjs");
+await one("ideas.ts", "ideas.mjs");
 console.log("built parts");
