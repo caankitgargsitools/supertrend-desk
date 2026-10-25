@@ -4045,14 +4045,14 @@ async function renderIdeas(force) {
     await renderIdeas(true);
   }));
 }
-const IDEA_NAMES = { trend: "Trend following (daily)", relstrength: "Relative strength among commodities", reversal: "Index short-term reversal", orb: "Index opening-range breakout", optsell: "Option-selling premium (hedged)", funding: "Crypto funding carry", season: "Index calendar effects" };
+const IDEA_NAMES = { trend: "Trend following (daily)", relstrength: "Relative strength among commodities", reversal: "Index short-term reversal", orb: "Index opening-range breakout", optsell: "Option-selling premium (hedged)", funding: "Crypto funding signal", season: "Index calendar effects" };
 const IDEA_WHY = {
   trend: "Long while an asset has been rising, short while falling (moving averages and breakouts) across MCX commodities (minis where a big contract is too big), indices and crypto.",
   relstrength: "Every month: long the strongest commodities of the past months, short the weakest.",
   reversal: "After a sharp one- or two-day move on an index, trade the bounce back.",
   orb: "Trade the break of the first 15–45 minutes' range on indices, out by 15:15.",
   optsell: "Weekly Nifty iron condors, hedged strangles and credit spreads with real expired-option prices: in at 09:30 the day after an expiry, out at 14:30 on expiry day; short strikes 1 or 1.5 standard deviations out (from the last 20 days' volatility), within the 10 strikes Dhan's data covers; each trade risks at most 2% of the capital. About 5 years of option history.",
-  funding: "Collect perpetual funding on crypto. Delta's funding history is only about two years, so the 8-of-10-years test can't judge it yet.",
+  funding: "Crypto funding signal (unhedged: Delta India has no spot coin to hedge with): short a coin when the previous day's funding was high (collecting it), long when deeply negative, otherwise out. Binance's free funding history from 2019–2020; Delta's actual rates from Dec 2023.",
   season: "Turn of the month, and holding indices overnight only.",
 };
 function renderLabStatus() {

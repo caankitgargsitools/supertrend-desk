@@ -10,7 +10,8 @@ import { type Cond, mondayOf, type Rules, validateRules } from "./rules.ts";
 import { newAcc, type Plan, priceBatch, type SimData, slippageFor, slipped, tradeCharges } from "./backtest.ts";
 import { DhanBusyError } from "./dhan.ts";
 import type { SLeg } from "./structures.ts";
-import { assetRoot, cachedAsset, dbStore, labMayWork, labParams, labQuiet, LAB_ASSETS, type LabConfig, readCandles, screenOne, TOKEN_ERR } from "./lab.ts";
+import { CRYPTO } from "./crypto.ts";
+import { assetRoot, cachedAsset, dbStore, labMayWork, labParams, labQuiet, LAB_ASSETS, type LabConfig, readCandles, saveCandles, screenOne, TOKEN_ERR } from "./lab.ts";
 import { loadMarginRates } from "./margins.ts";
 import { deflatedSharpe, median } from "./stats.ts";
 
@@ -108,13 +109,17 @@ export const IDEAS: IdeaDef[] = [
     ],
   },
   {
-    key: "funding", order: 6, kind: "later", daily: true, universe: CRYPTO_KEYS,
-    name: "Crypto funding carry",
-    why: "Perpetual futures pay funding between longs and shorts; a hedged position collects it when it is high.",
-    note: "Delta's funding history starts in late 2023, about two years, so the 8-of-10-years test can't judge it yet; built after the others.",
+    key: "funding", order: 6, kind: "custom", daily: true, universe: CRYPTO_KEYS,
+    name: "Crypto funding signal",
+    why: "When perpetual-futures funding is high, longs are crowded and paying shorts; going short collects the funding and bets the crowd unwinds (and the reverse when funding is deeply negative). Delta India has no spot coin to hedge with, so this is a directional position, not a hedged carry.",
+    note: "Signal from the previous day's Binance funding (all its settlements known by the day's open); funding paid or received at Delta's actual rates from Dec 2023, Binance's before. History from 2019–2020 (Binance).",
     settings: [
-      S("f-0.01", "Collect funding above 0.01% per 8 hours", { th: 0.01 }), S("f-0.02", "Above 0.02%", { th: 0.02 }), S("f-0.03", "Above 0.03%", { th: 0.03 }),
-      S("f-0.01-btc", "Above 0.01%, Bitcoin only", { th: 0.01 }), S("f-0.02-btc", "Above 0.02%, Bitcoin only", { th: 0.02 }), S("f-0.03-btc", "Above 0.03%, Bitcoin only", { th: 0.03 }),
+      S("f-0.01", "Short when the previous day's funding is above 0.01% per 8 hours, long when below −0.01%, otherwise out; all four coins", { th: 0.01, coins: "all" }),
+      S("f-0.02", "Funding beyond ±0.02% per 8 hours; all four coins", { th: 0.02, coins: "all" }),
+      S("f-0.03", "Funding beyond ±0.03% per 8 hours; all four coins", { th: 0.03, coins: "all" }),
+      S("f-0.01-btc", "Funding beyond ±0.01% per 8 hours; Bitcoin only", { th: 0.01, coins: "BTC" }),
+      S("f-0.02-btc", "Funding beyond ±0.02%; Bitcoin only", { th: 0.02, coins: "BTC" }),
+      S("f-0.03-btc", "Funding beyond ±0.03%; Bitcoin only", { th: 0.03, coins: "BTC" }),
     ],
   },
   {
@@ -424,6 +429,67 @@ export function optStrategy(key: string): LabConfig {
   const a = LAB_ASSETS[key];
   return { ...ideaConfig(key, { long: set([C("TIME", "base", {}, "not_weekend")]) }, { intraday: false }), trade_type: "OPTIONS", option_side: "SELL",
     structure: { preset: "CUSTOM", legs: [{ opt: "CE", act: "S", k: 0 }] }, strike_step: a.step ?? 50, expiry_flag: "WEEK", expiry_weekday: a.wd ?? 2, roll_on_expiry: false, lots: 1, timeframe_min: 5 };
+}
+
+/* ---------- crypto funding signal ---------- */
+/**
+ * One coin under the funding signal: at each day's open, short when the previous day's (Binance) funding was above th %
+ * per 8 hours, long when below −th, otherwise out. Each day held is booked as its own trade (so the months show the
+ * profit as it comes) with the day's funding at Delta's rate where known (`paid`, else the signal's own series):
+ * shorts receive positive funding, longs pay it. Fees and slippage only when a position opens or closes.
+ */
+export function fundingTrades(key: string, daily: DayBar[], signal: Map<string, number>, paid: Map<string, number>, th: number): LegTrades {
+  const out = emptyTrades(), lot = LAB_ASSETS[key].lot;
+  let pos: { dir: number; px: number; ch: number; slip: number; day: string } | null = null;
+  const book = (day: string, px: number, closing: boolean, fundRs: number) => {
+    const p = pos!, x = closing ? sideCost(key, px, p.dir < 0, day) : { fill: px, ch: 0, slip: 0 };
+    out.k.push(key); out.e.push(`${p.day} 00:00`); out.x.push(`${day} 23:59`); out.s.push(p.dir > 0 ? "L" : "S");
+    out.n.push(Math.trunc((x.fill - p.px) * p.dir * lot - p.ch - x.ch + fundRs)); out.sl.push(Math.trunc(p.slip + x.slip)); out.a.push(0);
+    pos = closing ? null : { ...p, px, ch: 0, slip: 0, day };
+  };
+  for (let i = 1; i < daily.length; i++) {
+    const d = daily[i], r = signal.get(addDays(d.day, -1));
+    const want = r == null ? 0 : r > th ? -1 : r < -th ? 1 : 0;
+    if (pos && pos.dir !== want) book(daily[i - 1].day, daily[i - 1].c, true, 0);
+    if (!pos && want) { const s = sideCost(key, d.o, want > 0, d.day); pos = { dir: want, px: s.fill, ch: s.ch, slip: s.slip, day: d.day }; }
+    if (pos) {
+      const rate = paid.get(d.day) ?? signal.get(d.day) ?? 0; // % per 8 hours, three times a day
+      book(d.day, d.c, i === daily.length - 1, -pos.dir * (rate / 100) * 3 * d.c * lot);
+    }
+  }
+  return out;
+}
+/** Binance's funding history of a coin (% per 8 hours, the UTC day's average), free public data, kept as candles kind "FB". */
+export async function binanceFunding(symbol: string, fromMs: number, toMs: number): Promise<Map<string, number>> {
+  const sum = new Map<string, { s: number; n: number }>();
+  for (let a = fromMs; a < toMs;) {
+    const res = await fetch(`https://fapi.binance.com/fapi/v1/fundingRate?symbol=${encodeURIComponent(symbol)}&startTime=${a}&limit=1000`);
+    if (!res.ok) throw new Error(`Binance funding ${symbol}: HTTP ${res.status}`);
+    const rows = await res.json() as { fundingTime: number; fundingRate: string }[];
+    if (!rows.length) break;
+    for (const r of rows) {
+      const d = new Date(Number(r.fundingTime)).toISOString().slice(0, 10), x = sum.get(d) ?? { s: 0, n: 0 };
+      x.s += Number(r.fundingRate) * 100; x.n++; sum.set(d, x);
+    }
+    const last = Number(rows[rows.length - 1].fundingTime);
+    if (rows.length < 1000 || last <= a) break;
+    a = last + 1;
+  }
+  return new Map([...sum].map(([d, x]) => [d, +(x.s / x.n).toFixed(6)]));
+}
+const dayMap = (bars: any) => new Map<string, number>((bars?.d ?? []).map((d: string, i: number) => [d, Number(bars.r[i])]));
+/** A coin's funding: Binance's history (stored, refreshed when a week old) and Delta's own rates (stored by the lab). */
+async function fundingOf(sb: SupabaseClient, key: string): Promise<{ signal: Map<string, number>; paid: Map<string, number> }> {
+  const rows = await readCandles(sb, key, ["FB", "F"]);
+  let fb = rows.find((r) => r.kind === "FB");
+  const today = ist(Date.now() / 1000).date;
+  if (!fb || String(fb.to_day) < addDays(today, -7)) {
+    const sym = CRYPTO[key]?.history_symbol ?? key.replace(/USD$/, "USDT");
+    const m = await binanceFunding(sym, Date.parse("2019-09-01T00:00:00Z"), Date.now());
+    const d = [...m.keys()].sort();
+    if (d.length) { fb = { asset: key, kind: "FB", from_day: d[0], to_day: d[d.length - 1], bars: { d, r: d.map((x) => m.get(x)!) } }; await saveCandles(sb, fb); }
+  }
+  return { signal: dayMap(fb?.bars), paid: dayMap(rows.find((r) => r.kind === "F")?.bars) };
 }
 
 /* ---------- combining a setting's legs into one portfolio ---------- */
@@ -764,12 +830,23 @@ async function runLeg(sb: SupabaseClient, leg: Leg, memo: Map<string, unknown>, 
     } else if (idea.key === "season") {
       t = emptyTrades();
       for (const [k, d] of Object.entries(daily)) { const x = seasonTrades(k, d.slice(20), c.p as any); for (const f of Object.keys(t) as (keyof LegTrades)[]) (t[f] as any[]).push(...(x[f] as any[])); }
+    } else if (idea.key === "funding") {
+      t = emptyTrades();
+      const p = c.p as { th: number; coins: string };
+      for (const [k, d] of Object.entries(daily)) {
+        if (p.coins === "BTC" && k !== "BTCUSD") continue;
+        const f = await fundingOf(sb, k);
+        const x = fundingTrades(k, d, f.signal, f.paid, Number(p.th));
+        for (const fk of Object.keys(t) as (keyof LegTrades)[]) (t[fk] as any[]).push(...(x[fk] as any[]));
+      }
     } else throw new Error(`No simulator for ${idea.key}`);
     // Sizing data: the daily ATR at each trade's entry.
     const atrBy = new Map(Object.entries(daily).map(([k, d]) => [k, { days: d.map((x) => x.day), m: atrRupees(d, LAB_ASSETS[k].lot) }]));
     t.a = t.e.map((e, i) => { const x = atrBy.get(t.k[i]); return x ? Math.trunc(before(x.days, x.m, e.slice(0, 10)) ?? 0) : 0; });
     const firsts = Object.values(daily).map((d) => d[0]?.day).filter(Boolean).sort();
-    return { n: t.n.length, first: firsts[0] ? addDays(firsts[0], idea.key === "relstrength" ? 380 : 30) : null, last: today, atr_med: atrMed, t };
+    const firstTrade = [...t.e].sort()[0]?.slice(0, 10) ?? null;
+    const first = idea.key === "funding" ? firstTrade : firsts[0] ? addDays(firsts[0], idea.key === "relstrength" ? 380 : 30) : null;
+    return { n: t.n.length, first, last: today, atr_med: atrMed, t };
   }
   const data = await cachedAsset(sb, leg.asset, true);
   const daily = !!leg.config.rules?.daily, a = LAB_ASSETS[leg.asset];
@@ -787,3 +864,6 @@ async function runLeg(sb: SupabaseClient, leg: Leg, memo: Map<string, unknown>, 
   }
   return { n: t.n.length, first: from, last: to, atr_med: { [leg.asset]: atrMedian(data.daily, a.lot, vaultFrom) }, t };
 }
+
+// For tests: the asset list the ideas use (crypto coins join it at run time).
+export { LAB_ASSETS };

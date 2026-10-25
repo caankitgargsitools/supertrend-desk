@@ -101,7 +101,7 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 - **Ideas lab (step 3, 25 Oct 2026; `ideas.ts`, migration 45)**: 7 ideas from research, 47 settings written into the
   ledger `idea_tries` before testing (trend following daily on MCX incl. minis + indices + crypto; relative strength among
   commodities; index short-term reversal; index opening-range breakout; index calendar effects; option selling and
-  crypto funding carry are registered but built later). Each setting = a portfolio for ₹35 lakh (`lab_settings.ideas_capital`):
+  crypto funding signal were built next, same day). Each setting = a portfolio for ₹35 lakh (`lab_settings.ideas_capital`):
   one contract per commodity picked by risk (`pickContracts`, minis where the big lot is too big), each trade sized so a
   lot's daily ATR ≈ 0.2% of capital. Tests: 8 of 10 years profitable (Papa's choice for portfolios), doubled slippage
   (total and 8 of 10 years), ≥ 100 trades, best 5% of trades removed, ≥ 75% of the idea's settings profitable, luck
@@ -117,7 +117,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   width risks ≤ 2% of capital. Priced by `priceBatch` with plan-level legs (`Plan.sk`) from Dhan expired options
   (cache `lab_opt_cache`), in 8-second resumable slices chained call to call (`ideas_lease_until` prevents overlap);
   `edge_fill` prices strikes beyond ± 10 at intrinsic / 0.05 so big-move weeks aren't dropped (counted, `edge_legs`).
-  Crypto funding carry (idea 6) stays "later": only ~2 years of Delta funding history.
+  Crypto funding signal (idea 6, migration 47; Papa chose the unhedged version — Delta India has no spot to hedge
+  with): short a coin when the previous day's Binance funding > th % per 8h, long when < −th, else out
+  (`fundingTrades`, each day held booked with the day's funding: Delta's rate from Dec 2023, Binance's before). Binance
+  history (free, fapi.binance.com, reachable from Supabase) stored as lab candles kind "FB", refreshed weekly.
 
 ## Incident 23 Oct 2026 (state to restore)
 - A daytime lab re-test (3,930 saved strategies) plus per-second price writes used up the database's disk allowance on
