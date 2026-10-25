@@ -2183,7 +2183,16 @@ Deno.serve(async (req) => {
   }
   // Ideas lab: one instalment per call (the schedule paces it, every minute while the markets are closed).
   if (action === "ideas") {
-    EdgeRuntime.waitUntil(ideasStep(sb).then((r) => console.log("ideas", JSON.stringify(r))).catch((e) => console.error("ideas", e)));
+    EdgeRuntime.waitUntil((async () => {
+      const creds = credsOf(await adminAccount(sb).catch(() => null));
+      const r = await ideasStep(sb, Date.now(), creds);
+      console.log("ideas", JSON.stringify(r));
+      // Option pricing works in short slices: hand over to a fresh call straight away while there is more.
+      if (r.chain) {
+        const { data: sec } = await sb.from("engine_secret").select("secret").single();
+        await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/engine`, { method: "POST", headers: { "Content-Type": "application/json", "x-engine-secret": sec!.secret }, body: JSON.stringify({ action: "ideas" }) });
+      }
+    })().catch((e) => console.error("ideas", e)));
     return Response.json({ action, accepted: true });
   }
   if (action === "lab_next") {

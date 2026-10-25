@@ -3,12 +3,12 @@
 //   1. planBacktest  – downloads index candles once and decides every trade (entry/exit times, strike)
 //   2. priceBatch    – prices as many planned trades as fit in one invocation; the engine chains the rest
 //   3. summarize     – totals once every trade is priced
-import { legsFor, legSign, legText, structMargin, structName, structOf } from "./structures.ts";
+import { legsFor, legSign, legText, type SLeg, structMargin, structName, structOf } from "./structures.ts";
 import { CRYPTO, cryptoDaily, cryptoFunding } from "./crypto.ts";
 import { Dhan, DhanBusyError, type OptBar } from "./dhan.ts";
 import {
   addDays, aggregate, type Bar, type DayBar, dayMinutes, isCommodity, isCrypto, isLastWeekdayOfMonth, ist, minToTime, partialDay, type Raw,
-  sessionFor, signalSeries, strikeFor, supertrend, timeToMin, weekdayOf,
+  sessionFor, signalSeries, strikeFor, supertrend, timeToMin, weekdayOf, weeklyExpiryWeekday,
 } from "./logic.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, type Signals, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
@@ -60,7 +60,7 @@ export function fundingCost(fromSec: number, toSec: number, value: number, rates
   }
   return cost;
 }
-export type BtParams = { funding?: Record<string, number> | null; no_slippage?: boolean; from: string; to: string; capital: number; brokerage: number; other_pct?: number; charges?: ChargeRates; near_code: number; sizing?: boolean; deploy_pct?: number; margin_rate?: number | null; sell_rate?: number | null };
+export type BtParams = { edge_fill?: boolean; funding?: Record<string, number> | null; no_slippage?: boolean; from: string; to: string; capital: number; brokerage: number; other_pct?: number; charges?: ChargeRates; near_code: number; sizing?: boolean; deploy_pct?: number; margin_rate?: number | null; sell_rate?: number | null };
 export type ChargeBreakdown = { brokerage: number; stt: number; exch: number; sebi: number; gst: number; stamp: number; total: number };
 
 /** Charges for one round trip (one buy and one sell order), the way the broker's calculator works them out. */
@@ -89,6 +89,7 @@ export type Plan = {
   spotIn: number; spotOut: number | null; strike: number | null; why: string; exitWhy: string;
   fillIn?: number; fillOut?: number; // exact index fills for breakout orders and stop / target exits
   rk?: RiskState | null; // stop / target levels while the position is open (underlying basis)
+  sk?: SLeg[]; // multi-leg plans only: this trade's own legs (strike steps from the money), instead of the structure's
 };
 export type Acc = {
   equity: number; peak: number; maxDd: number; grossWin: number; grossLoss: number; wins: number;
@@ -100,6 +101,7 @@ export type Acc = {
   lots?: { min: number; max: number; sum: number; n: number }; // lots per trade when sized from capital
   slip?: number; // rupees lost to slippage (already inside the trades' prices)
   funding?: number; // crypto perpetual funding paid (inside the charges)
+  edge?: number; // option legs priced at intrinsic / 0.05 beyond the data's 10 strikes (p.edge_fill)
 };
 
 /** Saved option series shared between runs (the strategy lab keeps them in the database). */
@@ -577,13 +579,20 @@ export async function priceBatch(
     return m.get(day);
   }
   let lastK = 0, lastT = 0;
+  // Dhan's expired-option data covers 10 strikes either side of the money. With p.edge_fill (the Ideas lab), a strike
+  // beyond that is priced at its intrinsic value (deep in the money; exact at expiry, a little kind before it) or at
+  // 0.05 (far out of the money), so the weeks with big moves aren't dropped from the test; counted in acc.edge.
+  const edge = (spot: number, opt: "CE" | "PE", strike: number) => { acc.edge = (acc.edge ?? 0) + 1; const v = opt === "CE" ? spot - strike : strike - spot; return v > 0 ? v : 0.05; };
   async function optPrice(day: string, min: number, spot: number, opt: "CE" | "PE", strike: number, code: number): Promise<number | null> {
-    let k = Math.max(-10, Math.min(10, Math.round((strike - Math.round(spot / step) * step) / step)));
+    const raw = Math.round((strike - Math.round(spot / step) * step) / step);
+    if (p.edge_fill && Math.abs(raw) > 10) return edge(spot, opt, strike);
+    let k = Math.max(-10, Math.min(10, raw));
     for (let tries = 0; tries < 3; tries++) {
       const bar = priceAt(await series(opt === "CE" ? "CALL" : "PUT", k, code, day), min);
       if (!bar || !(bar.px > 0)) return null;
       if (bar.strike == null || Math.abs(bar.strike - strike) < 0.01) { lastK = k; lastT = bar.t; return bar.px; }
       const k2 = k + Math.round((strike - bar.strike) / step);
+      if (p.edge_fill && Math.abs(k2) > 10) return edge(spot, opt, strike);
       if (k2 === k || Math.abs(k2) > 10) return null;
       k = k2;
     }
@@ -614,7 +623,7 @@ export async function priceBatch(
     return null;
   }
   const monthly = s.expiry_flag === "MONTH";
-  const isExpiry = (d: string) => monthly ? isLastWeekdayOfMonth(d, Number(s.expiry_weekday)) : weekdayOf(d) === Number(s.expiry_weekday);
+  const isExpiry = (d: string) => monthly ? isLastWeekdayOfMonth(d, Number(s.expiry_weekday)) : weekdayOf(d) === weeklyExpiryWeekday(String(s.underlying), d, Number(s.expiry_weekday));
   const expiriesBetween = (a: string, b: string) => { let n = 0; for (let d = a; d < b; d = addDays(d, 1)) if (isExpiry(d)) n++; return n; };
   const skip = (why: string) => { acc.skipped[why] = (acc.skipped[why] ?? 0) + 1; };
   const risk = normaliseRisk(s.risk, isOpt && !structOf(s));
@@ -637,7 +646,8 @@ export async function priceBatch(
       const inMin = t.fillIn != null ? t.entryMin + baseMin : t.entryMin, outMin = t.fillOut != null ? t.exitMin + baseMin : t.exitMin;
       const inCode = p.near_code + (s.roll_on_expiry && isExpiry(t.entryDay) ? 1 : 0);
       const gone = expiriesBetween(t.entryDay, t.exitDay);
-      const legs = legsFor(struct, t.side, t.spotIn, step);
+      // A plan may carry its own legs (distances from the at-the-money strike chosen per trade, e.g. from the volatility).
+      const legs = t.sk ? t.sk.map((l) => ({ ...l, strike: l.opt === "FUT" ? null : Math.round(t.spotIn / step) * step + l.k * step })) : legsFor(struct, t.side, t.spotIn, step);
       if (legs.some((l) => l.opt !== "FUT" && inCode + (l.x ?? 0) - gone < p.near_code)) { skip("Contract expired before the exit (turn on next-week expiry)"); continue; }
       const priced: (typeof legs[number] & { px: number; out: number; ri?: number; ro?: number })[] = [];
       let bad = false;

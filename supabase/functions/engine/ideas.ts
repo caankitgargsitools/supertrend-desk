@@ -4,11 +4,13 @@
 // (minis where a big contract is too big), and judged by the strategy lab's protective tests: luck (counted from the
 // ledger), the held-back last 6 months, doubled slippage, nearby settings, a few lucky trades; 8 of 10 years profitable.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { addDays, type DayBar, ist } from "./logic.ts";
+import { addDays, type DayBar, ist, weekdayOf, weeklyExpiryWeekday } from "./logic.ts";
 import { atr } from "./indicators.ts";
-import { type Cond, type Rules, validateRules } from "./rules.ts";
-import { slippageFor, slipped, tradeCharges } from "./backtest.ts";
-import { assetRoot, cachedAsset, labMayWork, labParams, labQuiet, LAB_ASSETS, type LabConfig, readCandles, screenOne } from "./lab.ts";
+import { type Cond, mondayOf, type Rules, validateRules } from "./rules.ts";
+import { newAcc, type Plan, priceBatch, type SimData, slippageFor, slipped, tradeCharges } from "./backtest.ts";
+import { DhanBusyError } from "./dhan.ts";
+import type { SLeg } from "./structures.ts";
+import { assetRoot, cachedAsset, dbStore, labMayWork, labParams, labQuiet, LAB_ASSETS, type LabConfig, readCandles, screenOne, TOKEN_ERR } from "./lab.ts";
 import { loadMarginRates } from "./margins.ts";
 import { deflatedSharpe, median } from "./stats.ts";
 
@@ -27,7 +29,7 @@ const CRYPTO_KEYS = ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD"];
 /* ---------- the ideas and their settings (fixed before testing) ---------- */
 export type IdeaSetting = { key: string; label: string; p: Record<string, number | string> };
 export type IdeaDef = {
-  key: string; order: number; name: string; why: string; kind: "rules" | "custom" | "later";
+  key: string; order: number; name: string; why: string; kind: "rules" | "custom" | "options" | "later";
   universe: string[]; daily: boolean; settings: IdeaSetting[]; note?: string;
 };
 const S = (key: string, label: string, p: Record<string, number | string>): IdeaSetting => ({ key, label, p });
@@ -90,15 +92,19 @@ export const IDEAS: IdeaDef[] = [
     ],
   },
   {
-    key: "optsell", order: 5, kind: "later", daily: false, universe: ["NIFTY"],
+    key: "optsell", order: 5, kind: "options", daily: false, universe: ["NIFTY"],
     name: "Option-selling premium (hedged)",
-    why: "Index options are usually priced above the moves that follow (the volatility risk premium); hedged, defined-risk selling collects part of it.",
-    note: "Built next: it needs the option-price backtests of the strategy lab joined into the portfolio test.",
+    why: "Index options are usually priced above the moves that follow (the volatility risk premium); hedged, defined-risk selling collects part of it. Weekly Nifty options: in at 09:30 the day after an expiry, out at 14:30 on the next expiry day; strikes set by the last 20 days' volatility.",
+    note: "Real expired-option prices from Dhan (about 5 years of history), strikes at most 10 steps from the money (Dhan's data). Each trade risks at most 2% of the capital (wing width × lots).",
     settings: [
-      S("ic-1sd", "Weekly iron condor, short strikes about 1 standard deviation out", { w: 1 }), S("ic-1.5sd", "Iron condor, 1.5 SD", { w: 1.5 }),
-      S("strangle-hedged-1sd", "Hedged strangle, 1 SD", { w: 1 }), S("strangle-hedged-1.5sd", "Hedged strangle, 1.5 SD", { w: 1.5 }),
-      S("ic-1sd-sl", "Iron condor 1 SD, stop at 2× premium", { w: 1 }), S("ic-1.5sd-sl", "Iron condor 1.5 SD, stop at 2× premium", { w: 1.5 }),
-      S("bull-put", "Bull put spread, 1 SD", { w: 1 }), S("bear-call", "Bear call spread, 1 SD", { w: 1 }),
+      S("ic-1sd", "Iron condor: sell the call and put about 1 standard deviation of the week's move out, buy wings 2 strikes further", { form: "ic", sd: 1, w: 2, stop: 0 }),
+      S("ic-1.5sd", "Iron condor, short strikes 1.5 SD out, wings 2 strikes further", { form: "ic", sd: 1.5, w: 2, stop: 0 }),
+      S("strangle-hedged-1sd", "Hedged strangle: short strikes 1 SD out, protection 4 strikes further", { form: "ic", sd: 1, w: 4, stop: 0 }),
+      S("strangle-hedged-1.5sd", "Hedged strangle: short strikes 1.5 SD out, protection 4 strikes further", { form: "ic", sd: 1.5, w: 4, stop: 0 }),
+      S("ic-1sd-sl", "Iron condor 1 SD, out early when Nifty touches a short strike", { form: "ic", sd: 1, w: 2, stop: 1 }),
+      S("ic-1.5sd-sl", "Iron condor 1.5 SD, out early when Nifty touches a short strike", { form: "ic", sd: 1.5, w: 2, stop: 1 }),
+      S("bull-put", "Bull put spread: sell a put 1 SD below, buy one 2 strikes lower", { form: "bps", sd: 1, w: 2, stop: 0 }),
+      S("bear-call", "Bear call spread: sell a call 1 SD above, buy one 2 strikes higher", { form: "bcs", sd: 1, w: 2, stop: 0 }),
     ],
   },
   {
@@ -202,6 +208,11 @@ export type LegSpec = { asset: string; win_from: string | null; win_to: string |
  */
 export function legsFor(idea: IdeaDef, s: IdeaSetting, today: string, have: Set<string>): LegSpec[] {
   if (idea.kind === "custom") return [{ asset: "*", win_from: null, win_to: null, config: { idea: idea.key, setting: s.key, p: s.p } }];
+  if (idea.kind === "options") {
+    const key = idea.universe[0];
+    if (!LAB_ASSETS[key] || !have.has(key)) return [];
+    return [1, 2, 3, 4, 5].map((y) => { const hi = addDays(today, -365 * (y - 1)); return { asset: key, win_from: addDays(hi, -364), win_to: hi, config: { idea: idea.key, setting: s.key, p: s.p } }; });
+  }
   if (idea.kind !== "rules") return [];
   const out: LegSpec[] = [];
   for (const key of idea.universe) {
@@ -218,8 +229,10 @@ export function legsFor(idea: IdeaDef, s: IdeaSetting, today: string, have: Set<
 }
 
 /* ---------- leg results: trades for one lot, with the daily ATR at entry for sizing ---------- */
-export type LegTrades = { k: string[]; e: string[]; x: string[]; s: string[]; n: number[]; sl: number[]; a: number[] };
-export type LegResult = { n: number; first: string | null; last: string | null; atr_med: Record<string, number>; t: LegTrades; error?: string; skip?: boolean };
+/** Trades of a leg for one lot; q (option ideas) = lots fixed per trade by its risk, instead of sizing by ATR. */
+export type LegTrades = { k: string[]; e: string[]; x: string[]; s: string[]; n: number[]; sl: number[]; a: number[]; q?: number[] };
+export type LegResult = { n: number; first: string | null; last: string | null; atr_med: Record<string, number>; t: LegTrades; error?: string; skip?: boolean;
+  planned?: number; unpriced?: number; skipped?: Record<string, number>; edge?: number; job?: any };
 const emptyTrades = (): LegTrades => ({ k: [], e: [], x: [], s: [], n: [], sl: [], a: [] });
 
 /** Daily ATR (20) in rupees for one lot, by day (the value known at that day's close). */
@@ -340,6 +353,79 @@ export function seasonTrades(key: string, daily: DayBar[], p: { t: string; a?: n
   return out;
 }
 
+/* ---------- option selling: weekly Nifty structures priced with real expired-option prices ---------- */
+export const OPT_IN = 570, OPT_OUT = 870; // 09:30 in, 14:30 out on expiry day
+export type OptSetting = { form: "ic" | "bps" | "bcs"; sd: number; w: number; stop: number };
+/** Expiry days in a list of trading days: each week's last trading day on or before its expiry weekday (holidays move it earlier). */
+export function weeklyExpiries(days: string[], underlying: string, weekday: number): string[] {
+  const weeks = new Map<string, string[]>();
+  for (const d of days) { const w = mondayOf(d); weeks.set(w, [...(weeks.get(w) ?? []), d]); }
+  const out: string[] = [];
+  for (const [w, ds] of [...weeks.entries()].sort()) {
+    const wd = weeklyExpiryWeekday(underlying, w, weekday);
+    const c = ds.filter((d) => weekdayOf(d) <= wd).sort();
+    if (c.length) out.push(c[c.length - 1]);
+  }
+  return out;
+}
+/** The legs of an option setting, d = strike steps from the money to the short strikes, w = wing width in steps. */
+export function optLegs(form: string, d: number, w: number): SLeg[] {
+  const L = (opt: "CE" | "PE", act: "B" | "S", k: number): SLeg => ({ opt, act, k, x: 0, q: 1 });
+  if (form === "bps") return [L("PE", "S", -d), L("PE", "B", -d - w)];
+  if (form === "bcs") return [L("CE", "S", d), L("CE", "B", d + w)];
+  return [L("CE", "S", d), L("CE", "B", d + w), L("PE", "S", -d), L("PE", "B", -d - w)];
+}
+/**
+ * One trade per weekly expiry: in at 09:30 on the first trading day after the previous expiry, out at 14:30 on expiry
+ * day (or earlier, when the index touches a short strike, with the stop setting). The short strikes sit sd standard
+ * deviations of the expected move away (20-day daily volatility × √days to expiry), at most 10 − w steps (Dhan's
+ * expired-option data covers 10 strikes either side of the money).
+ */
+export function optPlans(data: SimData, p: OptSetting, from: string, to: string, step: number, underlying = "NIFTY", weekday = 2): Plan[] {
+  const days = [...data.byDay.keys()].filter((d) => d >= addDays(from, -10) && d <= to).sort();
+  const idx = new Map(days.map((d, i) => [d, i]));
+  const exp = weeklyExpiries(days, underlying, weekday);
+  const dIdx = new Map(data.daily.map((d, i) => [d.day, i]));
+  const plans: Plan[] = [];
+  for (let j = 1; j < exp.length; j++) {
+    const e = exp[j], entry = days[idx.get(exp[j - 1])! + 1];
+    if (!entry || entry >= e || entry < from || e > to) continue;
+    const inBar = (data.byDay.get(entry) ?? []).find((b) => b.min >= OPT_IN);
+    if (!inBar) continue;
+    // Volatility from the 20 daily closes before the entry day.
+    let di = -1; for (const [d, i] of dIdx) if (d < entry && i > di) di = i;
+    if (di < 21) continue;
+    const r = Array.from({ length: 20 }, (_, k) => Math.log(data.daily[di - k].c / data.daily[di - k - 1].c));
+    const m = r.reduce((a, x) => a + x, 0) / r.length, sdD = Math.sqrt(r.reduce((a, x) => a + (x - m) ** 2, 0) / (r.length - 1));
+    const n = idx.get(e)! - idx.get(entry)! + 1, spot = inBar.o;
+    const d = Math.max(1, Math.min(10 - p.w, Math.round((p.sd * spot * sdD * Math.sqrt(n)) / step)));
+    let exitDay = e, exitMin = OPT_OUT, exitWhy = "Expiry day 14:30";
+    const outBar = (data.byDay.get(e) ?? []).find((b) => b.min >= OPT_OUT);
+    let spotOut = outBar ? outBar.o : (data.byDay.get(e) ?? []).at(-1)?.c ?? spot;
+    if (p.stop) {
+      const atm = Math.round(spot / step) * step, hi = atm + d * step, lo = atm - d * step;
+      scan: for (let i = idx.get(entry)!; i <= idx.get(e)!; i++) for (const b of data.byDay.get(days[i]) ?? []) {
+        if (days[i] === entry && b.min < OPT_IN + 5) continue;
+        if (days[i] === e && b.min >= OPT_OUT) break scan;
+        if ((p.form !== "bps" && b.h >= hi) || (p.form !== "bcs" && b.l <= lo)) { exitDay = days[i]; exitMin = b.min + 5; spotOut = b.c; exitWhy = "Nifty touched a short strike"; break scan; }
+      }
+    }
+    plans.push({ side: "LONG", opt: null, entryDay: entry, entryMin: OPT_IN, exitDay, exitMin, spotIn: spot, spotOut, strike: null,
+      why: `Weekly entry, short strikes ${d} steps out`, exitWhy, sk: optLegs(p.form, d, p.w) });
+  }
+  return plans;
+}
+/** Lots per option trade: its largest possible loss (the wing width; only one side of a condor can lose) ≤ 2% of the capital. */
+export function optLots(p: OptSetting, capital: number, step: number, lot: number): number {
+  return Math.max(1, Math.floor((0.02 * capital) / (p.w * step * lot)));
+}
+/** The strategy the option backtester prices (a custom multi-leg structure; each plan brings its own legs). */
+export function optStrategy(key: string): LabConfig {
+  const a = LAB_ASSETS[key];
+  return { ...ideaConfig(key, { long: set([C("TIME", "base", {}, "not_weekend")]) }, { intraday: false }), trade_type: "OPTIONS", option_side: "SELL",
+    structure: { preset: "CUSTOM", legs: [{ opt: "CE", act: "S", k: 0 }] }, strike_step: a.step ?? 50, expiry_flag: "WEEK", expiry_weekday: a.wd ?? 2, roll_on_expiry: false, lots: 1, timeframe_min: 5 };
+}
+
 /* ---------- combining a setting's legs into one portfolio ---------- */
 export type TryResult = {
   capital: number; target: number; contracts: Record<string, string>; lots: Record<string, number>;
@@ -348,9 +434,10 @@ export type TryResult = {
   months_n: number; months_pos: number; years: { y: number; from: string; to: string; net: number; slip: number; n: number; ok: boolean; stress_ok: boolean }[];
   years_ok: number; years_n: number; stress_net: number; stress_years_ok: number; top_cut: { dropped: number; net: number };
   vault: { from: string; to: string; net: number; n: number }; by_asset: Record<string, { net: number; n: number }>;
+  planned?: number; unpriced?: number; edge_legs?: number;
 };
-type Flat = { k: string; e: string; x: string; s: string; n: number; sl: number; a: number };
-const flatten = (t: LegTrades): Flat[] => t.n.map((_, i) => ({ k: t.k[i], e: t.e[i], x: t.x[i], s: t.s[i], n: t.n[i], sl: t.sl[i], a: t.a[i] }));
+type Flat = { k: string; e: string; x: string; s: string; n: number; sl: number; a: number; fq: number | null };
+const flatten = (t: LegTrades): Flat[] => t.n.map((_, i) => ({ k: t.k[i], e: t.e[i], x: t.x[i], s: t.s[i], n: t.n[i], sl: t.sl[i], a: t.a[i], fq: t.q?.[i] ?? null }));
 
 /**
  * A setting's portfolio: picks one contract per commodity, sizes every trade by the daily ATR at its entry (the risk
@@ -368,7 +455,8 @@ export function combineTry(legs: { asset: string; result: LegResult }[], o: { to
   const chosen = new Set(contracts.values());
   const lots: Record<string, number> = {};
   for (const k of chosen) lots[k] = atrMed[k] > 0 ? Math.max(1, Math.round(target / atrMed[k])) : 1;
-  const trades = all.filter((t) => chosen.has(t.k)).map((t) => {
+  const trades = all.filter((t) => chosen.has(t.k) || t.fq != null).map((t) => {
+    if (t.fq != null) return { ...t, q: t.fq, net: t.n * t.fq, slip: t.sl * t.fq };
     const typical = lots[t.k], cap = 3 * typical;
     const want = t.a > 0 ? Math.round(target / t.a) : typical;
     const q = Math.min(cap, Math.max(t.a > 0 && want < 1 ? 0 : 1, want));
@@ -403,6 +491,9 @@ export function combineTry(legs: { asset: string; result: LegResult }[], o: { to
   for (const t of pre) { const b = byAsset[t.k] ?? (byAsset[t.k] = { net: 0, n: 0 }); b.net += t.net; b.n++; }
   for (const b of Object.values(byAsset)) b.net = Math.trunc(b.net);
   const slipTot = pre.reduce((a, t) => a + t.slip, 0);
+  for (const t of trades) if (t.fq != null) lots[t.k] = Math.max(lots[t.k] ?? 0, t.fq);
+  const planned = legs.reduce((a, l) => a + Number(l.result?.planned ?? 0), 0), unpriced = legs.reduce((a, l) => a + Number(l.result?.unpriced ?? 0), 0);
+  const edgeLegs = legs.reduce((a, l) => a + Number(l.result?.edge ?? 0), 0);
   return {
     capital, target: Math.trunc(target), contracts: Object.fromEntries(contracts), lots,
     from, pre_to: preTo, vault_from: vaultFrom, months: Object.fromEntries(Object.entries(months).map(([m, v]) => [m, Math.trunc(v)])),
@@ -413,6 +504,7 @@ export function combineTry(legs: { asset: string; result: LegResult }[], o: { to
     stress_net: Math.trunc(net - slipTot), stress_years_ok: years.filter((y) => y.stress_ok).length,
     top_cut: { dropped: k, net: Math.trunc(rest) },
     vault: { from: vaultFrom, to: o.today, net: Math.trunc(post.reduce((a, t) => a + t.net, 0)), n: post.length }, by_asset: byAsset,
+    ...(planned ? { planned, unpriced, edge_legs: edgeLegs } : {}),
   };
 }
 
@@ -453,6 +545,7 @@ export function ideaVerdict(r: TryResult, o: { tries: number; plateau: { ok: num
   if (!(r.stress_net > 0)) why.push(`loses money once slippage is doubled (₹${r.stress_net.toLocaleString("en-IN")})`);
   else if (r.years_n >= 3 && r.stress_years_ok < need) why.push(`with slippage doubled, profitable in ${r.stress_years_ok} of ${r.years_n} years (needs ${need})`);
   if (r.trades < 100) why.push(`only ${r.trades} trades over the years tested (needs 100)`);
+  if (r.planned && (r.unpriced ?? 0) > r.planned * 0.2) why.push(`${r.unpriced} of ${r.planned} trades couldn't be priced with real option data`);
   if (!(r.top_cut.net > 0)) why.push(`the profit comes from a few trades: without its best ${r.top_cut.dropped} it ${r.top_cut.net < 0 ? `lost ₹${(-r.top_cut.net).toLocaleString("en-IN")}` : "made nothing"}`);
   const pNeed = Math.ceil(o.plateau.n * 0.75);
   if (o.plateau.ok < pNeed) why.push(`only ${o.plateau.ok} of the idea's ${o.plateau.n} settings made money (needs ${pNeed}): the result depends on the exact setting`);
@@ -511,8 +604,20 @@ export async function registerIdeas(sb: SupabaseClient) {
   return rows.length;
 }
 
-/** One instalment of the Ideas lab: one idea at a time, its backtests in small batches, then its verdict. */
-export async function ideasStep(sb: SupabaseClient, started = Date.now()): Promise<Record<string, unknown>> {
+type Creds = { client: string; token: string };
+/**
+ * One instalment of the Ideas lab: one idea at a time, its backtests in small batches, then its verdict. A lease on
+ * lab_settings keeps two instalments (the schedule and a chained call) from working at once.
+ */
+export async function ideasStep(sb: SupabaseClient, started = Date.now(), creds?: Creds): Promise<Record<string, unknown>> {
+  const now = new Date(Date.now());
+  const { data: lease } = await sb.from("lab_settings").update({ ideas_lease_until: new Date(now.getTime() + 150000).toISOString() }).eq("id", 1)
+    .or(`ideas_lease_until.is.null,ideas_lease_until.lt.${now.toISOString()}`).select("id");
+  if (!lease?.length) return { idle: "another instalment is working" };
+  try { return await ideasWork(sb, started, creds); }
+  finally { await sb.from("lab_settings").update({ ideas_lease_until: null }).eq("id", 1); }
+}
+async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Promise<Record<string, unknown>> {
   const { data: set } = await sb.from("lab_settings").select("ideas_enabled, ideas_capital").eq("id", 1).maybeSingle();
   if (!set?.ideas_enabled) return { idle: "Ideas lab is switched off" };
   if (!(await labQuiet(sb))) return { idle: "waiting for the markets to close" };
@@ -539,10 +644,23 @@ export async function ideasStep(sb: SupabaseClient, started = Date.now()): Promi
       await sb.from("idea_tries").update({ status: "running", started_at: new Date().toISOString() }).eq("id", t.id);
     }
   }
-  // 2. Run pending backtests, one asset's candles at a time.
+  // 2. Run pending backtests, one asset's candles at a time (option ideas: one pricing slice of one backtest).
   const ids = mine.map((t) => t.id);
-  const { data: pend } = await sb.from("idea_legs").select("id, try_id, asset, win_from, win_to, config").in("try_id", ids).eq("status", "pending").order("asset").order("id").limit(200);
-  let ran = 0;
+  let ran = 0, chain = false;
+  if (idea.kind === "options") {
+    const { data: op } = await sb.from("idea_legs").select("id, try_id, asset, win_from, win_to, config, result").in("try_id", ids).eq("status", "pending").order("id").limit(1);
+    if (op?.length) {
+      if (!creds?.client || !creds?.token) return { idle: "waiting for the Dhan connection (option prices come from Dhan)" };
+      let r: { done: boolean; result: LegResult; wait?: string };
+      try { r = await optionSlice(sb, op[0] as Leg & { result: LegResult | null }, creds, capital, started); }
+      catch (e) { r = { done: true, result: { n: 0, first: null, last: null, atr_med: {}, t: emptyTrades(), error: e instanceof Error ? e.message.slice(0, 160) : String(e) } }; }
+      await sb.from("idea_legs").update(r.done ? { status: "done", result: r.result, done_at: new Date().toISOString() } : { result: r.result }).eq("id", op[0].id);
+      ran = 1;
+      if (r.wait) return { idea: idea.key, waiting: r.wait };
+      chain = true;
+    }
+  }
+  const { data: pend } = idea.kind === "options" ? { data: [] as Leg[] } : await sb.from("idea_legs").select("id, try_id, asset, win_from, win_to, config").in("try_id", ids).eq("status", "pending").order("asset").order("id").limit(200);
   if (pend?.length) {
     const asset = pend[0].asset;
     const rates = await loadMarginRates(sb);
@@ -587,7 +705,47 @@ export async function ideasStep(sb: SupabaseClient, started = Date.now()): Promi
     await sb.from("idea_legs").update({ result: null }).in("try_id", (full ?? []).map((t) => t.id)); // the trades live on in the settings' results
     return { idea: idea.key, decided: (full ?? []).length, tries };
   }
-  return { idea: idea.key, ran, combined, more: true };
+  return { idea: idea.key, ran, combined, more: true, chain };
+}
+
+/**
+ * One slice (about 8 seconds) of an option backtest leg: plans the weekly trades once, then prices them with real
+ * expired-option prices (series cached in lab_opt_cache), keeping its place in the leg between calls. Dhan being busy,
+ * refusing or renewing its token makes it wait and try again (up to 20 times), never fail at once.
+ */
+export async function optionSlice(sb: SupabaseClient, leg: Leg & { result: LegResult | null }, creds: Creds, capital: number, started: number): Promise<{ done: boolean; result: LegResult; wait?: string }> {
+  const key = leg.asset, a = LAB_ASSETS[key], p = leg.config.p as OptSetting, step = a.step ?? 50;
+  const base = (): LegResult => ({ n: 0, first: null, last: null, atr_med: {}, t: emptyTrades() });
+  let job = leg.result?.job;
+  if (!job) {
+    const data = await cachedAsset(sb, key, true);
+    const first = data.raw[0]?.day;
+    const from = first && addDays(first, 30) > String(leg.win_from) ? addDays(first, 30) : String(leg.win_from), to = String(leg.win_to);
+    if (!first || from >= to) return { done: true, result: { ...base(), skip: true, error: "no 5-minute candles for this year" } };
+    job = { from, to, plans: optPlans(data, p, from, to, step, key, a.wd ?? 2), cursor: 0, acc: newAcc(capital), t: { ...emptyTrades(), q: [] as number[] }, tries: 0 };
+  }
+  const lots = optLots(p, capital, step, a.lot);
+  const busy0 = job.acc.busy ?? 0;
+  try {
+    const res = await priceBatch(optStrategy(key), creds, { ...labParams(a, job.from, job.to, capital), edge_fill: true }, job.plans, job.cursor, job.acc,
+      Math.min(started + WALL_BUDGET - 10000, Date.now() + 8000), async () => {}, dbStore(sb));
+    for (const x of res.trades as any[]) {
+      job.t.k.push(key); job.t.e.push(String(x.entry)); job.t.x.push(String(x.exit)); job.t.s.push("L");
+      job.t.n.push(Number(x.net) || 0); job.t.sl.push(Number(x.slip) || 0); job.t.a.push(0); job.t.q.push(lots);
+    }
+    job.cursor = res.next; job.acc = res.acc;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!(e instanceof DhanBusyError) && !TOKEN_ERR.test(msg) && !/HTTP (400|429|5\d\d)\b|DH-905/.test(msg)) throw e;
+    job.tries++;
+    if (job.tries > 20) return { done: true, result: { ...base(), error: `Dhan kept refusing option prices: ${msg.slice(0, 120)}` } };
+    return { done: false, result: { ...base(), job }, wait: `Dhan: ${msg.slice(0, 100)}` };
+  }
+  if ((job.acc.busy ?? 0) > busy0) { job.tries++; return { done: false, result: { ...base(), job }, wait: "Dhan's option-data server is busy" }; }
+  job.tries = 0;
+  if (job.cursor < job.plans.length) return { done: false, result: { ...base(), job } };
+  const unpriced = Object.values(job.acc.skipped ?? {}).reduce((x: number, y) => x + Number(y), 0);
+  return { done: true, result: { n: job.t.n.length, first: job.from, last: job.to, atr_med: {}, t: job.t, planned: job.plans.length, unpriced, skipped: job.acc.skipped, edge: job.acc.edge ?? 0 } };
 }
 
 /** One backtest leg: a rule strategy on one asset's candles, or a custom idea over its assets' daily candles. */

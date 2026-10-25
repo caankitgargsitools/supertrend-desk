@@ -110,6 +110,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   years 30, return/drawdown 20, slippage years 15, months 10, settings 10, luck 15. Runs one idea at a time, cron
   `ideas-lab` every 2 min → `engine_call('ideas')`, only while `labQuiet` and no lab run; switch `lab_settings.ideas_enabled`.
   Shown on the Lab page ("Ideas lab"). The random generator is paused (`lab_settings.enabled = false`, 25 Oct).
+  Option selling (idea 5, migration 46): weekly Nifty iron condors / hedged strangles / credit spreads, in 09:30 the day
+  after an expiry, out 14:30 on expiry day (`weeklyExpiries`: Nifty expiry Thursday until 28 Aug 2025, Tuesday after,
+  holidays a day earlier — `weeklyExpiryWeekday` in logic.ts, also used by the backtester's `isExpiry`); short strikes
+  sd × 20-day volatility × √days out, capped at 10 − wing steps (Dhan's rolling data covers ATM ± 10); lots so the wing
+  width risks ≤ 2% of capital. Priced by `priceBatch` with plan-level legs (`Plan.sk`) from Dhan expired options
+  (cache `lab_opt_cache`), in 8-second resumable slices chained call to call (`ideas_lease_until` prevents overlap);
+  `edge_fill` prices strikes beyond ± 10 at intrinsic / 0.05 so big-move weeks aren't dropped (counted, `edge_legs`).
+  Crypto funding carry (idea 6) stays "later": only ~2 years of Delta funding history.
 
 ## Incident 23 Oct 2026 (state to restore)
 - A daytime lab re-test (3,930 saved strategies) plus per-second price writes used up the database's disk allowance on

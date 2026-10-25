@@ -178,6 +178,15 @@ export function isLastWeekdayOfMonth(date: string, weekday: number): boolean {
   return dt.getUTCMonth() !== m - 1;
 }
 
+/**
+ * The weekday of an index's weekly expiry on a given date. Nifty's weekly options expired on Thursdays until
+ * 28 Aug 2025 and on Tuesdays from September 2025 (SEBI's expiry-day change); other underlyings keep their set weekday.
+ */
+export function weeklyExpiryWeekday(underlying: string, date: string, weekday: number): number {
+  if (underlying === "NIFTY") return date < "2025-09-01" ? 4 : 2;
+  return weekday;
+}
+
 export function strikeFor(close: number, step: number, offset: number, optType: "CE" | "PE"): number {
   const atm = Math.round(close / step) * step;
   return optType === "CE" ? atm + offset * step : atm - offset * step;

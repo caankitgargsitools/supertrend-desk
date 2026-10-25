@@ -2158,7 +2158,7 @@ async function screenPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
 }
 
 /** Option-series store backed by the lab_opt_cache table. */
-function dbStore(sb: SupabaseClient): OptStore {
+export function dbStore(sb: SupabaseClient): OptStore {
   return {
     async get(key) {
       const { data } = await sb.from("lab_opt_cache").select("bars").eq("key", key).maybeSingle();
