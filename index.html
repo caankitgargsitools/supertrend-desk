@@ -662,6 +662,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
   <nav class="nav" id="nav" aria-label="Pages" hidden>
     <button class="btn small" id="nav_strats" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-5 4 4 8-8"/><path d="M15 8h5v5"/></svg><span>Strategies</span></button>
     <button class="btn small" id="openLab" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/><path d="M7.5 15h9"/></svg><span>Strategy Lab</span></button>
+    <button class="btn small" id="nav_ideas" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg><span>Ideas Lab</span></button>
     <button class="btn small" id="nav_market" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16l-1.5 11a2 2 0 0 1-2 1.7H7.5a2 2 0 0 1-2-1.7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg><span>Marketplace</span></button>
     <button class="btn small" id="openCap" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2"/><path d="M3 10h18"/></svg><span>Capital</span></button>
     <button class="btn small" id="nav_wallet" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7H5a2 2 0 0 1 0-4h13v4"/><path d="M3 5v14a2 2 0 0 0 2 2h15V7"/><circle cx="16" cy="14" r="1.2"/></svg><span>Wallet</span></button>
@@ -1062,7 +1063,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
           <div class="formbar"><button class="btn primary" type="submit">Start focused run</button><span class="hint" id="lf_msg"></span></div>
         </form>
         <details class="xp" data-xp="labhow"><summary><span class="xt">How the lab works</span><span class="hint">runs, rounds, costs, crypto</span></summary><div class="xpb"><p class="hint" style="margin:0">The lab runs once a day at 16:05 IST or non-stop (see Lab settings). Each run invents new condition strategies (Supertrend, RSI, EMA/SMA, MACD, VWAP, Bollinger, ADX, previous-day and opening-range levels, many with a stop loss, target or trailing stop), backtests each one on the past year with charges, and re-tests the best of the last 30 days on the rolling year (once a day, and only at night, 11:30 PM – 8:30 AM). A run stopped by hand pauses the lab for an hour, then it carries on by itself. Nothing is left half-way: strategies a stopped or failed run hadn’t backtested yet, or that were waiting for option prices, are taken over by the next run first (they count towards its size), and earlier winners still in the tougher test carry on in every run until they pass or fail. “Focused run” researches only the assets you pick, with new strategies only. About 40% of each night goes to the winners: each is tried on the other assets, on other decision timeframes, with other stop loss and target settings, with trailing stops to lock in profit, with other indicator combinations, and with small steps on every indicator setting (lengths ±1, ±2 and ±10%, Supertrend factor and Bollinger width ±0.25/±0.5, RSI / ADX levels ±2/±5), which get a double share. About a quarter of new strategies are built around liquidity sweeps. Strategies that keep passing night after night get the most tries, so the strongest ideas are tested hardest. You can also run variations of any one strategy yourself (“Run variations”). Every index strategy that passes (on intraday candles) then joins the option-pricing queue: in the background, one strategy at a time and oldest first, it is priced with real expired-option prices as option buying, option writing and spreads, only while no run is going. After each run the lab rests about as long as the run worked (10–45 minutes), and whenever the database answers slowly it gives way for 20 minutes, so logins and live trading always come first. Strategies are <strong>ranked on the first 9 months</strong> and must also make money in the last 3 months, which the ranking never saw (round 1); then work on other assets and other timeframes (round 2); then make money in <strong>every one of the past 10 years</strong> (5 years for 5-minute strategies, the history Dhan keeps), so nothing passes on one big move of the underlying (round 3). Strategies that decide on minute candles must also stay profitable, in total and in every year, with the slippage doubled (charges are known exactly and counted once). Every backtest fills each order a little worse than the test price (slippage set per asset from how liquid it is: 0.01% on Nifty and Gold up to 0.04–0.05% on Midcap Select, Nifty Next 50, Bankex, Nickel and the mini contracts; 0.5–2% of premium on options). Variations come from at most 6 winners per asset, so no single asset fills the runs. Crypto (Bitcoin, Ether, Solana, XRP and any coin added under Connections) is tested as Delta Exchange perpetual futures round the clock, every day, on daily, weekly and 15-minute-based candles (Binance spot history before the coin traded properly on Delta India), with Delta's 0.05% fee + GST, Delta's actual funding (longs pay, shorts receive) and per-coin slippage. Crypto strategies are mostly slow trend followers that trade both ways: Supertrend and Heikin Ashi on daily and weekly candles, moving averages, Donchian breakouts, dips bought only in an uptrend, the late-US-evening hours, with volatility and Bitcoin-trend filters. Strategies that fail are cleared straight away; a one-line record stays so the lab never tries them again.</p></div></details>
-        <div id="lab_status" style="margin-top:12px"></div><div id="lab_pbo"></div><div id="lab_ideas"></div>
+        <div id="lab_status" style="margin-top:12px"></div><div id="lab_pbo"></div>
         <div id="lab_reqs" style="margin-top:12px"></div>
         <form id="labSetForm" hidden style="margin-top:14px">
           <div class="grid">
@@ -1219,6 +1220,11 @@ details.xp > summary:hover { background: var(--blue-soft); }
       </div>
     </section>
 
+    <section class="card" id="ideasPane" hidden>
+      <div class="head"><div><span class="label">Research</span><h2>Ideas Lab</h2></div></div>
+      <p class="hint" style="margin:6px 0 0">A short list of trading ideas from research, each with a few settings written down before testing, tested as portfolios across assets and judged by the strict tests: 8 of 10 years profitable, doubled slippage, the luck test, the held-back last 6 months, then shuffled prices and random entries. It works on its own, separately from the Strategy Lab, while the markets are closed.</p>
+      <div id="lab_ideas"></div>
+    </section>
     <section class="card" id="marketPane" hidden>
       <div class="head"><h2>Marketplace</h2><span class="hint" id="mk_bal"></span></div>
       <p class="riskline" style="margin-top:10px">Results below are backtests: simulations on past prices with estimated charges and fills. They are not a promise or forecast of future returns. Derivatives can lose more than you expect; 9 out of 10 individual traders in equity F&amp;O made net losses (SEBI study).</p>
@@ -3761,7 +3767,7 @@ function labChecking(r, m) { const x = robOf(r); return !!(m && m.passed) && r.b
 const ratioTxt = (v) => v == null ? "–" : `${v}×`;
 function labMetricsFor(r) { return lab.view === "FUT" ? r.metrics : lab.view === "BUY" ? r.ob && r.ob.metrics : lab.view === "SPREAD" ? r.osp && r.osp.metrics : r.os && r.os.metrics; }
 function openLab() {
-  closeCap(); hideNewPanes(); page = "lab"; markNav("openLab"); document.body.classList.add("wide");
+  closeCap(); hideNewPanes(); stopIdeasPoll(); page = "lab"; markNav("openLab"); document.body.classList.add("wide");
   lab.open = true;
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true; $("labPane").hidden = false;
   document.querySelectorAll("#stratList .strat, #archList .strat").forEach((b) => b.setAttribute("aria-current", "false"));
@@ -4032,7 +4038,7 @@ async function renderIdeas(force) {
   };
   box.innerHTML = `<section style="margin-top:14px"><div class="banner ${passed.length ? "ok" : "info"}" style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center">
       <span><b>Ideas lab</b> (7 ideas from research, tested as portfolios for ${rupees(cap)}): ${tries.length} settings written down before testing; the luck test counts ${triesN} independent tries.
-      ${!on ? "Switched off." : cur ? `Testing <b>${esc(IDEA_NAMES[cur.idea] || cur.idea)}</b> (one idea at a time, at night, weekends and holidays).` : done.length ? "Every idea built so far is decided." : "Starts when the markets close."}
+      ${!on ? "Switched off." : cur ? `Testing <b>${esc(IDEA_NAMES[cur.idea] || cur.idea)}</b> (one idea at a time, while the markets are closed).` : done.length ? "Every idea is decided." : "Starts when the markets close."}
       ${done.length ? ` So far ${fin.length} finalist${fin.length === 1 ? "" : "s"}, ${passed.length} passed every test.` : ""}</span>
       <button class="btn small" type="button" id="ideas_toggle">${on ? "Switch off" : "Switch on"}</button></div>
     ${on && prog ? prog : ""}
@@ -4063,7 +4069,6 @@ const IDEA_WHY = {
 function renderLabStatus() {
   const box = $("lab_status"); const r = lab.runs[0];
   renderPbo().catch(() => {});
-  renderIdeas().catch(() => {});
   $("lab_stop").hidden = !(r && r.status === "running");
   $("lab_run").disabled = !!(r && r.status === "running");
   if (!r) { box.innerHTML = '<div class="banner info">No runs yet. The first one starts at 16:05 IST, or press “Run now”.</div>'; return; }
@@ -5061,7 +5066,7 @@ const isAdmin = () => !!me && me.role === "admin";
 const myStrats = () => state.strategies.filter((x) => me && x.owner_id === me.user_id && !x.is_master);
 function instName(s) { return s.trade_type === "OPTIONS" ? (s.option_side === "SELL" ? "Option writing" : "Option buying") : "Futures"; }
 function assetLabel(k) { return (PRESETS[k] && PRESETS[k].name) || k || "–"; }
-const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane"];
+const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane", "ideasPane"];
 function hideNewPanes() { NEW_PANES.forEach((id) => $(id).hidden = true); }
 function markNav(id) { document.querySelectorAll("#nav .btn").forEach((b) => b.id === id ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")); }
 /** One page at a time: list, strat, market, wallet, admin, conn, cap, lab, terms. */
@@ -5072,7 +5077,8 @@ function showPage(name) {
   page = name;
   hideNewPanes();
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true;
-  const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab" }[name];
+  const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab", ideas: "nav_ideas" }[name];
+  if (name !== "ideas") stopIdeasPoll();
   markNav(navId);
   if (name === "list") { $("listPane").hidden = false; renderList(); }
   else if (name === "market") { $("marketPane").hidden = false; withLoading($("marketPane"), loadMarket()).catch((e) => toast(errorText(e))); }
@@ -5080,6 +5086,7 @@ function showPage(name) {
   else if (name === "admin") { $("adminPane").hidden = false; withLoading($("adminPane"), loadAdmin()).catch((e) => toast(errorText(e))); }
   else if (name === "conn") { $("connCard").hidden = false; renderConn(); }
   else if (name === "terms") { $("termsPane").hidden = false; }
+  else if (name === "ideas") { $("ideasPane").hidden = false; withLoading($("ideasPane"), renderIdeas(true)).catch((e) => toast(errorText(e))); startIdeasPoll(); }
   else if (name === "pass") { $("passPane").hidden = false; $("np_msg").textContent = ""; }
   else if (name === "cap") openCap();
   else if (name === "lab") openLab();
@@ -5087,7 +5094,7 @@ function showPage(name) {
   window.scrollTo({ top: 0 });
 }
 async function openStrat(id) {
-  closeLab(); closeCap(); hideNewPanes(); $("connCard").hidden = true; page = "strat"; markNav("nav_strats");
+  closeLab(); closeCap(); hideNewPanes(); stopIdeasPoll(); $("connCard").hidden = true; page = "strat"; markNav("nav_strats");
   selected = id; formDirty = false; closeConfirm(); stopBtPoll(); $("btResult").innerHTML = ""; $("logBody").innerHTML = ""; $("publishBox").hidden = true;
   renderStrategy(); window.scrollTo({ top: 0 });
   trMode = null; if (currentTab === "tr") loadStratTrades().catch((e) => toast(errorText(e)));
@@ -5095,6 +5102,11 @@ async function openStrat(id) {
 }
 $("nav_strats").addEventListener("click", () => showPage("list"));
 $("nav_market").addEventListener("click", () => showPage("market"));
+$("nav_ideas").addEventListener("click", () => showPage("ideas"));
+/** While the Ideas Lab page is open, its progress refreshes every 30 seconds. */
+var ideasPoll = null; // var: page switches during start-up may run before this line
+function startIdeasPoll() { stopIdeasPoll(); ideasPoll = setInterval(() => { if (page === "ideas" && !document.hidden) renderIdeas(true).catch(() => {}); }, 30000); }
+function stopIdeasPoll() { if (ideasPoll) { clearInterval(ideasPoll); ideasPoll = null; } }
 $("nav_wallet").addEventListener("click", () => showPage("wallet"));
 $("nav_admin").addEventListener("click", () => showPage("admin"));
 $("b_back").addEventListener("click", () => showPage("list"));
@@ -6335,6 +6347,7 @@ $("terms_go").addEventListener("click", (e) => run(e.currentTarget, async () => 
 function applyRole() {
   document.querySelectorAll("[data-admin]").forEach((el) => el.hidden = !isAdmin());
   $("openLab").hidden = !(isAdmin() || (me && me.can_build));
+  $("nav_ideas").hidden = !isAdmin();
   ["lab_settings_btn", "lab_run"].forEach((id) => $(id).hidden = !isAdmin());
   $("newFlip").hidden = !(isAdmin() || (me && me.can_build));
   $("lp_title").textContent = isAdmin() ? "Strategies" : "My strategies";

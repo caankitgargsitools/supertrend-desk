@@ -79,10 +79,15 @@ await p.addInitScript(([uid, email]) => {
 await p.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort()); await p.goto("http://localhost:8765/index.html"); await p.waitForTimeout(1500);
 
 
-await p.click("#openLab"); await p.waitForTimeout(1500);
+await p.click("#openLab"); await p.waitForTimeout(1200);
+if (await p.$eval("#labPane", (e) => /Ideas lab/.test(e.textContent))) throw new Error("the Strategy Lab page should no longer show the Ideas lab");
+if (await p.$("#nav_ideas[hidden]")) throw new Error("Ideas Lab tab hidden for the admin");
+await p.click("#nav_ideas"); await p.waitForTimeout(1500);
+if (!(await p.$eval("#labPane", (e) => e.hidden)) || await p.$eval("#ideasPane", (e) => e.hidden)) throw new Error("Ideas Lab page should replace the Strategy Lab page");
+if ((await p.$eval("#nav_ideas", (e) => e.getAttribute("aria-current"))) !== "page") throw new Error("Ideas Lab tab not marked current");
 const txt = await p.$eval("#lab_ideas", (e) => e.textContent.replace(/\s+/g, " "));
 console.log(txt.slice(0, 600));
-for (const want of [/Ideas lab/, /7 settings written down before testing/, /luck test counts 31 independent tries/, /Testing Trend following \(daily\)/, /So far 2 finalists, 1 passed every test/,
+for (const want of [/Ideas lab/, /7 settings written down before testing/, /luck test counts 31 independent tries/, /Testing Trend following \(daily\) \(one idea at a time, while the markets are closed\)/, /So far 2 finalists, 1 passed every test/,
   /1\. Trend following \(daily\)/, /Stage 2: noise tests/, /10 of 10/, /8 of 10/, /6 of 10/, /Passed/, /shuffled prices \(1% of 100 runs as good\) and random entries \(1% of 1,000 as good\)/, /testing against shuffled prices and random entries…/, /needs 8/, /Built next/, /built next/, /testing…/]) if (!want.test(txt)) throw new Error("missing: " + want);
 // best score first within an idea
 const first = await p.$eval("#lab_ideas details tbody tr td", (e) => e.textContent);
@@ -93,5 +98,7 @@ await p.click("#ideas_toggle"); await p.waitForTimeout(800);
 if (!upd || !/"ideas_enabled":false/.test(upd)) throw new Error("switch off did not update lab_settings: " + upd);
 await p.screenshot({ path: "lab_ideas.png", fullPage: false });
 await p.$eval("#lab_ideas", (e) => e.scrollIntoView()); await p.screenshot({ path: "lab_ideas.png" });
+await p.click("#openLab"); await p.waitForTimeout(800);
+if (!(await p.$eval("#ideasPane", (e) => e.hidden))) throw new Error("going back to the Strategy Lab should hide the Ideas Lab");
 console.log("errors", errs.length); if (errs.length) process.exit(1);
-console.log("ok   ideas section"); await b.close();
+console.log("ok   Ideas Lab tab, separate from the Strategy Lab"); await b.close();

@@ -11,7 +11,7 @@ import { newAcc, type Plan, priceBatch, type SimData, slippageFor, slipped, trad
 import { DhanBusyError } from "./dhan.ts";
 import type { SLeg } from "./structures.ts";
 import { CRYPTO } from "./crypto.ts";
-import { assetRoot, cachedAsset, dbStore, labMayWork, labParams, labQuiet, LAB_ASSETS, type LabConfig, readCandles, saveCandles, screenOne, TOKEN_ERR } from "./lab.ts";
+import { assetRoot, cachedAsset, dbStore, labParams, labQuiet, LAB_ASSETS, type LabConfig, readCandles, saveCandles, screenOne, TOKEN_ERR } from "./lab.ts";
 import { loadMarginRates } from "./margins.ts";
 import { deflatedSharpe, median } from "./stats.ts";
 import { pValue, seeded, shuffledData } from "./noise.ts";
@@ -728,9 +728,11 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
   const { data: set } = await sb.from("lab_settings").select("ideas_enabled, ideas_capital").eq("id", 1).maybeSingle();
   if (!set?.ideas_enabled) return { idle: "Ideas lab is switched off" };
   if (!(await labQuiet(sb))) return { idle: "waiting for the markets to close" };
-  if (!(await labMayWork(sb, true))) return { idle: "lab paused" };
-  const { count: busy } = await sb.from("lab_runs").select("id", { count: "exact", head: true }).eq("status", "running");
-  if ((busy ?? 0) > 0) return { idle: "a lab run is going" };
+  // Independent of the Strategy Lab (its runs, rests and manual stops): only a slow database makes it wait.
+  const t0 = Date.now();
+  const { data: health } = await sb.from("lab_settings").select("paused_until, pause_reason").eq("id", 1).maybeSingle();
+  if (Date.now() - t0 > 2000) return { idle: "the database is answering slowly" };
+  if (health?.pause_reason === "slow" && health.paused_until && Date.parse(health.paused_until) > Date.now()) return { idle: "the database was slow: giving way for a while" };
   const capital = Number(set.ideas_capital) || IDEA_CAPITAL;
   await registerIdeas(sb);
   const today = ist(Date.now() / 1000).date;
