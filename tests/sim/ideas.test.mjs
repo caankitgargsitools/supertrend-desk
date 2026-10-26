@@ -104,7 +104,7 @@ db.lab_candles = [
   { asset: "GOLDM", kind: "D", from_day: "2015-06-01", to_day: "2026-10-23", stored: false, bars: col(gold) },
   { asset: "NIFTY", kind: "D", from_day: "2015-06-01", to_day: "2026-10-23", stored: false, bars: col(nifty) },
 ];
-db.lab_settings = [{ id: 1, ideas_enabled: true, ideas_capital: 3500000, paused_until: null }];
+db.lab_settings = [{ id: 1, ideas_enabled: true, ideas_capital: 3500000, ideas_per_day: 0, paused_until: null }];
 db.lab_runs = []; db.algo_strategies = []; db.market_holidays = []; db.idea_tries = []; db.idea_legs = []; db.margin_rates = [];
 const real = Date.now; Date.now = () => Date.parse("2026-10-24T12:00:00+05:30");
 let last, steps = 0;

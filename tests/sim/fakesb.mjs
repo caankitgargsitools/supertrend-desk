@@ -11,6 +11,7 @@ class Q {
   delete() { this.op = "delete"; return this; }
   eq(k, v) { this.f.push((r) => r[k] === v || (r[k] != null && v != null && String(r[k]) === String(v))); return this; }
   neq(k, v) { this.f.push((r) => r[k] !== v); return this; }
+  like(k, v) { const re = new RegExp("^" + String(v).replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/[%*]/g, ".*") + "$"); this.f.push((r) => re.test(String(r[k] ?? ""))); return this; }
   is(k, v) { this.f.push((r) => v === null ? r[k] == null : r[k] === v); return this; }
   in(k, v) { this.f.push((r) => v.includes(r[k])); return this; }
   lt(k, v) { this.f.push((r) => r[k] != null && r[k] < v); return this; }

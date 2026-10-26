@@ -118,6 +118,12 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   30 s while open); the Strategy Lab page is back to its own content. The random generator is paused
   (`lab_settings.enabled = false`, 25 Oct). First full round (25–26 Oct): 0 of 47 settings passed; closest: iron condor
   1.5 SD with a short-strike exit (Sharpe 1.0, 3 of 4 years, luck 52%), trend following (4–12%/yr, luck ≤ 36%).
+  Generator v1 (26 Oct, migration 49; Papa: 20 new ideas a day, `lab_settings.ideas_per_day`): plain code, no AI —
+  `generatedIdeas()` = 8 signals × 5 filters × 5 markets × 2 directions (396, seeded order fixed in advance, research
+  recipes skipped), 4 settings each with the rules carried in the setting; `generateDaily` writes up to the day's
+  quota into `idea_defs` (none while 20 generated ideas wait), the combined near-misses (`COMBO_1`, kind "combo": parts
+  = existing settings, capital split equally or by risk, figures only while every part has history; option parts stay
+  real in stage 2) first. The Ideas Lab chains its instalments continuously while it has work.
   Option selling (idea 5, migration 46): weekly Nifty iron condors / hedged strangles / credit spreads, in 09:30 the day
   after an expiry, out 14:30 on expiry day (`weeklyExpiries`: Nifty expiry Thursday until 28 Aug 2025, Tuesday after,
   holidays a day earlier — `weeklyExpiryWeekday` in logic.ts, also used by the backtester's `isExpiry`); short strikes

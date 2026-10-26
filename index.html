@@ -4002,10 +4002,13 @@ async function renderPbo() {
 async function renderIdeas(force) {
   const box = $("lab_ideas"); if (!box || !isAdmin() || (!force && Date.now() - (renderIdeas.at || 0) < 30000)) return;
   renderIdeas.at = Date.now();
-  const [tries, sett] = await Promise.all([
+  const [tries, sett, defs] = await Promise.all([
     db.from("idea_tries").select("id, idea, idea_order, setting_key, label, status, result, verdict, started_at, done_at").order("idea_order").order("id").then((x) => x.data || []),
-    db.from("lab_settings").select("ideas_enabled, ideas_capital").eq("id", 1).maybeSingle().then((x) => x.data || {}),
+    db.from("lab_settings").select("ideas_enabled, ideas_capital, ideas_per_day").eq("id", 1).maybeSingle().then((x) => x.data || {}),
+    db.from("idea_defs").select("key, name, why, created_day").then((x) => x.data || []),
   ]);
+  for (const d of defs) { IDEA_NAMES[d.key] = d.name; IDEA_WHY[d.key] = d.why; }
+  const genIdeas = new Set(defs.map((d) => d.key)), todayIst = istDate(0), madeToday = defs.filter((d) => String(d.created_day) === todayIst).length, perDay = Number(sett.ideas_per_day ?? 20);
   const on = !!sett.ideas_enabled, cap = Number(sett.ideas_capital) || 3500000;
   const groups = []; for (const t of tries) { let g = groups.find((x) => x.idea === t.idea); if (!g) groups.push(g = { idea: t.idea, order: t.idea_order, rows: [] }); g.rows.push(t); }
   const cur = groups.find((g) => g.rows.some((t) => t.status === "running" || t.status === "combined" || t.status === "planned" || t.status === "stage2"));
@@ -4037,15 +4040,17 @@ async function renderIdeas(force) {
       <td>${verdict}</td></tr>`;
   };
   box.innerHTML = `<section style="margin-top:14px"><div class="banner ${passed.length ? "ok" : "info"}" style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center">
-      <span><b>Ideas lab</b> (7 ideas from research, tested as portfolios for ${rupees(cap)}): ${tries.length} settings written down before testing; the luck test counts ${triesN} independent tries.
+      <span><b>Ideas lab</b> (7 ideas from research plus generated ones, tested as portfolios for ${rupees(cap)}): ${tries.length} settings written down before testing; the luck test counts ${triesN} independent tries.
       ${!on ? "Switched off." : cur ? `Testing <b>${esc(IDEA_NAMES[cur.idea] || cur.idea)}</b> (one idea at a time, while the markets are closed).` : done.length ? "Every idea is decided." : "Starts when the markets close."}
-      ${done.length ? ` So far ${fin.length} finalist${fin.length === 1 ? "" : "s"}, ${passed.length} passed every test.` : ""}</span>
+      ${done.length ? ` So far ${fin.length} finalist${fin.length === 1 ? "" : "s"}, ${passed.length} passed every test.` : ""}
+      New ideas from the generator: ${madeToday} of ${perDay} today (none while 20 are waiting to be tested); ${genIdeas.size} generated so far.</span>
       <button class="btn small" type="button" id="ideas_toggle">${on ? "Switch off" : "Switch on"}</button></div>
     ${on && prog ? prog : ""}
     ${groups.map((g) => {
       const d = g.rows.filter((t) => t.status === "done"), np = d.filter((t) => t.verdict && t.verdict.passed).length;
       const st = g.rows.every((t) => t.status === "later") ? '<span class="chip">Built next</span>' : d.length === g.rows.length ? `<span class="chip ${np ? "green" : "red"}">${np} of ${d.length} passed</span>` : g === cur ? `<span class="chip blue">${g.rows.some((t) => t.status === "stage2") ? "Stage 2: noise tests" : "Testing"}</span>` : '<span class="chip">Waiting</span>';
-      return `<details class="xp" style="margin-top:8px"${g === cur || d.length ? " open" : ""}><summary><span class="xt">${g.order}. ${esc(IDEA_NAMES[g.idea] || g.idea)}</span> ${st}</summary><div class="xpb">
+      const keep = g === cur || g.rows.some((t) => t.verdict && (t.verdict.finalist || t.verdict.passed)) || g.order <= 7;
+      return `<details class="xp" style="margin-top:8px"${keep ? " open" : ""}><summary><span class="xt">${g.order}. ${esc(IDEA_NAMES[g.idea] || g.idea)}</span> ${genIdeas.has(g.idea) ? '<span class="chip">Generated</span> ' : ""}${st}</summary><div class="xpb">
         <p class="hint" style="margin:0 0 6px">${esc(IDEA_WHY[g.idea] || "")}</p>
         <div class="scroll"><table class="mini"><thead><tr><th>Setting</th><th class="n">Years profitable</th><th class="n">Return / yr</th><th class="n">Max DD</th><th class="n">Sharpe</th><th class="n">Luck</th><th class="n">Last 6 mo (held back)</th><th class="n">Score</th><th>Verdict</th></tr></thead>
         <tbody>${[...g.rows].sort((a, b) => ((b.verdict && b.verdict.score) || 0) - ((a.verdict && a.verdict.score) || 0)).map(rowHTML).join("")}</tbody></table></div></div></details>`;

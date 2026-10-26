@@ -31,7 +31,7 @@ const CRYPTO_KEYS = ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD"];
 /* ---------- the ideas and their settings (fixed before testing) ---------- */
 export type IdeaSetting = { key: string; label: string; p: Record<string, number | string> };
 export type IdeaDef = {
-  key: string; order: number; name: string; why: string; kind: "rules" | "custom" | "options" | "later";
+  key: string; order: number; name: string; why: string; kind: "rules" | "custom" | "options" | "combo" | "later"; source?: "research" | "generated";
   universe: string[]; daily: boolean; settings: IdeaSetting[]; note?: string;
 };
 const S = (key: string, label: string, p: Record<string, number | string>): IdeaSetting => ({ key, label, p });
@@ -136,7 +136,15 @@ export const IDEAS: IdeaDef[] = [
     ],
   },
 ];
-export const ideaByKey = (k: string) => IDEAS.find((x) => x.key === k);
+/** The ideas the lab knows: the research list above plus the generated ones (table idea_defs), loaded each instalment. */
+let RUNTIME: IdeaDef[] = [...IDEAS];
+export const ideaByKey = (k: string) => RUNTIME.find((x) => x.key === k);
+export function setRuntimeIdeas(extra: IdeaDef[]) { RUNTIME = [...IDEAS, ...extra]; }
+export async function loadIdeaDefs(sb: SupabaseClient) {
+  const { data } = await sb.from("idea_defs").select("key, idea_order, name, why, kind, daily, universe, settings, source").order("idea_order");
+  setRuntimeIdeas((data ?? []).map((r) => ({ key: r.key, order: r.idea_order, name: r.name, why: r.why, kind: r.kind, daily: r.daily, universe: r.universe ?? [], settings: r.settings ?? [], source: r.source })));
+  return RUNTIME;
+}
 
 /* ---------- strategy configs for rule-based ideas ---------- */
 const C = (ind: string, tf: string, p: Record<string, number>, op: string, v?: number): Cond => ({ ind, tf, p, op, ...(v != null ? { v } : {}) });
@@ -165,6 +173,7 @@ export function ideaConfig(key: string, rules: Rules, o: { tf?: number; intraday
 
 /** Rules of a rule-based idea's setting. */
 export function ideaRules(idea: string, p: Record<string, any>): { rules: Rules; entry: "FLIP" | "JOIN"; intraday: boolean } {
+  if (p.rules) return { rules: p.rules as Rules, entry: p.entry === "JOIN" ? "JOIN" : "FLIP", intraday: false }; // generated ideas carry their rules
   if (idea === "trend" && p.t === "ema") {
     const c = C("EMA", "D", { len: p.f, len2: p.s }, "fast_above_slow");
     // Always in the market: long while the fast average is above the slow one, short while below (stop and reverse).
@@ -212,7 +221,15 @@ export type LegSpec = { asset: string; win_from: string | null; win_to: string |
  * go; 5-minute: one leg per year, to stay inside the engine's time limit per call); a custom idea is one leg over all
  * its assets.
  */
-export function legsFor(idea: IdeaDef, s: IdeaSetting, today: string, have: Set<string>): LegSpec[] {
+export function legsFor(idea: IdeaDef, s: IdeaSetting, today: string, have: Set<string>, have5?: Set<string>): LegSpec[] {
+  if (idea.kind === "combo") {
+    // Every part's own legs, tagged with the part they belong to.
+    return ((s.p as any).parts as [string, string][]).flatMap(([pk, sk], part) => {
+      const pi = ideaByKey(pk), ps = pi?.settings.find((x) => x.key === sk);
+      if (!pi || !ps) return [];
+      return legsFor(pi, ps, today, pi.daily ? have : (have5 ?? have)).map((l) => ({ ...l, config: { ...l.config, part } }));
+    });
+  }
   if (idea.kind === "custom") return [{ asset: "*", win_from: null, win_to: null, config: { idea: idea.key, setting: s.key, p: s.p } }];
   if (idea.kind === "options") {
     const key = idea.universe[0];
@@ -507,6 +524,7 @@ export type TryResult = {
   years_ok: number; years_n: number; stress_net: number; stress_years_ok: number; top_cut: { dropped: number; net: number };
   vault: { from: string; to: string; net: number; n: number }; by_asset: Record<string, { net: number; n: number }>;
   planned?: number; unpriced?: number; edge_legs?: number;
+  parts?: { idea: string; setting: string; w: number; lots: Record<string, number>; contracts: Record<string, string>; target: number; options: boolean; net: number }[];
 };
 type Flat = { k: string; e: string; x: string; s: string; n: number; sl: number; a: number; fq: number | null };
 const flatten = (t: LegTrades): Flat[] => t.n.map((_, i) => ({ k: t.k[i], e: t.e[i], x: t.x[i], s: t.s[i], n: t.n[i], sl: t.sl[i], a: t.a[i], fq: t.q?.[i] ?? null }));
@@ -517,8 +535,14 @@ const flatten = (t: LegTrades): Flat[] => t.n.map((_, i) => ({ k: t.k[i], e: t.e
  * Months, years, drawdown and the other figures cover the time before the vault; the vault is reported apart.
  */
 export function combineTry(legs: { asset: string; result: LegResult }[], o: { today: string; capital?: number; risk?: number }): TryResult {
-  const capital = o.capital ?? IDEA_CAPITAL, target = capital * (o.risk ?? RISK_PCT);
-  const vaultFrom = addDays(o.today, -IDEA_VAULT_DAYS + 1), preTo = addDays(vaultFrom, -1);
+  const capital = o.capital ?? IDEA_CAPITAL;
+  const x = sizedTrades(legs, { capital, risk: o.risk });
+  return summarize(x.trades, { capital, target: x.target, contracts: x.contracts, lots: x.lots, from: x.from, legs }, o.today);
+}
+type Sized = Flat & { q: number; net: number; slip: number };
+/** Picks the contracts and sizes every trade of a set of legs (optScale: share of the capital for lots fixed per trade). */
+export function sizedTrades(legs: { asset: string; result: LegResult }[], o: { capital: number; risk?: number; optScale?: number }) {
+  const target = o.capital * (o.risk ?? RISK_PCT);
   const atrMed: Record<string, number> = {};
   for (const l of legs) for (const [k, v] of Object.entries(l.result?.atr_med ?? {})) if (v > 0) atrMed[k] = v;
   const all = legs.filter((l) => l.result && !l.result.error && !l.result.skip).flatMap((l) => flatten(l.result.t));
@@ -527,17 +551,27 @@ export function combineTry(legs: { asset: string; result: LegResult }[], o: { to
   const chosen = new Set(contracts.values());
   const lots: Record<string, number> = {};
   for (const k of chosen) lots[k] = atrMed[k] > 0 ? Math.max(1, Math.round(target / atrMed[k])) : 1;
-  const trades = all.filter((t) => chosen.has(t.k) || t.fq != null).map((t) => {
-    const q = t.fq ?? sizeLots(t.a, lots[t.k], target);
+  const trades: Sized[] = all.filter((t) => chosen.has(t.k) || t.fq != null).map((t) => {
+    const q = t.fq != null ? Math.max(1, Math.floor(t.fq * (o.optScale ?? 1))) : sizeLots(t.a, lots[t.k], target);
     return { ...t, q, net: t.n * q, slip: t.sl * q };
   }).filter((t) => t.q > 0).sort((a, b) => a.x.localeCompare(b.x));
+  for (const t of trades) if (t.fq != null) lots[t.k] = Math.max(lots[t.k] ?? 0, t.q);
   const firsts = legs.map((l) => l.result?.first).filter((x): x is string => !!x).sort();
-  const from = firsts[0] ?? preTo;
+  return { trades, target, contracts: Object.fromEntries(contracts) as Record<string, string>, lots, from: firsts[0] ?? null as string | null, options: trades.some((t) => t.fq != null) };
+}
+/**
+ * The figures of a portfolio's sized trades: months, years, drawdown and the rest cover the time before the vault;
+ * the vault is reported apart.
+ */
+export function summarize(trades: Sized[], m: { capital: number; target: number; contracts: Record<string, string>; lots: Record<string, number>; from: string | null; legs: { result: LegResult }[] }, today: string): TryResult {
+  const capital = m.capital;
+  const vaultFrom = addDays(today, -IDEA_VAULT_DAYS + 1), preTo = addDays(vaultFrom, -1);
+  const from = m.from ?? preTo;
   const pre = trades.filter((t) => t.x.slice(0, 10) <= preTo), post = trades.filter((t) => t.x.slice(0, 10) >= vaultFrom);
   // Months from the first data month to the vault (months without trades count as 0).
   const months: Record<string, number> = {};
-  for (let m = from.slice(0, 7); m <= preTo.slice(0, 7); m = addDays(m + "-28", 7).slice(0, 7)) months[m] = 0;
-  for (const t of pre) { const m = t.x.slice(0, 7); months[m] = (months[m] ?? 0) + t.net; }
+  for (let mo = from.slice(0, 7); mo <= preTo.slice(0, 7); mo = addDays(mo + "-28", 7).slice(0, 7)) months[mo] = 0;
+  for (const t of pre) { const mo = t.x.slice(0, 7); months[mo] = (months[mo] ?? 0) + t.net; }
   let eq = 0, peak = 0, dd = 0;
   for (const t of pre) { eq += t.net; peak = Math.max(peak, eq); dd = Math.max(dd, peak - eq); }
   const net = pre.reduce((a, t) => a + t.net, 0);
@@ -560,19 +594,18 @@ export function combineTry(legs: { asset: string; result: LegResult }[], o: { to
   for (const t of pre) { const b = byAsset[t.k] ?? (byAsset[t.k] = { net: 0, n: 0 }); b.net += t.net; b.n++; }
   for (const b of Object.values(byAsset)) b.net = Math.trunc(b.net);
   const slipTot = pre.reduce((a, t) => a + t.slip, 0);
-  for (const t of trades) if (t.fq != null) lots[t.k] = Math.max(lots[t.k] ?? 0, t.fq);
-  const planned = legs.reduce((a, l) => a + Number(l.result?.planned ?? 0), 0), unpriced = legs.reduce((a, l) => a + Number(l.result?.unpriced ?? 0), 0);
-  const edgeLegs = legs.reduce((a, l) => a + Number(l.result?.edge ?? 0), 0);
+  const planned = m.legs.reduce((a, l) => a + Number(l.result?.planned ?? 0), 0), unpriced = m.legs.reduce((a, l) => a + Number(l.result?.unpriced ?? 0), 0);
+  const edgeLegs = m.legs.reduce((a, l) => a + Number(l.result?.edge ?? 0), 0);
   return {
-    capital, target: Math.trunc(target), contracts: Object.fromEntries(contracts), lots,
-    from, pre_to: preTo, vault_from: vaultFrom, months: Object.fromEntries(Object.entries(months).map(([m, v]) => [m, Math.trunc(v)])),
+    capital, target: Math.trunc(m.target), contracts: m.contracts, lots: m.lots,
+    from, pre_to: preTo, vault_from: vaultFrom, months: Object.fromEntries(Object.entries(months).map(([mo, v]) => [mo, Math.trunc(v)])),
     net: Math.trunc(net), trades: pre.length, max_dd: Math.trunc(dd), per_year: Math.trunc(perYear), ret_pct: +((perYear / capital) * 100).toFixed(1),
     calmar: dd > 0 ? +(perYear / dd).toFixed(2) : perYear > 0 ? 9 : 0, sharpe: sd > 0 ? +((mean / sd) * Math.sqrt(12)).toFixed(2) : null,
     months_n: mv.length, months_pos: mv.filter((v) => v > 0).length,
     years, years_ok: years.filter((y) => y.ok).length, years_n: years.length,
     stress_net: Math.trunc(net - slipTot), stress_years_ok: years.filter((y) => y.stress_ok).length,
     top_cut: { dropped: k, net: Math.trunc(rest) },
-    vault: { from: vaultFrom, to: o.today, net: Math.trunc(post.reduce((a, t) => a + t.net, 0)), n: post.length }, by_asset: byAsset,
+    vault: { from: vaultFrom, to: today, net: Math.trunc(post.reduce((a, t) => a + t.net, 0)), n: post.length }, by_asset: byAsset,
     ...(planned ? { planned, unpriced, edge_legs: edgeLegs } : {}),
   };
 }
@@ -646,6 +679,105 @@ export function ledgerTries(rows: { idea: string; status: string }[], eff: Recor
   return Math.max(2, Math.round(n));
 }
 
+/* ---------- the idea generator (version 1: plain code, no AI) ---------- */
+/**
+ * New ideas are assembled from research building blocks: a signal (8 kinds), a filter (5), a market (5) and the
+ * direction (both ways, or long only). Each gets 4 settings, written into the ledger before it is tested. The order is
+ * fixed by a seed (never chosen by looking at results), and combinations that repeat a research idea are skipped.
+ */
+type GenBlock = { key: string; name: string; why: string; entry: "FLIP" | "JOIN"; grid: { key: string; label: string; long: Cond[]; short: Cond[]; exitLong?: Cond[]; exitShort?: Cond[] }[] };
+const D = (ind: string, p: Record<string, number>, op: string, v?: number) => C(ind, "D", p, op, v);
+export const GEN_BLOCKS: GenBlock[] = [
+  { key: "ema", name: "Moving-average trend", why: "Long while the fast daily average is above the slow one, short while below.", entry: "JOIN",
+    grid: [[10, 50], [20, 50], [20, 100], [50, 200]].map(([f, sl]) => ({ key: `${f}-${sl}`, label: `EMA ${f}/${sl}`, long: [D("EMA", { len: f, len2: sl }, "fast_above_slow")], short: [D("EMA", { len: f, len2: sl }, "fast_below_slow")] })) },
+  { key: "don", name: "Breakout trend", why: "Buy a new N-day high, sell a new N-day low; out on a shorter opposite breakout.", entry: "FLIP",
+    grid: [[20, 10], [55, 20], [100, 50], [200, 100]].map(([e, x]) => ({ key: `${e}-${x}`, label: `Donchian ${e}/${x}`, long: [D("DON", { len: e }, "new_high")], short: [D("DON", { len: e }, "new_low")], exitLong: [D("DON", { len: x }, "new_low")], exitShort: [D("DON", { len: x }, "new_high")] })) },
+  { key: "st", name: "Supertrend", why: "Daily Supertrend: long while it is up, short while it is down.", entry: "JOIN",
+    grid: [[10, 2], [10, 3], [14, 3], [20, 4]].map(([a, f]) => ({ key: `${a}-${f}`, label: `Supertrend(${a},${f})`, long: [D("ST", { atr: a, factor: f }, "up")], short: [D("ST", { atr: a, factor: f }, "down")] })) },
+  { key: "sma", name: "Price vs its average", why: "Long while the close is above its N-day average, short while below (time-series momentum).", entry: "JOIN",
+    grid: [50, 100, 150, 200].map((n) => ({ key: `${n}`, label: `SMA ${n}`, long: [D("SMA", { len: n }, "price_above")], short: [D("SMA", { len: n }, "price_below")] })) },
+  { key: "macd", name: "MACD trend", why: "Long while MACD is above its signal (or zero), short while below.", entry: "JOIN",
+    grid: [[12, 26, 9, "above_signal", "below_signal"], [8, 21, 5, "above_signal", "below_signal"], [12, 26, 9, "above_zero", "below_zero"], [8, 21, 5, "above_zero", "below_zero"]].map(([f, sl, g, up, dn]) =>
+      ({ key: `${f}-${sl}-${g}-${String(up).split("_")[1]}`, label: `MACD(${f},${sl},${g}) ${up === "above_zero" ? "vs zero" : "vs signal"}`, long: [D("MACD", { fast: Number(f), slow: Number(sl), sig: Number(g) }, String(up))], short: [D("MACD", { fast: Number(f), slow: Number(sl), sig: Number(g) }, String(dn))] })) },
+  { key: "rsimom", name: "RSI momentum", why: "Long when RSI rises above a level, short when it falls below the mirror level; out when it crosses back over 50.", entry: "FLIP",
+    grid: [[14, 55], [14, 60], [21, 55], [21, 60]].map(([n, lv]) => ({ key: `${n}-${lv}`, label: `RSI(${n}) above ${lv} / below ${100 - lv}`, long: [D("RSI", { len: n }, "gt", lv)], short: [D("RSI", { len: n }, "lt", 100 - lv)], exitLong: [D("RSI", { len: n }, "lt", 50)], exitShort: [D("RSI", { len: n }, "gt", 50)] })) },
+  { key: "rsirev", name: "RSI reversal", why: "Buy a sharp dip (very low short RSI), sell a sharp rally; out when RSI is back over 50.", entry: "FLIP",
+    grid: [[2, 10], [2, 20], [3, 10], [3, 20]].map(([n, lo]) => ({ key: `${n}-${lo}`, label: `RSI(${n}) ${lo} / ${100 - lo}`, long: [D("RSI", { len: n }, "lt", lo)], short: [D("RSI", { len: n }, "gt", 100 - lo)], exitLong: [D("RSI", { len: n }, "gt", 50)], exitShort: [D("RSI", { len: n }, "lt", 50)] })) },
+  { key: "bbrev", name: "Bollinger reversal", why: "Buy a close below the lower band, sell one above the upper band; out at the middle band.", entry: "FLIP",
+    grid: [[20, 2], [20, 2.5], [50, 2], [50, 2.5]].map(([n, m]) => ({ key: `${n}-${m}`, label: `Bollinger(${n}, ${m})`, long: [D("BB", { len: n, mult: m }, "close_below_lower")], short: [D("BB", { len: n, mult: m }, "close_above_upper")], exitLong: [D("BB", { len: n, mult: m }, "price_above_mid")], exitShort: [D("BB", { len: n, mult: m }, "price_below_mid")] })) },
+];
+export const GEN_FILTERS: { key: string; name: string; long: Cond[]; short: Cond[] }[] = [
+  { key: "none", name: "", long: [], short: [] },
+  { key: "calm", name: ", only in calm markets", long: [D("VOL", { len: 20, look: 250 }, "low_vol")], short: [D("VOL", { len: 20, look: 250 }, "low_vol")] },
+  { key: "wild", name: ", only in volatile markets", long: [D("VOL", { len: 20, look: 250 }, "high_vol")], short: [D("VOL", { len: 20, look: 250 }, "high_vol")] },
+  { key: "adx", name: ", only when ADX > 20", long: [D("ADX", { len: 14 }, "gt", 20)], short: [D("ADX", { len: 14 }, "gt", 20)] },
+  { key: "t200", name: ", only with the 200-day trend", long: [D("SMA", { len: 200 }, "price_above")], short: [D("SMA", { len: 200 }, "price_below")] },
+];
+export const GEN_UNIVERSES: { key: string; name: string; keys: string[] }[] = [
+  { key: "mcx", name: "MCX commodities", keys: MCX_KEYS }, { key: "index", name: "indices", keys: INDEX_KEYS }, { key: "crypto", name: "crypto", keys: CRYPTO_KEYS },
+  { key: "mcxcrypto", name: "commodities and crypto", keys: [...MCX_KEYS, ...CRYPTO_KEYS] }, { key: "all", name: "commodities, indices and crypto", keys: [...MCX_KEYS, ...INDEX_KEYS, ...CRYPTO_KEYS] },
+];
+/** Recipes the research list already covers (skipped by the generator). */
+const COVERED = new Set(["ema|none|all|both", "don|none|all|both", "rsirev|none|index|both", "bbrev|none|index|both"]);
+/** Every generated idea, in the fixed order the generator hands them out (seeded shuffle). */
+export function generatedIdeas(seed = 20261026): IdeaDef[] {
+  const out: IdeaDef[] = [];
+  for (const b of GEN_BLOCKS) for (const f of GEN_FILTERS) for (const u of GEN_UNIVERSES) for (const dir of ["both", "long"]) {
+    if (COVERED.has(`${b.key}|${f.key}|${u.key}|${dir}`)) continue;
+    out.push({
+      key: `g-${b.key}-${f.key}-${u.key}-${dir}`, order: 0, source: "generated", kind: "rules", daily: true, universe: u.keys,
+      name: `${b.name}${f.name} on ${u.name}${dir === "long" ? " (long only)" : ""}`, why: b.why,
+      settings: b.grid.map((g) => {
+        const rules: Rules = {
+          long: set([...g.long, ...f.long]), short: set(dir === "long" ? [] : [...g.short, ...f.short]),
+          ...(g.exitLong ? { exitLong: set(g.exitLong, "ANY") } : {}), ...(g.exitShort && dir !== "long" ? { exitShort: set(g.exitShort, "ANY") } : {}), daily: true,
+        };
+        return { key: g.key, label: `${g.label}${f.name}${dir === "long" ? ", long only" : ""}`, p: { rules, entry: b.entry } as any };
+      }),
+    });
+  }
+  const rnd = seeded(seed);
+  for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
+  return out;
+}
+/** The first generated idea (Papa, 26 Oct): the three near-misses of the first round as one portfolio. */
+export const COMBO_1: IdeaDef = {
+  key: "combo-1", order: 8, source: "generated", kind: "combo", daily: true, universe: [...MCX_KEYS, ...INDEX_KEYS, ...CRYPTO_KEYS],
+  name: "Near-misses combined: trend + iron condor + turn of the month",
+  why: "The three ideas that made money but didn't pass on their own (trend following, the iron condor with a short-strike exit, the turn of the month) make their money at different times; together on one capital they may be steadier than any alone. Years are counted while every part has history (the option data, about 4 years).",
+  settings: [
+    { key: "don-ic-tom-cap", label: "Donchian 20/10 + iron condor 1.5 SD (exit on touch) + turn of the month, capital split equally", p: { parts: [["trend", "don-20-10"], ["optsell", "ic-1.5sd-sl"], ["season", "tom-4-3"]], w: "capital" } as any },
+    { key: "ema-ic-tom-cap", label: "EMA 20/50 + iron condor 1.5 SD (exit on touch) + turn of the month, capital split equally", p: { parts: [["trend", "ema-20-50"], ["optsell", "ic-1.5sd-sl"], ["season", "tom-4-3"]], w: "capital" } as any },
+    { key: "don-ic-cap", label: "Donchian 20/10 + iron condor 1.5 SD (exit on touch), capital split equally", p: { parts: [["trend", "don-20-10"], ["optsell", "ic-1.5sd-sl"]], w: "capital" } as any },
+    { key: "ema-ic-cap", label: "EMA 20/50 + iron condor 1.5 SD (exit on touch), capital split equally", p: { parts: [["trend", "ema-20-50"], ["optsell", "ic-1.5sd-sl"]], w: "capital" } as any },
+    { key: "don-ic-tom-risk", label: "Donchian 20/10 + iron condor + turn of the month, capital split by risk (each part's monthly swings equal)", p: { parts: [["trend", "don-20-10"], ["optsell", "ic-1.5sd-sl"], ["season", "tom-4-3"]], w: "risk" } as any },
+    { key: "ema-ic-tom-risk", label: "EMA 20/50 + iron condor + turn of the month, capital split by risk", p: { parts: [["trend", "ema-20-50"], ["optsell", "ic-1.5sd-sl"], ["season", "tom-4-3"]], w: "risk" } as any },
+  ],
+};
+const isOptionLeg = (config: any) => ideaByKey(String(config?.idea ?? ""))?.kind === "options";
+
+/**
+ * A combined setting's portfolio: each part sized on its share of the capital (equal shares, or shares that give every
+ * part the same monthly swings), the trades added up, and the figures counted only while every part has history.
+ */
+export function combineCombo(legs: { asset: string; result: LegResult; config: any }[], p: { parts: [string, string][]; w: string }, o: { today: string; capital?: number }): TryResult {
+  const capital = o.capital ?? IDEA_CAPITAL, k = p.parts.length;
+  const byPart = p.parts.map((_, i) => legs.filter((l) => Number(l.config?.part) === i));
+  let w = p.parts.map(() => 1 / k);
+  if (p.w === "risk") {
+    const sds = byPart.map((ls) => { const r = combineTry(ls, { today: o.today, capital: capital / k }); const mv = Object.values(r.months); const m = mv.reduce((a, b) => a + b, 0) / Math.max(1, mv.length); return Math.sqrt(mv.reduce((a, b) => a + (b - m) ** 2, 0) / Math.max(1, mv.length - 1)) || 1; });
+    const inv = sds.map((x) => 1 / x), tot = inv.reduce((a, b) => a + b, 0);
+    w = inv.map((x) => x / tot);
+  }
+  const sized = byPart.map((ls, i) => sizedTrades(ls, { capital: capital * w[i], optScale: w[i] }));
+  const from = sized.map((x) => x.from).filter((x): x is string => !!x).sort().pop() ?? addDays(o.today, -365);
+  const trades = sized.flatMap((x, i) => x.trades.map((t) => ({ ...t, k: t.k, part: i }))).filter((t) => t.x.slice(0, 10) >= from).sort((a, b) => a.x.localeCompare(b.x));
+  const r = summarize(trades, { capital, target: capital * RISK_PCT, contracts: {}, lots: {}, from, legs }, o.today);
+  const preTo = r.pre_to;
+  return { ...r, parts: sized.map((x, i) => ({ idea: p.parts[i][0], setting: p.parts[i][1], w: +w[i].toFixed(3), lots: x.lots, contracts: x.contracts, target: Math.trunc(capital * w[i] * RISK_PCT), options: x.options,
+    net: Math.trunc(trades.filter((t) => (t as any).part === i && t.x.slice(0, 10) <= preTo).reduce((a, t) => a + t.net, 0)) })) };
+}
+
 /* ---------- stage 2 (finalists only): shuffled prices and random entries, for the whole portfolio ---------- */
 export const NOISE_RUNS = 100, RANDOM_RUNS = 1000;
 /**
@@ -704,7 +836,7 @@ async function dailyOf(sb: SupabaseClient, key: string): Promise<DayBar[]> {
 export async function registerIdeas(sb: SupabaseClient) {
   const { data } = await sb.from("idea_tries").select("idea, setting_key");
   const have = new Set((data ?? []).map((r) => `${r.idea}|${r.setting_key}`));
-  const rows = IDEAS.flatMap((i) => i.settings.filter((s) => !have.has(`${i.key}|${s.key}`)).map((s) => ({
+  const rows = RUNTIME.flatMap((i) => i.settings.filter((s) => !have.has(`${i.key}|${s.key}`)).map((s) => ({
     idea: i.key, idea_order: i.order, setting_key: s.key, label: s.label, setting: s.p, status: i.kind === "later" ? "later" : "planned",
   })));
   if (rows.length) { const { error } = await sb.from("idea_tries").insert(rows); if (error) throw new Error(error.message); }
@@ -725,7 +857,7 @@ export async function ideasStep(sb: SupabaseClient, started = Date.now(), creds?
   finally { await sb.from("lab_settings").update({ ideas_lease_until: null }).eq("id", 1); }
 }
 async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Promise<Record<string, unknown>> {
-  const { data: set } = await sb.from("lab_settings").select("ideas_enabled, ideas_capital").eq("id", 1).maybeSingle();
+  const { data: set } = await sb.from("lab_settings").select("ideas_enabled, ideas_capital, ideas_per_day").eq("id", 1).maybeSingle();
   if (!set?.ideas_enabled) return { idle: "Ideas lab is switched off" };
   if (!(await labQuiet(sb))) return { idle: "waiting for the markets to close" };
   // Independent of the Strategy Lab (its runs, rests and manual stops): only a slow database makes it wait.
@@ -734,8 +866,11 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
   if (Date.now() - t0 > 2000) return { idle: "the database is answering slowly" };
   if (health?.pause_reason === "slow" && health.paused_until && Date.parse(health.paused_until) > Date.now()) return { idle: "the database was slow: giving way for a while" };
   const capital = Number(set.ideas_capital) || IDEA_CAPITAL;
-  await registerIdeas(sb);
   const today = ist(Date.now() / 1000).date;
+  await loadIdeaDefs(sb);
+  const made = await generateDaily(sb, today, Number(set.ideas_per_day ?? 20));
+  if (made) await loadIdeaDefs(sb);
+  await registerIdeas(sb);
   const { data: tries } = await sb.from("idea_tries").select("id, idea, idea_order, setting_key, setting, status").neq("status", "later").order("idea_order").order("id");
   const open = (tries ?? []).filter((t) => t.status !== "done");
   if (!open.length) return { idle: "every idea is done" };
@@ -745,10 +880,11 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
   const planned = mine.filter((t) => t.status === "planned");
   if (planned.length) {
     const { data: cands } = await sb.from("lab_candles").select("asset, kind");
-    const have = new Set((cands ?? []).filter((c) => c.kind === (idea.daily ? "D" : "I5") || (!idea.daily && /^I5Y/.test(c.kind))).map((c) => c.asset));
+    const haveD = new Set((cands ?? []).filter((c) => c.kind === "D").map((c) => c.asset));
+    const have5 = new Set((cands ?? []).filter((c) => c.kind === "I5" || /^I5Y/.test(c.kind)).map((c) => c.asset));
     for (const t of planned) {
       const s = idea.settings.find((x) => x.key === t.setting_key)!;
-      const legs = legsFor(idea, s, today, have).map((l) => ({ try_id: t.id, kind: "real", ...l, status: "pending" }));
+      const legs = legsFor(idea, s, today, idea.daily ? haveD : have5, have5).map((l) => ({ try_id: t.id, kind: "real", ...l, status: "pending" }));
       if (legs.length) { const { error } = await sb.from("idea_legs").insert(legs); if (error) throw new Error(error.message); }
       await sb.from("idea_tries").update({ status: "running", started_at: new Date().toISOString() }).eq("id", t.id);
     }
@@ -756,8 +892,10 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
   // 2. Run pending backtests, one asset's candles at a time (option ideas: one pricing slice of one backtest).
   const ids = mine.map((t) => t.id);
   let ran = 0, chain = false;
-  if (idea.kind === "options") {
-    const { data: op } = await sb.from("idea_legs").select("id, try_id, asset, win_from, win_to, config, result").in("try_id", ids).eq("status", "pending").order("id").limit(1);
+  if (idea.kind === "options" || idea.kind === "combo") {
+    const { data: opAll } = await sb.from("idea_legs").select("id, try_id, asset, win_from, win_to, config, kind").in("try_id", ids).eq("status", "pending").eq("kind", "real").order("id").limit(500);
+    const first = (opAll ?? []).find((l) => isOptionLeg(l.config));
+    const { data: op } = first ? await sb.from("idea_legs").select("id, try_id, asset, win_from, win_to, config, result").eq("id", first.id).limit(1) : { data: [] as any[] };
     if (op?.length) {
       if (!creds?.client || !creds?.token) return { idle: "waiting for the Dhan connection (option prices come from Dhan)" };
       let r: { done: boolean; result: LegResult; wait?: string };
@@ -766,10 +904,11 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
       await sb.from("idea_legs").update(r.done ? { status: "done", result: r.result, done_at: new Date().toISOString() } : { result: r.result }).eq("id", op[0].id);
       ran = 1;
       if (r.wait) return { idea: idea.key, waiting: r.wait };
-      chain = true;
+      return { idea: idea.key, ran, more: true, chain: true };
     }
   }
-  const { data: pend } = idea.kind === "options" ? { data: [] as Leg[] } : await sb.from("idea_legs").select("id, try_id, asset, win_from, win_to, config, kind, k").in("try_id", ids).eq("status", "pending").order("asset").order("k").order("id").limit(200);
+  const { data: pend0 } = idea.kind === "options" ? { data: [] as Leg[] } : await sb.from("idea_legs").select("id, try_id, asset, win_from, win_to, config, kind, k").in("try_id", ids).eq("status", "pending").order("asset").order("k").order("id").limit(200);
+  const pend = (pend0 ?? []).filter((l) => !isOptionLeg(l.config) || l.kind !== "real");
   if (pend?.length) {
     const asset = pend[0].asset;
     const rates = await loadMarginRates(sb);
@@ -799,8 +938,9 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
   const waiting = new Set((left ?? []).map((l) => l.try_id));
   let combined = 0;
   for (const t of mine.filter((x) => x.status === "running" && !waiting.has(x.id))) {
-    const { data: legs } = await sb.from("idea_legs").select("asset, result").eq("try_id", t.id).limit(1000);
-    const result = combineTry((legs ?? []) as { asset: string; result: LegResult }[], { today, capital });
+    const { data: legs } = await sb.from("idea_legs").select("asset, result, config").eq("try_id", t.id).eq("kind", "real").limit(2000);
+    const result = idea.kind === "combo" ? combineCombo((legs ?? []) as any[], t.setting as any, { today, capital })
+      : combineTry((legs ?? []) as { asset: string; result: LegResult }[], { today, capital });
     await sb.from("idea_tries").update({ status: "combined", result }).eq("id", t.id);
     t.status = "combined"; (t as any).result = result; combined++;
   }
@@ -823,7 +963,7 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
     // The trades live on in the settings' results; finalists keep theirs for the random-entry test.
     const clear = (full ?? []).map((t) => t.id).filter((id) => !fin.includes(id));
     if (clear.length) await sb.from("idea_legs").update({ result: null }).in("try_id", clear);
-    return { idea: idea.key, decided: (full ?? []).length, finalists: fin.length, tries };
+    return { idea: idea.key, decided: (full ?? []).length, finalists: fin.length, tries, chain: true };
   }
   // 5. Finalists whose stage-2 runs are all done: the final verdict.
   for (const t of mine.filter((x) => x.status === "stage2" && !waiting.has(x.id))) {
@@ -831,15 +971,42 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
     const { data: s2 } = await sb.from("idea_legs").select("kind, k, result").eq("try_id", t.id).in("kind", ["noise", "random"]).limit(5000);
     const byK = new Map<number, number>();
     for (const l of s2 ?? []) if (l.kind === "noise" && l.result && !l.result.error) byK.set(Number(l.k), (byK.get(Number(l.k)) ?? 0) + (Number(l.result.net) || 0));
-    const runs = [...byK.values()], real = Number(row!.result.net);
+    // Option parts of a combined portfolio stay real in every shuffled run.
+    const fixed = (row!.result.parts ?? []).filter((x: any) => x.options).reduce((a: number, x: any) => a + Number(x.net || 0), 0);
+    const runs = [...byK.values()].map((x) => x + fixed), real = Number(row!.result.net);
     const noise = runs.length >= NOISE_RUNS * 0.8 ? { p: +pValue(real, runs).toFixed(4), runs: runs.length, real: Math.trunc(real), median: Math.trunc(median(runs) ?? 0) } : null;
     const rnd = (s2 ?? []).find((l) => l.kind === "random")?.result;
     const v = stage2Verdict(row!.verdict, noise, rnd && !rnd.error ? rnd : null);
     await sb.from("idea_tries").update({ status: "done", verdict: v, done_at: new Date().toISOString() }).eq("id", t.id);
     await sb.from("idea_legs").update({ result: null }).eq("try_id", t.id).eq("kind", "real");
-    return { idea: idea.key, final: t.id, passed: v.passed };
+    return { idea: idea.key, final: t.id, passed: v.passed, chain: true };
   }
-  return { idea: idea.key, ran, combined, more: true, chain };
+  // More to do: hand over to a fresh call straight away (the night's work runs continuously, not every 2 minutes).
+  return { idea: idea.key, ran, combined, more: true, chain: true };
+}
+
+/**
+ * Up to `perDay` new ideas a day from the generator (the combined near-misses first), and none while 20 generated
+ * ideas are still waiting to be tested; each one's settings go into the ledger at the next step, before any test.
+ */
+export async function generateDaily(sb: SupabaseClient, today: string, perDay: number): Promise<number> {
+  if (!(perDay > 0)) return 0;
+  const { data: defs } = await sb.from("idea_defs").select("key, created_day");
+  const have = new Set((defs ?? []).map((d) => d.key));
+  const madeToday = (defs ?? []).filter((d) => String(d.created_day) === today).length;
+  const { data: open } = await sb.from("idea_tries").select("idea, status").like("idea", "g-%").neq("status", "done");
+  const waiting = new Set((open ?? []).map((r) => r.idea)).size;
+  const n = Math.min(perDay - madeToday, 20 - waiting);
+  if (n <= 0) return 0;
+  const queue = [COMBO_1, ...generatedIdeas()].filter((d) => !have.has(d.key)).slice(0, n);
+  if (!queue.length) return 0;
+  const { data: last } = await sb.from("idea_defs").select("idea_order").order("idea_order", { ascending: false }).limit(1);
+  let order = Math.max(99, Number(last?.[0]?.idea_order ?? 99));
+  const rows = queue.map((d) => ({ key: d.key, idea_order: d.key === COMBO_1.key ? COMBO_1.order : ++order, name: d.name, why: d.why, kind: d.kind, daily: d.daily,
+    universe: d.universe, settings: d.settings, source: "generated", created_day: today }));
+  const { error } = await sb.from("idea_defs").insert(rows);
+  if (error) throw new Error(error.message);
+  return rows.length;
 }
 
 /**
@@ -951,9 +1118,10 @@ async function queueStage2(sb: SupabaseClient, idea: IdeaDef, t: { id: number; r
     await sb.from("idea_tries").update({ status: "done", verdict: { ...v, passed: true, why: [], stage2: { applies: false, why } }, done_at: new Date().toISOString() }).eq("id", t.id);
     return;
   }
-  const { data: real } = await sb.from("idea_legs").select("asset, win_from, win_to, config").eq("try_id", t.id).eq("kind", "real").limit(1000);
-  const chosen = new Set(Object.values(t.result.contracts ?? {}));
-  const base = (real ?? []).filter((l) => l.asset === "*" || chosen.has(l.asset));
+  const { data: real } = await sb.from("idea_legs").select("asset, win_from, win_to, config").eq("try_id", t.id).eq("kind", "real").limit(2000);
+  // Combined portfolios: each part's chosen contracts; option legs stay real in every run (option prices can't be shuffled).
+  const chosenOf = (l: any) => new Set(Object.values((l.config?.part != null ? t.result.parts?.[Number(l.config.part)]?.contracts : t.result.contracts) ?? {}));
+  const base = (real ?? []).filter((l) => !isOptionLeg(l.config) && (l.asset === "*" || chosenOf(l).has(l.asset)));
   const rows: Record<string, unknown>[] = [];
   for (let k = 1; k <= NOISE_RUNS; k++) for (const l of base) rows.push({ try_id: t.id, kind: "noise", k, asset: l.asset, win_from: l.win_from, win_to: l.win_to, config: l.config, status: "pending" });
   rows.push({ try_id: t.id, kind: "random", k: 0, asset: "~", config: {}, status: "pending" });
@@ -966,8 +1134,9 @@ async function noiseLeg(sb: SupabaseClient, leg: Leg, memo: Map<string, unknown>
   const seed = leg.try_id * 1009 + Number(leg.k);
   const r = await runLeg(sb, leg, memo, rates, today, capital, { seed });
   if (r.error) return { net: 0, n: 0, error: r.error };
-  if (leg.asset === "*") { const c = combineTry([{ asset: "*", result: r }], { today, capital }); return { net: c.net, n: c.trades }; }
-  const typical = Number(tr.lots?.[leg.asset]) || 1, target = Number(tr.target) || capital * RISK_PCT;
+  const part = leg.config?.part != null ? tr.parts?.[Number(leg.config.part)] : null;
+  if (leg.asset === "*") { const c = combineTry([{ asset: "*", result: r }], { today, capital: part ? capital * part.w : capital }); return { net: c.net, n: c.trades }; }
+  const typical = Number((part ? part.lots : tr.lots)?.[leg.asset]) || 1, target = Number(part ? part.target : tr.target) || capital * RISK_PCT;
   let net = 0, n = 0;
   r.t.n.forEach((x, i) => { if (r.t.x[i].slice(0, 10) > tr.pre_to) return; const q = sizeLots(r.t.a[i], typical, target); if (q > 0) { net += x * q; n++; } });
   return { net: Math.trunc(net), n };
@@ -975,15 +1144,16 @@ async function noiseLeg(sb: SupabaseClient, leg: Leg, memo: Map<string, unknown>
 
 /** The random-entry test of a finalist: its own trades (before the vault) at random dates of their assets, 1,000 times. */
 async function randomLeg(sb: SupabaseClient, leg: Leg, idea: IdeaDef, tr: TryResult) {
-  const { data: legs } = await sb.from("idea_legs").select("asset, result").eq("try_id", leg.try_id).eq("kind", "real").limit(1000);
-  const target = Number(tr.target) || IDEA_CAPITAL * RISK_PCT;
+  const { data: legs } = await sb.from("idea_legs").select("asset, result, config").eq("try_id", leg.try_id).eq("kind", "real").limit(2000);
   const byAsset = new Map<string, { e: number; x: number; dir: number; w: number }[]>();
   const sec = (s: string) => Date.parse(`${s.slice(0, 10)}T${s.length > 10 ? s.slice(11, 16) : "09:15"}:00+05:30`) / 1000;
   for (const l of legs ?? []) {
-    const t = l.result?.t as LegTrades | undefined; if (!t) continue;
+    const t = l.result?.t as LegTrades | undefined; if (!t || isOptionLeg(l.config)) continue; // option legs: not part of the random-entry test
+    const part = l.config?.part != null ? tr.parts?.[Number(l.config.part)] : null;
+    const lotsOf = (part ? part.lots : tr.lots) ?? {}, target = Number(part ? part.target : tr.target) || IDEA_CAPITAL * RISK_PCT;
     t.n.forEach((_, i) => {
-      const k = t.k[i]; if (!(k in (tr.lots ?? {})) || t.x[i].slice(0, 10) > tr.pre_to) return;
-      const q = t.q?.[i] ?? sizeLots(t.a[i], tr.lots[k], target); if (!(q > 0)) return;
+      const k = t.k[i]; if (!(k in lotsOf) || t.x[i].slice(0, 10) > tr.pre_to || t.x[i].slice(0, 10) < tr.from) return;
+      const q = t.q?.[i] ?? sizeLots(t.a[i], lotsOf[k], target); if (!(q > 0)) return;
       byAsset.set(k, [...(byAsset.get(k) ?? []), { e: sec(t.e[i]), x: sec(t.x[i]), dir: t.s[i] === "S" ? -1 : 1, w: LAB_ASSETS[k].lot * q }]);
     });
   }
