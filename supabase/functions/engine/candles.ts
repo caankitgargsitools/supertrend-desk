@@ -43,3 +43,13 @@ export async function readCandles(sb: SupabaseClient, asset: string, kinds: stri
   }));
 }
 
+/** Signed download links (gzip JSON, columns t/o/h/l/c[/v]) for an asset's candle files, for the prediction server. */
+export async function candleLinks(sb: SupabaseClient, asset: string, seconds = 3600): Promise<{ kind: string; from_day: string; to_day: string; url: string }[]> {
+  const { data: meta, error } = await sb.from("lab_candles").select("kind, from_day, to_day, stored").eq("asset", asset).or("kind.eq.D,kind.eq.I5,kind.like.I5Y*");
+  if (error) throw new Error(error.message);
+  const rows = (meta ?? []).filter((m) => m.stored);
+  if (!rows.length) return [];
+  const { data: urls, error: e } = await sb.storage.from(CANDLE_BUCKET).createSignedUrls(rows.map((m) => candlePath(asset, m.kind)), seconds);
+  if (e) throw new Error(e.message);
+  return rows.map((m, i) => ({ kind: m.kind, from_day: m.from_day, to_day: m.to_day, url: urls?.[i]?.signedUrl ?? "" })).filter((x) => x.url);
+}

@@ -144,6 +144,22 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (`fundingTrades`, each day held booked with the day's funding: Delta's rate from Dec 2023, Binance's before). Binance
   history (free, fapi.binance.com, reachable from Supabase) stored as lab candles kind "FB", refreshed weekly.
 
+- **Prediction Lab (27 Oct 2026, migration 51; `prediction.ts`, `predictor/`)**: Kronos-mini (open source, MIT; code
+  pinned at commit 67b630e, weights from Hugging Face on the server) forecasts every lab asset on 5m, 15m, 30m, 1h, 4h
+  and daily candles, 10 candles ahead (o/h/l/c). Scored per step against baselines: direction vs "last move continues",
+  close vs "price stays the same", high–low range vs the recent average swing; paired t-values; "Beats" = t > 2 with
+  ≥ 100 forecasts. Replay from 2025-09-01 (after Kronos's training data; stride 10 candles, 1 for 4h/daily) kept apart
+  from live forecasts (`pred_stats.mode`). Runs on the Dhandha AWS server (t4g.small, Mumbai, shared with the
+  crawler) as Docker `ankgenie-predictor` (image `ghcr.io/caankitgargsitools/ankgenie-predictor`, GitHub Actions
+  `predictor-image.yml`, own Watchtower; `--memory 1200m`, low CPU priority; forecast detail in SQLite on its volume).
+  It talks only to the engine with its own key (`x-pred-key`, sha256 in `pred_settings.key_hash`, made on the page by
+  `pred_create_key`, shown once inside the setup script): `pred_pull` (settings, assets, signed links to the lab's
+  candle files, live bars, holidays) and `pred_push` (heartbeat `pred_worker`, `pred_latest`, `pred_stats` whole-month
+  rows). Crypto candles: Binance public 5m. Live Dhan 5m candles: engine `pred_feed` every 5 min into `pred_bars`
+  (only while the server reported in the last 30 min). Page: admin tab "Prediction Lab". Watch only; path: accuracy →
+  paper trading → live, each with Papa's go. Tests: `predictor/tests/test_predictor.py`, `tests/sim/pred.test.mjs`,
+  `tests/ui/ui_pred.mjs`.
+
 ## Incident 23 Oct 2026 (state to restore)
 - A daytime lab re-test (3,930 saved strategies) plus per-second price writes used up the database's disk allowance on
   the smallest Supabase compute (~0.5–1 GB RAM, DB 778 MB, lab_results ~870 MB with toast): API 503s 16:34–17:17 IST,
@@ -171,11 +187,6 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (GOLD 1 kg contract dominated the paper loss) — proposed, awaiting Papa's go-ahead.
 - Tick-level prices/stops need Dhan's WebSocket feed on an always-on server (~₹500–1,500/month) — offered, not built.
 - Slippage column on Orders + per-strategy slippage summary (signal price vs fill) — proposed.
-- **Prediction Lab (Kronos)** — agreed with Papa 27 Oct 2026, awaiting his go to build: own tab; Kronos-mini forecasts
-  for every lab asset on 5m, 15m, 30m, 1h, 4h and daily, 1–10 candles ahead (direction, close, high–low range, full
-  candle); judged against baselines (no change, last move continues, ATR); replay of the months after Kronos's
-  training data (from about Sept 2025) + live. Runs on the Dhandha AWS server as it is (t4g.small Mumbai, shared with
-  the Dhandha crawler; only public candles go there). Path: accuracy in the lab → paper trading → live.
 - Pending (Papa, 27 Oct): server expansion for Kronos (separate t4g.medium ~₹2,000/month, or Dhandha server to
   t4g.large) and the larger Kronos models (small, base) — after the mini results.
 - Ideas from the Tradl.ai review (one-page backtest report, morning brief, featured shelves) — proposed.

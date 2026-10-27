@@ -28,6 +28,7 @@ import { auditStrategy } from "./audit.ts";
 import { ownDaily, ownIntraday } from "./owncandles.ts";
 import { KILL_EARLY, KILL_FULL, killVerdict } from "./kill.ts";
 import { ideasStep } from "./ideas.ts";
+import { predFeed, predKeyOk, predPull, predPush } from "./prediction.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -2143,6 +2144,18 @@ Deno.serve(async (req) => {
     await loadCryptoAssets(sb).catch(() => {});
     return reply(200, { marks: await liveMarks(u.user.id, admin), at: new Date().toISOString() });
   }
+  // The prediction server (Papa's AWS machine): its own key opens pred_pull and pred_push only.
+  const predKey = req.headers.get("x-pred-key");
+  if (!secret && predKey) {
+    if (!(await predKeyOk(sb, predKey))) return new Response("Forbidden", { status: 403 });
+    const b = await req.json().catch(() => ({}));
+    await loadCryptoAssets(sb).catch(() => {});
+    try {
+      if (b.action === "pred_pull") return Response.json(await predPull(sb, b));
+      if (b.action === "pred_push") return Response.json(await predPush(sb, b));
+    } catch (e) { return Response.json({ error: String((e as Error)?.message ?? e) }, { status: 500 }); }
+    return new Response("Not allowed", { status: 403 });
+  }
   const { data: sec } = await sb.from("engine_secret").select("secret").single();
   if (!secret || !sec || secret !== sec.secret) return new Response("Forbidden", { status: 403 });
 
@@ -2172,6 +2185,7 @@ Deno.serve(async (req) => {
     EdgeRuntime.waitUntil(runAudit(batch, Number(b.offset) || 0).catch((e) => console.error("audit", e)));
     return Response.json({ action, accepted: true, batch });
   }
+  if (action === "pred_feed") return Response.json({ action, ...(await predFeed(sb, credsOf(await adminAccount(sb)))) });
   if (action === "lab_reverdict") return Response.json({ action, ...(await labReverdict(sb, Math.min(200, Number((body as any).limit) || 50))) });
   if (action === "marks" && body.user_id) return Response.json({ action, marks: await liveMarks(body.user_id, false) });
   if (action === "lab_opt") {

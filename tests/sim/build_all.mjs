@@ -13,4 +13,5 @@ await one("stats.ts", "stats.mjs");
 await one("noise.ts", "noise.mjs");
 await one("kill.ts", "kill.mjs");
 await one("ideas.ts", "ideas.mjs");
+await one("prediction.ts", "pred.mjs");
 console.log("built parts");
