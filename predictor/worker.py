@@ -14,6 +14,8 @@ import os
 import time
 import traceback
 import urllib.request
+from array import array
+from bisect import bisect_left
 from dataclasses import dataclass, field
 
 from scoring import score, swing_baseline
@@ -22,6 +24,7 @@ from store import Store
 
 VERSION = "1.0"
 MIN_BARS = 64
+TRIM_DAYS = 6    # raw 5-minute bars kept after building (a tail rebuild needs the last 3 days)
 KEEP_DAYS = 200  # 5-minute history kept before the replay start (memory: the server has 2 GB, shared)
 REPLAY_STRIDE = {5: 10, 15: 10, 30: 10, 60: 10, 240: 1, 1440: 1}  # replay origins every n candles
 BATCH = int(os.environ.get("PRED_BATCH", "16"))
@@ -82,24 +85,33 @@ class Asset:
     last5: int = 0                                 # newest 5-minute bar built into the series
 
     def rebuild(self, tfs, holidays, now, tail_days: int | None = None):
-        """Builds every timeframe; with tail_days only the last days are rebuilt and joined to what was there."""
+        """Builds every timeframe; with tail_days only the last days are rebuilt and joined to what was there.
+        Afterwards the raw 5-minute bars are trimmed to the last few days (enough for the next tail rebuild) and the
+        candles kept as compact arrays: the server's memory is small and shared."""
         cut = None
         if tail_days is not None and self.series and self.base:
             cut = day_start(ist_day(max(self.base))) - tail_days * 86400
+        src = self.base if cut is None else {t: v for t, v in self.base.items() if t >= cut}
         for tf in tfs:
             if tf >= 1440:
-                b = daily_from(self.base, self.kind, holidays, now, self.daily_file)
+                files = self.daily_file
+                if cut is not None and files and files.get("t"):
+                    k0 = next((k for k, t in enumerate(files["t"]) if int(t) >= cut), len(files["t"]))
+                    files = {c: v[k0:] for c, v in files.items() if isinstance(v, list)}
+                b = daily_from(src, self.kind, holidays, now, files)
             else:
-                src = self.base if cut is None else {t: v for t, v in self.base.items() if t >= cut}
                 b = build(src, tf, self.kind, holidays, now)
-                old = self.series.get(tf)
-                if cut is not None and old is not None:
-                    keep = [i for i, t in enumerate(old.t) if t < cut]
-                    b = Bars([old.t[i] for i in keep] + b.t, [old.o[i] for i in keep] + b.o, [old.h[i] for i in keep] + b.h,
-                             [old.l[i] for i in keep] + b.l, [old.c[i] for i in keep] + b.c, [old.v[i] for i in keep] + b.v)
+            old = self.series.get(tf)
+            if cut is not None and old is not None:
+                n = bisect_left(old.t, cut)
+                b = Bars(list(old.t[:n]) + b.t, list(old.o[:n]) + b.o, list(old.h[:n]) + b.h, list(old.l[:n]) + b.l, list(old.c[:n]) + b.c, list(old.v[:n]) + b.v)
+            b = Bars(array("q", b.t), array("d", b.o), array("d", b.h), array("d", b.l), array("d", b.c), array("d", b.v))
             self.series[tf] = b
             self.index[tf] = {t: i for i, t in enumerate(b.t)}
         self.last5 = max(self.base) if self.base else 0
+        if self.base:
+            lo = day_start(ist_day(self.last5)) - (TRIM_DAYS - 1) * 86400
+            self.base = {t: v for t, v in self.base.items() if t >= lo}
 
 
 def candle_end(a: Asset, tf: int, t: int, holidays) -> int:
@@ -189,7 +201,8 @@ class Worker:
                 x.base.update(merge(live[a["key"]]["bars"]))
                 changed = changed or len(x.base) != before
             if changed or not x.series:
-                x.rebuild(tfs, self.holidays, now, None if (files or not x.series) else 3)
+                # Full rebuild when the day's history files came in (indices, MCX) or the first time; else the last days.
+                x.rebuild(tfs, self.holidays, now, None if ((files and kind != "crypto") or not x.series) else 3)
         if files:
             self.files_day = today
         return tfs

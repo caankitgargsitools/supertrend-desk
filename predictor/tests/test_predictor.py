@@ -203,6 +203,37 @@ def test_no_lookahead():
     print("ok   no look-ahead: each forecast's input ends at its own candle")
 
 
+def test_trim_and_tail_rebuild():
+    """Raw bars are trimmed after building; adding a day and rebuilding the tail gives the same candles as a full build."""
+    from worker import Asset
+    days = weekdays("2026-08-03", 30)
+    allc = {"t": [], "o": [], "h": [], "l": [], "c": []}
+    px = 100.0
+    for d in days:
+        cols, px = nse_day(d, px, 0.7)
+        for k in allc:
+            allc[k] += cols[k]
+    daily = {"t": [day_start(d) for d in days[:-3]], "o": [1.0] * 27, "h": [2.0] * 27, "l": [0.5] * 27, "c": [1.5] * 27}
+    split = 29 * 75  # all but the last day first
+    first = {k: v[:split] for k, v in allc.items()}
+    last = {k: v[split:] for k, v in allc.items()}
+    now = day_start(days[-1]) + 20 * 3600
+    tfs = [5, 15, 60, 240, 1440]
+    a = Asset("NIFTY", "nse", base=merge(first), daily_file=daily)
+    a.rebuild(tfs, {}, now)
+    assert len(a.base) <= 6 * 75, "raw bars trimmed to the last days"
+    a.base.update(merge(last))
+    a.rebuild(tfs, {}, now, 3)
+    full = Asset("NIFTY", "nse", base=merge(allc), daily_file=daily)
+    full.rebuild(tfs, {}, now)
+    for tf in tfs:
+        x, y = a.series[tf], full.series[tf]
+        assert list(x.t) == list(y.t) and list(x.c) == list(y.c) and list(x.h) == list(y.h) and list(x.l) == list(y.l), tf
+    assert list(a.series[1440].c[:27]) == [1.5] * 27 and len(a.series[1440]) == 30  # file days, then days built from bars
+    print("ok   raw bars trimmed after building; tail rebuild equals a full build (every timeframe, daily file kept)")
+
+
 if __name__ == "__main__":
+    test_trim_and_tail_rebuild()
     test_sessions_and_building(); test_future_times(); test_scoring(); test_worker_end_to_end(); test_no_lookahead()
     print("all passed")

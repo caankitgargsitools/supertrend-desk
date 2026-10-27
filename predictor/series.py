@@ -9,22 +9,31 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
+from functools import lru_cache
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 DAY = 86400
 
 
+_EPOCH = dt.date(1970, 1, 1)
+
+
+@lru_cache(maxsize=8192)
+def _day_name(n: int) -> str:
+    return (_EPOCH + dt.timedelta(days=n)).isoformat()
+
+
 def ist_day(t: int) -> str:
-    return dt.datetime.fromtimestamp(t, IST).strftime("%Y-%m-%d")
+    return _day_name((int(t) + 19800) // 86400)
 
 
 def ist_min(t: int) -> int:
-    d = dt.datetime.fromtimestamp(t, IST)
-    return d.hour * 60 + d.minute
+    return (int(t) + 19800) % 86400 // 60
 
 
+@lru_cache(maxsize=8192)
 def day_start(day: str) -> int:
-    return int(dt.datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=IST).timestamp())
+    return (dt.date.fromisoformat(day) - _EPOCH).days * 86400 - 19800
 
 
 def _nth_sunday(y: int, m: int, n: int) -> str:
@@ -34,6 +43,11 @@ def _nth_sunday(y: int, m: int, n: int) -> str:
 
 
 def session(kind: str, day: str, holidays: dict | None = None) -> tuple[int, int]:
+    return _session(kind, day, tuple(sorted(((k, v) for k, v in (holidays or {}).items() if k[1] == day), key=str)))
+
+
+@lru_cache(maxsize=16384)
+def _session(kind: str, day: str, hol: tuple) -> tuple[int, int]:
     """(open, close) in minutes for an asset kind ('nse' | 'mcx' | 'crypto') on a day; (1440, -1) when closed."""
     if kind == "crypto":
         return 0, 1440
@@ -44,7 +58,7 @@ def session(kind: str, day: str, holidays: dict | None = None) -> tuple[int, int
         o, c = 540, (1410 if _nth_sunday(y, 3, 2) <= day < _nth_sunday(y, 11, 1) else 1435)
     if dt.date.fromisoformat(day).weekday() >= 5:
         return 1440, -1
-    h = (holidays or {}).get(("MCX" if kind == "mcx" else "NSE", day), "missing")
+    h = dict(hol).get(("MCX" if kind == "mcx" else "NSE", day), "missing")
     if h == "missing":
         return o, c
     return (1440, -1) if h is None else (max(o, h), c)
