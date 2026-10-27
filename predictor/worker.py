@@ -120,6 +120,16 @@ class Worker:
         self.started = clock()
         self.error = None
         self.replay_ptr = store.get("replay_ptr", 0)
+        self.phase = None  # what it is doing before the first full round (shown on the page)
+
+    def say(self, phase: str | None):
+        """Reports a starting step straight away, so the page never waits in silence."""
+        self.phase = phase
+        print(time.strftime("%H:%M:%S"), phase or "running", flush=True)
+        try:
+            self.engine.push({"worker": self.heartbeat(list(self.settings.get("tfs") or []))})
+        except Exception as e:
+            print("report failed:", e, flush=True)
 
     # ---------- data ----------
     def refresh(self):
@@ -132,7 +142,11 @@ class Worker:
         tfs = list(self.settings.get("tfs") or [5, 15, 30, 60, 240, 1440])
         replay_from = day_start(str(self.settings.get("replay_from") or "2025-09-01"))
         live = {b["asset"]: b for b in p.get("bars", [])}
-        for a in p.get("assets", []):
+        first = not self.assets
+        listed = p.get("assets", [])
+        for n, a in enumerate(listed):
+            if first and n % 4 == 0:
+                self.say(f"starting: loading price history ({n} of {len(listed)} assets)")
             kind = "crypto" if a.get("crypto") else "mcx" if a.get("commodity") else "nse"
             x = self.assets.get(a["key"]) or Asset(a["key"], kind, a.get("binance"))
             self.assets[a["key"]] = x
@@ -333,7 +347,8 @@ class Worker:
         except OSError:
             load = None
         rs = {"total": 0, "done": 0, **(getattr(self, "replay_state", None) or {})}
-        return {"version": VERSION, "status": "replaying past months" if rs["done"] < rs["total"] else "live",
+        status = self.phase or ("replaying past months" if rs["done"] < rs["total"] else "live")
+        return {"version": VERSION, "status": status,
                 "detail": {"replay": rs, "lag_s": lag, "mem_mb": mem, "load": load, "model": getattr(self.runner, "name", "?"),
                            "samples": getattr(self.runner, "samples", 1), "assets": len(self.assets),
                            "forecasts_hour": self.store.count(since=now - 3600), "live_total": self.store.count("live"), "replay_total": self.store.count("replay"),
@@ -343,6 +358,7 @@ class Worker:
     def cycle(self):
         self.error = None
         tfs = self.refresh()
+        self.phase = None
         if not self.settings.get("enabled", True):
             self.report(tfs, force=True)
             return "off"
@@ -360,7 +376,17 @@ def main():
     from runner import make_runner
     url, key = os.environ["SUPABASE_URL"], os.environ["PRED_KEY"]
     os.makedirs("/data", exist_ok=True)
-    w = Worker(Engine(url, key), make_runner(), Store(os.environ.get("PRED_DB", "/data/predictions.sqlite")))
+    w = Worker(Engine(url, key), None, Store(os.environ.get("PRED_DB", "/data/predictions.sqlite")))
+    while w.runner is None:
+        w.say(f"starting: loading the Kronos-{os.environ.get('PRED_MODEL', 'mini')} model (first start downloads it)")
+        try:
+            w.runner = make_runner()
+        except Exception as e:  # no model, no forecasts: say why and try again in 5 minutes
+            w.error = f"model: {type(e).__name__}: {e}"
+            traceback.print_exc()
+            w.say("waiting: the model couldn't be loaded, trying again in 5 minutes")
+            time.sleep(300)
+    w.error = None
     while True:
         t0 = time.time()
         try:
