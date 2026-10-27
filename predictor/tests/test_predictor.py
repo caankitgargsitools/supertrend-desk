@@ -233,7 +233,47 @@ def test_trim_and_tail_rebuild():
     print("ok   raw bars trimmed after building; tail rebuild equals a full build (every timeframe, daily file kept)")
 
 
+def test_replay_passes():
+    """Pass 1 ≈ 100 evenly spread candles per asset and timeframe; each pass doubles them, keeping the earlier ones,
+    until every 10th candle is done; the chosen candles don't move when new candles arrive."""
+    days = weekdays("2026-01-05", 120)
+    i5 = {"t": [], "o": [], "h": [], "l": [], "c": []}
+    px = 100.0
+    for d in days:
+        cols, px = nse_day(d, px, 0.01)
+        for k in i5:
+            i5[k] += cols[k]
+    now = day_start(days[-1]) + 20 * 3600
+    with tempfile.TemporaryDirectory() as tmp:
+        w = Worker(FakeEngine({"i5": i5, "d": {"t": []}}), EchoModel(), Store(os.path.join(tmp, "p.sqlite")), get=lambda u: [], clock=lambda: now)
+        w.refresh()
+        w.settings.update({"tfs": [15], "replay_from": "2026-01-05"})
+        plan, st = w.replay_plan([15])
+        assert st["pass"] == 1 and 50 <= st["total"] <= 100 and st["passes"] == 3, st  # ~2,937 candles: spacing 40 → 20 → 10
+        first = {i for _, _, todo in plan for i in todo}
+        w.replay_step([15], budget_s=1e9)
+        plan2, st2 = w.replay_plan([15])
+        second = {i for _, _, todo in plan2 for i in todo}
+        assert st2["pass"] == 2 and st2["done"] == len(first) and not (first & second) and st2["total"] == len(first) + len(second)
+        seen = []
+        for _ in range(10):
+            plan, st = w.replay_plan([15])
+            seen.append(st["pass"])
+            if st["complete"]:
+                break
+            w.replay_step([15], budget_s=1e9)
+        assert st["complete"] and seen == [2, 3, 3], seen
+        done = {r[0] for r in w.store.db.execute("select t from forecasts where tf=15")}
+        s15 = w.assets["NIFTY"].series[15]
+        i0 = 63
+        assert done == {s15.t[i] for i in range(i0, len(s15)) if (i - i0) % 10 == 0 and now - s15.t[i] > 86400 + 900}
+        # new candles: the grid stays where it was (only later candles are added)
+        assert w.store.get("grid|NIFTY|15")["top"] == 40
+    print("ok   replay in passes: ~100 first, doubling each pass, earlier ones kept, fixed grid, until every 10th candle")
+
+
 if __name__ == "__main__":
+    test_replay_passes()
     test_trim_and_tail_rebuild()
     test_sessions_and_building(); test_future_times(); test_scoring(); test_worker_end_to_end(); test_no_lookahead()
     print("all passed")

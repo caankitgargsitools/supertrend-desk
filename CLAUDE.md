@@ -148,8 +148,11 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   pinned at commit 67b630e, weights from Hugging Face on the server) forecasts every lab asset on 5m, 15m, 30m, 1h, 4h
   and daily candles, 10 candles ahead (o/h/l/c). Scored per step against baselines: direction vs "last move continues",
   close vs "price stays the same", high–low range vs the recent average swing; paired t-values; "Beats" = t > 2 with
-  ≥ 100 forecasts. Replay from 2025-09-01 (after Kronos's training data; stride 10 candles, 1 for 4h/daily) kept apart
-  from live forecasts (`pred_stats.mode`). Runs on the Dhandha AWS server (t4g.small, Mumbai, shared with the
+  ≥ 100 forecasts. Replay from 2025-09-01 (after Kronos's training data) kept apart from live forecasts (`pred_stats.mode`),
+  in passes (Papa, 27 Oct: results soon, then ever more data): pass 1 ≈ 100 evenly spread candles per asset and
+  timeframe, each later pass halves the spacing (nested, grid fixed in the server's kv `grid|asset|tf`) down to every
+  10th candle (every one for 4h/daily); it keeps going in the background. Server memory: candles as arrays, raw 5m bars
+  trimmed after building; first start needed the AWS disk enlarged to 20 GB (27 Oct). Runs on the Dhandha AWS server (t4g.small, Mumbai, shared with the
   crawler) as Docker `ankgenie-predictor` (image `ghcr.io/caankitgargsitools/ankgenie-predictor`, GitHub Actions
   `predictor-image.yml`, own Watchtower; `--memory 1200m`, low CPU priority; forecast detail in SQLite on its volume).
   It talks only to the engine with its own key (`x-pred-key`, sha256 in `pred_settings.key_hash`, made on the page by

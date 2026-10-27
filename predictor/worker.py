@@ -27,7 +27,7 @@ MIN_BARS = 64
 TRIM_DAYS = 6    # raw 5-minute bars kept after building (a tail rebuild needs the last 3 days)
 KEEP_DAYS = 200  # 5-minute history kept before the replay start (memory: the server has 2 GB, shared)
 REPLAY_STRIDE = {5: 10, 15: 10, 30: 10, 60: 10, 240: 1, 1440: 1}  # replay origins at least n candles apart
-REPLAY_MAX = 600  # replay forecasts per asset and timeframe (100 are needed for a verdict)
+REPLAY_FIRST = 100  # pass 1 of the replay: about this many forecasts per asset and timeframe (a verdict needs 100)
 BATCH = int(os.environ.get("PRED_BATCH", "16"))
 BINANCE = "https://data-api.binance.vision/api/v3/klines"
 
@@ -258,38 +258,65 @@ class Worker:
         return out
 
     def replay_plan(self, tfs):
-        """Every (asset, tf) with its replay origins still to do."""
+        """The replay in passes (Papa, 27 Oct: results soon, then ever more data in the background). Pass 1 takes about
+        REPLAY_FIRST evenly spread candles per asset and timeframe since the replay start; each later pass halves the
+        spacing (twice as many), down to every REPLAY_STRIDE candles. Every pass keeps the candles of the passes before
+        it, and the spacing and starting candle are fixed the first time, so chosen candles never move as new ones
+        arrive. All assets finish a pass before any starts the next. Returns the work of the current pass."""
         start = day_start(str(self.settings.get("replay_from") or "2025-09-01"))
         now = int(self.clock())
-        plan, total, done = [], 0, 0
+        pairs = []
         for a in sorted(self.assets.values(), key=lambda x: x.key):
             for tf in tfs:
                 s = a.series.get(tf)
-                if not s:
+                if not s or not len(s):
                     continue
-                # Up to REPLAY_MAX forecasts per asset and timeframe, evenly spread; the spacing is fixed the first time
-                # so the chosen candles never move as new ones arrive.
-                sk = f"stride|{a.key}|{tf}"
-                stride = self.store.get(sk)
-                if not stride:
-                    n_in = len(s) - bisect_left(s.t, start)
-                    stride = max(REPLAY_STRIDE.get(tf, 10), -(-n_in // REPLAY_MAX))
-                    self.store.put(sk, stride)
+                gk = f"grid|{a.key}|{tf}"
+                grid = self.store.get(gk)
+                if not grid:
+                    i0 = max(MIN_BARS - 1, bisect_left(s.t, start))
+                    if i0 >= len(s):
+                        continue
+                    base, n_in = REPLAY_STRIDE.get(tf, 10), len(s) - i0
+                    top = base
+                    while n_in // top > REPLAY_FIRST:
+                        top *= 2
+                    grid = {"t0": s.t[i0], "top": top, "base": base}
+                    self.store.put(gk, grid)
+                i0 = bisect_left(s.t, grid["t0"])
+                last = len(s) - 1
+                while last >= i0 and now - s.t[last] <= 86400 + tf * 60:  # newer candles belong to the live forecasts
+                    last -= 1
                 have = self.store.times(a.key, tf)
-                idx = [i for i in range(MIN_BARS - 1, len(s)) if (i % stride == 0) and s.t[i] >= start and now - s.t[i] > 86400 + tf * 60]
-                todo = [i for i in idx if s.t[i] not in have]
-                total += len(idx); done += len(idx) - len(todo)
-                if todo:
-                    plan.append((a, tf, todo))
-        return plan, total, done
+                levels, stride, k = [], grid["top"], 0
+                while True:
+                    idx = range(i0, last + 1, stride)
+                    levels.append((k, stride, [i for i in idx if s.t[i] not in have], len(idx)))
+                    if stride <= grid["base"]:
+                        break
+                    stride, k = max(grid["base"], stride // 2), k + 1
+                pairs.append((a, tf, levels))
+        cur = min((next((lv[0] for lv in levels if lv[2]), None) for _, _, levels in pairs), key=lambda x: 1e9 if x is None else x, default=None)
+        passes = max((len(levels) for _, _, levels in pairs), default=0)
+        if cur is None:
+            return [], {"pass": passes, "passes": passes, "total": 0, "done": 0, "complete": True}
+        plan, total, todo_n = [], 0, 0
+        for a, tf, levels in pairs:
+            lv = levels[min(cur, len(levels) - 1)]
+            total += lv[3]
+            if cur < len(levels) and lv[2]:
+                plan.append((a, tf, list(lv[2])))
+                todo_n += len(lv[2])
+        return plan, {"pass": cur + 1, "passes": passes, "total": total, "done": total - todo_n, "complete": False}
 
     def replay_step(self, tfs, budget_s: float = 40):
         """Replay forecasts round-robin across assets and timeframes until the time budget is used."""
         t0 = self.clock()
-        plan, total, done = self.replay_plan(tfs)
-        self.replay_state = {"total": total, "done": done}
+        plan, state = self.replay_plan(tfs)
+        self.replay_state = state
         if not plan:
             return 0
+        done = state["done"]
         n = 0
         while self.clock() - t0 < budget_s and plan:
             a, tf, todo = plan[self.replay_ptr % len(plan)]
@@ -383,7 +410,7 @@ class Worker:
         except OSError:
             load = None
         rs = {"total": 0, "done": 0, **(getattr(self, "replay_state", None) or {})}
-        status = self.phase or ("replaying past months" if rs["done"] < rs["total"] else "live")
+        status = self.phase or ("live; the replay has covered every candle" if rs.get("complete") else f"live, and replaying past months (pass {rs.get('pass', 1)})")
         return {"version": VERSION, "status": status,
                 "detail": {"replay": rs, "lag_s": lag, "mem_mb": mem, "load": load, "model": getattr(self.runner, "name", "?"),
                            "samples": getattr(self.runner, "samples", 1), "assets": len(self.assets),
