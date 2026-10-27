@@ -123,6 +123,14 @@ class Worker:
         self.replay_ptr = store.get("replay_ptr", 0)
         self.phase = None  # what it is doing before the first full round (shown on the page)
 
+    def alive(self, phase: str):
+        """A heartbeat at least once a minute during long work (the first round can take several minutes)."""
+        if self.clock() - getattr(self, "_beat", 0) >= 60:
+            self._beat = self.clock()
+            keep = self.phase
+            self.say(phase)
+            self.phase = keep
+
     def say(self, phase: str | None):
         """Reports a starting step straight away, so the page never waits in silence."""
         self.phase = phase
@@ -146,8 +154,8 @@ class Worker:
         first = not self.assets
         listed = p.get("assets", [])
         for n, a in enumerate(listed):
-            if first and n % 4 == 0:
-                self.say(f"starting: loading price history ({n} of {len(listed)} assets)")
+            if first:
+                self.alive(f"starting: loading price history ({n} of {len(listed)} assets)")
             kind = "crypto" if a.get("crypto") else "mcx" if a.get("commodity") else "nse"
             x = self.assets.get(a["key"]) or Asset(a["key"], kind, a.get("binance"))
             self.assets[a["key"]] = x
@@ -204,6 +212,7 @@ class Worker:
         by_len: dict[int, list[dict]] = {}
         for j in jobs:
             by_len.setdefault(len(j["c"]), []).append(j)
+        done, total = 0, len(jobs)
         for group in by_len.values():
             for k in range(0, len(group), BATCH):
                 part = group[k:k + BATCH]
@@ -214,6 +223,8 @@ class Worker:
                     if mode == "live":
                         self.latest_dirty.add((j["asset"], j["tf"]))
                 self.store.commit()
+                done += len(part)
+                self.alive(f"forecasting: {done} of {total} {mode} forecasts in this round")
 
     def live_jobs(self, tfs) -> list[dict]:
         now = int(self.clock())
