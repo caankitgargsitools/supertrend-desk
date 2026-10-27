@@ -26,7 +26,8 @@ VERSION = "1.0"
 MIN_BARS = 64
 TRIM_DAYS = 6    # raw 5-minute bars kept after building (a tail rebuild needs the last 3 days)
 KEEP_DAYS = 200  # 5-minute history kept before the replay start (memory: the server has 2 GB, shared)
-REPLAY_STRIDE = {5: 10, 15: 10, 30: 10, 60: 10, 240: 1, 1440: 1}  # replay origins every n candles
+REPLAY_STRIDE = {5: 10, 15: 10, 30: 10, 60: 10, 240: 1, 1440: 1}  # replay origins at least n candles apart
+REPLAY_MAX = 600  # replay forecasts per asset and timeframe (100 are needed for a verdict)
 BATCH = int(os.environ.get("PRED_BATCH", "16"))
 BINANCE = "https://data-api.binance.vision/api/v3/klines"
 
@@ -266,7 +267,14 @@ class Worker:
                 s = a.series.get(tf)
                 if not s:
                     continue
-                stride = REPLAY_STRIDE.get(tf, 10)
+                # Up to REPLAY_MAX forecasts per asset and timeframe, evenly spread; the spacing is fixed the first time
+                # so the chosen candles never move as new ones arrive.
+                sk = f"stride|{a.key}|{tf}"
+                stride = self.store.get(sk)
+                if not stride:
+                    n_in = len(s) - bisect_left(s.t, start)
+                    stride = max(REPLAY_STRIDE.get(tf, 10), -(-n_in // REPLAY_MAX))
+                    self.store.put(sk, stride)
                 have = self.store.times(a.key, tf)
                 idx = [i for i in range(MIN_BARS - 1, len(s)) if (i % stride == 0) and s.t[i] >= start and now - s.t[i] > 86400 + tf * 60]
                 todo = [i for i in idx if s.t[i] not in have]
