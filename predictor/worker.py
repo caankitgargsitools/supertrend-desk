@@ -22,6 +22,7 @@ from store import Store
 
 VERSION = "1.0"
 MIN_BARS = 64
+KEEP_DAYS = 200  # 5-minute history kept before the replay start (memory: the server has 2 GB, shared)
 REPLAY_STRIDE = {5: 10, 15: 10, 30: 10, 60: 10, 240: 1, 1440: 1}  # replay origins every n candles
 BATCH = int(os.environ.get("PRED_BATCH", "16"))
 BINANCE = "https://data-api.binance.vision/api/v3/klines"
@@ -166,9 +167,12 @@ class Worker:
                         parts.append(cols)
                 parts.sort(key=lambda c: c["t"][0] if c.get("t") else 0)
                 x.base = {**merge(*parts), **{t: v for t, v in x.base.items() if t > max((c["t"][-1] for c in parts if c.get("t")), default=0)}}
+                # Only what the replay needs (warm-up for 256 four-hour candles); daily candles come from the daily file.
+                keep_from = replay_from - KEEP_DAYS * 86400
+                x.base = {t: v for t, v in x.base.items() if t >= keep_from}
                 changed = True
             if kind == "crypto" and x.binance:
-                start = max(x.base) + 300 if x.base else replay_from - 300 * 86400
+                start = max(x.base) + 300 if x.base else replay_from - KEEP_DAYS * 86400
                 if start < now - 600:
                     x.base.update(merge(binance(x.binance, start, now - 300, self.get)))
                     changed = True
