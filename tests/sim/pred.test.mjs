@@ -23,7 +23,9 @@ const r = await predPush(sb, { worker: { version: "1.0", status: "live", detail:
 assert.equal(r.stats, 1, "unknown assets, timeframes, months and modes are refused");
 assert.equal(r.latest, 1);
 assert.equal(db.pred_stats.length, 1); assert.equal(db.pred_worker[0].status, "live"); assert.ok(db.pred_worker[0].last_seen);
-await predPush(sb, { stats: [{ ...row, n: 12 }] });
+await predPush(sb, { stats: [{ ...row, n: 12, conf: { lo: [3, 1], mid: [4, 3], hi: [2, "x"], evil: [9, 9] }, cal_n: 5, hit_cal: 4 }] });
+assert.deepEqual(db.pred_stats[0].conf, { lo: [3, 1], mid: [4, 3], hi: [2, 0] }, "confidence bands kept, junk dropped");
+assert.equal(db.pred_stats[0].hit_cal, 4);
 assert.equal(db.pred_stats.length, 1); assert.equal(db.pred_stats[0].n, 12, "a resend replaces the month's figures, never adds twice");
 console.log("ok   server write: heartbeat, latest forecast, monthly totals (validated, idempotent)");
 

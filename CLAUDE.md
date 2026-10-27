@@ -152,7 +152,13 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   in passes (Papa, 27 Oct: results soon, then ever more data): pass 1 ≈ 100 evenly spread candles per asset and
   timeframe, each later pass halves the spacing (nested, grid fixed in the server's kv `grid|asset|tf`) down to every
   10th candle (every one for 4h/daily); it keeps going in the background. Server memory: candles as arrays, raw 5m bars
-  trimmed after building; first start needed the AWS disk enlarged to 20 GB (27 Oct). Runs on the Dhandha AWS server (t4g.small, Mumbai, shared with the
+  trimmed after building; first start needed the AWS disk enlarged to 20 GB (27 Oct). Step 1 (migration 52): 5 paths per forecast on 1h/4h/daily
+  (`pred_settings.samples`; the average path is the forecast, the share of paths up per step gives the confidence;
+  `pred_stats.conf` bands lo/mid/hi = ≤3, 4, 5 of 5 agreeing; older single-path forecasts on those timeframes are
+  redone). Step 2: correction layer `predictor/calib.py` — logistic model per timeframe and step, pooled across assets
+  (inputs: Kronos's move ÷ usual swing, paths agreeing, last 1/5/20-candle moves, time of day, asset type), refitted every
+  3 h walk-forward (each month only from outcomes known before it; needs 300), `pred_stats.cal_n/hit_cal`; page columns
+  "Corrected" and "All paths agree". Runs on the Dhandha AWS server (t4g.small, Mumbai, shared with the
   crawler) as Docker `ankgenie-predictor` (image `ghcr.io/caankitgargsitools/ankgenie-predictor`, GitHub Actions
   `predictor-image.yml`, own Watchtower; `--memory 1200m`, low CPU priority; forecast detail in SQLite on its volume).
   It talks only to the engine with its own key (`x-pred-key`, sha256 in `pred_settings.key_hash`, made on the page by
@@ -190,6 +196,9 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (GOLD 1 kg contract dominated the paper loss) — proposed, awaiting Papa's go-ahead.
 - Tick-level prices/stops need Dhan's WebSocket feed on an always-on server (~₹500–1,500/month) — offered, not built.
 - Slippage column on Orders + per-strategy slippage summary (signal price vs fill) — proposed.
-- Pending (Papa, 27 Oct): server expansion for Kronos (separate t4g.medium ~₹2,000/month, or Dhandha server to
-  t4g.large) and the larger Kronos models (small, base) — after the mini results.
+- Pending (Papa, 27 Oct) for the Prediction Lab, after the Kronos-mini results: server expansion (separate
+  t4g.medium ~₹2,000/month, or the Dhandha server to t4g.large); the larger Kronos models (small, base); fine-tuning
+  Kronos on our assets (train only on data before Sept 2025, then monthly walk-forward; free Kaggle/Colab GPU first,
+  rented GPU ~₹50–150/h if needed); longer look-back (up to 2,048 candles for mini); more context inputs (India VIX
+  with Nifty, Bitcoin with other coins); more samples per forecast on the shorter timeframes.
 - Ideas from the Tradl.ai review (one-page backtest report, morning brief, featured shelves) — proposed.

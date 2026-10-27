@@ -47,7 +47,7 @@ const res = {
   "pred_settings": [{ enabled: true, model: "mini", tfs: [5, 15, 30, 60, 240, 1440], horizon: 10, replay_from: "2025-09-01", key_created_at: null }],
   "pred_stats": [
     // Nifty 15 min: right 60% of 400 moves, closing error 10% smaller than no change (steady), range better
-    { asset: "NIFTY", tf: 15, h: 1, month: "2025-10", mode: "replay", n: 400, dir_n: 400, hit: 240, hit_mom: 200, ae_k: 36, ae_flat: 40, d_sum: 4, d_sq: 0.2, re_k: 30, re_atr: 40, r_sum: 10, r_sq: 1 },
+    { asset: "NIFTY", tf: 15, h: 1, month: "2025-10", mode: "replay", n: 400, dir_n: 400, hit: 240, hit_mom: 200, ae_k: 36, ae_flat: 40, d_sum: 4, d_sq: 0.2, re_k: 30, re_atr: 40, r_sum: 10, r_sq: 1, cal_n: 300, hit_cal: 192, conf: { lo: [100, 50], mid: [200, 120], hi: [100, 70] } },
     // Gold daily: a coin flip, no better than no change
     { asset: "GOLD", tf: 1440, h: 1, month: "2025-10", mode: "replay", n: 300, dir_n: 300, hit: 151, hit_mom: 150, ae_k: 60, ae_flat: 59, d_sum: -1, d_sq: 30, re_k: 50, re_atr: 49, r_sum: -1, r_sq: 30 },
     // BTC 5 min: too few yet
@@ -85,12 +85,12 @@ const r1 = await p.evaluate(() => ({
   prog: !!document.querySelector("#pred_status .labprog"),
 }));
 console.log(JSON.stringify(r1).slice(0, 600));
-const ok0 = /Replay pass 2 of 6/.test(r1.status);
-const ok1 = ok0 && r1.vis && r1.ideasHidden && /Working/.test(r1.status) && r1.prog && r1.rows.length === 3 && /Beats: direction, closing price, range/.test(r1.rows[0]) && /Nifty/.test(r1.rows[0])
+const ok0 = /Replay pass 2 of 6/.test(r1.status) && /64\.0%/.test(r1.rows[0]) && /70\.0%/.test(r1.rows[0]) && r1.rows.some((t) => /learning/.test(t));
+const ok1 = ok0 && r1.vis && r1.ideasHidden && /Working/.test(r1.status) && r1.prog && r1.rows.length === 3 && /Beats: direction, direction \(corrected\), closing price, range/.test(r1.rows[0]) && /Nifty/.test(r1.rows[0])
   && r1.rows.some((t) => /Gold/.test(t) && /No edge/.test(t)) && r1.rows.some((t) => /Too few yet/.test(t));
 await p.click('#pred_tbl tr[data-k="NIFTY|15"]'); await p.waitForTimeout(900);
 const r2 = await p.evaluate(() => ({ chart: !!document.querySelector("#pred_chart canvas"), detail: document.getElementById("pred_detail").textContent }));
-const ok2 = r2.chart && /By candles ahead/.test(r2.detail) && /Month by month/.test(r2.detail) && /right/.test(r2.detail);
+const ok2 = r2.chart && /Confidence and the correction layer/.test(r2.detail) && /all 5 paths/.test(r2.detail) && /70\.0%/.test(r2.detail) && /right on 64\.0%/.test(r2.detail) && /By candles ahead/.test(r2.detail) && /Month by month/.test(r2.detail) && /right/.test(r2.detail);
 await p.evaluate(() => document.querySelector('[data-xp="predkey"]').open = true);
 await p.click("#pred_newkey"); await p.waitForTimeout(600);
 const r3 = await p.evaluate(() => (document.getElementById("pred_script") || {}).textContent || "");
@@ -98,7 +98,7 @@ const ok3 = /PRED_KEY=pk_testkey0123456789abcdef/.test(r3) && /ankgenie-predicto
 await p.setViewportSize({ width: 390, height: 844 }); await p.waitForTimeout(400);
 const wide = await p.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
 await p.screenshot({ path: "pred_390.png", fullPage: false });
-console.log({ ok1, ok2, ok3, wide, errs: errs.length });
+console.log({ ok0, ok1, ok2, ok3, wide, errs: errs.length }); if (!ok2) console.log(r2.detail.replace(/\s+/g, " ").slice(r2.detail.replace(/\s+/g, " ").indexOf("Confidence"), r2.detail.replace(/\s+/g, " ").indexOf("Confidence") + 700));
 if (!ok1 || !ok2 || !ok3 || wide || errs.length) { console.log("FAIL", r2.detail.slice(0, 300)); process.exit(1); }
 console.log("ok   Prediction Lab: status and replay progress, scoreboard verdicts, detail chart, server key script, phone width");
 await b.close();

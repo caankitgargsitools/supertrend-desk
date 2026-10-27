@@ -69,7 +69,7 @@ export async function predFeed(sb: SupabaseClient, creds: { client: string; toke
 
 /** The server's read. `files`: signed links to every asset's candle history (asked for once a day). */
 export async function predPull(sb: SupabaseClient, body: { files?: boolean }) {
-  const { data: set } = await sb.from("pred_settings").select("enabled, model, tfs, horizon, lookback, replay_from").eq("id", 1).maybeSingle();
+  const { data: set } = await sb.from("pred_settings").select("enabled, model, tfs, horizon, lookback, replay_from, samples").eq("id", 1).maybeSingle();
   const today = ist(Date.now() / 1000).date;
   const assets = Object.values(LAB_ASSETS).map((a) => ({
     key: a.key, name: a.name, seg: a.seg, crypto: !!a.crypto, commodity: a.commodity,
@@ -79,11 +79,13 @@ export async function predPull(sb: SupabaseClient, body: { files?: boolean }) {
   const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").gte("day", String(set?.replay_from ?? "2025-09-01")).lte("day", addDays(today, 60));
   const files: Record<string, unknown> = {};
   if (body.files) for (const a of assets) if (!a.crypto) files[a.key] = await candleLinks(sb, a.key).catch(() => []);
-  const settings = set ? { enabled: set.enabled, model: set.model, tfs: set.tfs, horizon: set.horizon, lookback: set.lookback, replay_from: set.replay_from } : null;
+  const settings = set ? { enabled: set.enabled, model: set.model, tfs: set.tfs, horizon: set.horizon, lookback: set.lookback, replay_from: set.replay_from, samples: set.samples ?? null } : null;
   return { settings, assets, bars: bars ?? [], holidays: hol ?? [], files: body.files ? files : undefined, server_time: new Date().toISOString() };
 }
 
 const num = (x: unknown) => { const v = Number(x); return Number.isFinite(v) ? v : 0; };
+/** Confidence bands {lo, mid, hi: [calls, right]}; anything else is dropped. */
+const confOf = (c: any) => c && typeof c === "object" ? Object.fromEntries(["lo", "mid", "hi"].map((k) => [k, [Math.trunc(num(c[k]?.[0])), Math.trunc(num(c[k]?.[1]))]])) : null;
 /** The server's write: heartbeat, latest forecasts, monthly totals (whole-month figures, so a resend is harmless). */
 export async function predPush(sb: SupabaseClient, body: { worker?: any; latest?: any[]; stats?: any[] }) {
   const out: Record<string, number> = {};
@@ -106,6 +108,7 @@ export async function predPush(sb: SupabaseClient, body: { worker?: any; latest?
     const { error } = await sb.from("pred_stats").upsert(stats.slice(i, i + 500).map((r) => ({ asset: r.asset, tf: Number(r.tf), h: Number(r.h), month: r.month, mode: r.mode,
       n: Math.trunc(num(r.n)), dir_n: Math.trunc(num(r.dir_n)), hit: Math.trunc(num(r.hit)), hit_mom: Math.trunc(num(r.hit_mom)),
       ae_k: num(r.ae_k), ae_flat: num(r.ae_flat), d_sum: num(r.d_sum), d_sq: num(r.d_sq), re_k: num(r.re_k), re_atr: num(r.re_atr), r_sum: num(r.r_sum), r_sq: num(r.r_sq),
+      conf: confOf(r.conf), cal_n: Math.trunc(num(r.cal_n)), hit_cal: Math.trunc(num(r.hit_cal)),
       updated_at: new Date().toISOString() })));
     if (error) throw new Error(error.message);
   }

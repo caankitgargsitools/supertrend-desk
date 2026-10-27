@@ -24,8 +24,11 @@ def swing_baseline(h: list[float], l: list[float], steps: int, window: int = 50)
     return sum(vals) / len(vals) if vals else None
 
 
-def score(last: float, prev: float, pred: list[list[float]], act_h: list[float], act_l: list[float], act_c: list[float], base_r: dict[int, float | None]):
-    """Rows per step h for which the real candle exists. pred: [[o,h,l,c], ...]; act_*: real candles after the origin."""
+def score(last: float, prev: float, pred: list[list[float]], act_h: list[float], act_l: list[float], act_c: list[float], base_r: dict[int, float | None],
+          up: list[float] | None = None):
+    """Rows per step h for which the real candle exists. pred: [[o,h,l,c], ...] (the average path when several were
+    drawn); act_*: real candles after the origin; up: per step the share of drawn paths ending above the last close
+    (conf = the share agreeing with the call, which is the average path's direction)."""
     rows = []
     if not (last > 0):
         return rows
@@ -33,9 +36,12 @@ def score(last: float, prev: float, pred: list[list[float]], act_h: list[float],
         h = k + 1
         pc, ac = pred[k][3], act_c[k]
         move = ac - last
-        r = {"h": h, "dir_n": 0, "hit": 0, "hit_mom": 0}
+        r = {"h": h, "dir_n": 0, "hit": 0, "hit_mom": 0, "up_act": None, "conf": None}
+        if up is not None and k < len(up) and up[k] is not None and pc != last:
+            r["conf"] = up[k] if pc > last else 1 - up[k]  # share of paths agreeing with the call (the average path's direction)
         if move != 0:
             r["dir_n"] = 1
+            r["up_act"] = int(move > 0)
             r["hit"] = int(pc != last and (pc - last > 0) == (move > 0))
             r["hit_mom"] = int(last != prev and (last - prev > 0) == (move > 0))
         r["ae_k"] = abs(pc - ac) / last * 100

@@ -9,6 +9,7 @@ heartbeat. Only public market data comes here; the server key opens only pred_pu
 from __future__ import annotations
 
 import gzip
+import math
 import json
 import os
 import time
@@ -24,6 +25,9 @@ from store import Store
 
 VERSION = "1.0"
 MIN_BARS = 64
+CALIB_EVERY = 3 * 3600  # seconds between refits of the correction layer
+PRETTY = {5: "5 min", 15: "15 min", 30: "30 min", 60: "1 hour", 240: "4 hours", 1440: "daily"}
+DEFAULT_SAMPLES = {"60": 5, "240": 5, "1440": 5}  # paths per forecast by timeframe (the rest: 1); the server is small
 TRIM_DAYS = 6    # raw 5-minute bars kept after building (a tail rebuild needs the last 3 days)
 KEEP_DAYS = 200  # 5-minute history kept before the replay start (memory: the server has 2 GB, shared)
 REPLAY_STRIDE = {5: 10, 15: 10, 30: 10, 60: 10, 240: 1, 1440: 1}  # replay origins at least n candles apart
@@ -217,22 +221,38 @@ class Worker:
         lo = max(0, i + 1 - L)
         H = int(self.settings.get("horizon") or 10)
         base_r = {h: swing_baseline(s.h[lo:i + 1], s.l[lo:i + 1], h) for h in range(1, H + 1)}
-        return {"asset": a.key, "tf": tf, "t": s.t[i], "i": i, "key": f"{a.key}|{tf}|{s.t[i]}",
+        sw = base_r.get(1) or 0
+        mom = lambda n: (s.c[i] - s.c[i - n]) / sw / math.sqrt(n) if sw > 0 and i >= n else 0.0
+        tod = 0 if tf >= 1440 else (s.t[i] + 19800) % 86400 / 86400
+        feats = {"mom1": round(mom(1), 4), "mom5": round(mom(5), 4), "mom20": round(mom(20), 4), "tod": round(tod, 4), "kind": a.kind, "sw": sw}
+        return {"asset": a.key, "tf": tf, "t": s.t[i], "i": i, "key": f"{a.key}|{tf}|{s.t[i]}", "feats": feats,
                 "o": s.o[lo:i + 1], "h": s.h[lo:i + 1], "l": s.l[lo:i + 1], "c": s.c[lo:i + 1], "v": s.v[lo:i + 1], "t_in": s.t[lo:i + 1],
                 "future": future_times(s.t[i], tf, H, a.kind, self.holidays), "last": s.c[i], "prev": s.c[i - 1], "base_r": base_r}
 
+    def samples(self, tf: int) -> int:
+        """Paths drawn per forecast (settings.samples per timeframe; 5 on 1h, 4h and daily by default)."""
+        sm = self.settings.get("samples") or DEFAULT_SAMPLES
+        return max(1, min(10, int(sm.get(str(tf), 1))))
+
     def run_jobs(self, jobs: list[dict], mode: str):
+        """Forecasts in batches. With several paths per forecast each job is repeated in the batch (every row draws its
+        own path); the stored forecast is the average path, plus per step the share of paths ending above the last close."""
         H = int(self.settings.get("horizon") or 10)
-        by_len: dict[int, list[dict]] = {}
+        by_len: dict[tuple, list[dict]] = {}
         for j in jobs:
-            by_len.setdefault(len(j["c"]), []).append(j)
+            by_len.setdefault((len(j["c"]), self.samples(j["tf"])), []).append(j)
         done, total = 0, len(jobs)
-        for group in by_len.values():
-            for k in range(0, len(group), BATCH):
-                part = group[k:k + BATCH]
-                preds = self.runner.forecast([{**j, "t": j["t_in"]} for j in part], H)
-                for j, pred in zip(part, preds):
-                    self.store.add(j["asset"], j["tf"], j["t"], mode, j["last"], j["prev"], j["base_r"], [[round(x, 6) for x in r] for r in pred])
+        for (_, K), group in by_len.items():
+            step = max(1, BATCH // K)
+            for k in range(0, len(group), step):
+                part = group[k:k + step]
+                rows = [{**j, "t": j["t_in"], "key": f"{j['key']}|{r}"} for j in part for r in range(K)]
+                paths = self.runner.forecast(rows, H)
+                for n, j in enumerate(part):
+                    mine = paths[n * K:(n + 1) * K]
+                    pred = [[sum(p[h][c] for p in mine) / K for c in range(4)] for h in range(H)]
+                    up = [round(sum(1 for p in mine if p[h][3] > j["last"]) / K, 3) for h in range(H)] if K > 1 else None
+                    self.store.add(j["asset"], j["tf"], j["t"], mode, j["last"], j["prev"], j["base_r"], [[round(x, 6) for x in r] for r in pred], K, up, j.get("feats"))
                     self.dirty.add((j["asset"], j["tf"]))
                     if mode == "live":
                         self.latest_dirty.add((j["asset"], j["tf"]))
@@ -339,7 +359,7 @@ class Worker:
                 s, ix = a.series.get(tf), a.index.get(tf)
                 if not s:
                     continue
-                for t, mode, last, prev, base_r, pred, scored in self.store.open_forecasts(a.key, tf, H):
+                for t, mode, last, prev, base_r, pred, scored, up in self.store.open_forecasts(a.key, tf, H):
                     i = ix.get(t)
                     if i is None:
                         continue
@@ -347,7 +367,7 @@ class Worker:
                     if avail <= scored:
                         continue
                     rows = score(last, prev, json.loads(pred), s.h[i + 1:i + 1 + avail], s.l[i + 1:i + 1 + avail], s.c[i + 1:i + 1 + avail],
-                                 {int(k): v for k, v in json.loads(base_r).items()})
+                                 {int(k): v for k, v in json.loads(base_r).items()}, json.loads(up) if up else None)
                     self.store.save_scores(a.key, tf, t, mode, rows, avail)
                     self.dirty.add((a.key, tf))
         self.store.commit()
@@ -413,14 +433,44 @@ class Worker:
         status = self.phase or ("live; the replay has covered every candle" if rs.get("complete") else f"live, and replaying past months (pass {rs.get('pass', 1)})")
         return {"version": VERSION, "status": status,
                 "detail": {"replay": rs, "lag_s": lag, "mem_mb": mem, "load": load, "model": getattr(self.runner, "name", "?"),
-                           "samples": getattr(self.runner, "samples", 1), "assets": len(self.assets),
+                           "samples": self.settings.get("samples") or DEFAULT_SAMPLES, "assets": len(self.assets),
                            "forecasts_hour": self.store.count(since=now - 3600), "live_total": self.store.count("live"), "replay_total": self.store.count("replay"),
                            "started": int(self.started)},
                 "error": self.error}
 
+    def resample_old(self, tfs):
+        """Forecasts made with fewer paths than their timeframe now uses are redone (once per setting), so every forecast
+        of a timeframe is judged the same way."""
+        for tf in tfs:
+            K = self.samples(tf)
+            mk = f"samples|{tf}"
+            if K <= 1 or self.store.get(mk) == K:
+                continue
+            for a in self.assets.values():
+                old = [r[0] for r in self.store.db.execute("select t from forecasts where asset=? and tf=? and coalesce(k, 1) < ?", (a.key, tf, K))]
+                if old:
+                    self.store.forget(a.key, tf, old)
+                    self.dirty.add((a.key, tf))
+            self.store.put(mk, K)
+            self.store.commit()
+
+    def calibrate(self, tfs, force=False):
+        """The correction layer, refitted month by month (walk-forward) every few hours."""
+        if not force and self.clock() - (self.store.get("calib_at") or 0) < CALIB_EVERY:
+            return
+        from calib import walk_forward
+        H = int(self.settings.get("horizon") or 10)
+        for tf in tfs:
+            self.alive(f"refitting the correction layer ({PRETTY.get(tf, tf)})")
+            for asset in walk_forward(self.store.db, tf, H):
+                self.dirty.add((asset, tf))
+        self.store.put("calib_at", self.clock())
+        self.store.commit()
+
     def cycle(self):
         self.error = None
         tfs = self.refresh()
+        self.resample_old(tfs)
         self.phase = None
         if not self.settings.get("enabled", True):
             self.report(tfs, force=True)
@@ -431,6 +481,7 @@ class Worker:
         self.score_all(tfs)
         self.replay_step(tfs)
         self.score_all(tfs)
+        self.calibrate(tfs)
         self.report(tfs)
         return "ok"
 

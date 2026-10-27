@@ -272,7 +272,93 @@ def test_replay_passes():
     print("ok   replay in passes: ~100 first, doubling each pass, earlier ones kept, fixed grid, until every 10th candle")
 
 
+class NoisyModel(EchoModel):
+    """Stand-in that draws a different path per row: the last close plus noise, leaning up."""
+    def forecast(self, jobs, horizon):
+        import random
+        out = []
+        for j in jobs:
+            rnd = random.Random(j["key"])
+            last = j["c"][-1]
+            out.append([[last, last + 1, last - 1, last + rnd.uniform(-1, 3) * (k + 1)] for k in range(horizon)])
+        return out
+
+
+def test_paths_and_confidence():
+    days = weekdays("2026-03-02", 80)
+    i5 = {"t": [], "o": [], "h": [], "l": [], "c": []}
+    px = 100.0
+    for d in days:
+        cols, px = nse_day(d, px, 0.02)
+        for k in i5:
+            i5[k] += cols[k]
+    now = day_start(days[-1]) + 20 * 3600
+    with tempfile.TemporaryDirectory() as tmp:
+        st = Store(os.path.join(tmp, "p.sqlite"))
+        w = Worker(FakeEngine({"i5": i5, "d": {"t": []}}), NoisyModel(), st, get=lambda u: [], clock=lambda: now)
+        w.refresh()
+        w.settings.update({"tfs": [15, 60], "horizon": 3, "lookback": 64, "replay_from": "2026-03-02", "samples": {"60": 1}})
+        for x in w.assets.values():
+            x.series.clear(); x.base = merge(i5) if x.kind == "nse" else {}; x.rebuild([15, 60], {}, now)
+        w.replay_step([60], budget_s=1e9)
+        n1 = st.count()
+        assert n1 > 0 and st.db.execute("select count(*) from forecasts where tf=60 and k=1").fetchone()[0] == n1
+        # now 5 paths on 1 hour: the single-path ones are redone with 5
+        w.settings["samples"] = {"60": 5}
+        w.resample_old([15, 60])
+        assert st.count() == 0
+        w.replay_step([60], budget_s=1e9)
+        rows = st.db.execute("select k, up, pred, last from forecasts where tf=60").fetchall()
+        assert rows and all(r[0] == 5 for r in rows)
+        ups = [json.loads(r[1]) for r in rows]
+        assert all(all(x in (0, 0.2, 0.4, 0.6, 0.8, 1.0) for x in u) for u in ups) and any(0 < u[0] < 1 for u in ups), "shares of 5 paths"
+        w.score_all([60])
+        confs = [r[0] for r in st.db.execute("select conf from scores where tf=60 and conf is not null")]
+        assert confs and all(0 <= c <= 1 for c in confs)
+        tot = st.totals({("NIFTY", 60)})
+        assert all(set(x["conf"]) == {"lo", "mid", "hi"} for x in tot)
+        assert sum(x["conf"][b][0] for x in tot for b in x["conf"]) == sum(x["dir_n"] for x in tot), "every called move falls in one confidence band"
+    print("ok   several paths per forecast: average path, share of paths up, confidence bands; single-path ones redone")
+
+
+def test_correction_layer_walk_forward():
+    """Kronos is wrong in a steady way (its call is backwards): the correction learns it from earlier months and fixes
+    later calls; the first month has no correction (nothing earlier to learn from); a month whose pattern changes is
+    not fixed, which shows it never learns from the month it judges."""
+    import random
+    from calib import walk_forward
+    with tempfile.TemporaryDirectory() as tmp:
+        st = Store(os.path.join(tmp, "p.sqlite"))
+        rnd = random.Random(1)
+        months = ["2026-01", "2026-02", "2026-03", "2026-04"]
+        for mi, m in enumerate(months):
+            for k in range(400):
+                t = day_start(m + "-02") + k * 3600
+                up_pred = rnd.random() < 0.5
+                pc = 101.0 if up_pred else 99.0
+                actual_up = (not up_pred) if mi < 3 else up_pred  # backwards in Jan–Mar, right in April
+                st.add("NIFTY", 60, t, "replay", 100.0, 100.0, {"1": 1.0}, [[100, 101, 99, pc]], 5, [0.8 if up_pred else 0.2],
+                       {"mom1": 0, "mom5": 0, "mom20": 0, "tod": 0.4, "kind": "nse", "sw": 1.0})
+                st.save_scores("NIFTY", 60, t, "replay", [{"h": 1, "dir_n": 1, "hit": int(up_pred == actual_up), "hit_mom": 0, "ae_k": 0, "ae_flat": 0,
+                                                           "re_k": 0, "re_atr": 0, "conf": 0.8, "up_act": int(actual_up)}], 1)
+        st.commit()
+        walk_forward(st.db, 60, 1)
+        by = {}
+        for m, p, up_act in st.db.execute("select month, p_cal, up_act from scores where tf=60"):
+            by.setdefault(m, []).append((p, up_act))
+        assert all(p is None for p, _ in by["2026-01"]), "nothing earlier to learn from"
+        fixed = lambda m: sum(1 for p, u in by[m] if p is not None and (p > 0.5) == (u == 1)) / len(by[m])
+        assert fixed("2026-02") > 0.95 and fixed("2026-03") > 0.95, (fixed("2026-02"), fixed("2026-03"))
+        assert fixed("2026-04") < 0.05, "April's change isn't known to April's model: no peeking"
+        tot = st.totals({("NIFTY", 60)})
+        feb = next(x for x in tot if x["month"] == "2026-02")
+        assert feb["cal_n"] == 400 and feb["hit_cal"] > 380 and feb["hit"] < 20
+    print("ok   correction layer: walk-forward month by month, learns steady errors, never peeks at the month it judges")
+
+
 if __name__ == "__main__":
+    test_paths_and_confidence()
+    test_correction_layer_walk_forward()
     test_replay_passes()
     test_trim_and_tail_rebuild()
     test_sessions_and_building(); test_future_times(); test_scoring(); test_worker_end_to_end(); test_no_lookahead()
