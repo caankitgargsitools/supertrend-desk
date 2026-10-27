@@ -171,4 +171,11 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (GOLD 1 kg contract dominated the paper loss) — proposed, awaiting Papa's go-ahead.
 - Tick-level prices/stops need Dhan's WebSocket feed on an always-on server (~₹500–1,500/month) — offered, not built.
 - Slippage column on Orders + per-strategy slippage summary (signal price vs fill) — proposed.
+- **Prediction Lab (Kronos)** — agreed with Papa 27 Oct 2026, awaiting his go to build: own tab; Kronos-mini forecasts
+  for every lab asset on 5m, 15m, 30m, 1h, 4h and daily, 1–10 candles ahead (direction, close, high–low range, full
+  candle); judged against baselines (no change, last move continues, ATR); replay of the months after Kronos's
+  training data (from about Sept 2025) + live. Runs on the Dhandha AWS server as it is (t4g.small Mumbai, shared with
+  the Dhandha crawler; only public candles go there). Path: accuracy in the lab → paper trading → live.
+- Pending (Papa, 27 Oct): server expansion for Kronos (separate t4g.medium ~₹2,000/month, or Dhandha server to
+  t4g.large) and the larger Kronos models (small, base) — after the mini results.
 - Ideas from the Tradl.ai review (one-page backtest report, morning brief, featured shelves) — proposed.
