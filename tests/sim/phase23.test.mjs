@@ -64,13 +64,13 @@ const years = Array.from({ length: 10 }, (_, k) => { const y = 2025 - k, ts = Ar
 const base = [{ kind: "self", asset: "GOLD", tf: null, result: { net: 50000, max_dd: 10000 } }, { kind: "asset", asset: "SILVER", tf: null, result: { ok: true } },
   { kind: "tf", asset: "GOLD", tf: 60, result: { ok: true } }, ...years, ...Array.from({ length: 8 }, () => ({ kind: "step", asset: "GOLD", tf: null, result: { ok: true, net: 45000, n: 20 } })),
   { kind: "vault", asset: "GOLD", tf: null, result: { net: 9000, n: 3, ok: true } }];
-const s1 = robustVerdict(cfg, base, { families: 5219 });
+const s1 = robustVerdict(cfg, base, { families: 5219, strict: true });
 assert.ok(!s1.passed && s1.needs_stage2 && /waiting for the noise tests/.test(s1.why[0]));
 const nz = (realNet, shuffledNet) => [{ kind: "noise", asset: "GOLD", tf: 0, result: { net: realNet } }, ...Array.from({ length: 100 }, (_, k) => ({ kind: "noise", asset: "GOLD", tf: k + 1, result: { net: shuffledNet(k) } }))];
-const good = robustVerdict(cfg, [...base, ...nz(80000, (k) => k * 500 - 20000), { kind: "random", asset: "GOLD", tf: null, result: { p: 0.01, real: 500 } }], { families: 5219 });
+const good = robustVerdict(cfg, [...base, ...nz(80000, (k) => k * 500 - 20000), { kind: "random", asset: "GOLD", tf: null, result: { p: 0.01, real: 500 } }], { families: 5219, strict: true });
 console.log("finalist, beats noise →", good.passed, good.noise);
 assert.ok(good.passed && good.noise.p < 0.05);
-const fake = robustVerdict(cfg, [...base, ...nz(30000, (k) => k * 1000 - 20000), { kind: "random", asset: "GOLD", tf: null, result: { p: 0.3, real: 500 } }], { families: 5219 });
+const fake = robustVerdict(cfg, [...base, ...nz(30000, (k) => k * 1000 - 20000), { kind: "random", asset: "GOLD", tf: null, result: { p: 0.3, real: 500 } }], { families: 5219, strict: true });
 console.log("finalist, noise does as well →", fake.why);
 assert.ok(!fake.passed && /does no better than noise/.test(fake.why.join()) && /random entries did as well: 30%/.test(fake.why.join()));
 console.log("ok   two-stage verdict");

@@ -87,8 +87,16 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   adjustment** (Deflated Sharpe on the trades, `stats.ts`, tries = lab-wide rule families from `lab_trial_families()`,
   95% needed); ≥ 3 of 4 neighbouring settings profitable; profitable without its best 5% of trades; ≥ 30 trades
   (daily) / 100 (minute) over the years tested; doubled slippage for daily strategies too. Breeding from winners is off
-  (`lab_settings.evolve`). `lab_reverdict` (re-scoring stored results) is retired: re-tests go through `lab_refresh`.
+  (`lab_settings.evolve`). `lab_reverdict` re-scores stored results under the current rules (rev 5); full re-tests go through `lab_refresh`.
   First preview: none of the 24 desk lab strategies passes the luck test (best t = 3.4).
+- **Simple rules (rev 5, 27 Oct 2026, Papa: "relax, reward continuous profit")** — the default; `lab_settings.strict`
+  brings back rev 4. The full test is only the strategy itself, its years and the vault. Pass = profitable in all but
+  one year in five (8 of 10, 4 of 5; quarter rule unchanged), profitable in total with slippage doubled, ≥ 30 / 100
+  trades, vault profitable. Luck, best-trades cut, nearby settings, other assets/timeframes and phase 2 are shown for
+  information only. Ranked by the **consistency score** (`consistencyScore`): years 25, quarters 25, smoothness 20
+  (R² of the month-end curve + evenness of yearly profits), return ÷ drawdown 15, worst year 15; Lab page column
+  "Consistency", default sort. Stored results are re-scored in place by action `lab_reverdict` (no backtests).
+  Passing = worth paper trading, not proven.
 - Lab phase 2 (finalists only, i.e. strategies that passed everything above): 100 runs on shuffled candles
   (`noise.ts` `shuffledData`; check kind `noise`, tf 0 = real) and 1,000 sets of random entries (`random`); the real
   result must beat 95% of each. Overfitting gauge: Probability of Backtest Overfitting (CSCV, `stats.ts` `pbo`) per run,

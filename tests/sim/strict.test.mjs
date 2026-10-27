@@ -27,7 +27,7 @@ assert.equal(preVault(win, { ...minuteMcx, vault_days: 182 }).to, "2026-04-24", 
 console.log("ok   vault: 6 months (3 for MCX minute strategies), windows end where it starts");
 
 // --- checks: the vault is last, and every check carries the strategy's vault length
-const cs = robustChecks(gold, new Set(["GOLD", "SILVER", "CRUDEOIL", "COPPER"]), new Set(["GOLD"]));
+const cs = robustChecks(gold, new Set(["GOLD", "SILVER", "CRUDEOIL", "COPPER"]), new Set(["GOLD"]), true);
 assert.equal(cs.at(-1).kind, "vault"); assert.ok(cs.every((c) => c.config.vault_days === vaultDays(gold)));
 console.log("ok   checks end with the vault; transferred checks keep the original's vault");
 
@@ -48,7 +48,7 @@ const good = (over = {}) => [
   ...steps(over.steps ?? [true, true, true, true, true, true, true, false]),
   ...(over.vault === null ? [] : [{ kind: "vault", asset: "GOLD", tf: null, result: over.vault ?? { net: 12000, n: 4, ok: true } }]),
 ];
-const v = (over) => robustVerdict(daily, good(over), { families: 5219 });
+const v = (over) => robustVerdict(daily, good(over), { families: 5219, strict: true });
 const pass = v();
 console.log("strong strategy →", pass.passed, pass.why, "luck", pass.luck.dsr);
 // everything in phase 1 passed: it now waits for the phase-2 noise tests (phase23.test.mjs)
@@ -58,18 +58,18 @@ assert.match(why({ vault: { net: -3000, n: 3, ok: false } }), /lost money in the
 assert.match(why({ vault: { net: 0, n: 0, ok: false } }), /no trade in the held-back/);
 assert.match(why({ vault: null }), /not yet tested on the held-back/);
 assert.match(why({ steps: [true, true, true, true, false, false, false, false] }), /works only near this exact setting: 4 of 8/);
-assert.match(robustVerdict(daily, [...good().filter((c) => c.kind !== "step"), ...steps([true, true, true, true], 10000)], { families: 5219 }).why.join(" | "), /nearby settings made much less/);
+assert.match(robustVerdict(daily, [...good().filter((c) => c.kind !== "step"), ...steps([true, true, true, true], 10000)], { families: 5219, strict: true }).why.join(" | "), /nearby settings made much less/);
 // carried by a few big trades: 1 huge winner, the rest small losers (every year still profitable)
 const lucky = Array.from({ length: 12 }, (_, i) => (i === 0 ? 12000 : -1000)); // +1,000 a year, from one trade
 assert.match(why({ nets: lucky }), /the profit comes from a few trades: without its best 6/);
-assert.match(robustVerdict(daily, good().map((c) => c.kind === "year" ? { ...c, result: { ...c.result, tr: packTrades([{ entry: "2025-01-10 09:30", exit: "2025-01-10 15:00", side: "LONG", entry_px: 100, exit_px: 101, net: 5000, exit_why: "x" }]) } } : c), { families: 5219 }).why.join(" | "), /only 10 trades over the years tested \(needs 30\)/);
+assert.match(robustVerdict(daily, good().map((c) => c.kind === "year" ? { ...c, result: { ...c.result, tr: packTrades([{ entry: "2025-01-10 09:30", exit: "2025-01-10 15:00", side: "LONG", entry_px: 100, exit_px: 101, net: 5000, exit_why: "x" }]) } } : c), { families: 5219, strict: true }).why.join(" | "), /only 10 trades over the years tested \(needs 30\)/);
 // no edge: half the trades win, half lose about the same (each year forced profitable to isolate the luck rule)
 const coin = Array.from({ length: 120 }, (_, i) => (i % 2 ? 1150 : -1000));
-const cv = robustVerdict(daily, good({ nets: coin }), { families: 5219 });
+const cv = robustVerdict(daily, good({ nets: coin }), { families: 5219, strict: true });
 console.log("coin flip →", cv.luck.dsr, cv.why);
 assert.match(cv.why.join(" | "), /could be luck: \d+% confidence it beats the best of 5219 rule families/);
 // daily strategies now face doubled slippage too
 const thin = good().map((c) => c.kind === "year" ? { ...c, result: { ...c.result, xcost: c.result.net + 1 } } : c);
-assert.match(robustVerdict(daily, thin, { families: 5219 }).why.join(" | "), /slippage is doubled/);
+assert.match(robustVerdict(daily, thin, { families: 5219, strict: true }).why.join(" | "), /slippage is doubled/);
 console.log("ok   verdicts: vault, neighbours, best-trades cut, trade minimum, luck, daily slippage stress");
 console.log("all passed");

@@ -1598,10 +1598,20 @@ export const assetRoot = (k: string) => /^GOLD/.test(k) ? "GOLD" : /^SILVER/.tes
 type Check = { kind: "self" | "asset" | "tf" | "year" | "step" | "vault"; asset: string; tf: number | null; config: LabConfig };
 /** Years back for the year-by-year test: 10 on daily candles; 5 on 5-minute candles (the depth Dhan keeps). */
 export const yearsFor = (cfg: LabConfig) => cfg.rules?.daily ? 10 : 5;
-/** The checks for one first-round winner, limited to assets the lab has candles for. */
-export function robustChecks(cfg: LabConfig, haveD: Set<string>, haveI5: Set<string>): Check[] {
+/**
+ * The checks for one first-round winner, limited to assets the lab has candles for. Simple rules (rev 5, the default
+ * since 27 Oct 2026): the strategy itself, year by year, and the held-back months. `strict` (lab_settings.strict) adds
+ * the other assets, other timeframes and nearby settings of rev 4.
+ */
+export function robustChecks(cfg: LabConfig, haveD: Set<string>, haveI5: Set<string>, strict = false): Check[] {
   const out: Check[] = [{ kind: "self", asset: cfg.underlying, tf: null, config: cfg }];
   const daily = !!cfg.rules?.daily, me = LAB_ASSETS[cfg.underlying];
+  if (!strict) {
+    for (let k = 1; k <= yearsFor(cfg); k++) out.push({ kind: "year", asset: cfg.underlying, tf: k, config: cfg });
+    out.push({ kind: "vault", asset: cfg.underlying, tf: null, config: cfg });
+    const vd = vaultDays(cfg);
+    return out.map((c) => ({ ...c, config: { ...c.config, vault_days: vd } }));
+  }
   // Other assets: the same family first (indices for an index strategy, commodities for a commodity one, coins for a
   // coin), up to 6.
   const roots = new Set([assetRoot(cfg.underlying)]);
@@ -1671,9 +1681,16 @@ export async function familiesFor(sb: SupabaseClient, cfg: LabConfig): Promise<n
   if (!(n > 0)) throw new Error("lab: no rule-family count for this mode");
   return Math.max(10, n);
 }
-/** The verdict once every check of a winner is done. */
-export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: string; tf: number | null; result: any }[], opts: { families?: number } = {}) {
-  const daily = !!cfg.rules?.daily;
+/**
+ * The verdict once every check of a winner is done.
+ * Simple rules (rev 5, 27 Oct 2026, Papa: "relax the strategies, reward continuous profit"): profitable in all but one
+ * year in five (8 of 10, 4 of 5; minute strategies with under 3 years: 3 of the last 4 quarters), still profitable in
+ * total with slippage doubled, enough trades, and profitable in the held-back last months. Luck, the best trades
+ * removed (and, with `strict`, other assets, timeframes, nearby settings and the stage-2 noise tests) are shown for
+ * information; strategies are ranked by the consistency score.
+ */
+export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: string; tf: number | null; result: any }[], opts: { families?: number; strict?: boolean } = {}) {
+  const daily = !!cfg.rules?.daily, strict = !!opts.strict;
   const self = checks.find((c) => c.kind === "self")?.result ?? null;
   const assets = checks.filter((c) => c.kind === "asset").map((c) => ({ asset: c.asset, ...c.result }));
   const tfs = checks.filter((c) => c.kind === "tf" && !c.result?.skip).map((c) => ({ tf: c.tf, ...c.result }));
@@ -1682,11 +1699,15 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   const allTrades = unpackTrades(joinTrades(checks.filter((c) => c.kind === "year" && !c.result?.skip).map((c) => c.result?.tr).filter(Boolean)));
   const okY = yrs.filter((x) => x.ok).length;
   const why: string[] = [];
-  if (!self || !(self.net > 0)) why.push("lost money on the latest year");
-  if (!assets.length) why.push("no other asset to test it on");
-  else if (okA < 1) why.push(`worked on ${okA} of ${assets.length} other assets (needs 1)`);
-  if (tfs.length) { const need = tfs.length >= 3 ? 2 : 1; if (okT < need) why.push(`worked on ${okT} of ${tfs.length} other timeframes (needs ${need})`); }
-  else why.push("could not be tested on another timeframe yet (not enough 5-minute candles for this asset; MCX history grows every night)");
+  if (strict) {
+    if (!self || !(self.net > 0)) why.push("lost money on the latest year");
+    if (!assets.length) why.push("no other asset to test it on");
+    else if (okA < 1) why.push(`worked on ${okA} of ${assets.length} other assets (needs 1)`);
+    if (tfs.length) { const need = tfs.length >= 3 ? 2 : 1; if (okT < need) why.push(`worked on ${okT} of ${tfs.length} other timeframes (needs ${need})`); }
+    else why.push("could not be tested on another timeframe yet (not enough 5-minute candles for this asset; MCX history grows every night)");
+  }
+  // Years needed: every year (strict), or all but one in five (simple: 8 of 10, 4 of 5, 3 of 3).
+  const needY = strict ? yrs.length : yrs.length - Math.floor(yrs.length / 5);
   // Minute-candle strategies on assets with only about a year of minute prices (Dhan keeps an MCX contract's intraday
   // history for about a year): judged quarter by quarter instead, at least 3 of the last 4 quarters profitable.
   let quarters: { q: number; from: string; to: string; n: number; net: number; ok: boolean }[] | null = null;
@@ -1704,7 +1725,7 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
       if (okQ < 3) why.push(`only ${yrs.length} year${yrs.length === 1 ? "" : "s"} of minute prices, so judged by quarter: profitable in ${okQ} of the last 4 quarters (needs 3; lost or flat in ${quarters.filter((x) => !x.ok).map((x) => `quarter ${x.q}`).join(", ")})`);
     } else why.push(`only ${yrs.length} year${yrs.length === 1 ? "" : "s"} of history to test year by year (needs 3)`);
   } else if (yrs.length < 3) why.push(`only ${yrs.length} year${yrs.length === 1 ? "" : "s"} of history to test year by year (needs 3)`);
-  else if (okY < yrs.length) why.push(`profitable in ${okY} of the past ${yrs.length} years (needs every year; lost or flat in ${yrs.filter((x) => !x.ok).map((x) => `year ${x.y}`).join(", ")})`);
+  else if (okY < needY) why.push(`profitable in ${okY} of the past ${yrs.length} years (needs ${needY === yrs.length ? "every year" : needY}; lost or flat in ${yrs.filter((x) => !x.ok).map((x) => `year ${x.y}`).join(", ")})`);
   // Fills decide a strategy's edge: it must still make money in total and in every year with the asset's slippage
   // doubled (charges are known exactly and counted once). Minute and daily strategies alike.
   if (yrs.length >= 3 || quarters) {
@@ -1712,7 +1733,7 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
     if (st.every((x) => x.has)) {
       const tot = st.reduce((a, x) => a + x.v, 0), bad = st.filter((x) => !(x.v > 0));
       if (!(tot > 0)) why.push(`loses money once slippage is doubled (₹${Math.trunc(tot).toLocaleString("en-IN")} over ${st.length} years)`);
-      else if (bad.length) why.push(`with slippage doubled it lost money in ${bad.map((x) => `year ${x.y}`).join(", ")}`);
+      else if (strict && bad.length) why.push(`with slippage doubled it lost money in ${bad.map((x) => `year ${x.y}`).join(", ")}`);
     }
   }
   const bh = self?.bh ?? null;
@@ -1730,7 +1751,8 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   if (stepList.length >= 3) {
     const med = median(stepList.map((x) => Number(x.net) || 0)), selfNet = Number(self?.net) || 0, okS = stepList.filter((x) => x.ok).length;
     plateau = { ok: okS, n: stepList.length, median: med == null ? null : Math.trunc(med), self: Math.trunc(selfNet) };
-    if (okS < Math.ceil(stepList.length * 0.75)) why.push(`works only near this exact setting: ${okS} of ${stepList.length} nearby settings made money (needs ${Math.ceil(stepList.length * 0.75)})`);
+    if (!strict) { /* shown for information */ }
+    else if (okS < Math.ceil(stepList.length * 0.75)) why.push(`works only near this exact setting: ${okS} of ${stepList.length} nearby settings made money (needs ${Math.ceil(stepList.length * 0.75)})`);
     else if (med != null && selfNet > 0 && med < selfNet * 0.5) why.push(`nearby settings made much less (typical ₹${Math.trunc(med).toLocaleString("en-IN")} against ₹${Math.trunc(selfNet).toLocaleString("en-IN")}): the result depends on the exact setting`);
   }
   const nets = allTrades.map((t) => Number(t.net) || 0);
@@ -1742,12 +1764,12 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   if (nets.length) {
     const k = Math.max(1, Math.ceil(nets.length * 0.05)), rest = [...nets].sort((a, b) => b - a).slice(k).reduce((a, x) => a + x, 0);
     topCut = { dropped: k, net: Math.trunc(rest) };
-    if (!(rest > 0)) why.push(`the profit comes from a few trades: without its best ${k} it ${rest < 0 ? `lost ₹${Math.trunc(-rest).toLocaleString("en-IN")}` : "made nothing"}`);
+    if (strict && !(rest > 0)) why.push(`the profit comes from a few trades: without its best ${k} it ${rest < 0 ? `lost ₹${Math.trunc(-rest).toLocaleString("en-IN")}` : "made nothing"}`);
   }
   // Luck: the chance its trades beat the best result expected from luck alone among the rule families the lab has
   // tried (Deflated Sharpe Ratio); 95% needed.
   const luck = { ...deflatedSharpe(nets, opts.families ?? 100), families: opts.families ?? null };
-  if (nets.length >= 3 && luck.dsr < 0.95) why.push(`could be luck: ${Math.round(luck.dsr * 100)}% confidence it beats the best of ${luck.trials} rule families the lab has tried, by chance (needs 95%)`);
+  if (strict && nets.length >= 3 && luck.dsr < 0.95) why.push(`could be luck: ${Math.round(luck.dsr * 100)}% confidence it beats the best of ${luck.trials} rule families the lab has tried, by chance (needs 95%)`);
   // The vault: the held-back latest months, seen once.
   const vc = checks.find((c) => c.kind === "vault");
   const vault = vc?.result ?? null;
@@ -1760,7 +1782,8 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   const nz = checks.filter((c) => c.kind === "noise" && c.result && !c.result.error);
   const rnd = checks.find((c) => c.kind === "random")?.result ?? null;
   let noise: { p: number; runs: number; real: number } | null = null, needsStage2 = false;
-  if (!nz.length && !rnd) { if (!why.length) { needsStage2 = true; why.push("waiting for the noise tests (shuffled prices, random entries)"); } }
+  if (!strict) { /* stage 2 belongs to the strict rules */ }
+  else if (!nz.length && !rnd) { if (!why.length) { needsStage2 = true; why.push("waiting for the noise tests (shuffled prices, random entries)"); } }
   else {
     const real = nz.find((c) => Number(c.tf) === 0)?.result?.net, runs = nz.filter((c) => Number(c.tf) !== 0).map((c) => Number(c.result.net) || 0);
     if (real == null || runs.length < 20) why.push("the shuffled-price test didn't finish");
@@ -1773,8 +1796,9 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   }
   const quality = qualityScore(yrs, allTrades, { okA, nA: assets.length, okT, nT: tfs.length },
     { stepsOk: stepList.filter((x) => x.ok).length, stepsN: stepList.length, twoWay: cfg.direction === "BOTH", capital: 500000 });
-  return { passed: why.length === 0, why, self, bh, vs_bh: vsBh, risk_vs_bh: riskVsBh, assets: { ok: okA, n: assets.length, list: assets },
-    tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, vault, luck, plateau, top_cut: topCut, noise, random: rnd, needs_stage2: needsStage2, rev: 4, ...(quarters ? { quarters: { ok: quarters.filter((x) => x.ok).length, n: quarters.length, list: quarters } } : {}), steps: { ok: stepList.filter((x) => x.ok).length, n: stepList.length, list: stepList }, quality, daily, checked_at: new Date().toISOString() };
+  const consistency = consistencyScore(yrs, allTrades, quarters);
+  return { passed: why.length === 0, why, consistency, strict, self, bh, vs_bh: vsBh, risk_vs_bh: riskVsBh, assets: { ok: okA, n: assets.length, list: assets },
+    tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, vault, luck, plateau, top_cut: topCut, noise, random: rnd, needs_stage2: needsStage2, rev: strict ? 4 : 5, ...(quarters ? { quarters: { ok: quarters.filter((x) => x.ok).length, n: quarters.length, list: quarters } } : {}), steps: { ok: stepList.filter((x) => x.ok).length, n: stepList.length, list: stepList }, quality, daily, checked_at: new Date().toISOString() };
 }
 
 /* ---------- long trade lists and the quality score ---------- */
@@ -1908,6 +1932,61 @@ export function qualityScore(
     up_ok: up.filter((y) => y.ok).length, up_n: up.length, down_ok: down.filter((y) => y.ok).length, down_n: down.length,
     long_net: Math.trunc(longNet), short_net: Math.trunc(shortNet), two_way: ex.twoWay, rom_pct: +(rom * 100).toFixed(1), avg_margin: Math.trunc(avgMargin) };
 }
+/**
+ * Consistency score, 0–100 (rev 5, the lab's ranking): steady profit scores more than the same profit made in a few
+ * good stretches.
+ *  years 25 – share of years profitable (minute strategies with under 3 years: the last 4 quarters)
+ *  quarters 25 – share of calendar quarters with trades that made money
+ *  smoothness 20 – half: how close the month-end profit curve is to a straight rising line (R², rising only);
+ *                  half: how even the yearly profits are (1 ÷ (1 + spread ÷ average))
+ *  return ÷ drawdown 15 – yearly net ÷ worst drawdown (1.5 or more = full)
+ *  worst year 15 – full if no year lost; losing a whole average year's profit = 0
+ */
+export function consistencyScore(
+  yrs: { y: number; net: number; ok: boolean }[],
+  trades: { exit: string; net: number }[],
+  quarters: { ok: boolean }[] | null = null,
+) {
+  const n = yrs.length;
+  if (n < 1 || !trades.length) return null;
+  const clamp = (x: number) => Math.max(0, Math.min(1, x));
+  const yearShare = quarters && n < 3 ? quarters.filter((q) => q.ok).length / quarters.length : yrs.filter((y) => y.ok).length / n;
+  const qs = new Map<string, number>(), ms = new Map<string, number>();
+  let eq = 0, peak = 0, dd = 0;
+  for (const t of [...trades].sort((a, b) => String(a.exit).localeCompare(String(b.exit)))) {
+    const v = Number(t.net) || 0, d = String(t.exit).slice(0, 10);
+    eq += v; peak = Math.max(peak, eq); dd = Math.max(dd, peak - eq);
+    const q = `${d.slice(0, 4)}Q${Math.floor((Number(d.slice(5, 7)) - 1) / 3) + 1}`;
+    qs.set(q, (qs.get(q) ?? 0) + v); ms.set(d.slice(0, 7), (ms.get(d.slice(0, 7)) ?? 0) + v);
+  }
+  const qVals = [...qs.values()], qShare = qVals.length ? qVals.filter((x) => x > 0).length / qVals.length : 0;
+  // Month-end profit curve over every calendar month from the first trade to the last (months without trades count flat).
+  const keys = [...ms.keys()].sort(), curve: number[] = [];
+  if (keys.length) {
+    let [yy, mm] = keys[0].split("-").map(Number); const [ly, lm] = keys[keys.length - 1].split("-").map(Number);
+    let c = 0;
+    while (yy < ly || (yy === ly && mm <= lm)) { c += ms.get(`${yy}-${String(mm).padStart(2, "0")}`) ?? 0; curve.push(c); if (++mm > 12) { mm = 1; yy++; } }
+  }
+  let r2 = 0, slope = 0;
+  if (curve.length >= 3) {
+    const k = curve.length, mx = (k - 1) / 2, my = curve.reduce((a, b) => a + b, 0) / k;
+    let sxy = 0, sxx = 0, syy = 0;
+    curve.forEach((y, i) => { sxy += (i - mx) * (y - my); sxx += (i - mx) ** 2; syy += (y - my) ** 2; });
+    slope = sxx ? sxy / sxx : 0; r2 = syy ? (sxy * sxy) / (sxx * syy) : 0;
+  }
+  const total = trades.reduce((a, t) => a + (Number(t.net) || 0), 0), perYear = total / n;
+  const rdd = dd > 0 ? perYear / dd : perYear > 0 ? 9 : 0;
+  const nets = yrs.map((y) => Number(y.net) || 0), mean = nets.reduce((a, b) => a + b, 0) / n, worst = Math.min(...nets);
+  // Smoothness: half the straight-line fit, half how even the yearly profits are (a few big years score low).
+  const cv = mean > 0 ? Math.sqrt(nets.reduce((a, x) => a + (x - mean) ** 2, 0) / n) / mean : 9;
+  const smooth = slope > 0 ? 0.5 * r2 + 0.5 / (1 + cv) : 0;
+  const worstPart = worst >= 0 ? 1 : mean > 0 ? clamp(1 + worst / mean) : 0;
+  const pts = (w: number, x: number) => +(w * clamp(x)).toFixed(1);
+  const parts = { years: pts(25, yearShare), quarters: pts(25, qShare), smooth: pts(20, smooth), return_dd: pts(15, rdd / 1.5), worst_year: pts(15, worstPart) };
+  const score = +Object.values(parts).reduce((a, b) => a + b, 0).toFixed(1);
+  return { score, parts, years_share: +(yearShare * 100).toFixed(0), quarters_ok: qVals.filter((x) => x > 0).length, quarters_n: qVals.length,
+    r2: +r2.toFixed(2), cv: +cv.toFixed(2), return_dd: +rdd.toFixed(2), worst_year: Math.trunc(worst), avg_year: Math.trunc(mean), per_year: Math.trunc(perYear), max_dd: Math.trunc(dd) };
+}
 async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: string; to: string }, patch: (f: Record<string, unknown>) => unknown): Promise<boolean> {
   const { sb } = ctx;
   const capital = Number(run.settings?.capital ?? 500000);
@@ -1924,7 +2003,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     const { data: rows } = await q;
     for (const r of rows ?? []) {
       if (Date.now() - ctx.started > WALL_BUDGET - 20000) return true;
-      const checks = robustChecks(r.config, haveD, haveI5).map((c) => ({ lab_id: r.id, kind: c.kind, asset: c.asset, tf: c.tf, config: c.config, status: "pending" }));
+      const checks = robustChecks(r.config, haveD, haveI5, !!run.settings?.strict).map((c) => ({ lab_id: r.id, kind: c.kind, asset: c.asset, tf: c.tf, config: c.config, status: "pending" }));
       const { error } = await sb.from("lab_checks").insert(checks);
       if (error) throw new Error(error.message);
       await sb.from("lab_results").update({ robust_status: "queued" }).eq("id", r.id);
@@ -2042,7 +2121,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
     // A winner whose checks went missing goes back in the queue to get a fresh set (never stuck as "queued").
     if (!cs.length) { await sb.from("lab_results").update({ robust_status: null }).eq("id", r.id).eq("robust_status", "queued"); continue; }
     if (cs.some((c) => c.status === "pending")) continue;
-    const v = robustVerdict(r.config, cs, { families: await familiesFor(sb, r.config) });
+    const v = robustVerdict(r.config, cs, { families: await familiesFor(sb, r.config), strict: !!run.settings?.strict });
     if (v.needs_stage2) {
       // A finalist: 100 runs on shuffled prices (plus the real one) and the random-entry test, then decided again.
       const cfg = { ...r.config, vault_days: vaultDays(r.config) };
@@ -2371,41 +2450,41 @@ export function periodWindows(trades: { exit: string; net: number }[], from: str
  * stress of each year is recomputed from the kept trades (entry and exit prices × the asset's slippage × the lot), and
  * the verdict and quality score are worked out again. Marks each row done (robust.rev) so it can be called repeatedly.
  */
-export async function labReverdict(sb: SupabaseClient, limit = 120, shortOnly = false): Promise<{ done: number; flipped: number; left: number }> {
-  // Since the vault rule (rev 4) a verdict needs a check that stored results don't have: saved strategies are re-tested
-  // through the re-test queue (lab_refresh) instead of being re-scored here.
-  if (limit >= 0) throw new Error("Re-scoring stored results is retired: saved strategies are re-tested in full through the re-test queue.");
+/**
+ * Re-scores stored results under the simple rules (rev 5) from what their full test kept: the year-by-year results and
+ * trades (trades_long), the held-back months and the stored checks. No new backtests; a batch per call.
+ */
+export async function labReverdict(sb: SupabaseClient, limit = 50): Promise<{ done: number; passed: number; flipped: number; left: number }> {
   await loadCryptoAssets(sb);
-  const { data: rows, error } = await sb.from("lab_results").select("id, config, robust, trades_long, basic_passed, passed")
-    .eq("robust_status", "done").not("robust->years->list", "is", null).or("robust->>rev.is.null,robust->>rev.neq.3").in("robust->years->>n", shortOnly ? ["0", "1", "2"] : ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]).order("id").limit(limit);
+  // Small index (lab_results_robust_q: basic_passed, robust_status) first, then the rows themselves.
+  const { data: ids, error: ie } = await sb.from("lab_results").select("id").eq("basic_passed", true).eq("robust_status", "done")
+    .is("superseded_by", null).or("robust->>rev.is.null,robust->>rev.neq.5").order("id", { ascending: false }).limit(limit);
+  if (ie) throw new Error(ie.message);
+  const { data: rows, error } = (ids ?? []).length
+    ? await sb.from("lab_results").select("id, config, robust, trades_long, passed").in("id", ids!.map((r) => r.id))
+    : { data: [] as any[], error: null };
   if (error) throw new Error(error.message);
-  let done = 0, flipped = 0;
+  let done = 0, flipped = 0, passed = 0;
   for (const r of rows ?? []) {
-    const x = r.robust ?? {}, cfg = r.config ?? {};
-    const lot = Number(cfg.lot_size) || 1, frac = slippageFor(String(cfg.underlying)).fut;
-    const trades = unpackTrades(r.trades_long);
-    const years = (x.years?.list ?? []) as any[];
-    const yearChecks = years.map((y) => {
-      const ts = trades.filter((t) => t.exit.slice(0, 10) >= String(y.from) && t.exit.slice(0, 10) <= String(y.to));
-      const xcost = trades.length ? Math.trunc(ts.reduce((a, t) => a + frac * ((Number(t.entry_px) || 0) + (Number(t.exit_px) || 0)) * lot, 0)) : y.xcost;
-      return { kind: "year", asset: String(cfg.underlying), tf: Number(y.y), result: { ...y, xcost, ...(Number(y.y) === 1 && r.trades_long ? { tr: r.trades_long } : {}) } };
-    });
+    const x = r.robust ?? {}, cfg = r.config ?? {}, u = String(cfg.underlying);
     const checks = [
-      ...(x.self ? [{ kind: "self", asset: String(cfg.underlying), tf: null, result: x.self }] : []),
+      ...(x.self ? [{ kind: "self", asset: u, tf: null, result: x.self }] : []),
       ...((x.assets?.list ?? []) as any[]).map((a) => ({ kind: "asset", asset: String(a.asset), tf: null, result: a })),
-      ...((x.tfs?.list ?? []) as any[]).map((t) => ({ kind: "tf", asset: String(cfg.underlying), tf: Number(t.tf), result: t })),
-      ...yearChecks,
-      ...((x.steps?.list ?? []) as any[]).map((st) => ({ kind: "step", asset: String(cfg.underlying), tf: null, result: st })),
+      ...((x.tfs?.list ?? []) as any[]).map((t) => ({ kind: "tf", asset: u, tf: Number(t.tf), result: t })),
+      ...((x.years?.list ?? []) as any[]).map((y) => ({ kind: "year", asset: u, tf: Number(y.y), result: { ...y, ...(Number(y.y) === 1 && r.trades_long ? { tr: r.trades_long } : {}) } })),
+      ...((x.steps?.list ?? []) as any[]).map((st) => ({ kind: "step", asset: u, tf: null, result: st })),
+      ...(x.vault ? [{ kind: "vault", asset: u, tf: null, result: x.vault }] : []),
     ];
-    const v: any = robustVerdict(cfg, checks as any);
-    v.checked_at = x.checked_at ?? v.checked_at; v.rev = 3; v.status = "done";
-    const passed = !!r.basic_passed && v.passed;
-    if (passed !== !!r.passed) flipped++;
-    const { error: ue } = await sb.from("lab_results").update({ robust: v, passed }).eq("id", r.id);
+    const v: any = robustVerdict(cfg, checks as any, { families: Number(x.luck?.families ?? x.luck?.trials) || 100 });
+    // Kept from the earlier test, for information.
+    v.noise = x.noise ?? null; v.random = x.random ?? null; v.checked_at = x.checked_at ?? v.checked_at; v.rescored_at = new Date().toISOString();
+    if (v.passed) passed++;
+    if (v.passed !== !!r.passed) flipped++;
+    const { error: ue } = await sb.from("lab_results").update({ robust: v, passed: v.passed }).eq("id", r.id);
     if (ue) throw new Error(ue.message);
-    if (passed && !r.passed) await sb.rpc("lab_assign_twin", { p_id: r.id }).then(() => {}, () => {});
+    if (v.passed && !r.passed) await sb.rpc("lab_assign_twin", { p_id: r.id }).then(() => {}, () => {});
     done++;
   }
-  const { count } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("robust_status", "done").not("robust->years->list", "is", null).or("robust->>rev.is.null,robust->>rev.neq.3");
-  return { done, flipped, left: count ?? 0 };
+  const { count } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("basic_passed", true).eq("robust_status", "done").is("superseded_by", null).or("robust->>rev.is.null,robust->>rev.neq.5");
+  return { done, passed, flipped, left: count ?? 0 };
 }

@@ -2172,7 +2172,7 @@ Deno.serve(async (req) => {
     EdgeRuntime.waitUntil(runAudit(batch, Number(b.offset) || 0).catch((e) => console.error("audit", e)));
     return Response.json({ action, accepted: true, batch });
   }
-  if (action === "lab_reverdict") return Response.json({ action, ...(await labReverdict(sb, Math.min(300, Number((body as any).limit) || 120), !!(body as any).short)) });
+  if (action === "lab_reverdict") return Response.json({ action, ...(await labReverdict(sb, Math.min(200, Number((body as any).limit) || 50))) });
   if (action === "marks" && body.user_id) return Response.json({ action, marks: await liveMarks(body.user_id, false) });
   if (action === "lab_opt") {
     EdgeRuntime.waitUntil((async () => {
