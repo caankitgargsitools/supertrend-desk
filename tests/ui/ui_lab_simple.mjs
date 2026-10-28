@@ -101,5 +101,24 @@ console.log(JSON.stringify(await p.evaluate(() => { const g = document.getElemen
 if (c2.cols !== 14 || c2.sideways || !c2.legend || c2.codes[0] !== "1" || c2.sortedBy !== "test" || !/Net 1 yr Last 3 mo/.test(c2.hdr.join("|"))) { console.log("FAIL compact"); process.exit(1); }
 const sel = await p.evaluate(() => [...document.getElementById("lab_only").options].map((o) => o.value).join(",") + " | " + document.getElementById("lab_period").value);
 if (sel !== "passed,passed_desk,all | all") { console.log("FAIL filters", sel); process.exit(1); }
+// Best N per asset (28 Oct): desk strategies count like any other; per timeframe too; a re-tested desk strategy shows
+// its newest result, never the older one.
+const per = await p.evaluate(() => {
+  const t0 = lab.rows[0], mk = (id, fp, tf, score, passed, extra = {}) => ({ ...t0, id, fingerprint: fp, asset: "MIDCPNIFTY", run_id: 9, twin_of: null, family: fp, label: `M ${id}`, passed, basic_passed: true, score,
+    config: { ...t0.config, timeframe_min: tf, rules: { ...(t0.config.rules || {}), daily: false } }, metrics: { ...t0.metrics, score, passed: true }, robust: { ...(t0.robust || {}), status: "done", passed }, ...extra });
+  lab.rows = [mk(901, "A", 30, 9, true), mk(902, "B", 30, 8, true), mk(903, "C", 15, 7, true),
+    mk(904, "D", 30, 99, true, { superseded_by: 905 }), mk(905, "D", 30, 1, false)];
+  state.strategies = [...(state.strategies || []), { id: "desk1", name: "My Midcap", user_id: me.user_id, owner_id: me.user_id, lab_id: 904, archived: false, active: true, live: false }];
+  lab.asset = "ALL"; lab.filters = {}; lab.only = true; lab.deskKeep = false; lab.sortKey = "score"; lab.sortDir = -1;
+  const names = () => labGroup().map((f) => f.best.r.id);
+  lab.per = 1; lab.perTf = false; const one = names();
+  lab.per = 1; lab.perTf = true; const oneTf = names();
+  lab.per = 0; lab.deskKeep = true; const withMine = labGroup().map((f) => [f.best.r.id, !!f.desk]);
+  lab.deskKeep = false; lab.per = 5; lab.perTf = false;
+  return { one, oneTf, withMine };
+});
+console.log(JSON.stringify(per));
+if (JSON.stringify(per.one) !== "[901]" || JSON.stringify(per.oneTf) !== "[901,903]" || !per.withMine.some(([id, d]) => id === 905 && d) || per.withMine.some(([id]) => id === 904)) { console.log("FAIL per asset"); process.exit(1); }
+console.log("ok   best 1 per asset shows one (desk strategies too), per asset per timeframe, a re-tested desk strategy shows its newest result");
 console.log("ok   compact table: 14 two-figure columns, no sideways scroll at 1440 px, numbered statuses with a legend, sort by either figure, All time and Passed-only filters");
 await b.close();

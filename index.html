@@ -1107,7 +1107,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
           <label class="f"><span>From</span><select id="lab_period"><option value="all" selected>All time (everything the lab kept)</option><option value="run">Latest run only</option><option value="7">Found in the last 7 days</option><option value="30">Found in the last 30 days</option></select></label>
           <label class="f"><span>Stop loss</span><select id="lab_stopf"><option value="ANY">With or without</option><option value="WITH">With stop / target</option><option value="WITHOUT">Without</option></select></label>
           <label class="f"><span>Show</span><select id="lab_only"><option value="passed">Passed only</option><option value="passed_desk">Passed, plus mine on my desk</option><option value="all">Everything (failed too)</option></select></label>
-          <label class="f"><span>Per asset</span><select id="lab_per"><option value="1">Best 1 per asset</option><option value="5" selected>Best 5 per asset</option><option value="10">Best 10 per asset</option><option value="0">All</option></select></label>
+          <label class="f"><span>Per asset</span><select id="lab_per"><option value="1">Best 1 per asset</option><option value="5" selected>Best 5 per asset</option><option value="10">Best 10 per asset</option><option value="1tf">Best 1 per asset per timeframe</option><option value="5tf">Best 5 per asset per timeframe</option><option value="0">All</option></select></label>
           <label class="f"><span>My desk</span><select id="lab_mine"><option value="">Mark mine among all</option><option value="only">Only those on my desk</option></select></label>
         </div>
         <div id="lab_reqfilter" class="banner info" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center" hidden></div>
@@ -3818,7 +3818,7 @@ function openLabFor(s, how) {
   lab.view = s.trade_type === "OPTIONS" ? (s.structure ? "SPREAD" : s.option_side === "SELL" ? "SELL" : "BUY") : "FUT";
   $("lab_view").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x.dataset.v === lab.view ? "true" : "false")); $("lab_stopf").disabled = lab.view !== "FUT";
   lab.filters = {}; lab.mine = ""; $("lab_mine").value = ""; lab.showN = 0; lab.request = null;
-  if (how === "compare") { lab.per = 10; $("lab_per").value = "10"; lab.cmp = s.name; } else lab.cmp = null;
+  if (how === "compare") { lab.per = 10; lab.perTf = false; $("lab_per").value = "10"; lab.cmp = s.name; } else lab.cmp = null;
   lab.focus = { strat: s.id, labId: Number(s.lab_id), open: how === "open" };
   openLab();
 }
@@ -3923,13 +3923,19 @@ async function loadLabRun(stale) {
       if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : lab.view === "SPREAD" ? "opt_struct" : "opt_sell", "is", null);
       const got = (await q.then((x) => x.data).catch(() => null)) || [];
       all.push(...got);
-      // A desk strategy re-tested since: its newest result is shown with it.
-      const newer = [...new Set(got.map((r) => r.superseded_by).filter((id) => id && !have.has(Number(id))))];
-      const nrows = newer.length ? ((await db.from("lab_results_list").select(LAB_ROW_COLS).in("id", newer.slice(0, 200)).then((x) => x.data).catch(() => null)) || []) : [];
+      // A desk strategy re-tested since (possibly several times): its newest result, found by its fingerprint, is
+      // what counts; the older ones only link the desk strategy to it.
+      const fps = [...new Set(got.filter((r) => r.superseded_by).map((r) => r.fingerprint))];
+      let nrows = [];
+      if (fps.length) {
+        let q2 = db.from("lab_results_list").select(LAB_ROW_COLS).in("fingerprint", fps.slice(0, 200)).is("superseded_by", null);
+        if (lab.asset !== "ALL") q2 = q2.eq("asset", lab.asset);
+        nrows = ((await q2.then((x) => x.data).catch(() => null)) || []).filter((r) => !have.has(Number(r.id)));
+      }
       all.push(...nrows);
       // Re-tests that failed before failures were kept: only the desk strategy's note says why.
-      const found = new Set([...have, ...nrows.map((r) => Number(r.id))]);
-      for (const r of got) if (r.superseded_by && !found.has(Number(r.superseded_by))) { r.retestFailed = true; r.passed = false; }
+      const current = new Set([...all.filter((r) => !r.superseded_by).map((r) => r.fingerprint)]);
+      for (const r of got) if (r.superseded_by && !current.has(r.fingerprint)) { r.retestFailed = true; r.passed = false; }
     }
   }
   lab.rows = all.map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
@@ -4406,10 +4412,13 @@ function labGroup() {
   // One line per strategy (same rules and stops), showing its latest result and how often it passed.
   const by = new Map(), desk = labDeskMap();
   lab.deskSince = labDeskSince(desk);
+  const current = new Set(lab.rows.filter((r) => !r.superseded_by).map((r) => r.fingerprint)), deskByFp = new Map();
+  for (const r of lab.rows) { const d = desk.get(Number(r.id)); if (d && r.superseded_by && current.has(r.fingerprint)) deskByFp.set(r.fingerprint, [...(deskByFp.get(r.fingerprint) || []), ...d]); }
   for (const r of lab.rows) {
     const m = labMetricsFor(r); if (!m) continue;
-    const mine = desk.get(Number(r.id));
-    // A strategy on my desk always stays in the list, so the lab's finds can be compared with it.
+    const own = [...(desk.get(Number(r.id)) || []), ...(!r.superseded_by ? deskByFp.get(r.fingerprint) || [] : [])], mine = own.length ? own : null;
+    // An older result of a strategy re-tested since never stands in for the newest one (its desk mark moves there).
+    if (r.superseded_by && current.has(r.fingerprint)) continue;
     // "Passed only" hides every strategy that didn't pass, those on my desk too; "Passed, plus mine" keeps mine.
     if (lab.only && !labPassed(r, m) && !(mine && lab.deskKeep)) continue;
     const risk = r.config ? r.config.risk : r.has_risk;
@@ -4444,12 +4453,20 @@ function labGroup() {
   const cmp = (a, b) => { const x = key(a), y = key(b); return (typeof x === "string" ? x.localeCompare(y) : x - y) * dir; };
   const out = [...fam.values()].map((f) => { f.members.sort(cmp); f.best = f.members[0]; f.desk = f.members.some(deskOpen); return f; }).sort((a, b) => cmp(a.best, b.best));
   lab.deskN = out.filter((f) => f.desk).length;
-  // "Best N per asset": only the top groups of each asset, in the order picked above. Groups with a strategy on my desk always stay.
+  // "Best N per asset" (or per asset and timeframe): only the top groups of each, in the order picked above. Strategies on
+  // my desk count like any other; they stay on top of the limit only with "Show: Passed, plus mine on my desk" (Papa,
+  // 28 Oct: "best 1 per asset" must show one).
   lab.perHidden = 0;
   if (!lab.per) return out;
   const seen = new Map();
-  return out.filter((f) => { if (f.desk) return true; const a = f.best.r.asset, k = (seen.get(a) || 0) + 1; seen.set(a, k); if (k > lab.per) { lab.perHidden++; return false; } return true; });
+  return out.filter((f) => {
+    if (f.desk && lab.deskKeep) return true;
+    const a = lab.perTf ? `${f.best.r.asset}|${labTfKey(f.best.r)}` : f.best.r.asset, k = (seen.get(a) || 0) + 1; seen.set(a, k);
+    if (k > lab.per) { lab.perHidden++; return false; } return true;
+  });
 }
+/** The decision timeframe of a lab strategy: "D" for once a day, else its candle minutes (users see the style). */
+function labTfKey(r) { const c = r.config; return c ? (c.rules && c.rules.daily ? "D" : String(c.timeframe_min)) : labStyle(r); }
 function familyKey(r) {
   // Twins (same asset, 80%+ of trades opened on the same day in the same direction) are one group.
   if (r.twin_of) return "T" + r.twin_of;
@@ -4772,7 +4789,7 @@ function renderLabTable() {
   const nStrat = fams.reduce((a, f) => a + f.members.length, 0);
   const nf = Object.values(lab.filters).filter(Boolean).length;
   const cmpTxt = lab.cmp ? `Comparing with your “${lab.cmp}” (green row, ✓ On my desk): rows above it rank higher on the column you sort by; “New since yours” marks strategies found after you added it. ` : "";
-  $("lab_count").textContent = (fams.length ? cmpTxt : "") + (fams.length ? `${fams.length} groups of twins / similar strategies (${nStrat} strategies)${lab.perHidden ? `, best ${lab.per} per asset (${lab.perHidden} more groups under “Per asset: All”)` : ""}${nf ? `, ${nf} column filter${nf === 1 ? "" : "s"} on` : ""}${lab.deskN ? `; ${lab.deskN} on your desk (green, ✓)` : ""}${fams.length > (lab.showN || 150) ? `; showing the first ${lab.showN || 150} groups (type in the boxes under the titles to find one, e.g. “HA strength” under Strategy, or press “Show more”)` : ""}.${labPhone() ? " Tap a card to open it." : " Click a column title to sort; type in the boxes under the titles to filter (numbers: 50 = at least 50, >50, <0, 10-20)."}` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run."));
+  $("lab_count").textContent = (fams.length ? cmpTxt : "") + (fams.length ? `${fams.length} groups of twins / similar strategies (${nStrat} strategies)${lab.perHidden ? `, best ${lab.per} per asset${lab.perTf ? " per timeframe" : ""} (${lab.perHidden} more groups under “Per asset: All”)` : ""}${nf ? `, ${nf} column filter${nf === 1 ? "" : "s"} on` : ""}${lab.deskN ? `; ${lab.deskN} on your desk (green, ✓)` : ""}${fams.length > (lab.showN || 150) ? `; showing the first ${lab.showN || 150} groups (type in the boxes under the titles to find one, e.g. “HA strength” under Strategy, or press “Show more”)` : ""}.${labPhone() ? " Tap a card to open it." : " Click a column title to sort; type in the boxes under the titles to filter (numbers: 50 = at least 50, >50, <0, 10-20)."}` : (lab.view === "FUT" ? "Nothing here yet for these filters." : "No strategies priced with real option prices yet for these filters. The best index strategies of each run are priced at the end of the run."));
   const pc = (v) => `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}" title="${rupees(v)}">${rupeesShort(v)}</span>`;
   const rs = (v) => v == null ? "–" : `<span title="${rupees(v)}">${rupeesShort(v)}</span>`;
   const rowFor = (g, num, f, sub) => {
@@ -5191,7 +5208,7 @@ $("lab_view").querySelectorAll("button").forEach((b) => b.addEventListener("clic
   const sel = $("lab_asset");
   fillLabAssetSelect();
   sel.addEventListener("change", () => { lab.asset = sel.value; lab.cmp = null; loadLab().catch((e) => toast(errorText(e))); });
-  $("lab_per").addEventListener("change", () => { lab.per = Number($("lab_per").value); lab.showN = 0; renderLabTable(); });
+  $("lab_per").addEventListener("change", () => { const v = $("lab_per").value; lab.per = parseInt(v, 10) || 0; lab.perTf = v.endsWith("tf"); lab.showN = 0; renderLabTable(); });
   $("lab_more").addEventListener("click", () => { lab.showN = (lab.showN || 150) + 150; renderLabTable(); });
   $("lab_period").addEventListener("change", () => { lab.period = $("lab_period").value; loadLab().catch((e) => toast(errorText(e))); });
   $("lab_only").addEventListener("change", () => { const v = $("lab_only").value; lab.only = v !== "all"; lab.deskKeep = v === "passed_desk"; loadLab().catch((e) => toast(errorText(e))); });
