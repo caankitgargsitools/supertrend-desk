@@ -158,7 +158,12 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   redone). Step 2: correction layer `predictor/calib.py` — logistic model per timeframe and step, pooled across assets
   (inputs: Kronos's move ÷ usual swing, paths agreeing, last 1/5/20-candle moves, time of day, asset type), refitted every
   3 h walk-forward (each month only from outcomes known before it; needs 300), `pred_stats.cal_n/hit_cal`; page columns
-  "Corrected" and "All paths agree". Runs on the Dhandha AWS server (t4g.small, Mumbai, shared with the
+  "Corrected" and "All paths agree". Fine-tuning (28 Oct, migration 54): GitHub Actions `kronos-finetune.yml` (manual; free runners; needs repo secret
+  PRED_KEY): `finetune.py` trains the Kronos-mini predictor (tokenizer frozen, the Kronos recipe) on every asset and
+  timeframe's candles before 2025-09-01 only (last 90 days before it for checking, best checkpoint kept), `evaluate.py`
+  compares original vs fine-tuned on the same unseen candles from the cutoff (per asset group in parallel), `report.py`
+  sends the results (`pred_push` model_run → `pred_models`); weights = GitHub release asset. Page section "Fine-tuning".
+  The server keeps the original until Papa chooses (switching would need model-tagged stats). Runs on the Dhandha AWS server (t4g.small, Mumbai, shared with the
   crawler) as Docker `ankgenie-predictor` (image `ghcr.io/caankitgargsitools/ankgenie-predictor`, GitHub Actions
   `predictor-image.yml`, own Watchtower; `--memory 1200m`, low CPU priority; forecast detail in SQLite on its volume).
   It talks only to the engine with its own key (`x-pred-key`, sha256 in `pred_settings.key_hash`, made on the page by

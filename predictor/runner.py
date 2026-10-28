@@ -19,7 +19,7 @@ def _times(ts):
 
 
 class KronosRunner:
-    def __init__(self, model: str = "mini", threads: int = 2, samples: int = 1):
+    def __init__(self, model: str = "mini", threads: int = 2, samples: int = 1, weights: str | None = None):
         import torch
         from model import Kronos, KronosPredictor, KronosTokenizer  # the Kronos repository's package
         torch.set_num_threads(threads)
@@ -29,6 +29,10 @@ class KronosRunner:
         self.samples = samples
         tok = KronosTokenizer.from_pretrained(tid)
         m = Kronos.from_pretrained(mid)
+        if weights:  # our fine-tuned predictor (finetune.py), on top of the same tokenizer
+            from safetensors.torch import load_file
+            m.load_state_dict(load_file(weights))
+            self.name = f"{model}-ft"
         tok.eval(); m.eval()
         self.p = KronosPredictor(m, tok, device="cpu", max_context=ctx)
 

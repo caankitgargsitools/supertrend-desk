@@ -1,0 +1,107 @@
+# Fine-tunes Kronos-mini on our markets (candles before 1 Sept 2025 only), then tests the original and the fine-tuned
+# model side by side on the unseen months after it, and sends the results to the Prediction Lab page. Started by hand
+# (Actions → kronos fine-tune → Run workflow, or from a Claude session). Free on GitHub's runners (public repository).
+# Needs the repository secret PRED_KEY: the Prediction Lab server key (it reads public market candles, writes forecasts).
+name: kronos fine-tune
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Training time in minutes (at most ~300)"
+        default: "200"
+      per_pair:
+        description: "Unseen candles compared per asset and timeframe"
+        default: "60"
+
+permissions:
+  contents: write
+
+env:
+  KRONOS_SHA: 67b630e67f6a18c9e9be918d9b4337c960db1e9a
+  SUPABASE_URL: https://umryzxusbdttbcshkajt.supabase.co
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: .github/workflows/kronos-finetune.yml
+      - name: Install (CPU PyTorch, the Kronos code at a pinned commit)
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1
+          pip install numpy==1.26.4 pandas==2.2.2 einops==0.8.1 huggingface_hub==0.33.1 safetensors==0.6.2 tqdm==4.67.1
+          mkdir -p /tmp/kronos && curl -sL "https://github.com/shiyu-coder/Kronos/archive/${KRONOS_SHA}.tar.gz" | tar -xz -C /tmp/kronos --strip-components=1
+      - name: Fine-tune
+        env:
+          PRED_KEY: ${{ secrets.PRED_KEY }}
+          PYTHONPATH: /tmp/kronos:${{ github.workspace }}/predictor
+        run: python predictor/finetune.py --minutes "${{ inputs.minutes || 200 }}" --out out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: finetuned
+          path: out/
+
+  evaluate:
+    needs: train
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        kinds: [nse, mcx, crypto]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: .github/workflows/kronos-finetune.yml
+      - name: Install
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1
+          pip install numpy==1.26.4 pandas==2.2.2 einops==0.8.1 huggingface_hub==0.33.1 safetensors==0.6.2 tqdm==4.67.1
+          mkdir -p /tmp/kronos && curl -sL "https://github.com/shiyu-coder/Kronos/archive/${KRONOS_SHA}.tar.gz" | tar -xz -C /tmp/kronos --strip-components=1
+      - uses: actions/download-artifact@v4
+        with:
+          name: finetuned
+          path: out/
+      - name: Original vs fine-tuned on the unseen months
+        env:
+          PRED_KEY: ${{ secrets.PRED_KEY }}
+          PYTHONPATH: /tmp/kronos:${{ github.workspace }}/predictor
+        run: python predictor/evaluate.py --weights out/kronos-mini-ft.safetensors --kinds ${{ matrix.kinds }} --per-pair "${{ inputs.per_pair || 60 }}" --out eval/eval-${{ matrix.kinds }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-${{ matrix.kinds }}
+          path: eval/
+
+  report:
+    needs: [train, evaluate]
+    if: always() && needs.train.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          path: art/
+      - name: Publish the weights as a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="kronos-mini-ft-${{ github.run_id }}"
+          gh release create "$TAG" art/finetuned/kronos-mini-ft.safetensors art/finetuned/train.json --title "Kronos-mini fine-tuned (run ${{ github.run_id }})" --notes "Fine-tuned on candles before the cutoff in train.json. Weights only: public market data." --latest=false
+          echo "URL=https://github.com/${{ github.repository }}/releases/download/$TAG/kronos-mini-ft.safetensors" >> "$GITHUB_ENV"
+      - name: Send the results to the Prediction Lab
+        env:
+          PRED_KEY: ${{ secrets.PRED_KEY }}
+          PYTHONPATH: ${{ github.workspace }}/predictor
+        run: python predictor/report.py art/finetuned/train.json "art/eval-*/eval-*.json" "$URL"

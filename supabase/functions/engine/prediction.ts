@@ -87,8 +87,18 @@ const num = (x: unknown) => { const v = Number(x); return Number.isFinite(v) ? v
 /** Confidence bands {lo, mid, hi: [calls, right]}; anything else is dropped. */
 const confOf = (c: any) => c && typeof c === "object" ? Object.fromEntries(["lo", "mid", "hi"].map((k) => [k, [Math.trunc(num(c[k]?.[0])), Math.trunc(num(c[k]?.[1]))]])) : null;
 /** The server's write: heartbeat, latest forecasts, monthly totals (whole-month figures, so a resend is harmless). */
-export async function predPush(sb: SupabaseClient, body: { worker?: any; latest?: any[]; stats?: any[] }) {
+export async function predPush(sb: SupabaseClient, body: { worker?: any; latest?: any[]; stats?: any[]; model_run?: any }) {
   const out: Record<string, number> = {};
+  const mr = body.model_run;
+  if (mr && typeof mr.name === "string" && /^kronos-[a-z0-9-]{1,60}$/.test(mr.name)) {
+    // A fine-tuning run's results (GitHub Actions): kept whole, shown on the page; the weights stay on GitHub.
+    const url = typeof mr.weights_url === "string" && /^https:\/\/github\.com\/caankitgargsitools\/supertrend-desk\/releases\/download\//.test(mr.weights_url) ? mr.weights_url : null;
+    const size = JSON.stringify(mr.eval ?? null).length + JSON.stringify(mr.train ?? null).length;
+    if (size > 2_000_000) throw new Error("model_run too large");
+    const { error } = await sb.from("pred_models").upsert({ name: mr.name, trained_at: mr.trained_at ?? null, cutoff: mr.cutoff ?? null, weights_url: url, train: mr.train ?? null, eval: mr.eval ?? null });
+    if (error) throw new Error(error.message);
+    out.model_run = 1;
+  }
   if (body.worker) {
     const w = body.worker;
     const { error } = await sb.from("pred_worker").upsert({ id: 1, last_seen: new Date().toISOString(), version: String(w.version ?? "").slice(0, 40),

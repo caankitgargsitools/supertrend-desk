@@ -1253,6 +1253,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
       </div>
       <div id="pred_board" style="margin-top:8px"></div>
       <div id="pred_detail" style="margin-top:12px"></div>
+      <div id="pred_ft" style="margin-top:16px"></div>
       <div id="pred_key" style="margin-top:16px"></div>
     </section>
     <section class="card" id="marketPane" hidden>
@@ -5351,6 +5352,41 @@ async function renderPred() {
   if (pred.sel) await renderPredDetail(...pred.sel.split("|"));
   else $("pred_detail").innerHTML = "";
   renderPredKey(set);
+  renderPredFt().catch(() => {});
+}
+/** Fine-tuning runs (GitHub Actions): the original and the fine-tuned Kronos-mini on the same unseen candles. */
+async function renderPredFt() {
+  const box = $("pred_ft"); if (!box) return;
+  const { data: runs } = await db.from("pred_models").select("name, trained_at, cutoff, weights_url, train, eval").order("trained_at", { ascending: false }).limit(3);
+  if (!runs || !runs.length) {
+    box.innerHTML = `<h3 style="font-size:15px;margin:0 0 6px">Fine-tuning</h3><p class="hint" style="margin:0">No fine-tuning run yet. Kronos-mini is trained further on our own markets' candles from before 1 September 2025 (free, on GitHub's computers), then the original and the fine-tuned model are tested side by side on the months after, which neither has seen. Results appear here.</p>`;
+    return;
+  }
+  const r = runs[0], t = r.train || {}, rows = (r.eval && r.eval.rows) || [];
+  const hSel = Number($("pred_h").value) || 1, h = [1, 3, 5, 10].reduce((a, b) => Math.abs(b - hSel) < Math.abs(a - hSel) ? b : a);
+  const sum = (rs) => { const o = {}; for (const x of rs) { const v = x.steps && x.steps[String(h)]; if (!v) continue; for (const [k, n] of Object.entries(v)) o[k] = (o[k] || 0) + Number(n); } return o; };
+  const fig = (o) => {
+    const n = o.n || 0, dn = o.dir_n || 0;
+    const tdir = (a, b) => { if (!dn) return null; const p = (a + b) / (2 * dn); const se = Math.sqrt(2 * p * (1 - p) / dn); return se > 0 ? (b - a) / dn / se : null; }; // fine-tuned vs original hit rates
+    return { n, hb: dn ? o.hit_base / dn : null, hf: dn ? o.hit_ft / dn : null, hm: dn ? o.hit_mom / dn : null,
+      cb: o.ae_flat ? (o.ae_flat - o.ae_base) / o.ae_flat : null, cf: o.ae_flat ? (o.ae_flat - o.ae_ft) / o.ae_flat : null, tc: predT(o.d || 0, o.d2 || 0, n),
+      rb: o.re_atr ? (o.re_atr - o.re_base) / o.re_atr : null, rf: o.re_atr ? (o.re_atr - o.re_ft) / o.re_atr : null, tr: predT(o.rd || 0, o.rd2 || 0, n), td: tdir(o.hit_base || 0, o.hit_ft || 0) };
+  };
+  const verdict = (f) => {
+    if (f.n < 50) return '<span class="chip">Too few</span>';
+    const better = [f.tc > 2 && "closing price", f.tr > 2 && "range", f.td > 2 && "direction"].filter(Boolean), worse = [f.tc < -2 && "closing price", f.tr < -2 && "range", f.td < -2 && "direction"].filter(Boolean);
+    return better.length && !worse.length ? `<span class="chip green">Fine-tuned better: ${esc(better.join(", "))}</span>` : worse.length && !better.length ? `<span class="chip red">Fine-tuned worse: ${esc(worse.join(", "))}</span>`
+      : worse.length ? `<span class="chip yellow">Mixed</span>` : '<span class="chip">No clear difference</span>';
+  };
+  const line = (label, f) => `<tr><td>${label}</td><td class="n">${f.n.toLocaleString("en-IN")}</td><td class="n">${predPct(f.hb)}</td><td class="n"><b>${predPct(f.hf)}</b></td><td class="n">${predPct(f.hm)}</td>
+    <td class="n">${predSigned(f.cb)}</td><td class="n"><b>${predSigned(f.cf)}</b> <span class="hint sm">t ${f.tc == null ? "–" : f.tc.toFixed(1)}</span></td><td class="n">${predSigned(f.rb)}</td><td class="n"><b>${predSigned(f.rf)}</b> <span class="hint sm">t ${f.tr == null ? "–" : f.tr.toFixed(1)}</span></td><td>${verdict(f)}</td></tr>`;
+  const tfs = [...new Set(rows.map((x) => x.tf))].sort((a, b) => a - b);
+  const head = '<thead><tr><th></th><th class="n">Candles</th><th class="n">Direction: original</th><th class="n">Direction: fine-tuned</th><th class="n">Last move continues</th><th class="n">Close vs no change: original</th><th class="n">Close vs no change: fine-tuned</th><th class="n">Range vs swing: original</th><th class="n">Range vs swing: fine-tuned</th><th>Verdict</th></tr></thead>';
+  box.innerHTML = `<h3 style="font-size:15px;margin:0 0 6px">Fine-tuning: original vs fine-tuned Kronos-mini</h3>
+    <p class="hint" style="margin:0 0 6px">Run ${esc(r.name)} · trained on candles before ${esc(String(r.cutoff || ""))} for ${t.minutes ?? "–"} min (${(t.steps || 0).toLocaleString("en-IN")} steps over ${(t.train_windows || 0).toLocaleString("en-IN")} windows from ${t.train_pairs ?? "–"} asset–timeframe pairs); its check on the 90 days before the cutoff went from ${t.check_before ?? "–"} to ${t.check_best ?? "–"} (lower is better). Tested on unseen candles from ${esc(String((r.eval && r.eval.runs && r.eval.runs[0] && r.eval.runs[0].start) || r.cutoff || ""))}, both models on the same candles, ${h} candle${h === 1 ? "" : "s"} ahead. The t-values compare fine-tuned with original (over 2: fine-tuned clearly better; under −2: clearly worse). Watch only: the server keeps the original until you choose.</p>
+    <div class="scroll"><table class="mini">${head}<tbody>${line("<b>All</b>", fig(sum(rows)))}${tfs.map((tf) => line(PRED_TF[tf] || tf, fig(sum(rows.filter((x) => x.tf === tf))))).join("")}</tbody></table></div>
+    ${xpA("predftA", "By asset and timeframe", `${rows.length} pairs`)}<div class="scroll"><table class="mini">${head}<tbody>${rows.slice().sort((a, b) => labAssetName(a.asset).localeCompare(labAssetName(b.asset)) || a.tf - b.tf).map((x) => line(`${esc(labAssetName(x.asset))} · ${PRED_TF[x.tf] || x.tf}`, fig(sum([x])))).join("")}</tbody></table></div>${XPZ}
+    ${r.weights_url ? `<p class="hint" style="margin:6px 0 0">Weights: <a href="${esc(r.weights_url)}" target="_blank" rel="noopener">GitHub release</a>.</p>` : ""}`;
 }
 async function renderPredDetail(asset, tfS) {
   const tf = Number(tfS), mode = $("pred_mode").value, hSel = Number($("pred_h").value) || 1;

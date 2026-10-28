@@ -141,6 +141,7 @@ class Worker:
         self.error = None
         self.replay_ptr = store.get("replay_ptr", 0)
         self.phase = None  # what it is doing before the first full round (shown on the page)
+        self.history_from = None  # training: load candle history from this time instead of just before the replay
         if not store.get("sent_seeded") and store.count() == 0:
             store.put("sent_seeded", True)  # a new server: nothing was sent before
 
@@ -197,11 +198,11 @@ class Worker:
                 parts.sort(key=lambda c: c["t"][0] if c.get("t") else 0)
                 x.base = {**merge(*parts), **{t: v for t, v in x.base.items() if t > max((c["t"][-1] for c in parts if c.get("t")), default=0)}}
                 # Only what the replay needs (warm-up for 256 four-hour candles); daily candles come from the daily file.
-                keep_from = replay_from - KEEP_DAYS * 86400
+                keep_from = self.history_from or replay_from - KEEP_DAYS * 86400
                 x.base = {t: v for t, v in x.base.items() if t >= keep_from}
                 changed = True
             if kind == "crypto" and x.binance:
-                start = max(x.base) + 300 if x.base else replay_from - KEEP_DAYS * 86400
+                start = max(x.base) + 300 if x.base else (self.history_from or replay_from - KEEP_DAYS * 86400)
                 if start < now - 600:
                     x.base.update(merge(binance(x.binance, start, now - 300, self.get)))
                     changed = True

@@ -55,6 +55,9 @@ const res = {
   "pred_latest": [{ asset: "NIFTY", tf: 15, made_at: now, last_close: 25000, path: [{ t: 1793000000, o: 25000, h: 25020, l: 24990, c: 25010 }, { t: 1793000900, o: 25010, h: 25030, l: 25000, c: 25020 }],
     actual: [{ t: 1792999100, o: 24980, h: 25010, l: 24970, c: 25000 }], recent: [{ t: 1792999100, last: 24990, p: [25000], a: [25005] }] }],
   "rpc/pred_create_key": "pk_testkey0123456789abcdef",
+  "pred_models": [{ name: "kronos-mini-ft-2026-10-28", trained_at: now, cutoff: "2025-09-01", weights_url: "https://github.com/caankitgargsitools/supertrend-desk/releases/download/x/kronos-mini-ft.safetensors",
+    train: { minutes: 200, steps: 8000, train_windows: 900000, train_pairs: 150, check_before: 3.21, check_best: 2.95 },
+    eval: { runs: [{ start: "2025-09-01" }], rows: [{ asset: "NIFTY", tf: 15, n: 60, steps: { "1": { n: 60, dir_n: 60, hit_base: 30, hit_ft: 33, hit_mom: 29, ae_flat: 6, ae_base: 6.3, ae_ft: 5.9, d: 0.4, d2: 0.05, re_atr: 9, re_base: 10, re_ft: 8, rd: 2, rd2: 0.2 } } }] } }],
   "billing_settings": { trial_days: 14, deploy_fee: 500, deploy_fee_period: "MONTHLY", profit_share_pct: 20, min_balance: 1000, pay_to: "desk@upi", pay_note: "" },
 };
 await p.route(/supabase\.co/, (r) => {
@@ -90,6 +93,9 @@ const ok1 = ok0 && r1.vis && r1.ideasHidden && /Working/.test(r1.status) && r1.p
   && r1.rows.some((t) => /Gold/.test(t) && /No edge/.test(t)) && r1.rows.some((t) => /Too few yet/.test(t));
 await p.click('#pred_tbl tr[data-k="NIFTY|15"]'); await p.waitForTimeout(900);
 const r2 = await p.evaluate(() => ({ chart: !!document.querySelector("#pred_chart canvas"), detail: document.getElementById("pred_detail").textContent }));
+const ftTxt = await p.evaluate(() => document.getElementById("pred_ft").textContent.replace(/\s+/g, " "));
+const okFt = /original vs fine-tuned/.test(ftTxt) && /trained on candles before 2025-09-01/.test(ftTxt) && /55\.0%/.test(ftTxt) && /Fine-tuned better/.test(ftTxt);
+if (!okFt) { console.log("FAIL ft", ftTxt.slice(0, 600)); process.exit(1); }
 const ok2 = r2.chart && /Confidence and the correction layer/.test(r2.detail) && /all 5 paths/.test(r2.detail) && /70\.0%/.test(r2.detail) && /right on 64\.0%/.test(r2.detail) && /By candles ahead/.test(r2.detail) && /Month by month/.test(r2.detail) && /right/.test(r2.detail);
 await p.evaluate(() => document.querySelector('[data-xp="predkey"]').open = true);
 await p.click("#pred_newkey"); await p.waitForTimeout(600);
