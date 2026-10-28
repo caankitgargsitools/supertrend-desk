@@ -75,7 +75,7 @@ const sum = await p.$eval("#lab_runsum", (e) => (e.hidden ? "" : e.textContent.r
 console.log("summary:", sum);
 if (!/Run #5/.test(sum) || !/4 passed/.test(sum) || !/worked on … of … other assets — 4/.test(sum) || !/4 still being tested/.test(sum)) throw new Error("summary wrong");
 await p.click("#lab_runsum_all"); await p.waitForTimeout(800);
-if (await p.$eval("#lab_only", (e) => e.value) !== "false") throw new Error("show all did not switch the filter");
+if (await p.$eval("#lab_only", (e) => e.value) !== "all") throw new Error("show all did not switch the filter");
 if (await p.$eval("#lab_period", (e) => e.value) !== "run:5") throw new Error("run choice lost after reload");
 await p.screenshot({ path: "lab_runsum.png" });
 await p.selectOption("#lab_period", "30"); await p.waitForTimeout(800);

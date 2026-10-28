@@ -78,10 +78,28 @@ const out = await p.evaluate(() => {
   const ci = ths.findIndex((t) => /^Consistency/.test(t));
   const row = [...document.querySelectorAll("#lab_grid tbody tr")].find((tr) => tr.querySelector(".t") && tr.querySelector(".t").textContent === r.label);
   const html = robustHTML(r, r.metrics, true);
-  return { sort: lab.sortKey, ci, nCols: ths.length, nCells: row ? row.children.length : -1, cell: row && ci >= 0 ? row.children[ci].textContent.trim() : null,
+  return { sort: lab.sortKey, ci, nCols: ths.length, nCells: row ? row.children.length : -1, cell: row && ci >= 0 ? row.children[ci].querySelector("div").textContent.trim() : null,
     panel: /Consistency score/.test(html) && /87.5 of 100/.test(html), info: /for information/.test(html) && !/needs 95%/.test(html), banner: /9 of the past 10 years/.test(html) && /paper trading/.test(html), noAssets: !/Other assets that work/.test(html) };
 });
 console.log(JSON.stringify(out));
 if (out.sort !== "cons" || out.ci < 0 || out.nCols !== out.nCells || out.cell !== "87.5" || !out.panel || !out.info || !out.banner || !out.noAssets || errs.length) { console.log("FAIL", errs); process.exit(1); }
 console.log("ok   consistency column (default sort), score breakdown, simple-rules banner, other checks for information");
+// Compact table (28 Oct): 14 two-figure columns, numbered statuses with a legend, sorting by the lower figure, no sideways scroll.
+const c2 = await p.evaluate(() => {
+  const g = document.getElementById("lab_grid"), ths = [...document.querySelectorAll("#lab_grid thead tr.t th")];
+  const legend = document.getElementById("lab_legend").textContent;
+  const codes = [...document.querySelectorAll("#lab_grid tbody tr")[0].querySelectorAll(".sc")].map((x) => x.textContent);
+  const twoLine = document.querySelector('#lab_grid thead tr.t [data-k="test"]');
+  twoLine.click();
+  const sortedBy = lab.sortKey;
+  return { cols: ths.length, sideways: g.scrollWidth > g.clientWidth + 2, legend: /1 Passed/.test(legend.replace(/\s+/g, " ")) && /Two figures per column/.test(legend), codes, sortedBy,
+    hdr: ths.map((t) => t.textContent.replace(/[↕▲▼\s]+/g, " ").trim()).slice(2, 5) };
+});
+console.log(JSON.stringify(c2));
+console.log(JSON.stringify(await p.evaluate(() => { const g = document.getElementById("lab_grid"); return { grid: g.clientWidth, table: g.scrollWidth, cols: [...g.querySelectorAll("thead tr.t th")].map((t) => Math.round(t.getBoundingClientRect().width)) }; })));
+
+if (c2.cols !== 14 || c2.sideways || !c2.legend || c2.codes[0] !== "1" || c2.sortedBy !== "test" || !/Net 1 yr Last 3 mo/.test(c2.hdr.join("|"))) { console.log("FAIL compact"); process.exit(1); }
+const sel = await p.evaluate(() => [...document.getElementById("lab_only").options].map((o) => o.value).join(",") + " | " + document.getElementById("lab_period").value);
+if (sel !== "passed,passed_desk,all | all") { console.log("FAIL filters", sel); process.exit(1); }
+console.log("ok   compact table: 14 two-figure columns, no sideways scroll at 1440 px, numbered statuses with a legend, sort by either figure, All time and Passed-only filters");
 await b.close();

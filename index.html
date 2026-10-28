@@ -377,6 +377,21 @@ tr.openrow td { background: var(--bg); }
 .lab-table thead tr.fl input, .lab-table thead tr.fl select { width: 100%; min-width: 46px; padding: 5px 6px; font: 12px var(--font-data); border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
 .lab-table thead tr.fl input.on, .lab-table thead tr.fl select.on { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-soft); font-weight: 600; }
 .lab-table tbody td { border-bottom: 1px solid var(--line); }
+/* two figures per column: top in normal type, underneath in grey (the header names both the same way) */
+.lab-table td.two .b2 { color: var(--muted); font-size: 11px; margin-top: 3px; }
+.lab-table thead .sk { cursor: pointer; user-select: none; }
+.lab-table thead .sk:hover { color: var(--logo-yellow); }
+.lab-table thead .h2 { opacity: .7; font-size: 10px; margin-top: 3px; font-weight: 400; }
+.lab-table thead tr.fl .f2 { margin-top: 3px; }
+.lab-table thead [aria-sort="none"] .ar::after { content: "↕"; opacity: .45; }
+.lab-table thead [aria-sort="ascending"] .ar::after { content: "▲"; } .lab-table thead [aria-sort="descending"] .ar::after { content: "▼"; }
+.sc { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px; margin: 0 3px 0 0; border-radius: 9px; font: 600 10.5px var(--font-ui, inherit); background: var(--line); color: var(--ink); cursor: help; }
+.sc.green { background: var(--green-soft, #d8f3e3); color: var(--green, #137a3f); } .sc.red { background: var(--red-soft, #fbe0e0); color: var(--red, #b42318); }
+.sc.blue { background: var(--blue-soft); color: var(--blue); } .sc.yellow { background: #fff3c4; color: #8a6100; }
+.sc.desk { background: var(--logo-green, #1f9d55); color: #fff; } .sc.desk2 { background: transparent; border: 1px solid var(--logo-green, #1f9d55); color: var(--logo-green, #1f9d55); }
+.lab-table td.lbl .scs { margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.lablegend { margin-top: 8px; font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
+.lablegend .lg { display: inline-flex; align-items: center; margin-right: 10px; white-space: nowrap; }
 /* Lab grid: the table sizes each column to its content (numbers never cut off) and scrolls inside its own box,
    both ways, with the title and filter rows fixed at the top of the box. It can never spill out of the page. */
 body.wide .wrap { max-width: 1840px; }
@@ -1089,15 +1104,16 @@ details.xp > summary:hover { background: var(--blue-soft); }
           <div class="f"><span>Results as</span><div class="seg" id="lab_view" role="group" aria-label="Instrument">
             <button type="button" data-v="FUT" aria-pressed="true">Futures</button><button type="button" data-v="BUY" aria-pressed="false">Option buying</button><button type="button" data-v="SELL" aria-pressed="false">Option writing</button><button type="button" data-v="SPREAD" aria-pressed="false">Spreads &amp; hedges</button></div></div>
           <label class="f"><span>Asset</span><select id="lab_asset"><option value="ALL">All assets</option></select></label>
-          <label class="f"><span>From</span><select id="lab_period"><option value="run">Latest run only</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option></select></label>
+          <label class="f"><span>From</span><select id="lab_period"><option value="all" selected>All time (everything the lab kept)</option><option value="run">Latest run only</option><option value="7">Found in the last 7 days</option><option value="30">Found in the last 30 days</option></select></label>
           <label class="f"><span>Stop loss</span><select id="lab_stopf"><option value="ANY">With or without</option><option value="WITH">With stop / target</option><option value="WITHOUT">Without</option></select></label>
-          <label class="f"><span>Show</span><select id="lab_only"><option value="true">Passed only</option><option value="false">Everything kept</option></select></label>
+          <label class="f"><span>Show</span><select id="lab_only"><option value="passed">Passed only</option><option value="passed_desk">Passed, plus mine on my desk</option><option value="all">Everything (failed too)</option></select></label>
           <label class="f"><span>Per asset</span><select id="lab_per"><option value="1">Best 1 per asset</option><option value="5" selected>Best 5 per asset</option><option value="10">Best 10 per asset</option><option value="0">All</option></select></label>
           <label class="f"><span>My desk</span><select id="lab_mine"><option value="">Mark mine among all</option><option value="only">Only those on my desk</option></select></label>
         </div>
         <div id="lab_reqfilter" class="banner info" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center" hidden></div>
         <div id="lab_runsum" hidden></div>
         <p class="hint" id="lab_count" style="margin:10px 0 0"></p>
+        <div id="lab_legend" class="lablegend"></div>
         <div id="lab_mtools" class="labmtools">
           <input id="lab_msearch" type="search" placeholder="Search strategies…" autocomplete="off" aria-label="Search strategies">
           <select id="lab_msort" aria-label="Sort by"></select>
@@ -3749,7 +3765,7 @@ $("capForm").addEventListener("submit", (e) => {
 });
 
 /* ---------- strategy lab ---------- */
-const lab = { open: false, settings: null, runs: [], rows: [], view: "FUT", asset: "ALL", period: "30", stopf: "ANY", only: true, per: 5, sort: "score", poll: null, sel: null };
+const lab = { open: false, settings: null, runs: [], rows: [], view: "FUT", asset: "ALL", period: "all", stopf: "ANY", only: true, deskKeep: false, per: 5, sort: "score", poll: null, sel: null };
 const LAB_IND = { ST: "Supertrend", HA: "Heikin Ashi", RSI: "RSI", EMA: "EMA", SMA: "SMA", MACD: "MACD", VWAP: "VWAP", BB: "Bollinger", ADX: "ADX", ATR: "ATR", PDHL: "Prev-day H/L", ORB: "Opening range", SWEEP: "Liquidity sweep" };
 function condText(c) {
   const def = IND_DEFS[c.ind] || { name: c.ind, ops: [] };
@@ -3795,7 +3811,7 @@ function openLab() {
   withLoading($("labPane"), loadLab()).catch((e) => toast(errorText(e)));
 }
 /** What the loaded list depends on; a change means it must be read again. */
-const labKey = () => [lab.view, lab.asset, lab.period, lab.only, lab.request || ""].join("|");
+const labKey = () => [lab.view, lab.asset, lab.period, lab.only, lab.deskKeep, lab.request || ""].join("|");
 /** From a strategy on my desk: open the lab on its asset and instrument, either on its own result or to compare. */
 function openLabFor(s, how) {
   lab.asset = PRESETS[s.underlying] ? s.underlying : "ALL"; $("lab_asset").value = lab.asset;
@@ -3847,7 +3863,7 @@ async function loadLabRun(stale) {
   if (!isAdmin()) {
     // Users: results and trades only, from a server view that leaves out every parameter.
     const key = labKey();
-    const res = must(await db.rpc("lab_feed", { p_view: lab.view, p_asset: lab.asset, p_period: lab.period, p_only: lab.only, p_request: lab.request || null }));
+    const res = must(await db.rpc("lab_feed", { p_view: lab.view, p_asset: lab.asset, p_period: lab.period === "all" ? "60" : lab.period, p_only: lab.only, p_request: lab.request || null }));
     if (stale()) return;
     lab.loadedAt = Date.now(); lab.loadedKey = key;
     lab.settings = null; lab.runs = res.run ? [res.run] : []; lab.checking = Number(res.checking) || 0;
@@ -3876,7 +3892,7 @@ async function loadLabRun(stale) {
     if (lab.request) q = q.eq("request_id", lab.request);
     else if (lab.period === "run") q = q.eq("run_id", runs[0] ? runs[0].id : -1);
     else if (lab.period.startsWith("run:")) q = q.eq("run_id", Number(lab.period.slice(4)));
-    else q = q.gte("created_at", new Date(Date.now() - Number(lab.period) * 86400000).toISOString());
+    else if (lab.period !== "all") q = q.gte("created_at", new Date(Date.now() - Number(lab.period) * 86400000).toISOString());
     // A result shows only once it has been through every test: first-round winners still waiting for the tougher
     // test are left out (counted in the status line).
     q = q.or("basic_passed.is.null,basic_passed.eq.false,robust_status.eq.done");
@@ -3956,7 +3972,7 @@ function fillLabRuns() {
   const sel = $("lab_period"), cur = lab.period;
   const runOpts = lab.runs.map((x) => { const c = x.counts || {}, st = x.status === "running" ? "running" : x.status === "done" ? `${c.generated ?? 0} tested, ${c.passed ?? 0} passed` : x.status;
     return [`run:${x.id}`, `Run #${x.id} · ${LAB_TRIGGER[x.trigger] || x.trigger} (${st})`]; });
-  const opts = [["run", "Latest run only"], ...runOpts, ["7", "Last 7 days"], ["30", "Last 30 days"]];
+  const opts = [["all", "All time (everything the lab kept)"], ["run", "Latest run only"], ...runOpts, ["7", "Found in the last 7 days"], ["30", "Found in the last 30 days"]];
   if (cur.startsWith("run:") && !opts.some(([v]) => v === cur)) opts.splice(1, 0, [cur, `Run #${cur.slice(4)}`]);
   sel.innerHTML = opts.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join("");
   sel.value = cur;
@@ -3987,7 +4003,7 @@ async function renderLabRunSum() {
     ${top.length ? `<div style="margin-top:6px">Most common reasons (a strategy can fail several):<ul style="margin:4px 0 0 18px;padding:0">${top.map(([w, n]) => `<li>${esc(w)} — <b>${n}</b></li>`).join("")}</ul></div>` : ""}
     ${lab.only && rows.length > pass ? `<div style="margin-top:6px"><button class="btn small" type="button" id="lab_runsum_all">Show all ${rows.length} with their reasons</button> <span class="hint">“Show: Passed only” hides the ones that failed.</span></div>` : ""}</div>`;
   const b = $("lab_runsum_all");
-  if (b) b.addEventListener("click", () => { $("lab_only").value = "false"; $("lab_only").dispatchEvent(new Event("change")); });
+  if (b) b.addEventListener("click", () => { $("lab_only").value = "all"; $("lab_only").dispatchEvent(new Event("change")); });
 }
 /** Progress of the re-test of every saved strategy with the current rules (new strategies wait until it's done). */
 function labRefreshHTML() {
@@ -4394,7 +4410,8 @@ function labGroup() {
     const m = labMetricsFor(r); if (!m) continue;
     const mine = desk.get(Number(r.id));
     // A strategy on my desk always stays in the list, so the lab's finds can be compared with it.
-    if (!mine && lab.view !== "FUT" && lab.only && !labPassed(r, m)) continue;
+    // "Passed only" hides every strategy that didn't pass, those on my desk too; "Passed, plus mine" keeps mine.
+    if (lab.only && !labPassed(r, m) && !(mine && lab.deskKeep)) continue;
     const risk = r.config ? r.config.risk : r.has_risk;
     if (!mine && lab.stopf === "WITH" && !risk && lab.view === "FUT") continue;
     if (!mine && lab.stopf === "WITHOUT" && risk && lab.view === "FUT") continue;
@@ -4494,6 +4511,90 @@ const LAB_COLS = [
   { k: "longnet", w: 74, t: "Long test net", f: "num", n: true, v: (g) => { const L = longOf(g.r); return L ? L.net : null; }, tip: "Net profit over the longest period tested in the nightly long test (up to 10 years for daily strategies, 5 years for intraday), 1 lot after charges" },
   { k: "longpos", w: 60, t: "Long test periods +", f: "num", n: true, v: (g) => { const L = longOf(g.r); return L ? L.pos : null; }, tip: "Of the periods tested (3M, 6M, 1Y … 10Y), how many made money" },
 ];
+
+/** What each figure looks like in the table (the same figure LAB_COLS sorts and filters by). */
+const labPc = (v) => v == null ? "–" : `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}" title="${rupees(v)}">${rupeesShort(v)}</span>`;
+const labRs = (v) => v == null ? "–" : `<span title="${rupees(v)}">${rupeesShort(v)}</span>`;
+const labScore = (v, tip) => v == null ? "–" : `<b class="${v >= 70 ? "pos-num" : v < 40 ? "neg-num" : ""}"${tip ? ` title="${esc(tip)}"` : ""}>${v}</b>`;
+const labPctC = (v) => v == null ? "–" : `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${v}%</span>`;
+const labRatio = (ok, n, need) => n == null ? "–" : `<span class="${n && ok >= need ? "pos-num" : "neg-num"}">${ok ?? 0}/${n ?? 0}</span>`;
+function labRobDone(r) { const x = robOf(r); return x && x.status === "done" ? x : null; }
+const LAB_SHOW = {
+  asset: (g) => esc(labAssetName(g.r.asset)),
+  style: (g) => { const c = g.r.config; if (!c) return esc(labStyle(g.r)); return esc(`${c.rules && c.rules.daily ? "Daily" : `${c.timeframe_min}m ${c.intraday ? "intraday" : "positional"}`}${c.rules && c.rules.candles === "HA" ? " · HA" : ""}`); },
+  trades: (g) => g.m.full.n ?? "–",
+  win: (g) => g.m.full.win_rate == null ? "–" : `${g.m.full.win_rate}%`,
+  net: (g) => labPc(g.m.full.net),
+  test: (g) => labPc(g.m.test.net),
+  dd: (g) => labRs(g.m.full.max_dd),
+  pf: (g) => g.m.full.pf ?? "–",
+  months: (g) => `${g.m.pos_months}/${g.m.months_n}`,
+  years: (g) => { const x = labRobDone(g.r); if (!x) return robOf(g.r) ? '<span class="hint">checking</span>' : "–"; if (x.q_n) return `<span class="${x.q_ok >= 3 ? "pos-num" : "neg-num"}" title="Only ${x.years_n} year of minute prices: judged by quarter (3 of the last 4 needed)">${x.q_ok}/${x.q_n} qtr</span>`; return x.years_n == null ? "–" : `<span class="${x.years_n >= 3 && x.years_ok >= x.years_n - Math.floor(x.years_n / 5) ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span>`; },
+  cons: (g) => { const x = robOf(g.r), q = x && x.consistency; return q ? labScore(q.score, consTip(q)) : "–"; },
+  quality: (g) => { const x = robOf(g.r), q = x && x.quality; return q ? labScore(q.score) : "–"; },
+  desk: (g) => deskCell(deskScore(g.r)),
+  score: (g) => g.m.score ?? "–",
+  mtoday: (g) => { const mt = marginToday(g.r); return mt ? `<span title="${esc(marginTip(g.r))}">${rupeesShort(mt)}</span>` : "–"; },
+  rtoday: (g) => labPctC(returnToday(g)),
+  margin: (g) => g.m.margin_lot ? labRs(g.m.margin_lot) : "–",
+  rom: (g) => labPctC(g.m.ret_margin ?? null),
+  oassets: (g) => { const x = labRobDone(g.r); return x ? (x.assets_n ? labRatio(x.assets_ok, x.assets_n, 1) : '<span class="hint">–</span>') : "–"; },
+  otfs: (g) => { const x = labRobDone(g.r); return x ? (x.tfs_n ? labRatio(x.tfs_ok, x.tfs_n, x.tfs_n >= 3 ? 2 : 1) : '<span class="hint">–</span>') : "–"; },
+  vsbh: (g) => { const x = labRobDone(g.r); return x ? ratioTxt(x.risk_vs_bh) : "–"; },
+  nights: (g) => `${g.passes}/${g.nights}`,
+  longnet: (g) => { const L = longOf(g.r); return L ? `<span class="${L.net > 0 ? "pos-num" : L.net < 0 ? "neg-num" : ""}" title="${rupees(L.net)} over ${L.key}">${rupeesShort(L.net)} <span class="hint sm">${L.key}</span></span>` : "–"; },
+  longpos: (g) => { const L = longOf(g.r); return L ? `${L.pos}/${L.n}` : "–"; },
+};
+/**
+ * The table's columns: two figures in each, the first on top in normal type, the second underneath in grey (both
+ * named in the header, each sortable and filterable on its own). 14 columns instead of 26, so no sideways scrolling
+ * on a laptop screen.
+ */
+const LAB_GROUPS = [["no"], ["name"], ["asset", "style"], ["trades", "win"], ["net", "test"], ["dd", "pf"], ["months", "years"], ["cons", "quality"],
+  ["desk", "score"], ["mtoday", "rtoday"], ["margin", "rom"], ["oassets", "otfs"], ["vsbh", "nights"], ["longnet", "longpos"]];
+const labCol = (k) => LAB_COLS.find((c) => c.k === k);
+/** Short names for the two-line header (the full name and explanation show on hover). */
+const LAB_SHORT = { asset: "Asset", style: "Style", trades: "Trades", win: "Win %", net: "Net 1 yr", test: "Last 3 mo", dd: "Max DD", pf: "PF", months: "Months +",
+  years: "Years +", cons: "Consistency", quality: "Quality", desk: "Desk score", score: "Rank (9 mo)", mtoday: "Margin today", rtoday: "Return on it",
+  margin: "Avg margin", rom: "Return on margin", oassets: "Other assets", otfs: "Other TFs", vsbh: "vs Buy & Hold", nights: "Nights passed", longnet: "Long test net",
+  longpos: "Periods +" };
+/** Status codes under each strategy's name, explained in the legend above the table. */
+const LAB_STATUS = [
+  { n: 1, c: "green", t: "Passed", d: "passed every test of the current rules: worth paper trading" },
+  { n: 2, c: "blue", t: "Being checked", d: "passed round 1; the full test is still running" },
+  { n: 3, c: "red", t: "Failed the full test", d: "passed round 1 but not the year-by-year test or the held-back months (open it for the reasons)" },
+  { n: 4, c: "red", t: "Failed round 1", d: "lost money or too few trades in the ranked 9 months or the 3 months after" },
+  { n: 5, c: "desk", t: "On my desk", d: "you are running it (paper or live)" },
+  { n: 6, c: "", t: "Was on my desk", d: "you added it earlier and archived it" },
+  { n: 7, c: "desk2", t: "Twin on my desk", d: "a near-identical version in this group is on your desk" },
+  { n: 8, c: "blue", t: "New since yours", d: "found after you last added a strategy of this asset" },
+  { n: 9, c: "blue", t: "Re-tested", d: "a saved strategy re-tested with the current rules" },
+  { n: 10, c: "red", t: "Failed re-test", d: "re-tested with the current rules and failed" },
+  { n: 11, c: "blue", t: "Re-checking today", d: "showing the last complete result while today's re-test runs" },
+];
+function labStatusCodes(g, f, sub) {
+  const r = g.r, m = g.m, out = [];
+  out.push(labPassed(r, m) ? 1 : labChecking(r, m) ? 2 : m.passed && robDone(r) ? 3 : 4);
+  if (g.deskS) out.push(g.deskS.some((s) => !s.archived) ? 5 : 6);
+  else if (!sub && f && f.members.some((x) => x !== g && deskOpen(x))) out.push(7);
+  else { const t = lab.deskSince && lab.deskSince.get(r.asset); if (t && g.first && g.first > t) out.push(8); }
+  if (r.retestFailed) out.push(10); else if (r.refresh || r.champion) out.push(9);
+  if (g.rechecking) out.push(11);
+  return out;
+}
+function labStatusHTML(g, f, sub) {
+  const desk = g.deskS && g.deskS.filter((s) => !s.archived);
+  return labStatusCodes(g, f, sub).map((n) => {
+    const st = LAB_STATUS[n - 1];
+    const extra = n === 5 && desk ? `: ${desk.map((s) => `${s.name} · ${s.active ? "active" : "paused"} · ${s.live ? "live" : "paper"}`).join("; ")}` : "";
+    return `<span class="sc ${st.c}" title="${esc(`${n} ${st.t}: ${st.d}${extra}`)}">${n}</span>`;
+  }).join("") + (g.r.starred ? '<span class="sc yellow" title="Starred">★</span>' : "");
+}
+function renderLabLegend() {
+  const box = $("lab_legend"); if (!box) return;
+  box.innerHTML = `<div><b>Status numbers</b> (under each name; hover one for more): ${LAB_STATUS.map((st) => `<span class="lg"><span class="sc ${st.c}">${st.n}</span> ${esc(st.t)}</span>`).join("")}</div>
+    <div><b>Two figures per column</b>: the top one in normal type, the one underneath in grey, both named in the header in the same way. Click either name to sort by it; each has its own filter box.</div>`;
+}
 /**
  * Desk score, 0–100, from the tougher test's results, built on the four things that matter most:
  *  steady returns 35 — unbroken profitable years 15, even yearly profits 8, profitable months 7, worst year vs average year 5
@@ -4609,7 +4710,7 @@ function labFloatHead() {
   if (!(hr.top < top && tb.bottom > top + hr.height + 30)) return off();
   if (!f) {
     f = document.createElement("div"); f.id = "lab_fhead"; f.className = "labfhead"; f.hidden = true; document.body.append(f);
-    f.addEventListener("click", (ev) => { const th = ev.target.closest("th[data-k]"); const tt = $("lab_grid").querySelector("table"); const o = th && tt && tt.querySelector(`thead tr.t th[data-k="${th.dataset.k}"]`); if (o) o.click(); });
+    f.addEventListener("click", (ev) => { const th = ev.target.closest("[data-k]"); const tt = $("lab_grid").querySelector("table"); const o = th && tt && tt.querySelector(`thead tr.t [data-k="${th.dataset.k}"]`); if (o) o.click(); });
   }
   if (f._src !== tr.innerHTML) { f.innerHTML = `<table class="lab-table"><thead><tr class="t">${tr.innerHTML}</tr></thead></table>`; f._src = tr.innerHTML; }
   const src = [...tr.children], dst = [...f.querySelectorAll("th")];
@@ -4632,15 +4733,22 @@ function renderLabHead() {
   const head = $("lab_head");
   const tbl = head.closest("table");
   let cg = tbl.querySelector("colgroup"); if (!cg) { cg = document.createElement("colgroup"); tbl.prepend(cg); }
-  cg.innerHTML = LAB_COLS.map((c) => `<col${c.w ? ` style="width:${c.w}px"` : ""}>`).join("");
+  const W = { no: 30, name: 240 };
+  cg.innerHTML = LAB_GROUPS.map((gp) => `<col style="width:${W[gp[0]] || 62}px">`).join("");
   const opts = (c) => [...new Set(lab.rows.map((r) => c.v({ r, m: { full: {}, test: {} } })))].filter((x) => x && x !== "–").sort();
-  head.innerHTML = `<tr class="t">${LAB_COLS.map((c) => `<th class="${c.n ? "n " : ""}${c.v ? "sort" : ""}" data-k="${c.k}" ${c.v ? `aria-sort="${lab.sortKey === c.k ? (lab.sortDir > 0 ? "ascending" : "descending") : "none"}" tabindex="0"` : ""} ${c.tip ? `title="${esc(c.tip)}"` : ""}>${esc(c.t)} ${c.v ? '<span class="ar"></span>' : ""}</th>`).join("")}</tr>
-    <tr class="fl">${LAB_COLS.map((c) => `<th>${!c.f ? `<button type="button" class="btn small" id="lab_fclear" title="Clear all filters" aria-label="Clear all filters" style="padding:3px 8px;font-size:13px">✕</button>`
-      : c.f === "select" ? `<select data-f="${c.k}" aria-label="Filter ${esc(c.t)}"><option value="">All</option>${opts(c).map((o) => `<option>${esc(o)}</option>`).join("")}</select>`
-      : `<input data-f="${c.k}" ${c.f === "num" ? 'placeholder=">0"' : 'placeholder="contains…"'} aria-label="Filter ${esc(c.t)}" autocomplete="off">`}</th>`).join("")}</tr>`;
-  head.querySelectorAll("tr.t th.sort").forEach((th) => {
-    const go = () => { const k = th.dataset.k; if (lab.sortKey === k) lab.sortDir = -lab.sortDir; else { lab.sortKey = k; lab.sortDir = ["name", "asset", "style", "dd", "margin"].includes(k) ? 1 : -1; } renderLabHead(); renderLabTable(); };
-    th.addEventListener("click", go); th.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  const sortAttr = (c) => `data-k="${c.k}" aria-sort="${lab.sortKey === c.k ? (lab.sortDir > 0 ? "ascending" : "descending") : "none"}" tabindex="0" role="button"${c.tip ? ` title="${esc(c.tip)}"` : ` title="${esc(c.t)}"`}`;
+  const label = (c, i) => `<div class="${i ? "h2" : "h1"} sk" ${sortAttr(c)}>${esc(LAB_SHORT[c.k] || c.t)} <span class="ar"></span></div>`;
+  const filt = (c) => !c.f ? "" : c.f === "select" ? `<select data-f="${c.k}" aria-label="Filter ${esc(c.t)}"><option value="">All</option>${opts(c).map((o) => `<option>${esc(o)}</option>`).join("")}</select>`
+    : `<input data-f="${c.k}" ${c.f === "num" ? 'placeholder=">0"' : 'placeholder="contains…"'} aria-label="Filter ${esc(c.t)}" autocomplete="off">`;
+  head.innerHTML = `<tr class="t">${LAB_GROUPS.map((gp) => { const cs = gp.map(labCol);
+      if (gp[0] === "no") return '<th class="n">#</th>';
+      if (gp[0] === "name") return `<th class="nm"><div class="h1 sk" ${sortAttr(cs[0])}>Strategy <span class="ar"></span></div><div class="h2">status numbers: see the legend above</div></th>`;
+      return `<th class="n two">${cs.map(label).join("")}</th>`; }).join("")}</tr>
+    <tr class="fl">${LAB_GROUPS.map((gp) => gp[0] === "no" ? `<th><button type="button" class="btn small" id="lab_fclear" title="Clear all filters" aria-label="Clear all filters" style="padding:3px 8px;font-size:13px">✕</button></th>`
+      : `<th>${gp.map(labCol).map((c, i) => `<div class="${i ? "f2" : ""}">${filt(c)}</div>`).join("")}</th>`).join("")}</tr>`;
+  head.querySelectorAll("tr.t [data-k]").forEach((el) => {
+    const go = () => { const k = el.dataset.k; if (lab.sortKey === k) lab.sortDir = -lab.sortDir; else { lab.sortKey = k; lab.sortDir = ["name", "asset", "style", "dd", "margin"].includes(k) ? 1 : -1; } renderLabHead(); renderLabTable(); };
+    el.addEventListener("click", go); el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
   });
   head.querySelectorAll("[data-f]").forEach((el) => {
     el.value = lab.filters[el.dataset.f] || ""; el.classList.toggle("on", !!el.value);
@@ -4649,6 +4757,7 @@ function renderLabHead() {
     el.addEventListener(el.tagName === "SELECT" ? "change" : "input", apply);
   });
   const clr = $("lab_fclear"); if (clr) clr.addEventListener("click", () => { lab.filters = {}; renderLabHead(); renderLabTable(); });
+  renderLabLegend();
   // The filter row sits right under the title row.
   requestAnimationFrame(() => { setBarH(); const tr = head.querySelector("tr.t"); if (tr) $("lab_grid").style.setProperty("--labhead", `${tr.getBoundingClientRect().height}px`); fitLabGrid(); labFloatHead(); });
 }
@@ -4670,18 +4779,13 @@ function renderLabTable() {
     const m = g.m, r = g.r, c = r.config || {}, pub = !r.config;
     const tr = document.createElement("tr"); tr.className = "pick" + (sub ? " sub" : "") + (lab.sel === r.id ? " sel" : "") + (deskOpen(g) ? " ondesk" : "");
     if (g.deskS) tr.dataset.desk = g.deskS.map((x) => x.id).join(" ");
-    const chips = [pub ? "" : `<span class="chip">${c.rules && c.rules.daily ? "Daily" : (c.timeframe_min + "m · " + (c.intraday ? "intraday" : "positional"))}</span>`,
-      c.rules && c.rules.candles === "HA" ? '<span class="chip">HA candles</span>' : "",
-      c.risk ? `<span class="chip yellow">${esc(riskText(c.risk, true))}</span>` : "", r.retestFailed ? '<span class="chip red" title="Re-tested with the current rules and failed; see the strategy on your desk for why">Failed re-test (current rules)</span>' : r.refresh ? '<span class="chip blue" title="A saved strategy re-tested with the current rules">Re-tested (current rules)</span>' : r.champion ? '<span class="chip green">Re-tested</span>' : "", g.rechecking ? `<span class="chip blue" title="Showing the result from run #${g.r.run_id}; today's re-test (run #${g.rechecking.run_id}) is still being checked">Re-checking today</span>` : "",
-      r.starred ? '<span class="chip yellow">★</span>' : "", labDeskChip(g, f, sub),
-      labPassed(r, m) ? '<span class="chip green">Passed</span>' : labChecking(r, m) ? '<span class="chip blue">Being checked</span>' : m.passed && robDone(r) ? '<span class="chip red">Failed tougher test</span>' : '<span class="chip red">Not passed</span>'].join("");
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : lab.view === "SPREAD" ? r.osp : r.os) : null;
     const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} twins / similar</button>` : "";
-    tr.innerHTML = `<td class="n">${num}</td><td class="lbl"><div class="t"></div><div class="chips" style="margin-top:4px">${chips}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>
-      <td style="white-space:nowrap">${esc(labAssetName(r.asset))}</td><td>${esc(labStyle(r))}</td><td class="n">${m.full.n}</td><td class="n">${m.full.win_rate}</td><td class="n">${pc(m.full.net)}${longNetLine(r)}</td><td class="n">${m.margin_lot ? rs(m.margin_lot) : "–"}</td>
-      <td class="n">${m.ret_margin == null ? "–" : `<span class="${m.ret_margin > 0 ? "pos-num" : m.ret_margin < 0 ? "neg-num" : ""}">${m.ret_margin}%</span>`}</td>${(() => { const mt = marginToday(r), rt = returnToday(g);
-        return `<td class="n" title="${esc(marginTip(r))}">${mt ? rupeesShort(mt) : "–"}</td><td class="n">${rt == null ? "–" : `<span class="${rt > 0 ? "pos-num" : rt < 0 ? "neg-num" : ""}">${rt}%</span>`}</td>`; })()}<td class="n">${pc(m.test.net)}</td>
-      <td class="n">${rs(m.full.max_dd)}</td><td class="n">${m.full.pf ?? "–"}</td><td class="n">${m.pos_months}/${m.months_n}</td><td class="n">${deskCell(deskScore(r))}</td>${(() => { const x = robOf(r), q = x && x.consistency; return q ? `<td class="n" title="${esc(consTip(q))}"><b class="${q.score >= 70 ? "pos-num" : q.score < 40 ? "neg-num" : ""}">${q.score}</b></td>` : '<td class="n hint">–</td>'; })()}${(() => { const x = robOf(r), q = x && x.quality; return q ? `<td class="n"><b class="${q.score >= 70 ? "pos-num" : q.score < 40 ? "neg-num" : ""}">${q.score}</b></td>` : '<td class="n hint">–</td>'; })()}<td class="n">${m.score}</td>${robCells(r)}<td class="n">${g.passes}/${g.nights}</td>${(() => { const L = longOf(r); return L ? `<td class="n"><span class="${L.net > 0 ? "pos-num" : L.net < 0 ? "neg-num" : ""}" title="${rupees(L.net)} over ${L.key}">${rupeesShort(L.net)}</span><div class="hint sm">${L.key}</div></td><td class="n">${L.pos}/${L.n}</td>` : '<td class="n hint">–</td><td class="n hint">–</td>'; })()}`;
+    tr.innerHTML = LAB_GROUPS.map((gp) => {
+      if (gp[0] === "no") return `<td class="n">${num}</td>`;
+      if (gp[0] === "name") return `<td class="lbl"><div class="t"></div><div class="scs">${labStatusHTML(g, f, sub)}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>`;
+      return `<td class="n two"><div>${LAB_SHOW[gp[0]](g)}</div>${gp[1] ? `<div class="b2">${LAB_SHOW[gp[1]](g)}</div>` : ""}</td>`;
+    }).join("");
     tr.querySelector(".t").textContent = r.label;
     tr.addEventListener("click", (e) => {
       if (e.target.closest(".famBtn")) { if (lab.openFam.has(f.key)) lab.openFam.delete(f.key); else lab.openFam.add(f.key); renderLabTable(); return; }
@@ -4725,7 +4829,7 @@ function renderLabCards(fams, pc, rs) {
     const m = g.m, r = g.r, x = robOf(r);
     const el = document.createElement("div"); el.className = "lcd" + (lab.sel === r.id ? " sel" : "") + (deskOpen(g) ? " ondesk" : ""); el.tabIndex = 0;
     if (g.deskS) el.dataset.desk = g.deskS.map((x) => x.id).join(" ");
-    const status = labPassed(r, m) ? '<span class="chip green">Passed</span>' : labChecking(r, m) ? '<span class="chip blue">Being checked</span>' : m.passed && robDone(r) ? '<span class="chip red">Failed tougher test</span>' : '<span class="chip red">Not passed</span>';
+    const status = labStatusHTML(g, f, sub);
     const cell = (k, v) => `<div><span class="k">${k}</span><b>${v}</b></div>`;
     const ratio = (ok, n, need = 1) => n == null ? "–" : `<span class="${n && ok >= need ? "pos-num" : "neg-num"}">${ok ?? 0}/${n}</span>`;
     const done = x && x.status === "done";
@@ -5090,7 +5194,7 @@ $("lab_view").querySelectorAll("button").forEach((b) => b.addEventListener("clic
   $("lab_per").addEventListener("change", () => { lab.per = Number($("lab_per").value); lab.showN = 0; renderLabTable(); });
   $("lab_more").addEventListener("click", () => { lab.showN = (lab.showN || 150) + 150; renderLabTable(); });
   $("lab_period").addEventListener("change", () => { lab.period = $("lab_period").value; loadLab().catch((e) => toast(errorText(e))); });
-  $("lab_only").addEventListener("change", () => { lab.only = $("lab_only").value === "true"; loadLab().catch((e) => toast(errorText(e))); });
+  $("lab_only").addEventListener("change", () => { const v = $("lab_only").value; lab.only = v !== "all"; lab.deskKeep = v === "passed_desk"; loadLab().catch((e) => toast(errorText(e))); });
   $("lab_stopf").addEventListener("change", () => { lab.stopf = $("lab_stopf").value; renderLabTable(); });
   $("lab_mine").addEventListener("change", () => { lab.mine = $("lab_mine").value; lab.showN = 0; renderLabTable(); });
 }
