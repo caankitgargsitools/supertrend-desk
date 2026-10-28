@@ -1,7 +1,7 @@
 """Prediction Lab worker (runs on Papa's AWS server in Docker).
 
 Every minute: reads settings, live 5-minute candles and holidays from the engine (pred_pull; the candle history
-once a day), takes crypto candles from Binance's public data, makes a Kronos forecast for every finished candle of every
+once a day), takes crypto candles from Binance's public data, makes a Chaturbhuj forecast for every finished candle of every
 asset and timeframe (live first), fills the replay of past months in the spare time, scores forecasts as the real
 candles come in, and every few minutes sends the monthly totals and the latest forecasts back (pred_push) with a
 heartbeat. Only public market data comes here; the server key opens only pred_pull and pred_push.
@@ -503,7 +503,7 @@ def main():
     os.makedirs("/data", exist_ok=True)
     w = Worker(Engine(url, key), None, Store(os.environ.get("PRED_DB", "/data/predictions.sqlite")))
     while w.runner is None:
-        w.say(f"starting: loading the Kronos-{os.environ.get('PRED_MODEL', 'mini')} model (first start downloads it)")
+        w.say("starting: loading the Chaturbhuj model (first start downloads it)")
         try:
             w.runner = make_runner()
         except Exception as e:  # no model, no forecasts: say why and try again in 5 minutes

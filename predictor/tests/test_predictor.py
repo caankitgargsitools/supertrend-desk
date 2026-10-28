@@ -322,7 +322,7 @@ def test_paths_and_confidence():
 
 
 def test_correction_layer_walk_forward():
-    """Kronos is wrong in a steady way (its call is backwards): the correction learns it from earlier months and fixes
+    """Chaturbhuj is wrong in a steady way (its call is backwards): the correction learns it from earlier months and fixes
     later calls; the first month has no correction (nothing earlier to learn from); a month whose pattern changes is
     not fixed, which shows it never learns from the month it judges."""
     import random

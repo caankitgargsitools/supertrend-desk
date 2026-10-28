@@ -19,7 +19,7 @@ def build(train_path: str, eval_glob: str, weights_url: str | None) -> dict:
             e = json.load(f)
         rows += e["rows"]
         meta.append({k: e[k] for k in ("start", "per_pair", "kinds", "minutes")})
-    return {"name": f"kronos-mini-ft-{train['trained_at'][:10]}", "trained_at": train["trained_at"], "cutoff": train["cutoff"],
+    return {"name": f"chaturbhuj-ft-{train['trained_at'][:10]}", "trained_at": train["trained_at"], "cutoff": train["cutoff"],
             "weights_url": weights_url, "train": train, "eval": {"runs": meta, "rows": rows}}
 
 

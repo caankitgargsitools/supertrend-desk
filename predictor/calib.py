@@ -1,7 +1,7 @@
 """The correction layer (27 Oct 2026, Papa's step 2): a small logistic model that learns, per timeframe and step ahead,
-how far to trust Kronos's direction call, from Kronos's own forecast and a few plain facts about the moment.
+how far to trust Chaturbhuj's direction call, from Chaturbhuj's own forecast and a few plain facts about the moment.
 
-Inputs: Kronos's predicted move ÷ the usual swing, how many of its paths agree, the last 1, 5 and 20 candles' moves,
+Inputs: Chaturbhuj's predicted move ÷ the usual swing, how many of its paths agree, the last 1, 5 and 20 candles' moves,
 the time of day, and whether the asset is an index, MCX or crypto. Output: the chance the price ends higher.
 
 Walk-forward only: each month's corrected calls come from a model trained on forecasts whose outcome was known before

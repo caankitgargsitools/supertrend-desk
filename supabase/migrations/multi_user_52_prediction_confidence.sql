@@ -1,4 +1,4 @@
--- Prediction Lab step 1 and 2 (27 Oct 2026): several Kronos paths per forecast with a confidence band, and the
+-- Prediction Lab step 1 and 2 (27 Oct 2026): several Chaturbhuj paths per forecast with a confidence band, and the
 -- correction layer (walk-forward logistic model on the server, calib.py). Per month:
 --  conf    {"lo":[n,hit], "mid":[n,hit], "hi":[n,hit]} direction calls by the share of paths agreeing with them
 --          (under 70% / 70–90% / 90% or more; with 5 paths: 3 or fewer, 4, all 5)

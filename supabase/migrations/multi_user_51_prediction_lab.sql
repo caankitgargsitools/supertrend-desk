@@ -1,4 +1,4 @@
--- Prediction Lab (27 Oct 2026; engine prediction.ts, server predictor/): Kronos-mini forecasts every lab asset on
+-- Prediction Lab (27 Oct 2026; engine prediction.ts, server predictor/): Chaturbhuj forecasts every lab asset on
 -- 5m, 15m, 30m, 1h, 4h and daily candles, 1–10 candles ahead, scored against simple baselines. The forecasts run on
 -- Papa's AWS server (Dhandha's t4g.small, Mumbai), which talks only to the engine with its own key (x-pred-key):
 -- it reads public candles and writes these tables, nothing else. Tables stay small: per-month totals, the latest
@@ -7,11 +7,11 @@
 create table if not exists public.pred_settings (
   id integer primary key default 1 check (id = 1),
   enabled boolean not null default true,
-  model text not null default 'mini',          -- Kronos-mini; small/base are pending (server size)
+  model text not null default 'mini',          -- Chaturbhuj; small/base are pending (server size)
   tfs integer[] not null default '{5,15,30,60,240,1440}',
   horizon integer not null default 10,
   lookback integer not null default 256,
-  replay_from date not null default '2025-09-01', -- after Kronos's training data (paper 2 Aug 2025)
+  replay_from date not null default '2025-09-01', -- after the base model's training data (paper 2 Aug 2025)
   key_hash text,                                -- sha256 of the server key (the key itself is shown once)
   key_created_at timestamptz,
   updated_at timestamptz not null default now()
@@ -36,15 +36,15 @@ create table if not exists public.pred_stats (
   mode text not null,               -- 'replay' | 'live'
   n integer not null default 0,     -- forecasts scored
   dir_n integer not null default 0, -- of them, with a real move (not flat)
-  hit integer not null default 0,   -- Kronos's direction right
+  hit integer not null default 0,   -- Chaturbhuj's direction right
   hit_mom integer not null default 0, -- 'last move continues' right
-  ae_k double precision not null default 0,    -- sum of |close error| in % of price, Kronos
+  ae_k double precision not null default 0,    -- sum of |close error| in % of price, Chaturbhuj
   ae_flat double precision not null default 0, -- same for 'price stays the same'
-  d_sum double precision not null default 0,   -- sum of (flat error − Kronos error): > 0 = Kronos better
+  d_sum double precision not null default 0,   -- sum of (flat error − Chaturbhuj error): > 0 = Chaturbhuj better
   d_sq double precision not null default 0,    -- sum of squares, for the confidence
-  re_k double precision not null default 0,    -- sum of |range error| in %, Kronos
+  re_k double precision not null default 0,    -- sum of |range error| in %, Chaturbhuj
   re_atr double precision not null default 0,  -- same for ATR
-  r_sum double precision not null default 0,   -- sum of (ATR error − Kronos error)
+  r_sum double precision not null default 0,   -- sum of (ATR error − Chaturbhuj error)
   r_sq double precision not null default 0,
   updated_at timestamptz not null default now(),
   primary key (asset, tf, h, month, mode)
@@ -54,7 +54,7 @@ create table if not exists public.pred_stats (
 create table if not exists public.pred_latest (
   asset text not null,
   tf integer not null,
-  made_at timestamptz not null,     -- close of the last candle Kronos saw
+  made_at timestamptz not null,     -- close of the last candle Chaturbhuj saw
   last_close double precision,
   path jsonb not null,              -- predicted candles {t,o,h,l,c,v}
   actual jsonb,                     -- recent real candles {t,o,h,l,c}, including any after made_at

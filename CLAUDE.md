@@ -144,11 +144,12 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (`fundingTrades`, each day held booked with the day's funding: Delta's rate from Dec 2023, Binance's before). Binance
   history (free, fapi.binance.com, reachable from Supabase) stored as lab candles kind "FB", refreshed weekly.
 
-- **Prediction Lab (27 Oct 2026, migration 51; `prediction.ts`, `predictor/`)**: Kronos-mini (open source, MIT; code
-  pinned at commit 67b630e, weights from Hugging Face on the server) forecasts every lab asset on 5m, 15m, 30m, 1h, 4h
+- **Prediction Lab (27 Oct 2026, migration 51; `prediction.ts`, `predictor/`)**: Chaturbhuj — Papa's name for the forecasting model
+  (28 Oct: "don't call it Kronos"; use Chaturbhuj in everything Papa sees). It is the open-source Kronos-mini (MIT;
+  code pinned at commit 67b630e, weights from Hugging Face on the server; library names in code stay Kronos). Chaturbhuj forecasts every lab asset on 5m, 15m, 30m, 1h, 4h
   and daily candles, 10 candles ahead (o/h/l/c). Scored per step against baselines: direction vs "last move continues",
   close vs "price stays the same", high–low range vs the recent average swing; paired t-values; "Beats" = t > 2 with
-  ≥ 100 forecasts. Replay from 2025-09-01 (after Kronos's training data) kept apart from live forecasts (`pred_stats.mode`),
+  ≥ 100 forecasts. Replay from 2025-09-01 (after the base model's training data) kept apart from live forecasts (`pred_stats.mode`),
   in passes (Papa, 27 Oct: results soon, then ever more data): pass 1 ≈ 100 evenly spread candles per asset and
   timeframe, each later pass halves the spacing (nested, grid fixed in the server's kv `grid|asset|tf`) down to every
   10th candle (every one for 4h/daily); it keeps going in the background. Server memory: candles as arrays, raw 5m bars
@@ -156,10 +157,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (`pred_settings.samples`; the average path is the forecast, the share of paths up per step gives the confidence;
   `pred_stats.conf` bands lo/mid/hi = ≤3, 4, 5 of 5 agreeing; older single-path forecasts on those timeframes are
   redone). Step 2: correction layer `predictor/calib.py` — logistic model per timeframe and step, pooled across assets
-  (inputs: Kronos's move ÷ usual swing, paths agreeing, last 1/5/20-candle moves, time of day, asset type), refitted every
+  (inputs: Chaturbhuj's move ÷ usual swing, paths agreeing, last 1/5/20-candle moves, time of day, asset type), refitted every
   3 h walk-forward (each month only from outcomes known before it; needs 300), `pred_stats.cal_n/hit_cal`; page columns
-  "Corrected" and "All paths agree". Fine-tuning (28 Oct, migration 54): GitHub Actions `kronos-finetune.yml` (manual; free runners; needs repo secret
-  PRED_KEY): `finetune.py` trains the Kronos-mini predictor (tokenizer frozen, the Kronos recipe) on every asset and
+  "Corrected" and "All paths agree". Fine-tuning (28 Oct, migration 54): GitHub Actions `chaturbhuj-finetune.yml` (manual; free runners; needs repo secret
+  PRED_KEY): `finetune.py` trains the Chaturbhuj predictor (tokenizer frozen, the base model's recipe) on every asset and
   timeframe's candles before 2025-09-01 only (last 90 days before it for checking, best checkpoint kept), `evaluate.py`
   compares original vs fine-tuned on the same unseen candles from the cutoff (per asset group in parallel), `report.py`
   sends the results (`pred_push` model_run → `pred_models`); weights = GitHub release asset. Page section "Fine-tuning".
@@ -201,9 +202,9 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (GOLD 1 kg contract dominated the paper loss) — proposed, awaiting Papa's go-ahead.
 - Tick-level prices/stops need Dhan's WebSocket feed on an always-on server (~₹500–1,500/month) — offered, not built.
 - Slippage column on Orders + per-strategy slippage summary (signal price vs fill) — proposed.
-- Pending (Papa, 27 Oct) for the Prediction Lab, after the Kronos-mini results: server expansion (separate
-  t4g.medium ~₹2,000/month, or the Dhandha server to t4g.large); the larger Kronos models (small, base); fine-tuning
-  Kronos on our assets (train only on data before Sept 2025, then monthly walk-forward; free Kaggle/Colab GPU first,
+- Pending (Papa, 27 Oct) for the Prediction Lab, after the Chaturbhuj results: server expansion (separate
+  t4g.medium ~₹2,000/month, or the Dhandha server to t4g.large); larger versions of Chaturbhuj (base model small, base); fine-tuning
+  Chaturbhuj on our assets (train only on data before Sept 2025, then monthly walk-forward; free Kaggle/Colab GPU first,
   rented GPU ~₹50–150/h if needed); longer look-back (up to 2,048 candles for mini); more context inputs (India VIX
   with Nifty, Bitcoin with other coins); more samples per forecast on the shorter timeframes.
 - Ideas from the Tradl.ai review (one-page backtest report, morning brief, featured shelves) — proposed.

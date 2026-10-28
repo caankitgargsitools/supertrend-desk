@@ -1,11 +1,12 @@
-"""Fine-tuning Kronos-mini on our own markets (Papa, 28 Oct 2026), run by GitHub Actions (kronos-finetune.yml).
+"""Fine-tuning Chaturbhuj on our own markets (Papa, 28 Oct 2026), run by GitHub Actions (chaturbhuj-finetune.yml).
+Chaturbhuj is built on the open-source Kronos-mini (MIT licence).
 
 What it learns from: every lab asset's candles on 5m, 15m, 30m, 1h, 4h and daily, built exactly as the forecaster
 builds them, but only candles that ended BEFORE the cutoff (1 Sept 2025, where the replay starts). The replay months
 stay unseen, so the comparison in evaluate.py is honest. The last 90 days before the cutoff are kept apart to judge
 the training as it goes (the best checkpoint by that check is kept).
 
-How: the Kronos project's own recipe (finetune/train_predictor.py): the tokenizer stays as it is, the predictor learns
+How: the base model project's own recipe (finetune/train_predictor.py): the tokenizer stays as it is, the predictor learns
 to give the next candle's tokens, AdamW with a one-cycle learning rate, gradients clipped. Each training sample is one
 asset and timeframe picked at random, and a random window of 256 candles plus the 10 that followed (as the forecaster
 uses them), normalised on the 256 only.
@@ -33,7 +34,7 @@ TFS = [5, 15, 30, 60, 240, 1440]
 
 
 def stamps(ts) -> np.ndarray:
-    """Kronos's time features (minute, hour, weekday, day, month) from IST times."""
+    """The model's time features (minute, hour, weekday, day, month) from IST times."""
     import datetime as dt
     out = np.zeros((len(ts), 5), dtype=np.float32)
     for k, t in enumerate(ts):
@@ -176,7 +177,7 @@ def main():
     ap.add_argument("--cutoff", default=CUTOFF)
     ap.add_argument("--out", default="out")
     a = ap.parse_args()
-    from runner import KronosRunner
+    from runner import ChaturbhujRunner
     from worker import Engine, http_json
     os.makedirs(a.out, exist_ok=True)
     t0 = time.time()
@@ -184,11 +185,11 @@ def main():
     print(f"loaded {len(assets)} assets in {round(time.time() - t0)} s")
     win = Windows(assets, cutoff=a.cutoff)
     print(f"{len(win.train)} asset-timeframe pairs to learn from, {len(win.val)} to check on")
-    runner = KronosRunner("mini", threads=os.cpu_count() or 4, samples=1)
+    runner = ChaturbhujRunner("mini", threads=os.cpu_count() or 4, samples=1)
     state, summary = train(runner, win, a.minutes)
     meta = {"base": "NeoQuasar/Kronos-mini", "cutoff": a.cutoff, "history_from": a.history_from, "lookback": LOOKBACK, "horizon": HORIZON,
             "trained_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **{k: v for k, v in summary.items() if k != "history"}}
-    save(state, os.path.join(a.out, "kronos-mini-ft.safetensors"), meta)
+    save(state, os.path.join(a.out, "chaturbhuj-ft.safetensors"), meta)
     with open(os.path.join(a.out, "train.json"), "w") as f:
         json.dump({**meta, "history": summary["history"]}, f)
     print(json.dumps(meta))

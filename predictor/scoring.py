@@ -1,12 +1,12 @@
 """Scoring a forecast against what happened, and the simple guesses it must beat.
 
 For each step h ahead (1 … H), from the last close the model saw:
-  direction – Kronos's predicted close vs the last close, against the real move (flat moves left out);
+  direction – Chaturbhuj's predicted close vs the last close, against the real move (flat moves left out);
               baseline: the last candle's move continues.
   close     – |predicted − real close| in % of the last close; baseline: the price stays the same.
   range     – highest high − lowest low over the h candles, error in %; baseline: the average such swing over the
               recent candles (an ATR-like guess).
-Paired differences (baseline error − Kronos error) are summed with their squares, so the page can say how sure the
+Paired differences (baseline error − Chaturbhuj error) are summed with their squares, so the page can say how sure the
 difference is (a t-value; forecasts that overlap in time make it look surer than it is, which the page says)."""
 from __future__ import annotations
 

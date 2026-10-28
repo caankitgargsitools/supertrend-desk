@@ -1,6 +1,6 @@
-# Prediction Lab worker (Kronos)
+# Prediction Lab worker (Chaturbhuj)
 
-Runs Kronos-mini forecasts for every lab asset on 5m, 15m, 30m, 1h, 4h and daily candles, 1–10 candles ahead,
+Runs Chaturbhuj forecasts (our name for the model; it is built on the open-source Kronos-mini, MIT licence) for every lab asset on 5m, 15m, 30m, 1h, 4h and daily candles, 1–10 candles ahead,
 scores them against simple baselines and reports to the engine (`pred_pull` / `pred_push`, key `x-pred-key`).
 Only public market candles reach the server.
 

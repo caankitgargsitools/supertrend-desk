@@ -1,4 +1,4 @@
-// Prediction Lab (27 Oct 2026). Kronos-mini runs on Papa's AWS server (predictor/); the engine only feeds it and
+// Prediction Lab (27 Oct 2026). Chaturbhuj (our forecasting model, built on the open-source Kronos-mini) runs on Papa's AWS server (predictor/); the engine only feeds it and
 // stores what it sends back:
 //  pred_feed – every 5 minutes in market hours: the last days of 5-minute candles of every Dhan asset (indices; MCX on
 //              the current contract) into pred_bars. Crypto candles the server takes itself from Binance (public).
@@ -90,7 +90,7 @@ const confOf = (c: any) => c && typeof c === "object" ? Object.fromEntries(["lo"
 export async function predPush(sb: SupabaseClient, body: { worker?: any; latest?: any[]; stats?: any[]; model_run?: any }) {
   const out: Record<string, number> = {};
   const mr = body.model_run;
-  if (mr && typeof mr.name === "string" && /^kronos-[a-z0-9-]{1,60}$/.test(mr.name)) {
+  if (mr && typeof mr.name === "string" && /^chaturbhuj-[a-z0-9-]{1,60}$/.test(mr.name)) {
     // A fine-tuning run's results (GitHub Actions): kept whole, shown on the page; the weights stay on GitHub.
     const url = typeof mr.weights_url === "string" && /^https:\/\/github\.com\/caankitgargsitools\/supertrend-desk\/releases\/download\//.test(mr.weights_url) ? mr.weights_url : null;
     const size = JSON.stringify(mr.eval ?? null).length + JSON.stringify(mr.train ?? null).length;

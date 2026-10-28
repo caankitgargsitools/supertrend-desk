@@ -30,10 +30,10 @@ assert.equal(db.pred_stats.length, 1); assert.equal(db.pred_stats[0].n, 12, "a r
 console.log("ok   server write: heartbeat, latest forecast, monthly totals (validated, idempotent)");
 
 db.pred_models = [];
-const mr = await predPush(sb, { model_run: { name: "kronos-mini-ft-2026-10-28", trained_at: "2026-10-28T10:00:00Z", cutoff: "2025-09-01", weights_url: "https://github.com/caankitgargsitools/supertrend-desk/releases/download/x/kronos-mini-ft.safetensors", train: { steps: 5 }, eval: { rows: [] } } });
-assert.equal(mr.model_run, 1); assert.ok(db.pred_models.some((m) => m.name === "kronos-mini-ft-2026-10-28" && m.weights_url));
-await predPush(sb, { model_run: { name: "kronos-evil", weights_url: "https://evil.example/w.bin", train: {}, eval: {} } });
-assert.equal(db.pred_models.find((m) => m.name === "kronos-evil").weights_url, null, "weights only from our own GitHub releases");
+const mr = await predPush(sb, { model_run: { name: "chaturbhuj-ft-2026-10-28", trained_at: "2026-10-28T10:00:00Z", cutoff: "2025-09-01", weights_url: "https://github.com/caankitgargsitools/supertrend-desk/releases/download/x/chaturbhuj-ft.safetensors", train: { steps: 5 }, eval: { rows: [] } } });
+assert.equal(mr.model_run, 1); assert.ok(db.pred_models.some((m) => m.name === "chaturbhuj-ft-2026-10-28" && m.weights_url));
+await predPush(sb, { model_run: { name: "chaturbhuj-evil", weights_url: "https://evil.example/w.bin", train: {}, eval: {} } });
+assert.equal(db.pred_models.find((m) => m.name === "chaturbhuj-evil").weights_url, null, "weights only from our own GitHub releases");
 const bad = await predPush(sb, { model_run: { name: "../../x", train: {} } });
 assert.ok(!bad.model_run && !db.pred_models.some((m) => m.name === "../../x"), "bad names are ignored");
 console.log("ok   fine-tuning runs: kept, weights link only from our GitHub releases");

@@ -1,7 +1,7 @@
-"""Fine-tuning chain with stand-in Kronos weights (Hugging Face isn't reachable in tests) and synthetic prices:
+"""Fine-tuning chain with stand-in Chaturbhuj weights (Hugging Face isn't reachable in tests) and synthetic prices:
 windows never cross the cutoff, training lowers the loss and saves weights the runner loads, and the side-by-side test
-scores both models on the same unseen candles. Needs torch and the Kronos code:
-  PYTHONPATH=<Kronos repo> python predictor/tests/test_finetune.py"""
+scores both models on the same unseen candles. Needs torch and the base model code (Kronos):
+  PYTHONPATH=<base model repo> python predictor/tests/test_finetune.py"""
 import os
 import sys
 import tempfile
@@ -9,7 +9,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
 
-import model as km  # noqa: E402  (the Kronos repository's package)
+import model as km  # noqa: E402  (the base model's package)
 
 km.KronosTokenizer.from_pretrained = classmethod(lambda cls, _id: cls(d_in=6, d_model=64, n_heads=2, ff_dim=128, n_enc_layers=1, n_dec_layers=1, ffn_dropout_p=0, attn_dropout_p=0,
                                                                      resid_dropout_p=0, s1_bits=6, s2_bits=6, beta=0.05, gamma0=1, gamma=1.1, zeta=0.05, group_size=4))
@@ -20,7 +20,7 @@ STAND_IN = None
 import torch  # noqa: E402
 from evaluate import compare  # noqa: E402
 from finetune import Windows, save, train  # noqa: E402
-from runner import KronosRunner  # noqa: E402
+from runner import ChaturbhujRunner  # noqa: E402
 from series import day_start, ist_day  # noqa: E402
 from store import Store  # noqa: E402
 from test_predictor import FakeEngine, nse_day, weekdays  # noqa: E402
@@ -50,15 +50,15 @@ with tempfile.TemporaryDirectory() as tmp:
     assert xs.shape == (4, 74, 6) and ss.shape == (4, 74, 5) and abs(xs[:, :64].mean()) < 0.5
     print("ok   training windows end before the 1 Sept 2025 cutoff; the last 20 days before it are kept for checking")
 
-    base = KronosRunner("mini", threads=2)
+    base = ChaturbhujRunner("mini", threads=2)
     STAND_IN = {k: v.clone() for k, v in base.p.model.state_dict().items()}  # every load starts from the same stand-in weights
-    tuned = KronosRunner("mini", threads=2)
+    tuned = ChaturbhujRunner("mini", threads=2)
     state, summ = train(tuned, win, minutes=0.6, batch=8, val_batches=4, every=20, log=lambda *_: None)
     print("training:", {k: summ[k] for k in ("steps", "check_before", "check_best")})
     assert summ["steps"] >= 20 and summ["check_best"] < summ["check_before"], summ
     path = os.path.join(tmp, "ft.safetensors")
     save(state, path, {"cutoff": "2025-09-01"})
-    loaded = KronosRunner("mini", threads=2, weights=path)
+    loaded = ChaturbhujRunner("mini", threads=2, weights=path)
     assert loaded.name == "mini-ft"
     assert all(torch.equal(loaded.p.model.state_dict()[k], state[k]) for k in state)
     print("ok   training lowers the checking loss; the saved weights load back into the forecaster")

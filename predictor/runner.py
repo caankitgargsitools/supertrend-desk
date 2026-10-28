@@ -1,4 +1,5 @@
-"""Kronos forecasts in batches. The model code is the official Kronos repository (MIT licence) at a pinned commit,
+"""Chaturbhuj forecasts in batches. Chaturbhuj is our name for the model; it is built on the open-source Kronos
+repository (MIT licence) at a pinned commit,
 copied into the image; the weights come from Hugging Face on first start and stay in /data."""
 from __future__ import annotations
 
@@ -18,10 +19,10 @@ def _times(ts):
     return pd.Series([dt.datetime.fromtimestamp(t, IST).replace(tzinfo=None) for t in ts])
 
 
-class KronosRunner:
+class ChaturbhujRunner:
     def __init__(self, model: str = "mini", threads: int = 2, samples: int = 1, weights: str | None = None):
         import torch
-        from model import Kronos, KronosPredictor, KronosTokenizer  # the Kronos repository's package
+        from model import Kronos, KronosPredictor, KronosTokenizer  # the base model's package (Kronos, MIT licence)
         torch.set_num_threads(threads)
         mid, tid, ctx = MODELS[model]
         self.torch = torch
@@ -58,4 +59,4 @@ class KronosRunner:
 
 
 def make_runner():
-    return KronosRunner(os.environ.get("PRED_MODEL", "mini"), int(os.environ.get("PRED_THREADS", "2")), int(os.environ.get("PRED_SAMPLES", "1")))
+    return ChaturbhujRunner(os.environ.get("PRED_MODEL", "mini"), int(os.environ.get("PRED_THREADS", "2")), int(os.environ.get("PRED_SAMPLES", "1")))

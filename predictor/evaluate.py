@@ -1,4 +1,4 @@
-"""Original Kronos-mini against our fine-tuned one, on the same unseen candles (from 1 Sept 2025, after the training
+"""Original Chaturbhuj against our fine-tuned one, on the same unseen candles (from 1 Sept 2025, after the training
 cutoff), scored exactly like the Prediction Lab (scoring.py). Run by GitHub Actions after finetune.py, one asset group
 per job (indices, MCX, crypto) so the jobs run side by side.
 
@@ -80,7 +80,7 @@ def main():
     ap.add_argument("--kinds", default="", help="nse,mcx,crypto (empty = all)")
     ap.add_argument("--out", default="out/eval.json")
     a = ap.parse_args()
-    from runner import KronosRunner
+    from runner import ChaturbhujRunner
     from store import Store
     from worker import Engine, Worker, http_json
     import tempfile
@@ -91,8 +91,8 @@ def main():
     w.refresh()
     w.settings.setdefault("lookback", 256)
     threads = os.cpu_count() or 4
-    base = KronosRunner("mini", threads=threads, samples=1)
-    tuned = KronosRunner("mini", threads=threads, samples=1, weights=a.weights)
+    base = ChaturbhujRunner("mini", threads=threads, samples=1)
+    tuned = ChaturbhujRunner("mini", threads=threads, samples=1, weights=a.weights)
     t0 = time.time()
     kinds = set(a.kinds.split(",")) if a.kinds else None
     rows = compare(w, base, tuned, list(w.settings.get("tfs") or [5, 15, 30, 60, 240, 1440]), a.start, a.per_pair, kinds=kinds)
