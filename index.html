@@ -5309,7 +5309,7 @@ const predPct = (v, d = 1) => v == null ? "–" : `${(v * 100).toFixed(d)}%`;
 const predSigned = (v) => v == null ? "–" : `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${v > 0 ? "+" : ""}${(v * 100).toFixed(1)}%</span>`;
 function predStatusHTML(w, set) {
   if (!w || !w.last_seen) return `<div class="banner info">The forecasting server isn't connected yet. Create a server key below, copy the setup script and run it once on the AWS server (<code>sudo bash setup.sh</code>). The first forecasts appear here a few minutes after it starts; the replay of past months then fills in over a day or two.</div>`;
-  const d = w.detail || {}, ago = (Date.now() - Date.parse(w.last_seen)) / 1000, on = ago < 420;
+  const d = w.detail || {}, ago = (Date.now() - Date.parse(w.last_seen)) / 1000, on = ago < 180; // it reports every minute
   const rp = d.replay || {}, frac = rp.total ? rp.done / rp.total : null;
   const lag = Object.entries(d.lag_s || {}).filter(([tf, s]) => s > Math.max(Number(tf) * 60, 600));
   const head = on ? `<span class="working"><span class="spin" aria-hidden="true"></span><span><b>Working</b> · ${esc(w.status || "")} · last report ${Math.round(ago / 60) < 1 ? "just now" : `${Math.round(ago / 60)} min ago`}</span></span>`
