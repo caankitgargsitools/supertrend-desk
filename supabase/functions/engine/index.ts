@@ -28,7 +28,7 @@ import { auditStrategy } from "./audit.ts";
 import { ownDaily, ownIntraday } from "./owncandles.ts";
 import { KILL_EARLY, KILL_FULL, killVerdict } from "./kill.ts";
 import { ideasStep } from "./ideas.ts";
-import { predFeed, predKeyOk, predPull, predPush } from "./prediction.ts";
+import { githubOidcOk, predFeed, predKeyOk, predPull, predPush } from "./prediction.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 
@@ -2153,6 +2153,18 @@ Deno.serve(async (req) => {
     try {
       if (b.action === "pred_pull") return Response.json(await predPull(sb, b));
       if (b.action === "pred_push") return Response.json(await predPush(sb, b));
+    } catch (e) { return Response.json({ error: String((e as Error)?.message ?? e) }, { status: 500 }); }
+    return new Response("Not allowed", { status: 403 });
+  }
+  // The fine-tuning workflow on GitHub, vouched for by GitHub's signature: reads candles, sends its results, nothing else.
+  const ghToken = req.headers.get("x-gh-oidc");
+  if (!secret && !predKey && ghToken) {
+    if (!(await githubOidcOk(ghToken))) return new Response("Forbidden", { status: 403 });
+    const b = await req.json().catch(() => ({}));
+    await loadCryptoAssets(sb).catch(() => {});
+    try {
+      if (b.action === "pred_pull") return Response.json(await predPull(sb, b));
+      if (b.action === "pred_push" && b.model_run) return Response.json(await predPush(sb, { model_run: b.model_run }));
     } catch (e) { return Response.json({ error: String((e as Error)?.message ?? e) }, { status: 500 }); }
     return new Response("Not allowed", { status: 403 });
   }

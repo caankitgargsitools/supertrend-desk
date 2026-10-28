@@ -1,7 +1,8 @@
 # Fine-tunes Chaturbhuj (our forecasting model, built on the open-source Kronos-mini, MIT licence) on our markets (candles before 1 Sept 2025 only), then tests the original and the fine-tuned
 # model side by side on the unseen months after it, and sends the results to the Prediction Lab page. Started by hand
 # (Actions → chaturbhuj fine-tune → Run workflow, or from a Claude session). Free on GitHub's runners (public repository).
-# Needs the repository secret PRED_KEY: the Prediction Lab server key (it reads public market candles, writes forecasts).
+# No stored key: each request carries a fresh GitHub-signed token (OIDC), which the engine accepts only for this
+# repository's main branch and this workflow (prediction.ts githubOidcOk): it reads market candles and sends results.
 name: chaturbhuj fine-tune
 
 on:
@@ -15,7 +16,8 @@ on:
         default: "60"
 
 permissions:
-  contents: write
+  contents: write   # the release with the weights
+  id-token: write   # GitHub-signed tokens for the engine
 
 env:
   BASE_MODEL_SHA: 67b630e67f6a18c9e9be918d9b4337c960db1e9a
@@ -39,7 +41,6 @@ jobs:
           mkdir -p /tmp/basemodel && curl -sL "https://github.com/shiyu-coder/Kronos/archive/${BASE_MODEL_SHA}.tar.gz" | tar -xz -C /tmp/basemodel --strip-components=1
       - name: Fine-tune
         env:
-          PRED_KEY: ${{ secrets.PRED_KEY }}
           PYTHONPATH: /tmp/basemodel:${{ github.workspace }}/predictor
         run: python predictor/finetune.py --minutes "${{ inputs.minutes || 200 }}" --out out
       - uses: actions/upload-artifact@v4
@@ -73,7 +74,6 @@ jobs:
           path: out/
       - name: Original vs fine-tuned on the unseen months
         env:
-          PRED_KEY: ${{ secrets.PRED_KEY }}
           PYTHONPATH: /tmp/basemodel:${{ github.workspace }}/predictor
         run: python predictor/evaluate.py --weights out/chaturbhuj-ft.safetensors --kinds ${{ matrix.kinds }} --per-pair "${{ inputs.per_pair || 60 }}" --out eval/eval-${{ matrix.kinds }}.json
       - uses: actions/upload-artifact@v4
@@ -102,6 +102,5 @@ jobs:
           echo "URL=https://github.com/${{ github.repository }}/releases/download/$TAG/chaturbhuj-ft.safetensors" >> "$GITHUB_ENV"
       - name: Send the results to the Prediction Lab
         env:
-          PRED_KEY: ${{ secrets.PRED_KEY }}
           PYTHONPATH: ${{ github.workspace }}/predictor
         run: python predictor/report.py art/finetuned/train.json "art/eval-*/eval-*.json" "$URL"

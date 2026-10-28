@@ -27,6 +27,38 @@ export async function predKeyOk(sb: SupabaseClient, key: string | null): Promise
   return !!data?.key_hash && (await sha256(key)) === data.key_hash;
 }
 
+/*
+ * GitHub's own signature instead of a stored key, for the fine-tuning workflow (Papa, 28 Oct: "can you do it
+ * yourself?"): GitHub Actions hands each run a short-lived token signed by GitHub (OIDC). It is accepted only when it
+ * names this repository, its main branch and the chaturbhuj-finetune.yml workflow, so no one else (forks, other
+ * branches, other workflows) gets in, and no secret has to be stored anywhere. It opens pred_pull and fine-tuning
+ * results only.
+ */
+const GH_ISS = "https://token.actions.githubusercontent.com";
+export const GH_AUD = "ankgenie-prediction";
+const GH_REPO = "caankitgargsitools/supertrend-desk";
+const GH_WORKFLOW = `${GH_REPO}/.github/workflows/chaturbhuj-finetune.yml@refs/heads/main`;
+const JWKS = { at: 0, keys: [] as any[] };
+const b64url = (x: string) => Uint8Array.from(atob(x.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((x.length + 3) % 4)), (c) => c.charCodeAt(0));
+export async function githubOidcOk(token: string | null, nowSec = Date.now() / 1000, fetchKeys: () => Promise<any[]> = async () => {
+  if (Date.now() - JWKS.at > 3600000 || !JWKS.keys.length) { const r = await fetch(`${GH_ISS}/.well-known/jwks`); JWKS.keys = (await r.json()).keys ?? []; JWKS.at = Date.now(); }
+  return JWKS.keys;
+}): Promise<boolean> {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length !== 3) return false;
+    const head = JSON.parse(new TextDecoder().decode(b64url(parts[0]))), body = JSON.parse(new TextDecoder().decode(b64url(parts[1])));
+    if (head.alg !== "RS256") return false;
+    const aud = Array.isArray(body.aud) ? body.aud : [body.aud];
+    if (body.iss !== GH_ISS || !aud.includes(GH_AUD) || body.repository !== GH_REPO || body.ref !== "refs/heads/main" || body.job_workflow_ref !== GH_WORKFLOW) return false;
+    if (!(body.exp > nowSec) || (body.nbf && body.nbf > nowSec + 60)) return false;
+    const jwk = (await fetchKeys()).find((k) => k.kid === head.kid && k.kty === "RSA");
+    if (!jwk) return false;
+    const key = await crypto.subtle.importKey("jwk", { kty: "RSA", n: jwk.n, e: jwk.e, alg: "RS256", ext: true }, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+    return await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64url(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
+  } catch { return false; }
+}
+
 /** The MCX contract the live feed follows: the nearest one that doesn't expire within 5 days (volume moves before). */
 async function mcxContract(sb: SupabaseClient, underlying: string, today: string): Promise<string | null> {
   const { data } = await sb.from("mcx_contracts").select("sec_id, expiry").eq("underlying", underlying).gt("expiry", addDays(today, 5)).order("expiry").limit(1);

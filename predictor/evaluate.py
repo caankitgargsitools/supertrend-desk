@@ -85,7 +85,7 @@ def main():
     from worker import Engine, Worker, http_json
     import tempfile
     tmp = tempfile.mkdtemp()
-    w = Worker(Engine(os.environ["SUPABASE_URL"], os.environ["PRED_KEY"]), None, Store(os.path.join(tmp, "e.sqlite")), get=http_json)
+    w = Worker(Engine(os.environ["SUPABASE_URL"], os.environ.get("PRED_KEY")), None, Store(os.path.join(tmp, "e.sqlite")), get=http_json)
     w.say = lambda *_: None
     w.alive = lambda *_: None
     w.refresh()

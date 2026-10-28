@@ -42,3 +42,29 @@ assert.equal(p.settings.horizon, 10); assert.ok(p.assets.some((a) => a.key === "
 assert.ok(!JSON.stringify(p).includes("key_hash"), "the read never returns the key's fingerprint");
 console.log("ok   server read: settings, assets, live bars");
 console.log("all passed");
+
+// GitHub's signed token for the fine-tuning workflow: only this repository, its main branch and that workflow get in.
+{
+  const { githubOidcOk } = await import("./pred.mjs");
+  const { subtle } = globalThis.crypto;
+  const kp = await subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
+  const jwk = { ...(await subtle.exportKey("jwk", kp.publicKey)), kid: "k1" };
+  const b64 = (u8) => Buffer.from(u8).toString("base64url");
+  const sign = async (claims, kid = "k1", key = kp.privateKey) => {
+    const h = b64(Buffer.from(JSON.stringify({ alg: "RS256", kid }))), p = b64(Buffer.from(JSON.stringify(claims)));
+    return `${h}.${p}.${b64(new Uint8Array(await subtle.sign("RSASSA-PKCS1-v1_5", key, Buffer.from(`${h}.${p}`))))}`;
+  };
+  const now = 1793200000, keys = async () => [jwk];
+  const good = { iss: "https://token.actions.githubusercontent.com", aud: "ankgenie-prediction", repository: "caankitgargsitools/supertrend-desk", ref: "refs/heads/main",
+    job_workflow_ref: "caankitgargsitools/supertrend-desk/.github/workflows/chaturbhuj-finetune.yml@refs/heads/main", exp: now + 300, nbf: now - 10 };
+  assert.equal(await githubOidcOk(await sign(good), now, keys), true);
+  for (const [why, c] of [["fork", { repository: "someone/supertrend-desk" }], ["branch", { ref: "refs/heads/evil" }], ["workflow", { job_workflow_ref: "caankitgargsitools/supertrend-desk/.github/workflows/other.yml@refs/heads/main" }],
+    ["audience", { aud: "sts.amazonaws.com" }], ["issuer", { iss: "https://evil.example" }], ["expired", { exp: now - 1 }]]) {
+    assert.equal(await githubOidcOk(await sign({ ...good, ...c }), now, keys), false, why);
+  }
+  const other = await subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
+  assert.equal(await githubOidcOk(await sign(good, "k1", other.privateKey), now, keys), false, "signed by someone else");
+  assert.equal(await githubOidcOk("not.a.token", now, keys), false);
+  assert.equal(await githubOidcOk(null, now, keys), false);
+  console.log("ok   GitHub-signed token: only this repository's main-branch fine-tuning workflow; forks, branches, other workflows, expired or forged tokens refused");
+}

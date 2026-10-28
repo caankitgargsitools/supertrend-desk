@@ -181,7 +181,7 @@ def main():
     from worker import Engine, http_json
     os.makedirs(a.out, exist_ok=True)
     t0 = time.time()
-    assets = load_assets(Engine(os.environ["SUPABASE_URL"], os.environ["PRED_KEY"]), http_json, a.history_from, a.cutoff)
+    assets = load_assets(Engine(os.environ["SUPABASE_URL"], os.environ.get("PRED_KEY")), http_json, a.history_from, a.cutoff)
     print(f"loaded {len(assets)} assets in {round(time.time() - t0)} s")
     win = Windows(assets, cutoff=a.cutoff)
     print(f"{len(win.train)} asset-timeframe pairs to learn from, {len(win.val)} to check on")

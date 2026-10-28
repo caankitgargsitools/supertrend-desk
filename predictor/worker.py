@@ -49,15 +49,26 @@ def http_json(url: str, body: dict | None = None, headers: dict | None = None, t
 
 
 class Engine:
-    def __init__(self, url: str, key: str):
+    """The engine's two doors for the forecaster: with the server key, or (the fine-tuning workflow on GitHub) with a
+    fresh GitHub-signed token for each request, so no key has to be stored on GitHub."""
+    def __init__(self, url: str, key: str | None = None):
         self.url = url.rstrip("/") + "/functions/v1/engine"
-        self.key = key
+        self.key = key or None
+
+    def auth(self) -> dict:
+        if self.key:
+            return {"x-pred-key": self.key}
+        req_url, req_tok = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL"), os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
+        if not (req_url and req_tok):
+            raise RuntimeError("no server key and not running in GitHub Actions")
+        tok = http_json(f"{req_url}&audience=ankgenie-prediction", headers={"Authorization": f"bearer {req_tok}"})["value"]
+        return {"x-gh-oidc": tok}
 
     def pull(self, files: bool):
-        return http_json(self.url, {"action": "pred_pull", "files": files}, {"x-pred-key": self.key}, timeout=120)
+        return http_json(self.url, {"action": "pred_pull", "files": files}, self.auth(), timeout=120)
 
     def push(self, body: dict):
-        return http_json(self.url, {"action": "pred_push", **body}, {"x-pred-key": self.key}, timeout=120)
+        return http_json(self.url, {"action": "pred_push", **body}, self.auth(), timeout=120)
 
     def file(self, url: str):
         return http_json(url, timeout=120)

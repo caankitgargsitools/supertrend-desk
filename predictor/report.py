@@ -25,4 +25,4 @@ def build(train_path: str, eval_glob: str, weights_url: str | None) -> dict:
 
 if __name__ == "__main__":
     run = build(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
-    print(json.dumps(Engine(os.environ["SUPABASE_URL"], os.environ["PRED_KEY"]).push({"model_run": run})))
+    print(json.dumps(Engine(os.environ["SUPABASE_URL"], os.environ.get("PRED_KEY")).push({"model_run": run})))

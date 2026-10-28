@@ -159,8 +159,9 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   redone). Step 2: correction layer `predictor/calib.py` — logistic model per timeframe and step, pooled across assets
   (inputs: Chaturbhuj's move ÷ usual swing, paths agreeing, last 1/5/20-candle moves, time of day, asset type), refitted every
   3 h walk-forward (each month only from outcomes known before it; needs 300), `pred_stats.cal_n/hit_cal`; page columns
-  "Corrected" and "All paths agree". Fine-tuning (28 Oct, migration 54): GitHub Actions `chaturbhuj-finetune.yml` (manual; free runners; needs repo secret
-  PRED_KEY): `finetune.py` trains the Chaturbhuj predictor (tokenizer frozen, the base model's recipe) on every asset and
+  "Corrected" and "All paths agree". Fine-tuning (28 Oct, migration 54): GitHub Actions `chaturbhuj-finetune.yml` (manual; free runners; no stored key:
+  each request carries a GitHub-signed OIDC token, accepted by the engine only for this repo's main branch and this
+  workflow — `githubOidcOk`, header `x-gh-oidc`, opens pred_pull and model_run only): `finetune.py` trains the Chaturbhuj predictor (tokenizer frozen, the base model's recipe) on every asset and
   timeframe's candles before 2025-09-01 only (last 90 days before it for checking, best checkpoint kept), `evaluate.py`
   compares original vs fine-tuned on the same unseen candles from the cutoff (per asset group in parallel), `report.py`
   sends the results (`pred_push` model_run → `pred_models`); weights = GitHub release asset. Page section "Fine-tuning".
