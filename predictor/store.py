@@ -22,6 +22,7 @@ class Store:
           dir_n integer, hit integer, hit_mom integer, ae_k real, ae_flat real, re_k real, re_atr real,
           primary key (asset, tf, t, h));
         create table if not exists kv (k text primary key, v text);
+        create table if not exists sent (k text primary key, h text);
         """)
         # Added 27 Oct (several paths per forecast, the correction layer): k = paths drawn, up = per step the share
         # of paths ending above the last close, feats = the inputs the correction layer learns from; per score:
@@ -84,6 +85,27 @@ class Store:
                             # direction by how many paths agreed: under 70% (3 of 5), 70–90% (4 of 5), 90%+ (5 of 5)
                             "conf": {"lo": [r[15], r[16]], "mid": [r[17], r[18]], "hi": [r[19], r[20]]}, "cal_n": r[21], "hit_cal": r[22]})
         return out
+
+    @staticmethod
+    def _row_key(r: dict) -> str:
+        return f"{r['asset']}|{r['tf']}|{r['h']}|{r['month']}|{r['mode']}"
+
+    @staticmethod
+    def _row_hash(r: dict) -> str:
+        return json.dumps(r, sort_keys=True, default=lambda x: round(x, 6) if isinstance(x, float) else x)
+
+    def unsent(self, rows: list[dict]) -> list[dict]:
+        """Only the monthly rows that differ from what the database already got (28 Oct: resending every row of every
+        touched asset and timeframe, ~800 rows a minute, used up the small database's processor)."""
+        out = []
+        for r in rows:
+            got = self.db.execute("select h from sent where k=?", (self._row_key(r),)).fetchone()
+            if not got or got[0] != self._row_hash(r):
+                out.append(r)
+        return out
+
+    def mark_sent(self, rows: list[dict]):
+        self.db.executemany("insert or replace into sent values (?,?)", [(self._row_key(r), self._row_hash(r)) for r in rows])
 
     def recent(self, asset: str, tf: int, n: int = 20):
         rows = self.db.execute("select t, last, pred, up from forecasts where asset=? and tf=? order by t desc limit ?", (asset, tf, n)).fetchall()

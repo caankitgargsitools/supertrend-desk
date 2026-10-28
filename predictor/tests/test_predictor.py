@@ -356,7 +356,35 @@ def test_correction_layer_walk_forward():
     print("ok   correction layer: walk-forward month by month, learns steady errors, never peeks at the month it judges")
 
 
+def test_reports_send_only_changes():
+    """Totals go out only when a month's figures changed; the database never gets the same row twice."""
+    days = weekdays("2026-08-03", 40)
+    i5 = {"t": [], "o": [], "h": [], "l": [], "c": []}
+    px = 100.0
+    for d in days:
+        cols, px = nse_day(d, px, 0.3)
+        for k in i5:
+            i5[k] += cols[k]
+    clock = [day_start(days[-1]) + 20 * 3600]
+    with tempfile.TemporaryDirectory() as tmp:
+        eng = FakeEngine({"i5": i5, "d": {"t": []}})
+        w = Worker(eng, EchoModel(), Store(os.path.join(tmp, "p.sqlite")), get=lambda u: [], clock=lambda: clock[0])
+        w.cycle()
+        first = sum(len(b.get("stats", [])) for b in eng.pushed)
+        assert first > 0
+        n0 = len(eng.pushed)
+        w.dirty |= {(k, tf) for k in w.assets for tf in (15, 1440)}  # everything marked touched, nothing changed
+        clock[0] += 700
+        w.report([15, 1440])
+        assert len(eng.pushed) == n0 + 1 and eng.pushed[-1]["stats"] == [], "unchanged months are not sent again"
+        clock[0] += 100
+        w.report([15, 1440])
+        assert len(eng.pushed) == n0 + 1, "reports at most every 10 minutes"
+    print("ok   reports: only changed monthly rows, at most every 10 minutes")
+
+
 if __name__ == "__main__":
+    test_reports_send_only_changes()
     test_paths_and_confidence()
     test_correction_layer_walk_forward()
     test_replay_passes()

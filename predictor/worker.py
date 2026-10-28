@@ -25,7 +25,9 @@ from store import Store
 
 VERSION = "1.0"
 MIN_BARS = 64
-CALIB_EVERY = 3 * 3600  # seconds between refits of the correction layer
+CALIB_EVERY = 3 * 3600
+REPORT_EVERY = 600  # seconds between reports of totals and latest forecasts (the heartbeat goes every minute)
+PUSH_ROWS = 1000    # monthly rows per request  # seconds between refits of the correction layer
 PRETTY = {5: "5 min", 15: "15 min", 30: "30 min", 60: "1 hour", 240: "4 hours", 1440: "daily"}
 DEFAULT_SAMPLES = {"60": 5, "240": 5, "1440": 5}  # paths per forecast by timeframe (the rest: 1); the server is small
 TRIM_DAYS = 6    # raw 5-minute bars kept after building (a tail rebuild needs the last 3 days)
@@ -139,6 +141,8 @@ class Worker:
         self.error = None
         self.replay_ptr = store.get("replay_ptr", 0)
         self.phase = None  # what it is doing before the first full round (shown on the page)
+        if not store.get("sent_seeded") and store.count() == 0:
+            store.put("sent_seeded", True)  # a new server: nothing was sent before
 
     def alive(self, phase: str):
         """A heartbeat at least once a minute during long work (the first round can take several minutes)."""
@@ -395,7 +399,7 @@ class Worker:
 
     def report(self, tfs, force=False):
         now = self.clock()
-        if not force and now - self.last_push < 240:
+        if not force and now - self.last_push < REPORT_EVERY:
             return
         lat = [x for x in (self.latest(self.assets[k], tf) for k, tf in self.latest_dirty if k in self.assets) if x]
         if not lat and not self.store.get("latest_sent"):
@@ -404,7 +408,13 @@ class Worker:
             if lat:
                 self.store.put("latest_sent", True)
         stats = self.store.totals(self.dirty)
-        self.engine.push({"worker": self.heartbeat(tfs), "latest": lat, "stats": stats})
+        if not self.store.get("sent_seeded"):
+            # First run with the change filter: the database already holds every row the earlier version sent.
+            self.store.mark_sent(stats); self.store.put("sent_seeded", True); stats = []
+        stats = self.store.unsent(stats)
+        for k in range(0, max(1, len(stats)), PUSH_ROWS):
+            self.engine.push({"worker": self.heartbeat(tfs), "latest": lat if k == 0 else [], "stats": stats[k:k + PUSH_ROWS]})
+            self.store.mark_sent(stats[k:k + PUSH_ROWS])
         self.dirty.clear(); self.latest_dirty.clear()
         self.last_push = now
         self.store.commit()
