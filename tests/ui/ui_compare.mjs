@@ -124,6 +124,25 @@ await p.click('#cmp_per [data-p="1y"]'); await p.waitForTimeout(600);
 const y1 = await p.evaluate(() => [...new Set([...document.querySelectorAll("#cmp_yr text.ax")].map((t) => t.textContent).filter((t) => /^'?\d{2,4}$/.test(t)))].length);
 if (y1 > 2) fail("1y period", y1);
 console.log("ok   compare: add from lab rows and the list, max 4, colours stay with each strategy, cards, curves, falls, years, table with best marked, alike pairs, rules, tooltip, period");
+// Lab strategy page: profit curve, falls from the peak (max drawdown marked), profit per year / quarter / month.
+await p.evaluate(() => showPage("lab")); await p.waitForTimeout(900);
+await p.evaluate(() => openLabDetail(7003)); await p.waitForTimeout(1500);
+await p.locator("#ld_eq").scrollIntoViewIfNeeded();
+const ld = await p.evaluate(() => ({ eq: document.querySelectorAll("#ld_eq path.ln").length, dd: document.querySelectorAll("#ld_dd path.ln").length, mark: /Max drawdown/.test(document.getElementById("ld_dd").textContent),
+  kpi: document.getElementById("ld_kpis").textContent.replace(/\s+/g, " "), bars: document.querySelectorAll("#ld_yr rect.kbar").length }));
+console.log(JSON.stringify(ld));
+if (ld.eq !== 1 || ld.dd !== 1 || !ld.mark || ld.bars < 5 || !/Max drawdown\s*−?₹/.test(ld.kpi) || !/Made back/.test(ld.kpi)) fail("lab curve", ld);
+await p.click('#ld_cbk [data-b="Q"]'); await p.waitForTimeout(200);
+const q = await p.evaluate(() => document.querySelectorAll("#ld_yr rect.kbar").length);
+await p.click('#ld_cbk [data-b="M"]'); await p.waitForTimeout(200);
+const mo = await p.evaluate(() => ({ n: document.querySelectorAll("#ld_yr rect.kbar").length, labels: document.querySelectorAll("#ld_yr text.ax").length }));
+await p.click('#ld_cper [data-p="1y"]'); await p.waitForTimeout(200);
+const ly1 = await p.evaluate(() => document.querySelectorAll("#ld_yr rect.kbar").length);
+console.log(JSON.stringify({ q, mo, ly1 }));
+if (!(q > ld.bars * 3 && mo.n > q * 2 && mo.labels < 40 && ly1 <= 13 && ly1 >= 11)) fail("lab curve periods", { q, mo, ly1 });
+await p.click('#ld_cbk [data-b="Y"]'); await p.click('#ld_cper [data-p="max"]'); await p.waitForTimeout(200);
+await p.locator(".ldcurve").screenshot({ path: `${SHOT}/ldcurve_${theme}_${width}.png` });
+console.log("ok   lab strategy page: profit curve, falls from the peak with max drawdown marked, profit per year/quarter/month, period buttons");
 // Bulk permanent delete: only archived ones.
 await p.evaluate(() => { state.strategies.find((s) => s.id === "s1").archived = true; showPage("list"); document.getElementById("lf_arch").checked = true; document.getElementById("lf_arch").dispatchEvent(new Event("change")); lsel.clear(); lsel.add("s1"); lsel.add("s2"); renderList(); });
 const pb = await p.evaluate(() => !document.querySelector('#lp_bulk [data-bulk="purge"]').hidden);

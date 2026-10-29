@@ -91,6 +91,9 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   curve, falls from the peak, profit per year, a figure table with the best marked (records under half the longest
   aren't marked) and an "All together" column, how alike their months are (correlation), and the rules. Period
   1Y/3Y/5Y/All. Colours `--cmp1..4` validated for both looks. Test: `tests/ui/ui_compare.mjs` (args: theme width).
+  The lab strategy page (admin and public detail) has the same charts for the version open (`labCurveHTML` /
+  `drawLabCurve`): profit curve, falls from the peak with the max drawdown marked (dates, days down, days to make back),
+  profit per year / quarter / month, period 1Y/3Y/5Y/All.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

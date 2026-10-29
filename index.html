@@ -565,6 +565,11 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
   .cmprules .cr { border: 1px solid var(--line); border-left: 4px solid var(--cc); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); }
   .cmprules .top { display: flex; align-items: center; margin-bottom: 6px; } .cmprules dl { margin: 0; font-size: 12.5px; } .cmprules dt { color: var(--muted); font-size: 11px; margin-top: 6px; } .cmprules dd { margin: 0; }
   #cmp_per { display: inline-flex; }
+  .ldkpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 4px 0 10px; }
+  .ldkpis > div { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); min-width: 0; }
+  .ldkpis span { display: block; color: var(--muted); font-size: 11.5px; } .ldkpis b { display: block; font: 700 18px var(--font-data); } .ldkpis small { display: block; color: var(--muted); font-size: 11.5px; }
+  .ldcurve .sh .seg { display: inline-flex; }
+  @media (max-width: 760px) { .ldkpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 1100px) { .cmpcards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 760px) { .cmptray { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); left: 12px; right: 12px; transform: none; max-width: none; } .cmpchip { max-width: 150px; }
     .cmptray .hint { display: none; } #cmpPane .head .actions { width: 100%; } }
@@ -5051,7 +5056,7 @@ async function openLabDetail(id) {
         <div class="stat"><span class="label">Profitable months</span><span class="v">${m.pos_months} of ${m.months_n}</span></div>
         <div class="stat"><span class="label">Score</span><span class="v">${m.score}</span></div>
       </div>
-      ${monthsHTML(m)}
+      ${monthsHTML(m)}${labCurveHTML()}
       <div id="ld_long"></div>
       ${xpA("period", "Results by period")}${statsTable(m)}${XPZ}
       ${xpA("params", "How this strategy works", "every rule and setting")}
@@ -5066,7 +5071,7 @@ async function openLabDetail(id) {
     $("ld_save").addEventListener("click", (e) => { if (labPending(r)) { toast(LAB_PEND_TXT); return; } run(e.currentTarget, () => promoteLab(r, versions[pickI])); });
     $("ld_var").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: !!(r.config.rules && r.config.rules.daily), title: `Lab #${r.id}` }));
     $("ld_mtest").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: !!(r.config.rules && r.config.rules.daily), title: `Lab #${r.id}`, manual: true }));
-    renderLongTests(r.id); wireTrades(box, r, v, tm);
+    renderLongTests(r.id); wireTrades(box, r, v, tm); drawLabCurve(r, v);
     box.scrollIntoView({ block: "start", behavior: "smooth" });
   };
   draw();
@@ -5102,7 +5107,7 @@ async function openLabDetailPublic(id) {
         <div class="stat"><span class="label">Return on avg margin</span><span class="v ${m.ret_margin > 0 ? "up" : m.ret_margin < 0 ? "down" : ""}">${m.ret_margin == null ? "–" : m.ret_margin + "%"}</span></div>
         <div class="stat"><span class="label">Profitable months</span><span class="v">${m.pos_months} of ${m.months_n}</span></div>
       </div>
-      ${monthsHTML(m)}
+      ${monthsHTML(m)}${labCurveHTML()}
       <div id="ld_long"></div>
       ${xpA("period", "Results by period")}${statsTable(m)}${XPZ}
       <p class="hint">Tested on ${esc(aName)} from ${esc(run0.from_day || "")} to ${esc(run0.to_day || "")}, 1 lot, after brokerage and statutory charges. The strategy's settings stay private.</p>
@@ -5113,7 +5118,7 @@ async function openLabDetailPublic(id) {
     $("ld_close").addEventListener("click", () => { box.hidden = true; lab.sel = null; renderLabTable(); });
     $("ld_var").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: r.cfg && r.cfg.data_segment === "MCX_COMM" ? true : null, title: `Lab #${r.id}` }));
     $("ld_mtest").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: r.cfg && r.cfg.data_segment === "MCX_COMM" ? true : null, title: `Lab #${r.id}`, manual: true }));
-    renderLongTests(r.id); wireTrades(box, r, v, tm);
+    renderLongTests(r.id); wireTrades(box, r, v, tm); drawLabCurve(r, v);
     $("ld_use").addEventListener("click", () => {
       if (labPending(r)) { toast(LAB_PEND_TXT); return; }
       const f = $("ld_form");
@@ -6432,17 +6437,18 @@ function cmpLines(box, series, { from, to, h = 300, area = false, unit = "" } = 
   svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move); svg.addEventListener("pointerleave", () => { xh.setAttribute("x1", -10); xh.setAttribute("x2", -10); hd.innerHTML = ""; cmpTip(null); });
 }
 /** Grouped bars: profit per calendar year, one bar per strategy, hover for the figure. */
-function cmpBars(box, items, years) {
+function cmpBars(box, items, years, label = "Profit per year") {
   const W = Math.max(300, box.clientWidth), phone = W < 560, L = phone ? 52 : 70, R = 10, T = 14, B = 28, H = 240;
   const vals = items.flatMap((it) => years.map((y) => it.st.yrs.get(y) || 0));
   let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals); if (hi === lo) hi = lo + 1;
   const step = cmpNice((hi - lo) / 4); lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
   const Y = (v) => T + ((hi - v) / (hi - lo)) * (H - T - B), gw = (W - L - R) / Math.max(1, years.length), bw = Math.max(3, Math.min(26, (gw - 10) / items.length - 2));
   const yt = []; for (let v = lo; v <= hi + step / 2; v += step) yt.push(v);
-  box.innerHTML = `<svg class="cmpsvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Profit per year">
+  const every = Math.max(1, Math.ceil(years.length / ((W - L - R) / 52)));
+  box.innerHTML = `<svg class="cmpsvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">
     ${yt.map((v) => `<line class="kgrid${v === 0 ? " zero" : ""}" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"/><text class="ax" x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${v === 0 ? "0" : rupeesShort(v)}</text>`).join("")}
     ${years.map((y, i) => { const gx = L + i * gw + (gw - items.length * (bw + 2)) / 2;
-      return `<text class="ax" x="${L + i * gw + gw / 2}" y="${H - 8}" text-anchor="middle">${phone && years.length > 6 ? "'" + y.slice(2) : y}</text>` + items.map((it, j) => { const v = it.st.yrs.get(y); if (v == null) return "";
+      return (i % every ? "" : `<text class="ax" x="${L + i * gw + gw / 2}" y="${H - 8}" text-anchor="middle">${esc(cmpBarLabel(y, phone && years.length > 6))}</text>`) + items.map((it, j) => { const v = it.st.yrs.get(y); if (v == null) return "";
         const y0 = Y(Math.max(0, v)), hh = Math.max(1, Math.abs(Y(v) - Y(0)));
         return `<rect class="kbar c${it.c}" x="${(gx + j * (bw + 2)).toFixed(1)}" y="${y0.toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" rx="2" data-tip="${esc(`<b>${y}</b><div><i class="sw c${it.c}"></i><span>${esc(it.name)}</span><b>${rupees(v)}</b></div>`)}"/>`; }).join(""); }).join("")}</svg>`;
   box.querySelectorAll("rect.kbar").forEach((r) => { r.addEventListener("pointermove", (ev) => cmpTip(r.dataset.tip, ev)); r.addEventListener("pointerdown", (ev) => cmpTip(r.dataset.tip, ev)); r.addEventListener("pointerleave", () => cmpTip(null)); });
@@ -6568,6 +6574,59 @@ async function renderCmp() {
 window.addEventListener("resize", () => { if (page === "cmp" && renderCmp.draw) { clearTimeout(renderCmp.rt); renderCmp.rt = setTimeout(renderCmp.draw, 150); } });
 cmpRefresh();
 
+
+/* ---------- Lab strategy page: profit curve, falls from the peak, profit per period (29 Oct 2026, Papa) ----------
+ * The same charts as the Compare page, for the one strategy and version open: every trade tested, 1 lot, after charges. */
+let ldPeriod = "max", ldBucket = "Y", ldArgs = null;
+const cmpBarLabel = (k, short) => /^\d{4}-\d\d$/.test(k) ? new Date(k + "-01T00:00:00Z").toLocaleString("en-IN", { month: "short", timeZone: "UTC" }) + " " + k.slice(2, 4) : /^\d{4}-Q\d$/.test(k) ? `${k.slice(5)} ${k.slice(2, 4)}` : short ? "'" + k.slice(2) : k;
+function labCurveHTML() {
+  return `<div class="cmpsec ldcurve"><div class="sh"><h3>Profit over time</h3><span class="hint">Every trade tested, 1 lot, after charges. Hover or touch the chart for the figures on any day.</span>
+      <div class="seg" id="ld_cper" role="group" aria-label="Period" style="margin-left:auto">${CMP_PERIODS.map(([k, l]) => `<button type="button" data-p="${k}" aria-pressed="${ldPeriod === k}">${l}</button>`).join("")}</div></div>
+    <div class="ldkpis" id="ld_kpis"></div><div id="ld_eq" class="cmpchart"></div>
+    <div class="sh" style="margin-top:14px"><h3>Falls from the peak</h3><span class="hint">How far below its best point it was at any time; the deepest fall is the max drawdown.</span></div><div id="ld_dd" class="cmpchart"></div>
+    <div class="sh" style="margin-top:14px"><h3>Profit per period</h3><div class="seg" id="ld_cbk" role="group" aria-label="Period length" style="margin-left:auto">${[["Y", "Year"], ["Q", "Quarter"], ["M", "Month"]].map(([k, l]) => `<button type="button" data-b="${k}" aria-pressed="${ldBucket === k}">${l}</button>`).join("")}</div></div><div id="ld_yr" class="cmpchart"></div></div>`;
+}
+function drawLabCurve(r, v) {
+  ldArgs = [r, v];
+  const box = $("ld_eq"); if (!box) return;
+  const wrap = box.closest(".ldcurve");
+  const all = labTradeList(r, v).map((t) => ({ t: cmpTime(t.exit), net: Number(t.net) || 0 })).filter((t) => t.t).sort((a, b) => a.t - b.t);
+  if (!all.length) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  wrap.querySelectorAll("#ld_cper button").forEach((b) => { b.setAttribute("aria-pressed", String(b.dataset.p === ldPeriod)); b.onclick = () => { ldPeriod = b.dataset.p; drawLabCurve(r, v); }; });
+  wrap.querySelectorAll("#ld_cbk button").forEach((b) => { b.setAttribute("aria-pressed", String(b.dataset.b === ldBucket)); b.onclick = () => { ldBucket = b.dataset.b; drawLabCurve(r, v); }; });
+  const end = all[all.length - 1].t, yrsBack = (CMP_PERIODS.find((p) => p[0] === ldPeriod) || [])[2] || 0;
+  const from = yrsBack ? Math.max(all[0].t - 86400000, end - yrsBack * 365.25 * 86400000) : all[0].t - 86400000;
+  const tr = all.filter((t) => t.t >= from), st = cmpStats(tr);
+  // The deepest fall: when it started (the peak), its bottom, and whether it has been made back.
+  let c = 0, pk = 0, pkT = from, worst = 0, wPk = from, wPkV = 0, wLow = from, rec = null;
+  const eq = [[from, 0]], dd = [[from, 0]];
+  for (const x of tr) { c += x.net; if (c >= pk) { pk = c; pkT = x.t; } eq.push([x.t, c]); dd.push([x.t, c - pk]); if (pk - c > worst) { worst = pk - c; wPk = pkT; wPkV = pk; wLow = x.t; } }
+  rec = (eq.find((q) => q[0] > wLow && q[1] >= wPkV) || [null])[0];
+  const day = (t) => new Date(t + 19800000).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  const days = (a, b) => Math.round((b - a) / 86400000);
+  const pos = (x) => x > 0 ? "pos-num" : x < 0 ? "neg-num" : "";
+  $("ld_kpis").innerHTML = `<div><span>Net profit</span><b class="${pos(st.net)}">${rupees(st.net)}</b><small>${rupees(st.perYear)} a year · ${st.n} trades</small></div>
+    <div><span>Max drawdown</span><b class="neg-num">${worst ? rupees(-worst) : "₹0"}</b><small>${worst ? `${day(wPk)} → ${day(wLow)} (${days(wPk, wLow)} days down)` : "never below a peak"}</small></div>
+    <div><span>Made back</span><b>${!worst ? "–" : rec ? `${days(wLow, rec)} days` : "Not yet"}</b><small>${!worst ? "" : rec ? `back at the old peak on ${day(rec)}` : "still below the peak before that fall"}</small></div>
+    <div><span>Profit ÷ max drawdown</span><b>${st.retdd == null ? "–" : st.retdd.toFixed(2) + "×"}</b><small>${st.yOk}/${st.yN} years profitable · ${st.mN ? Math.round((st.mOk / st.mN) * 100) : 0}% of months</small></div>`;
+  const nm = (r.label || "This strategy").slice(0, 40);
+  cmpLines(box, [{ c: 1, name: nm, pts: eq }], { from, to: end, h: 300 });
+  cmpLines($("ld_dd"), [{ c: 2, name: "Below the peak", pts: dd }], { from, to: end, h: 170, area: true });
+  // Mark the deepest point of the fall.
+  const svg = $("ld_dd").querySelector("svg"), lowPt = dd.reduce((a, p) => p[1] < a[1] ? p : a, [0, 0]);
+  if (svg && worst) {
+    const vb = svg.viewBox.baseVal, W = vb.width, phone = W < 560, L = phone ? 52 : 70, R = phone ? 10 : 150, T = 14, B = 28, H = vb.height;
+    const ticks = dd.map((p) => p[1]); let lo = Math.min(0, ...ticks), hi = 0; if (hi === lo) hi = lo + 1; const stp = cmpNice((hi - lo) / 4); lo = Math.floor(lo / stp) * stp; hi = Math.ceil(hi / stp) * stp;
+    const x = L + ((lowPt[0] - from) / Math.max(1, end - from)) * (W - L - R), y = T + ((hi - lowPt[1]) / (hi - lo)) * (H - T - B);
+    svg.querySelector(".hit").insertAdjacentHTML("beforebegin", `<circle class="kdot c2" cx="${x}" cy="${y}" r="5"/><text class="lab" x="${Math.min(x + 8, W - R - 4)}" y="${Math.min(H - B - 4, y + 16)}" text-anchor="${x > W - R - 120 ? "end" : "start"}">Max drawdown ${rupeesShort(-worst)}</text>`);
+  }
+  const key = (t) => { const d = cmpIst(t); return ldBucket === "M" ? d.slice(0, 7) : ldBucket === "Q" ? `${d.slice(0, 4)}-Q${Math.floor((Number(d.slice(5, 7)) - 1) / 3) + 1}` : d.slice(0, 4); };
+  const per = new Map(); for (const x of tr) per.set(key(x.t), (per.get(key(x.t)) || 0) + x.net);
+  const keys = [...per.keys()].sort();
+  cmpBars($("ld_yr"), [{ c: 1, name: nm, st: { yrs: per } }], keys, `Profit per ${{ Y: "year", Q: "quarter", M: "month" }[ldBucket]}`);
+}
+window.addEventListener("resize", () => { if (ldArgs && $("ld_eq") && !$("ld_eq").closest("[hidden]")) { clearTimeout(drawLabCurve.rt); drawLabCurve.rt = setTimeout(() => drawLabCurve(...ldArgs), 150); } });
 /* ---------- several strategies at once: tick them, then activate / pause / go live / back to paper ---------- */
 const lsel = new Set();
 function renderBulkBar() {
