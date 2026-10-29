@@ -509,6 +509,66 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
   .lab-table tr.picked td { background: var(--blue-soft); }
   .lcd.picked { outline: 2px solid var(--blue); }
   td.ck, th.ck { width: 34px; text-align: center; }
+  /* Compare (29 Oct 2026): four colour slots, validated for both looks (direct labels + table cover the light-look contrast). */
+  :root, :root[data-theme="dark"] { --cmp1: #3987e5; --cmp2: #d95926; --cmp3: #199e70; --cmp4: #c98500; }
+  :root[data-theme="light"] { --cmp1: #2a78d6; --cmp2: #eb6834; --cmp3: #1baf7a; --cmp4: #eda100; }
+  .c1 { --cc: var(--cmp1); } .c2 { --cc: var(--cmp2); } .c3 { --cc: var(--cmp3); } .c4 { --cc: var(--cmp4); }
+  i.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: var(--cc); margin-right: 6px; flex: none; vertical-align: -1px; }
+  .btn.cmpBtn { font-size: 11.5px; padding: 2px 8px; min-height: 0; }
+  .btn.cmpBtn.on { background: var(--blue-soft); border-color: var(--blue); color: var(--ink); }
+  td.nm .btn.cmpBtn { margin-left: 6px; vertical-align: middle; }
+  .lab-table .scs .btn.cmpBtn { margin-left: 4px; }
+  .cardbtns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .navbadge { margin-left: auto; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--blue); color: var(--on-blue); font-size: 11px; line-height: 18px; text-align: center; }
+  .cmptray { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 40; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: min(960px, calc(100vw - 32px));
+    padding: 8px 10px 8px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: var(--glow), 0 18px 40px -16px rgba(0,0,0,.55); }
+  .cmptray .lbl { font-weight: 700; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .cmpchip { display: inline-flex; align-items: center; gap: 2px; padding: 3px 4px 3px 8px; border-radius: 999px; background: var(--chip); font-size: 12.5px; max-width: 220px; }
+  .cmpchip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cmpchip .x, .cmpcard .x { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: 6px; }
+  .cmpchip .x:hover, .cmpcard .x:hover { color: var(--red); background: var(--red-soft); }
+  .cmptip { position: fixed; z-index: 60; pointer-events: none; min-width: 180px; max-width: 320px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); font-size: 12.5px; box-shadow: 0 12px 30px -12px rgba(0,0,0,.6); }
+  .cmptip > b { display: block; margin-bottom: 4px; color: var(--muted); font-weight: 600; }
+  .cmptip div { display: flex; align-items: center; gap: 4px; padding: 1px 0; } .cmptip div span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .cmptip div b { font-family: var(--font-data); margin-left: 10px; }
+  .cmpcards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+  .cmpcard { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 14px 14px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); border-top: 4px solid var(--cc); min-width: 0; }
+  .cmpcard .top { display: flex; align-items: center; gap: 4px; } .cmpcard .nm { font-weight: 700; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cmpcard .sub { color: var(--muted); font-size: 12px; }
+  .cmpcard .hl { display: flex; flex-direction: column; margin-top: 4px; } .cmpcard .hl > span { font: 700 22px var(--font-data); } .cmpcard .hl small { color: var(--muted); font-size: 12px; }
+  .cmpcard .kv3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 4px; } .cmpcard .kv3 span { display: block; color: var(--muted); font-size: 11px; } .cmpcard .kv3 b { font: 600 13px var(--font-data); }
+  .cmpcard .chips { display: flex; flex-wrap: wrap; gap: 4px; } .cmpcard .open { align-self: flex-start; margin-top: auto; }
+  .cmpcard.add { border-style: dashed; border-top-width: 1px; align-items: center; justify-content: center; text-align: center; color: var(--muted); }
+  .cmpcard.add .plus { font-size: 28px; line-height: 1; color: var(--blue); }
+  .cmpempty { text-align: center; padding: 40px 16px; } .cmpempty .big { font-size: 40px; color: var(--blue); } .cmpempty h3 { margin: 6px 0; } .cmpempty p { max-width: 560px; margin: 0 auto 14px; }
+  .cmpsec { margin-top: 22px; } .cmpsec .sh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 8px; } .cmpsec h3 { margin: 0; font-size: 15px; }
+  .cmpsec .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; margin-bottom: 4px; } .cmpsec .legend span { display: inline-flex; align-items: center; }
+  #cmpPane, #cmpPane .cmpsec, .cmpchart { min-width: 0; max-width: 100%; }
+  .cmpchart { width: 100%; overflow: hidden; touch-action: pan-y; } .cmpsvg { display: block; width: 100%; height: auto; }
+  .cmpsvg .kgrid { stroke: var(--line); stroke-width: 1; } .cmpsvg .kgrid.zero { stroke: var(--muted); stroke-opacity: .55; }
+  .cmpsvg .ax { fill: var(--muted); font: 11px var(--font-data); } .cmpsvg .lab { fill: var(--ink); font: 600 12px var(--font-ui); } .cmpsvg .labv { fill: var(--muted); font: 11px var(--font-data); }
+  .cmpsvg .ln { fill: none; stroke: var(--cc); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .cmpsvg .area { fill: var(--cc); fill-opacity: .10; stroke: none; }
+  .cmpsvg .kdot { fill: var(--cc); stroke: var(--panel); stroke-width: 2; } .cmpsvg .xh { stroke: var(--muted); stroke-dasharray: 3 3; } .cmpsvg .hit { fill: transparent; cursor: crosshair; }
+  .cmpsvg .kbar { fill: var(--cc); stroke: var(--panel); stroke-width: 1; cursor: default; } .cmpsvg .kbar:hover { fill-opacity: .8; }
+  .cmptbl { width: 100%; border-collapse: collapse; font-size: 13px; } .cmptbl th, .cmptbl td { padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  .cmptbl thead th { text-align: right; font-size: 12.5px; white-space: nowrap; } .cmptbl thead th:first-child { text-align: left; }
+  .cmptbl tr.grp td { padding-top: 14px; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 700; border-bottom-color: transparent; }
+  .cmptbl td.best { font-weight: 700; background: var(--green-soft); } .cmptbl .bm { color: var(--green); font-size: 10px; }
+  .cmptbl .comb { color: var(--muted); border-left: 1px dashed var(--line); } .cmptbl td small { color: var(--muted); }
+  .cmppairs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .cmppairs .cpair { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--panel-2); }
+  .cmppairs .who { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12.5px; margin-bottom: 10px; } .cmppairs .who span { display: inline-flex; align-items: center; } .cmppairs .vs { color: var(--muted); }
+  .cmppairs .meter { position: relative; height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--green), var(--muted) 50%, var(--red)); opacity: .8; }
+  .cmppairs .meter span { position: absolute; top: -4px; width: 4px; height: 14px; margin-left: -2px; border-radius: 2px; background: var(--ink); box-shadow: 0 0 0 2px var(--panel); }
+  .cmppairs .ends { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); margin: 3px 0 6px; } .cmppairs .cpair p { margin: 2px 0 0; }
+  .cmprules { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  .cmprules .cr { border: 1px solid var(--line); border-left: 4px solid var(--cc); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); }
+  .cmprules .top { display: flex; align-items: center; margin-bottom: 6px; } .cmprules dl { margin: 0; font-size: 12.5px; } .cmprules dt { color: var(--muted); font-size: 11px; margin-top: 6px; } .cmprules dd { margin: 0; }
+  #cmp_per { display: inline-flex; }
+  @media (max-width: 1100px) { .cmpcards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 760px) { .cmptray { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); left: 12px; right: 12px; transform: none; max-width: none; } .cmpchip { max-width: 150px; }
+    .cmptray .hint { display: none; } #cmpPane .head .actions { width: 100%; } }
+  @media (max-width: 460px) { .cmpcards { grid-template-columns: minmax(0, 1fr); } }
   td.ck input, th.ck input { width: 18px; height: 18px; cursor: pointer; }
 
 /* ================= AnkGenie 2.0 — a dark, quiet trading desk =================
@@ -680,6 +740,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
   <nav class="nav" id="nav" aria-label="Pages" hidden>
     <button class="btn small" id="nav_strats" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-5 4 4 8-8"/><path d="M15 8h5v5"/></svg><span>Strategies</span></button>
     <button class="btn small" id="openLab" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/><path d="M7.5 15h9"/></svg><span>Strategy Lab</span></button>
+    <button class="btn small" id="nav_cmp" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Compare</span><b class="navbadge" id="nav_cmp_n" hidden></b></button>
     <button class="btn small" id="nav_ideas" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg><span>Ideas Lab</span></button>
     <button class="btn small" id="nav_pred" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l4-4 3 3 5-6"/><path d="M15 10l2-2 4 0" stroke-dasharray="2 2"/><circle cx="19" cy="6" r="2"/></svg><span>Prediction Lab</span></button>
     <button class="btn small" id="nav_market" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16l-1.5 11a2 2 0 0 1-2 1.7H7.5a2 2 0 0 1-2-1.7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg><span>Marketplace</span></button>
@@ -778,6 +839,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
             <button class="btn" id="b_publish" type="button" data-admin hidden>Publish to marketplace</button>
             <button class="btn" id="b_vary" type="button" hidden>Find variations</button>
             <button class="btn" id="b_mtest" type="button" hidden>Manual test</button>
+            <span id="sp_cmp"></span>
             <button class="btn" id="b_archive" type="button">Archive</button>
           </div>
         </div>
@@ -1123,6 +1185,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
           <button class="btn small" type="button" data-lbulk="star">☆ Star</button>
           <button class="btn small" type="button" data-lbulk="unstar">Remove star</button>
           <button class="btn small" type="button" data-lbulk="xlsx">Download Excel</button>
+          <button class="btn small" type="button" data-lbulk="compare">⇄ Compare</button>
           <button class="btn small" type="button" data-lbulk="clear">Clear selection</button>
         </div>
         <div id="lab_mtools" class="labmtools">
@@ -1238,6 +1301,8 @@ details.xp > summary:hover { background: var(--blue-soft); }
         <button class="btn small" type="button" data-bulk="allow" hidden>Allow new trades again</button>
         <button class="btn small" type="button" data-bulk="archive">Archive</button>
         <button class="btn small" type="button" data-bulk="restore" hidden>Restore</button>
+        <button class="btn small danger" type="button" data-bulk="purge" hidden>Delete permanently</button>
+        <button class="btn small" type="button" data-bulk="compare">⇄ Compare</button>
         <button class="btn small" type="button" data-bulk="clear">Clear selection</button>
       </div>
       <div class="lpm" id="lp_m">
@@ -1257,6 +1322,14 @@ details.xp > summary:hover { background: var(--blue-soft); }
       <p class="hint" style="margin:6px 0 0">A short list of trading ideas from research, each with a few settings written down before testing, tested as portfolios across assets and judged by the strict tests: 8 of 10 years profitable, doubled slippage, the luck test, the held-back last 6 months, then shuffled prices and random entries. It works on its own, separately from the Strategy Lab, while the markets are closed.</p>
       <div id="lab_ideas"></div>
     </section>
+    <section class="card" id="cmpPane" hidden>
+      <div class="head"><div><span class="label">Side by side</span><h2>Compare strategies</h2></div>
+        <div class="actions"><div class="seg" id="cmp_per" role="group" aria-label="Period"></div><button class="btn small" id="cmp_clear" type="button">Clear all</button></div></div>
+      <p class="hint" style="margin:6px 0 0">Up to 4 strategies, from the Strategy Lab or your Strategies page (press <b>⇄ Compare</b> on any of them). Lab strategies are compared on their backtest (futures, 1 lot, after charges and slippage, every year tested); a desk strategy uses its lab backtest when it came from the lab, otherwise its own paper and live trades. Past results don't promise future ones.</p>
+      <div id="cmp_cards" class="cmpcards"></div>
+      <div id="cmp_body"></div>
+    </section>
+
     <section class="card" id="predPane" hidden>
       <div class="head"><div><span class="label">Research</span><h2>Prediction Lab</h2></div></div>
       <p class="hint" style="margin:6px 0 0">Chaturbhuj, our AI model trained on candlestick charts (built on an open-source model), forecasts every lab asset on 5-minute, 15-minute, 30-minute, 1-hour, 4-hour and daily candles, 1 to 10 candles ahead. Each forecast is checked against what actually happened and against three simple guesses it has to beat: <b>the price stays the same</b> (closing price), <b>the last move continues</b> (direction) and <b>the recent average swing</b> (high–low range). The replay covers only the months after the base model's training data (from September 2025), so it is tested on prices it has never seen; live forecasts are counted separately. It runs on the AWS server and only public market prices go there. Watch only: nothing here places a trade. Next steps, each with your go-ahead: paper trading, then live.</p>
@@ -1361,6 +1434,8 @@ details.xp > summary:hover { background: var(--blue-soft); }
   </main>
 </div>
 <footer class="disclaim" id="disclaim"><div class="box" id="disclaimBox"></div></footer>
+<div class="cmptray" id="cmpTray" hidden></div>
+<div class="cmptip" id="cmpTip" hidden></div>
 <div class="toast" id="toast" hidden></div>
 
 <script>
@@ -1710,6 +1785,7 @@ function renderStrategy() {
   $("b_live").textContent = s.live ? "Switch to paper" : "Go live";
   $("b_live").className = s.live ? "btn" : "btn go";
   $("b_flat").disabled = s.position === "FLAT";
+  $("sp_cmp").innerHTML = cmpBtnHTML("desk", s.id, s.name, "");
   $("archBanner").hidden = !s.archived;
   ["b_active", "b_live", "b_flat", "b_archive"].forEach((id) => $(id).hidden = !!s.archived);
   const eb = $("errBox"); eb.hidden = !s.last_error; eb.textContent = s.last_error || "";
@@ -4819,7 +4895,7 @@ function renderLabTable() {
     const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} twins / similar</button>` : "";
     tr.innerHTML = LAB_GROUPS.map((gp) => {
       if (gp[0] === "no") return `<td class="n">${labPickBox(r)}${num}</td>`;
-      if (gp[0] === "name") return `<td class="lbl"><div class="t"></div><div class="scs">${labStatusHTML(g, f, sub)}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>`;
+      if (gp[0] === "name") return `<td class="lbl"><div class="t"></div><div class="scs">${labStatusHTML(g, f, sub)}${more}${isAdmin() && r.config ? cmpBtnHTML("lab", r.id, r.label) : ""}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>`;
       return `<td class="n two"><div>${LAB_SHOW[gp[0]](g)}</div>${gp[1] ? `<div class="b2">${LAB_SHOW[gp[1]](g)}</div>` : ""}</td>`;
     }).join("");
     tr.querySelector(".t").textContent = r.label;
@@ -4879,7 +4955,7 @@ function renderLabCards(fams, pc, rs) {
         ${cell("Max DD", rs(m.full.max_dd))}${cell("PF", m.full.pf ?? "–")}${cell("Months +", `${m.pos_months}/${m.months_n}`)}
         ${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Margin today (1 lot)", marginToday(r) ? rupees(marginToday(r)) : "–")}${cell("1-yr net on today's margin", returnToday(g) == null ? "–" : returnToday(g) + "%")}${cell("Desk score", deskCell(deskScore(r)))}${cell("Consistency", x && x.consistency ? `<span class="${x.consistency.score >= 70 ? "pos-num" : x.consistency.score < 40 ? "neg-num" : ""}">${x.consistency.score}</span>` : "–")}${cell("Quality", x && x.quality ? `<span class="${x.quality.score >= 70 ? "pos-num" : x.quality.score < 40 ? "neg-num" : ""}">${x.quality.score}</span>` : "–")}
         ${done ? cell("Assets +", ratio(x.assets_ok, x.assets_n)) + cell("Timeframes +", x.tfs_n ? ratio(x.tfs_ok, x.tfs_n, x.tfs_n >= 3 ? 2 : 1) : "n/a") + cell("Years +", x.years_n == null ? "–" : x.q_n ? `<span class="${x.q_ok >= 3 ? "pos-num" : "neg-num"}">${x.q_ok}/${x.q_n} qtr</span>` : `<span class="${x.years_n >= 3 && x.years_ok === x.years_n ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span>`) : ""}</div>
-      ${!sub && f.members.length > 1 ? `<button type="button" class="btn small fam">${lab.openFam.has(f.key) ? "Hide similar" : `+${f.members.length - 1} similar`}</button>` : ""}`;
+      <div class="cardbtns">${!sub && f.members.length > 1 ? `<button type="button" class="btn small fam">${lab.openFam.has(f.key) ? "Hide similar" : `+${f.members.length - 1} similar`}</button>` : ""}${isAdmin() && r.config ? cmpBtnHTML("lab", r.id, r.label) : ""}</div>`;
     el.querySelector(".nm").textContent = r.label;
     el.addEventListener("click", (e) => {
       if (e.target.closest(".lpk")) { labPickToggle(g, e.target.checked); el.classList.toggle("picked", e.target.checked); return; }
@@ -4947,7 +5023,7 @@ async function openLabDetail(id) {
     const mk = labKind(v), tm = (t) => t.margin ?? labTradeMargin(r.config, mk, t, m.margin_pct);
     const mMax = m.margin_max ?? (v.trades.length ? Math.max(...v.trades.map(tm)) : null);
     box.innerHTML = `<div class="head"><div><span class="label">Lab strategy #${r.id}</span><h2 style="font-size:18px"></h2></div>
-      <div class="actions"><button class="btn small" id="ld_star" type="button">${r.starred ? "★ Starred" : "☆ Star (keep)"}</button><button class="btn small" id="ld_xlsx" type="button">Download Excel</button><button class="btn primary small" id="ld_save" type="button" ${labPending(r) ? `disabled title="${esc(LAB_PEND_TXT)}"` : ""}>${labPending(r) ? "Save as strategy (after the tougher test)" : "Save as strategy"}</button><button class="btn small" id="ld_mtest" type="button">Manual test</button><button class="btn small" id="ld_var" type="button">Run variations</button><button class="btn small" id="ld_close" type="button">Close</button></div></div>
+      <div class="actions"><button class="btn small" id="ld_star" type="button">${r.starred ? "★ Starred" : "☆ Star (keep)"}</button><button class="btn small" id="ld_xlsx" type="button">Download Excel</button><button class="btn primary small" id="ld_save" type="button" ${labPending(r) ? `disabled title="${esc(LAB_PEND_TXT)}"` : ""}>${labPending(r) ? "Save as strategy (after the tougher test)" : "Save as strategy"}</button><button class="btn small" id="ld_mtest" type="button">Manual test</button><button class="btn small" id="ld_var" type="button">Run variations</button>${cmpBtnHTML("lab", r.id, r.label)}<button class="btn small" id="ld_close" type="button">Close</button></div></div>
       ${labDeskBanner(r.id)}${labPending(r) ? `<div class="banner warn" style="margin-top:12px">${esc(LAB_PEND_TXT)}</div>` : ""}
       <div id="ld_form"></div>
       <div class="seg" id="ld_vers" style="margin-top:12px" role="group" aria-label="Version">${versions.map((x, i) => `<button type="button" data-i="${i}" aria-pressed="${i === pickI}">${esc(x.key === "FUT" ? "Futures" : x.label)}</button>`).join("")}</div>
@@ -5225,6 +5301,10 @@ function labVersionOf(r, view) {
 }
 async function labBulk(kind, btn) {
   if (kind === "clear") { lab.pick.clear(); renderLabTable(); return; }
+  if (kind === "compare") {
+    if (lab.pick.size > CMP_MAX) { toast(`Compare takes up to ${CMP_MAX} strategies; tick ${CMP_MAX} or fewer.`); return; }
+    cmpSet([...lab.pick.values()].map((g) => ({ k: "lab", id: String(g.r.id), name: g.r.label }))); showPage("cmp"); return;
+  }
   const ids = [...lab.pick.keys()]; if (!ids.length) return;
   if (kind === "star" || kind === "unstar") {
     const on = kind === "star", todo = ids.filter((id) => !!lab.pick.get(id).r.starred !== on);
@@ -5318,7 +5398,7 @@ const isAdmin = () => !!me && me.role === "admin";
 const myStrats = () => state.strategies.filter((x) => me && x.owner_id === me.user_id && !x.is_master);
 function instName(s) { return s.trade_type === "OPTIONS" ? (s.option_side === "SELL" ? "Option writing" : "Option buying") : "Futures"; }
 function assetLabel(k) { return (PRESETS[k] && PRESETS[k].name) || k || "–"; }
-const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane", "ideasPane", "predPane"];
+const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane", "ideasPane", "predPane", "cmpPane"];
 function hideNewPanes() { NEW_PANES.forEach((id) => $(id).hidden = true); }
 function markNav(id) { document.querySelectorAll("#nav .btn").forEach((b) => b.id === id ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")); }
 /** One page at a time: list, strat, market, wallet, admin, conn, cap, lab, terms. */
@@ -5329,7 +5409,7 @@ function showPage(name) {
   page = name;
   hideNewPanes();
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true;
-  const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab", ideas: "nav_ideas", pred: "nav_pred" }[name];
+  const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab", ideas: "nav_ideas", pred: "nav_pred", cmp: "nav_cmp" }[name];
   if (name !== "ideas") stopIdeasPoll();
   if (name !== "pred") stopPredPoll();
   markNav(navId);
@@ -5342,9 +5422,11 @@ function showPage(name) {
   else if (name === "ideas") { $("ideasPane").hidden = false; withLoading($("ideasPane"), renderIdeas(true)).catch((e) => toast(errorText(e))); startIdeasPoll(); }
   else if (name === "pred") { $("predPane").hidden = false; withLoading($("predPane"), renderPred()).catch((e) => toast(errorText(e))); startPredPoll(); }
   else if (name === "pass") { $("passPane").hidden = false; $("np_msg").textContent = ""; }
+  else if (name === "cmp") { $("cmpPane").hidden = false; cmpCache.clear(); withLoading($("cmpPane"), renderCmp()).catch((e) => toast(errorText(e))); }
   else if (name === "cap") openCap();
   else if (name === "lab") openLab();
   else if (name === "strat") { renderStrategy(); }
+  renderCmpTray();
   window.scrollTo({ top: 0 });
 }
 async function openStrat(id) {
@@ -6178,6 +6260,303 @@ async function renderLive() {
   $("lv_note").textContent = `Total CAGR uses the combined capital and the capital-weighted average days live${missing ? `; ${missing} strateg${missing === 1 ? "y has" : "ies have"} no capital figure yet and ${missing === 1 ? "is" : "are"} left out of the capital and CAGR` : ""}. Total max drawdown is on all live trades together, in the order they closed. Open positions aren't in the profit until they close.`;
 }
 
+/* ---------- Compare (29 Oct 2026, Papa): up to 4 strategies side by side ----------
+ * “⇄ Compare” on any lab strategy (row, card, detail) or desk strategy (list, card, strategy page) adds it to the
+ * compare list (kept in this browser); the Compare page shows them together: cards, the profit curve, the falls from
+ * the peak, profit per year, a figure-by-figure table with the best of each row marked, how alike their months are,
+ * and their rules. Each strategy keeps its colour slot while it stays in the list. */
+const CMP_MAX = 4;
+let cmpList = (() => { try { return (JSON.parse(localStorage.getItem("cmp") || "[]") || []).filter((x) => x && (x.k === "lab" || x.k === "desk") && x.c >= 1 && x.c <= CMP_MAX).slice(0, CMP_MAX); } catch { return []; } })();
+const cmpCache = new Map();
+let cmpPeriod = "max";
+const CMP_PERIODS = [["1y", "1Y", 1], ["3y", "3Y", 3], ["5y", "5Y", 5], ["max", "All years", 0]];
+function cmpHas(k, id) { return cmpList.some((x) => x.k === k && String(x.id) === String(id)); }
+/** Sets the list; each strategy keeps its colour slot, newcomers take the lowest free one. */
+function cmpSet(items) {
+  const out = [];
+  for (const it of items.slice(0, CMP_MAX)) {
+    const old = cmpList.find((x) => x.k === it.k && String(x.id) === String(it.id));
+    out.push({ k: it.k, id: String(it.id), name: String(it.name || "").slice(0, 120), c: old ? old.c : 0 });
+  }
+  for (const x of out) if (!x.c || out.some((y) => y !== x && y.c === x.c)) { x.c = 0; for (let c = 1; c <= CMP_MAX; c++) if (!out.some((y) => y.c === c)) { x.c = c; break; } }
+  cmpList = out;
+  try { localStorage.setItem("cmp", JSON.stringify(cmpList)); } catch { /* private window: kept for this visit only */ }
+  cmpRefresh();
+}
+function cmpToggle(k, id, name) {
+  if (cmpHas(k, id)) { cmpSet(cmpList.filter((x) => !(x.k === k && String(x.id) === String(id)))); toast("Removed from Compare."); if (page === "cmp") renderCmp().catch((e) => toast(errorText(e))); return; }
+  if (cmpList.length >= CMP_MAX) { toast(`Compare holds up to ${CMP_MAX} strategies. Remove one first (✕ in the bar at the bottom or on the Compare page).`); return; }
+  cmpSet([...cmpList, { k, id, name }]);
+  toast(cmpList.length === 1 ? "Added to Compare. Add up to 3 more, then press “Compare now” at the bottom." : `Added to Compare (${cmpList.length} of ${CMP_MAX}).`);
+}
+function cmpBtnHTML(k, id, name, size = "small") {
+  const on = cmpHas(k, id);
+  return `<button type="button" class="btn ${size} cmpBtn${on ? " on" : ""}" data-ck="${k}" data-cid="${esc(String(id))}" data-cn="${esc(String(name || ""))}" aria-pressed="${on}" title="${on ? "In Compare: press to take it out" : `Add to Compare (up to ${CMP_MAX})`}">${on ? "✓ Comparing" : "⇄ Compare"}</button>`;
+}
+// One listener for every Compare button, ahead of the row's own click (which would open the strategy).
+document.addEventListener("click", (e) => {
+  const b = e.target.closest && e.target.closest(".cmpBtn"); if (!b) return;
+  e.stopPropagation(); e.preventDefault();
+  cmpToggle(b.dataset.ck, b.dataset.cid, b.dataset.cn);
+}, true);
+function cmpRefresh() {
+  document.querySelectorAll(".cmpBtn").forEach((b) => { const on = cmpHas(b.dataset.ck, b.dataset.cid); b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); b.textContent = on ? "✓ Comparing" : "⇄ Compare"; });
+  const nb = $("nav_cmp_n"); if (nb) { nb.hidden = !cmpList.length; nb.textContent = String(cmpList.length); }
+  renderCmpTray();
+}
+/** The bar at the bottom while strategies wait to be compared (not on the Compare page itself). */
+function renderCmpTray() {
+  const t = $("cmpTray"); if (!t) return;
+  t.hidden = !cmpList.length || page === "cmp" || !me;
+  if (t.hidden) return;
+  t.innerHTML = `<span class="lbl">Compare</span>${cmpList.map((x) => `<span class="cmpchip"><i class="sw c${x.c}"></i><span class="nm">${esc(x.name || (x.k === "lab" ? `Lab #${x.id}` : "Strategy"))}</span><button type="button" class="x" data-k="${x.k}" data-id="${esc(x.id)}" aria-label="Remove ${esc(x.name)}">✕</button></span>`).join("")}
+    ${cmpList.length < CMP_MAX ? `<span class="hint">${CMP_MAX - cmpList.length} more can be added</span>` : ""}<button type="button" class="btn small primary" id="cmp_go">Compare now →</button>`;
+  t.querySelectorAll(".x").forEach((b) => b.addEventListener("click", () => cmpSet(cmpList.filter((x) => !(x.k === b.dataset.k && x.id === b.dataset.id)))));
+  $("cmp_go").addEventListener("click", () => showPage("cmp"));
+}
+$("nav_cmp").addEventListener("click", () => showPage("cmp"));
+$("cmp_clear").addEventListener("click", () => { cmpSet([]); renderCmp().catch((e) => toast(errorText(e))); });
+
+/** Trade times: lab lists say "YYYY-MM-DD HH:MM" in IST; the desk keeps ISO timestamps. */
+function cmpTime(v) {
+  const s = String(v || "");
+  if (/^\d{4}-\d\d-\d\d$/.test(s)) return Date.parse(s + "T00:00:00Z") - 19800000;
+  if (/^\d{4}-\d\d-\d\d[ T]\d\d:\d\d(:\d\d)?$/.test(s)) return Date.parse(s.replace(" ", "T") + "Z") - 19800000;
+  const t = Date.parse(s); return Number.isFinite(t) ? t : null;
+}
+const cmpIst = (t) => new Date(t + 19800000).toISOString();
+const CMP_LAB_COLS = "id, label, asset, config, metrics, robust, trades, trades_long, basic_passed, passed, robust_status";
+async function cmpLoad(x) {
+  const key = `${x.k}:${x.id}`; if (cmpCache.has(key)) return cmpCache.get(key);
+  const it = { ...x, trades: [], desk: null, lab: null, s: null, src: "" };
+  if (x.k === "desk") {
+    const s = state.strategies.find((y) => String(y.id) === String(x.id));
+    if (!s) { it.missing = "This strategy is no longer on your desk."; return it; }
+    it.s = s; it.name = s.name; it.asset = s.underlying;
+    const tr = must(await db.from("algo_trades").select("exit_at, net, mode").eq("strategy_id", s.id).order("exit_at", { ascending: true }).limit(5000));
+    it.desk = tr.map((t) => ({ t: cmpTime(t.exit_at), net: Math.trunc(Number(t.net) || 0), mode: t.mode })).filter((t) => t.t);
+    if (s.lab_id) it.lab = await db.from("lab_results").select(CMP_LAB_COLS).eq("id", s.lab_id).maybeSingle().then((r) => r.data).catch(() => null);
+  } else {
+    it.lab = must(await db.from("lab_results").select(CMP_LAB_COLS).eq("id", Number(x.id)).maybeSingle());
+    if (!it.lab) { it.missing = "This lab result is no longer kept."; return it; }
+    it.name = it.lab.label; it.asset = it.lab.asset;
+  }
+  if (it.lab && it.lab.config) {
+    it.trades = labTradeList(it.lab, { key: "FUT", trades: it.lab.trades || [] }).map((t) => ({ t: cmpTime(t.exit), net: Number(t.net) || 0 })).filter((t) => t.t);
+    it.src = `Lab #${it.lab.id} backtest`;
+  }
+  if (!it.trades.length && it.desk) { it.trades = it.desk; it.src = "Desk trades (paper and live)"; }
+  it.trades.sort((a, b) => a.t - b.t);
+  cmpCache.set(key, it); return it;
+}
+/** Every figure the page shows, from one trade list (1 lot, after charges). */
+function cmpStats(tr) {
+  let cum = 0, peak = 0, dd = 0, gp = 0, gl = 0, wins = 0, run = 0, streak = 0, best = null, worst = null;
+  const yrs = new Map(), mons = new Map();
+  for (const x of tr) {
+    cum += x.net; peak = Math.max(peak, cum); dd = Math.max(dd, peak - cum);
+    if (x.net > 0) { gp += x.net; wins++; run = 0; } else { gl -= x.net; run++; streak = Math.max(streak, run); }
+    best = best == null ? x.net : Math.max(best, x.net); worst = worst == null ? x.net : Math.min(worst, x.net);
+    const d = cmpIst(x.t); yrs.set(d.slice(0, 4), (yrs.get(d.slice(0, 4)) || 0) + x.net); mons.set(d.slice(0, 7), (mons.get(d.slice(0, 7)) || 0) + x.net);
+  }
+  const n = tr.length, span = n ? Math.max(1 / 12, (tr[n - 1].t - tr[0].t) / (365.25 * 86400000)) : 0;
+  const yv = [...yrs.values()], mv = [...mons.values()];
+  return { n, net: cum, win: n ? (wins / n) * 100 : null, pf: gl ? gp / gl : gp ? Infinity : null, dd, retdd: dd ? cum / dd : null, perYear: n ? cum / span : null,
+    avg: n ? cum / n : null, best, worst, streak, yrs, mons, yOk: yv.filter((v) => v > 0).length, yN: yv.length, mOk: mv.filter((v) => v > 0).length, mN: mv.length,
+    bestY: yv.length ? Math.max(...yv) : null, worstY: yv.length ? Math.min(...yv) : null };
+}
+function cmpCorr(a, b, months) {
+  const xs = months.map((m) => a.get(m) || 0), ys = months.map((m) => b.get(m) || 0), n = xs.length;
+  if (n < 6) return null;
+  const mx = xs.reduce((p, v) => p + v, 0) / n, my = ys.reduce((p, v) => p + v, 0) / n;
+  let sxy = 0, sxx = 0, syy = 0; for (let i = 0; i < n; i++) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) ** 2; syy += (ys[i] - my) ** 2; }
+  return sxx && syy ? sxy / Math.sqrt(sxx * syy) : null;
+}
+function cmpTip(html, ev) {
+  const t = $("cmpTip"); if (!html) { t.hidden = true; return; }
+  t.innerHTML = html; t.hidden = false;
+  const w = t.offsetWidth, h = t.offsetHeight, x = ev.clientX + 14 + w > innerWidth - 8 ? ev.clientX - 14 - w : ev.clientX + 14;
+  t.style.left = `${Math.max(8, x)}px`; t.style.top = `${Math.max(8, Math.min(innerHeight - h - 8, ev.clientY - h / 2))}px`;
+}
+const cmpNice = (v) => { const p = 10 ** Math.floor(Math.log10(Math.max(1, v))), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; };
+/** A line chart of several series over time: series = [{c, name, pts:[[t, v]]}]. One y axis, crosshair + tooltip. */
+function cmpLines(box, series, { from, to, h = 300, area = false, unit = "" } = {}) {
+  const W = Math.max(300, box.clientWidth), phone = W < 560, L = phone ? 52 : 70, R = phone ? 10 : 150, T = 14, B = 28, H = h;
+  const all = series.flatMap((s) => s.pts.map((p) => p[1]));
+  let lo = Math.min(0, ...all), hi = Math.max(0, ...all); if (hi === lo) hi = lo + 1;
+  const step = cmpNice((hi - lo) / 4); lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+  const X = (t) => L + ((t - from) / Math.max(1, to - from)) * (W - L - R), Y = (v) => T + ((hi - v) / (hi - lo)) * (H - T - B);
+  const yt = []; for (let v = lo; v <= hi + step / 2; v += step) yt.push(v);
+  const yrs = (to - from) / (365.25 * 86400000), xt = [];
+  const d0 = new Date(cmpIst(from).slice(0, 7) + "-01T00:00:00Z");
+  for (let d = new Date(d0); d.getTime() - 19800000 <= to; d.setUTCMonth(d.getUTCMonth() + (yrs > 6 ? 12 : yrs > 2.5 ? 6 : yrs > 1.2 ? 3 : 1))) {
+    const t = d.getTime() - 19800000; if (t < from) continue;
+    if (yrs > 6 && d.getUTCMonth() !== 0) continue;
+    xt.push([t, yrs > 6 ? String(d.getUTCFullYear()) : d.toLocaleString("en-IN", { month: "short", timeZone: "UTC" }) + " " + String(d.getUTCFullYear()).slice(2)]);
+  }
+  const path = (pts) => pts.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("");
+  // Direct labels at the right end, pushed apart so they never overlap.
+  const ends = series.filter((s) => s.pts.length).map((s) => ({ s, y: Y(s.pts[s.pts.length - 1][1]), v: s.pts[s.pts.length - 1][1] })).sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 30) ends[i].y = ends[i - 1].y + 30;
+  for (let i = ends.length - 2; i >= 0; i--) if (ends[i].y > ends[i + 1].y - 30) ends[i].y = ends[i + 1].y - 30;
+  const nm = (s) => s.length > 17 ? s.slice(0, 16) + "…" : s;
+  box.innerHTML = `<svg class="cmpsvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(series.map((s) => s.name).join(", "))}">
+    ${yt.map((v) => `<line class="kgrid${v === 0 ? " zero" : ""}" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"/><text class="ax" x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${v === 0 ? "0" : rupeesShort(v)}${unit}</text>`).join("")}
+    ${xt.map(([t, l]) => `<text class="ax" x="${X(t)}" y="${H - 8}" text-anchor="middle">${esc(l)}</text>`).join("")}
+    ${area ? series.map((s) => s.pts.length ? `<path class="area c${s.c}" d="${path(s.pts)}L${X(s.pts[s.pts.length - 1][0]).toFixed(1)},${Y(0)}L${X(s.pts[0][0]).toFixed(1)},${Y(0)}Z"/>` : "").join("") : ""}
+    ${series.map((s) => `<path class="ln c${s.c}" d="${path(s.pts)}"/>`).join("")}
+    ${phone ? "" : ends.map((e) => `<circle class="kdot c${e.s.c}" cx="${X(e.s.pts[e.s.pts.length - 1][0])}" cy="${Y(e.v)}" r="4"/><text class="lab" x="${W - R + 12}" y="${e.y - 2}">${esc(nm(e.s.name))}</text><text class="labv" x="${W - R + 12}" y="${e.y + 12}">${rupeesShort(e.v)}</text>`).join("")}
+    <line class="xh" y1="${T}" y2="${H - B}" x1="-10" x2="-10"/><g class="hdots"></g>
+    <rect class="hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/></svg>`;
+  const svg = box.querySelector("svg"), xh = svg.querySelector(".xh"), hd = svg.querySelector(".hdots");
+  const at = (pts, t) => { let lo2 = 0, hi2 = pts.length - 1, k = -1; while (lo2 <= hi2) { const m = (lo2 + hi2) >> 1; if (pts[m][0] <= t) { k = m; lo2 = m + 1; } else hi2 = m - 1; } return k < 0 ? null : pts[k][1]; };
+  const move = (ev) => {
+    const r = svg.getBoundingClientRect(), x = ((ev.clientX - r.left) / r.width) * W, t = from + ((x - L) / (W - L - R)) * (to - from);
+    if (x < L || x > W - R) { xh.setAttribute("x1", -10); xh.setAttribute("x2", -10); hd.innerHTML = ""; cmpTip(null); return; }
+    xh.setAttribute("x1", x); xh.setAttribute("x2", x);
+    const vals = series.map((s) => ({ s, v: at(s.pts, t) }));
+    hd.innerHTML = vals.filter((q) => q.v != null).map((q) => `<circle class="kdot c${q.s.c}" cx="${x}" cy="${Y(q.v)}" r="4"/>`).join("");
+    cmpTip(`<b>${esc(new Date(t + 19800000).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }))}</b>${vals.sort((a, b) => (b.v ?? -Infinity) - (a.v ?? -Infinity)).map((q) => `<div><i class="sw c${q.s.c}"></i><span>${esc(nm(q.s.name))}</span><b>${q.v == null ? "–" : rupees(q.v)}</b></div>`).join("")}`, ev);
+  };
+  svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move); svg.addEventListener("pointerleave", () => { xh.setAttribute("x1", -10); xh.setAttribute("x2", -10); hd.innerHTML = ""; cmpTip(null); });
+}
+/** Grouped bars: profit per calendar year, one bar per strategy, hover for the figure. */
+function cmpBars(box, items, years) {
+  const W = Math.max(300, box.clientWidth), phone = W < 560, L = phone ? 52 : 70, R = 10, T = 14, B = 28, H = 240;
+  const vals = items.flatMap((it) => years.map((y) => it.st.yrs.get(y) || 0));
+  let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals); if (hi === lo) hi = lo + 1;
+  const step = cmpNice((hi - lo) / 4); lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+  const Y = (v) => T + ((hi - v) / (hi - lo)) * (H - T - B), gw = (W - L - R) / Math.max(1, years.length), bw = Math.max(3, Math.min(26, (gw - 10) / items.length - 2));
+  const yt = []; for (let v = lo; v <= hi + step / 2; v += step) yt.push(v);
+  box.innerHTML = `<svg class="cmpsvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Profit per year">
+    ${yt.map((v) => `<line class="kgrid${v === 0 ? " zero" : ""}" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"/><text class="ax" x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${v === 0 ? "0" : rupeesShort(v)}</text>`).join("")}
+    ${years.map((y, i) => { const gx = L + i * gw + (gw - items.length * (bw + 2)) / 2;
+      return `<text class="ax" x="${L + i * gw + gw / 2}" y="${H - 8}" text-anchor="middle">${phone && years.length > 6 ? "'" + y.slice(2) : y}</text>` + items.map((it, j) => { const v = it.st.yrs.get(y); if (v == null) return "";
+        const y0 = Y(Math.max(0, v)), hh = Math.max(1, Math.abs(Y(v) - Y(0)));
+        return `<rect class="kbar c${it.c}" x="${(gx + j * (bw + 2)).toFixed(1)}" y="${y0.toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" rx="2" data-tip="${esc(`<b>${y}</b><div><i class="sw c${it.c}"></i><span>${esc(it.name)}</span><b>${rupees(v)}</b></div>`)}"/>`; }).join(""); }).join("")}</svg>`;
+  box.querySelectorAll("rect.kbar").forEach((r) => { r.addEventListener("pointermove", (ev) => cmpTip(r.dataset.tip, ev)); r.addEventListener("pointerdown", (ev) => cmpTip(r.dataset.tip, ev)); r.addEventListener("pointerleave", () => cmpTip(null)); });
+}
+function cmpRules(it) {
+  const c = (it.lab && it.lab.config) || it.s || {};
+  const r = c.rules || {};
+  const rows = [];
+  rows.push(["Runs on", `${assetLabel(c.underlying || it.asset)} · ${r.daily ? "daily candles" : c.timeframe_min ? `${c.timeframe_min}-minute candles` : "–"}${c.intraday === true ? " · intraday" : c.intraday === false ? " · positional" : ""}`]);
+  rows.push(["Direction", { BOTH: "Long and short", LONG_ONLY: "Long only", SHORT_ONLY: "Short only" }[c.direction] || "–"]);
+  if (r.long || r.short) { rows.push(["Buy when", setText(r.long)]); rows.push(["Sell when", setText(r.short)]); if (r.exitLong && r.exitLong.conds && r.exitLong.conds.length) rows.push(["Exit long when", setText(r.exitLong)]); if (r.exitShort && r.exitShort.conds && r.exitShort.conds.length) rows.push(["Exit short when", setText(r.exitShort)]); }
+  else if (it.s) rows.push(["Kind", kindName(it.s) + (it.s.factor ? ` (ATR ${it.s.atr_period}, factor ${it.s.factor})` : "")]);
+  if (r.candles === "HA") rows.push(["Candles", "Heikin Ashi"]);
+  rows.push(["Stops", c.risk ? riskText(c.risk) : "None"]);
+  if (it.s) rows.push(["On the desk", `${it.s.archived ? "Archived" : it.s.active ? "Active" : "Paused"} · ${it.s.live ? "Live" : "Paper"} · ${instName(it.s)}`]);
+  return rows;
+}
+async function renderCmp() {
+  const per = $("cmp_per");
+  per.innerHTML = CMP_PERIODS.map(([k, l]) => `<button type="button" data-p="${k}" aria-pressed="${cmpPeriod === k}">${l}</button>`).join("");
+  per.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { cmpPeriod = b.dataset.p; renderCmp().catch((e) => toast(errorText(e))); }));
+  $("cmp_clear").hidden = !cmpList.length;
+  const cards = $("cmp_cards"), body = $("cmp_body");
+  if (!cmpList.length) {
+    cards.innerHTML = ""; per.hidden = true;
+    body.innerHTML = `<div class="cmpempty"><div class="big">⇄</div><h3>Nothing to compare yet</h3><p class="hint">Press <b>⇄ Compare</b> on up to ${CMP_MAX} strategies${isAdmin() ? " in the Strategy Lab (on a row, a card or a strategy's page) or" : ""} on your Strategies page, or tick several and press ⇄ Compare in the bar above the list. They wait in a bar at the bottom of the screen; press “Compare now” when ready.</p>
+      <div class="actions" style="justify-content:center">${isAdmin() ? '<button class="btn small" type="button" id="cmp_to_lab">Open the Strategy Lab</button>' : ""}<button class="btn small" type="button" id="cmp_to_list">Open my strategies</button></div></div>`;
+    if ($("cmp_to_lab")) $("cmp_to_lab").addEventListener("click", () => showPage("lab"));
+    $("cmp_to_list").addEventListener("click", () => showPage("list"));
+    return;
+  }
+  per.hidden = false;
+  const items = await Promise.all(cmpList.map((x) => cmpLoad(x).catch((e) => ({ ...x, trades: [], missing: errorText(e) }))));
+  const live = items.filter((it) => !it.missing && it.trades.length);
+  const end = live.length ? Math.max(...live.map((it) => it.trades[it.trades.length - 1].t)) : Date.now();
+  const yrsBack = (CMP_PERIODS.find((p) => p[0] === cmpPeriod) || [])[2] || 0;
+  const from = yrsBack ? end - yrsBack * 365.25 * 86400000 : live.length ? Math.min(...live.map((it) => it.trades[0].t)) : end - 86400000;
+  for (const it of items) { it.tr = (it.trades || []).filter((t) => t.t >= from && t.t <= end); it.st = cmpStats(it.tr); }
+  const sh = live.filter((it) => it.tr.length);
+  // A much shorter record (e.g. a few months of desk trades against years of backtest) is shown but never marked best.
+  const spanOf = (it) => it.tr.length ? it.tr[it.tr.length - 1].t - it.tr[0].t : 0, maxSpan = Math.max(0, ...items.map(spanOf));
+  for (const it of items) { it.span = spanOf(it); it.short = sh.length > 1 && it.span < maxSpan * 0.5; }
+  // ---- cards
+  const rob = (it) => it.lab ? robOf(it.lab) : null;
+  cards.innerHTML = cmpList.map((x, i) => { const it = items[i], st = it.st, x2 = rob(it), cons = x2 && x2.consistency;
+    const status = it.lab ? (it.lab.passed === true ? '<span class="chip green">Passed</span>' : it.lab.basic_passed && !(x2 && x2.status === "done") ? '<span class="chip blue">Being checked</span>' : '<span class="chip red">Not passed</span>') : "";
+    const desk = it.s ? `<span class="chip ${it.s.live ? "red" : "yellow"}">${it.s.live ? "Live" : "Paper"}</span><span class="chip${it.s.active ? " green" : ""}">${it.s.archived ? "Archived" : it.s.active ? "Active" : "Paused"}</span>` : "";
+    return `<div class="cmpcard c${x.c}"><div class="top"><i class="sw c${x.c}"></i><div class="nm" title="${esc(it.name || x.name)}">${esc(it.name || x.name || "–")}</div><button type="button" class="x" data-i="${i}" aria-label="Remove from Compare">✕</button></div>
+      <div class="sub">${esc(assetLabel(it.asset || ""))}${it.src ? ` · ${esc(it.src)}` : ""}</div>
+      ${it.missing ? `<p class="hint">${esc(it.missing)}</p>` : !st.n ? '<p class="hint">No trades in this period.</p>' : `<div class="hl"><span class="${st.net >= 0 ? "pos-num" : "neg-num"}">${rupees(st.net)}</span><small>${rupeesShort(st.perYear)} a year · ${st.n} trades</small></div>
+      <div class="kv3"><div><span>Max fall</span><b>${rupeesShort(st.dd)}</b></div><div><span>Years +</span><b>${st.yOk}/${st.yN}</b></div><div><span>Consistency</span><b>${cons ? cons.score : "–"}</b></div></div>`}
+      <div class="chips">${status}${desk}</div>
+      <button type="button" class="btn small open" data-i="${i}">Open</button></div>`; }).join("") +
+    (cmpList.length < CMP_MAX ? `<div class="cmpcard add"><div class="plus">+</div><p class="hint">Add ${CMP_MAX - cmpList.length} more with <b>⇄ Compare</b> in the Strategy Lab or on Strategies.</p></div>` : "");
+  cards.querySelectorAll(".x").forEach((b) => b.addEventListener("click", () => { const x = cmpList[Number(b.dataset.i)]; cmpSet(cmpList.filter((y) => y !== x)); renderCmp().catch((e) => toast(errorText(e))); }));
+  cards.querySelectorAll(".open").forEach((b) => b.addEventListener("click", () => { const x = cmpList[Number(b.dataset.i)];
+    if (x.k === "desk") openStrat(x.id); else { showPage("lab"); setTimeout(() => openLabDetail(Number(x.id)).catch((e) => toast(errorText(e))), 600); } }));
+  if (!sh.length) { body.innerHTML = '<p class="hint" style="margin-top:14px">None of these has trades in the period chosen.</p>'; return; }
+  // ---- combined (all of them together, 1 lot each)
+  const allTr = sh.flatMap((it) => it.tr).sort((a, b) => a.t - b.t), comb = cmpStats(allTr);
+  // ---- table rows: [label, value(st, it), format, better]
+  const ratio = (a, b) => b ? a / b : null;
+  const ROWS = [
+    ["Profit", "Net profit", (st) => st.net, "rs", 1], ["Profit", "Average per year", (st) => st.perYear, "rs", 1], ["Profit", "Average per trade", (st) => st.avg, "rs", 1],
+    ["Risk", "Biggest fall from a peak", (st) => st.dd, "rs", -1], ["Risk", "Profit ÷ biggest fall", (st) => st.retdd, "x", 1], ["Risk", "Worst trade", (st) => st.worst, "rs", 1], ["Risk", "Longest losing run (trades)", (st) => st.streak, "int", -1],
+    ["Steadiness", "Profitable years", (st) => ratio(st.yOk, st.yN), "yrs", 1], ["Steadiness", "Profitable months", (st) => ratio(st.mOk, st.mN), "pct", 1], ["Steadiness", "Best year", (st) => st.bestY, "rs", 1], ["Steadiness", "Worst year", (st) => st.worstY, "rs", 1],
+    ["Trades", "Trades", (st) => st.n, "int", 0], ["Trades", "Win rate", (st) => st.win, "pct0", 1], ["Trades", "Profit factor", (st) => st.pf, "x", 1], ["Trades", "Best trade", (st) => st.best, "rs", 0],
+  ];
+  const LABROWS = [["Lab scores", "Consistency (0–100)", (it) => { const x = rob(it); return x && x.consistency ? x.consistency.score : null; }, "int", 1],
+    ["Lab scores", "Quality (0–100)", (it) => { const x = rob(it); return x && x.quality ? x.quality.score : null; }, "int", 1]];
+  const DESKROWS = [["On the desk", "Paper trades · net", (it) => it.desk ? it.desk.filter((t) => t.mode !== "LIVE") : null, "desk", 0], ["On the desk", "Live trades · net", (it) => it.desk ? it.desk.filter((t) => t.mode === "LIVE") : null, "desk", 0]];
+  const fmt = (v, f, st) => { if (v == null || Number.isNaN(v)) return "–";
+    if (f === "rs") return `<span class="${v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""}">${rupees(v)}</span>`;
+    if (f === "x") return v === Infinity ? "∞" : `${v.toFixed(2)}×`;
+    if (f === "pct") return `${Math.round(v * 100)}%${st ? ` <small>(${st.mOk}/${st.mN})</small>` : ""}`;
+    if (f === "pct0") return `${Math.round(v)}%`;
+    if (f === "yrs") return st ? `${st.yOk}/${st.yN}` : `${Math.round(v * 100)}%`;
+    if (f === "desk") return v.length ? `${v.length} · <span class="${v.reduce((a, t) => a + t.net, 0) >= 0 ? "pos-num" : "neg-num"}">${rupees(v.reduce((a, t) => a + t.net, 0))}</span>` : "–";
+    return String(Math.trunc(v)); };
+  const monthsOf = (ms) => Math.max(1, Math.round(ms / (30.44 * 86400000)));
+  const heads = cmpList.map((x, i) => `<th class="n"><i class="sw c${x.c}"></i>${esc((items[i].name || x.name || "").slice(0, 40))}${items[i].short ? `<div class="hint sm" title="Not marked best: its record is much shorter than the others'">only ${monthsOf(items[i].span)} month${monthsOf(items[i].span) === 1 ? "" : "s"} of trades</div>` : ""}</th>`).join("");
+  let grp = "";
+  const rowsHTML = (defs, kind) => defs.map(([g, label, fn, f, better]) => {
+    const vs = items.map((it) => it.missing ? null : kind === "st" ? (it.tr.length ? fn(it.st) : null) : fn(it));
+    const nums = vs.filter((v, i) => typeof v === "number" && Number.isFinite(v) && !(kind === "st" && items[i].short));
+    const bestV = better && nums.length > 1 ? (better > 0 ? Math.max(...nums) : Math.min(...nums)) : null;
+    const g2 = g !== grp ? `<tr class="grp"><td colspan="${items.length + 2}">${esc(g)}</td></tr>` : ""; grp = g;
+    return `${g2}<tr><td>${esc(label)}</td>${vs.map((v, i) => `${(() => { const b = bestV != null && v === bestV && !(kind === "st" && items[i].short); return `<td class="n${b ? " best" : ""}">${fmt(v, f, kind === "st" ? items[i].st : null)}${b ? ' <span class="bm" title="Best of these">▲</span>' : ""}</td>`; })()}`).join("")}<td class="n comb">${kind === "st" ? fmt(fn(comb), f, comb) : ""}</td></tr>`;
+  }).join("");
+  const hasLab = items.some((it) => it.lab), hasDesk = items.some((it) => it.desk);
+  // ---- how alike: correlation of monthly profit
+  const months = [...new Set(sh.flatMap((it) => [...it.st.mons.keys()]))].sort();
+  const pairs = []; for (let i = 0; i < sh.length; i++) for (let j = i + 1; j < sh.length; j++) pairs.push([sh[i], sh[j], cmpCorr(sh[i].st.mons, sh[j].st.mons, months)]);
+  const alike = (r) => r == null ? ["–", "Too few months to tell"] : r >= 0.7 ? ["Very alike", "They win and lose in the same months: running both adds risk more than safety"] : r >= 0.4 ? ["Somewhat alike", "Often good and bad in the same months"] : r > -0.2 ? ["Independent", "Their good and bad months don't line up: together they smooth each other out"] : ["Opposite", "One tends to do well when the other doesn't: good for smoothing"];
+  const years = [...new Set(sh.flatMap((it) => [...it.st.yrs.keys()]))].sort();
+  body.innerHTML = `
+    <div class="cmpsec"><div class="sh"><h3>Profit over time</h3><span class="hint">Running total of net profit, 1 lot each, after charges. Hover or touch for the figures on any day.</span></div>
+      <div class="legend">${sh.map((it) => `<span><i class="sw c${it.c}"></i>${esc(it.name)}</span>`).join("")}</div><div id="cmp_eq" class="cmpchart"></div></div>
+    <div class="cmpsec"><div class="sh"><h3>Falls from the peak</h3><span class="hint">How far each one was below its best point at any time: the deeper and longer, the harder it is to sit through.</span></div><div id="cmp_dd" class="cmpchart"></div></div>
+    <div class="cmpsec"><div class="sh"><h3>Profit per year</h3><span class="hint">Calendar years (the first and last may be part-years).</span></div>
+      <div class="legend">${sh.map((it) => `<span><i class="sw c${it.c}"></i>${esc(it.name)}</span>`).join("")}</div><div id="cmp_yr" class="cmpchart"></div></div>
+    <div class="cmpsec"><div class="sh"><h3>Figure by figure</h3><span class="hint">▲ = the best of these on that line (a strategy with a much shorter record isn't marked). “All together” = running all of them at once, 1 lot each.</span></div>
+      <div class="scroll"><table class="cmptbl"><thead><tr><th></th>${heads}<th class="n comb">All together</th></tr></thead><tbody>
+      ${rowsHTML(ROWS, "st")}${hasLab ? rowsHTML(LABROWS, "it") : ""}${hasDesk ? rowsHTML(DESKROWS, "it") : ""}</tbody></table></div></div>
+    ${pairs.length ? `<div class="cmpsec"><div class="sh"><h3>How alike are they?</h3><span class="hint">From their monthly profits (correlation, −1 to +1). Strategies that aren't alike make a smoother desk together.</span></div>
+      <div class="cmppairs">${pairs.map(([a, b, r]) => { const [w, t] = alike(r); return `<div class="cpair"><div class="who"><span><i class="sw c${a.c}"></i>${esc(a.name)}</span><span class="vs">and</span><span><i class="sw c${b.c}"></i>${esc(b.name)}</span></div>
+        <div class="meter"><span style="left:${r == null ? 50 : ((r + 1) / 2) * 100}%"></span></div><div class="ends"><span>opposite</span><span>independent</span><span>same</span></div>
+        <b>${w}${r == null ? "" : ` (${r.toFixed(2)})`}</b><p class="hint">${t}</p></div>`; }).join("")}</div></div>` : ""}
+    <div class="cmpsec"><div class="sh"><h3>How each one trades</h3></div>
+      <div class="cmprules">${items.map((it) => `<div class="cr c${it.c}"><div class="top"><i class="sw c${it.c}"></i><b>${esc(it.name || it.name || "–")}</b></div>${it.missing ? `<p class="hint">${esc(it.missing)}</p>` : `<dl>${cmpRules(it).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>`}</div>`).join("")}</div></div>`;
+  const draw = () => {
+    if (!$("cmp_eq")) return;
+    const eq = sh.map((it) => { let c = 0; return { c: it.c, name: it.name, pts: [[from, 0], ...it.tr.map((t) => [t.t, (c += t.net)])] }; });
+    cmpLines($("cmp_eq"), eq, { from, to: end, h: 320 });
+    const dd = sh.map((it) => { let c = 0, pk = 0; return { c: it.c, name: it.name, pts: [[from, 0], ...it.tr.map((t) => { c += t.net; pk = Math.max(pk, c); return [t.t, c - pk]; })] }; });
+    cmpLines($("cmp_dd"), dd, { from, to: end, h: 200, area: true });
+    cmpBars($("cmp_yr"), sh, years);
+  };
+  draw(); renderCmp.draw = draw;
+  // Once the page has settled (a scrollbar may have appeared), draw again at the final width.
+  requestAnimationFrame(() => { const w = $("cmp_eq") && $("cmp_eq").clientWidth; if (w && w !== renderCmp.w) draw(); renderCmp.w = w; });
+}
+window.addEventListener("resize", () => { if (page === "cmp" && renderCmp.draw) { clearTimeout(renderCmp.rt); renderCmp.rt = setTimeout(renderCmp.draw, 150); } });
+cmpRefresh();
+
 /* ---------- several strategies at once: tick them, then activate / pause / go live / back to paper ---------- */
 const lsel = new Set();
 function renderBulkBar() {
@@ -6189,6 +6568,7 @@ function renderBulkBar() {
   $("lp_bulk_n").textContent = `${n} selected (${act} active, ${live} live${arch ? `, ${arch} archived` : ""})`;
   const b = (k) => document.querySelector(`#lp_bulk [data-bulk="${k}"]`);
   b("exit").hidden = !sel.some((s) => s.position !== "FLAT" && !s.archived);
+  b("purge").hidden = !arch; b("compare").hidden = n > CMP_MAX;
   b("restore").hidden = !arch; b("allow").hidden = !sel.some((s) => s.kill_at && !s.archived);
   for (const k of ["on", "off", "live", "paper", "archive"]) b(k).hidden = arch === n;
 }
@@ -6198,6 +6578,22 @@ async function bulkAction(kind) {
   const btn = document.querySelector(`#lp_bulk [data-bulk="${kind}"]`);
   const ids100 = async (xs, patch) => { for (let i = 0; i < xs.length; i += 100) must(await db.from("algo_strategies").update(patch).in("id", xs.slice(i, i + 100).map((s) => s.id))); };
   const nS = (k) => `${k} strateg${k === 1 ? "y" : "ies"}`;
+  if (kind === "compare") {
+    const pick = state.strategies.filter((s) => lsel.has(s.id));
+    if (pick.length > CMP_MAX) { toast(`Compare takes up to ${CMP_MAX} strategies; tick ${CMP_MAX} or fewer.`); return; }
+    cmpSet(pick.map((s) => ({ k: "desk", id: String(s.id), name: s.name }))); showPage("cmp"); return;
+  }
+  if (kind === "purge") {
+    const todo = state.strategies.filter((s) => lsel.has(s.id) && s.archived);
+    if (!todo.length) { toast("Only archived strategies can be deleted permanently. Archive them first."); return; }
+    askConfirm(`<strong>Delete ${nS(todo.length)} permanently?</strong><br>${names(todo)}.<br>Their settings, signal logs and backtests are removed and <b>can't be recovered</b>. Only archived strategies are deleted${todo.length < lsel.size ? `; the other ${lsel.size - todo.length} ticked ${lsel.size - todo.length === 1 ? "one is" : "ones are"} left alone` : ""}.`, "Delete permanently", () => run(btn, async () => {
+      for (let i = 0; i < todo.length; i += 100) must(await db.from("algo_strategies").delete().in("id", todo.slice(i, i + 100).map((s) => s.id)).eq("archived", true));
+      for (const s of todo) { lsel.delete(s.id); if (cmpHas("desk", s.id)) cmpSet(cmpList.filter((x) => !(x.k === "desk" && String(x.id) === String(s.id)))); }
+      if (todo.some((s) => s.id === selected)) { selected = null; chartFor = null; }
+      await loadAll(); toast(`${nS(todo.length)} deleted permanently.`);
+    }), true);
+    return;
+  }
   if (kind === "restore") {
     const todo = state.strategies.filter((s) => lsel.has(s.id) && s.archived);
     if (!todo.length) { toast("None of them is archived."); return; }
@@ -6331,7 +6727,7 @@ function renderList() {
     tr.append(ck);
     for (const [k, , f, t] of cols) {
       const td = document.createElement("td"); const v = f(s);
-      if (k === "name") { td.className = "nm"; td.textContent = v; td.title = s.name; if (s.lab_status === "failed") { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Failed lab test"; e.title = s.lab_note || "Its lab result did not pass the tougher test"; td.append(e); } if (s.last_error) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Error"; td.append(e); } if (s.kill_at) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Kill rule"; e.title = s.kill_note || "New trades stopped: far worse than its backtest"; td.append(e); } if (s.exec_state === "working") { const e = document.createElement("span"); e.className = "chip yellow"; e.style.marginLeft = "6px"; e.textContent = "Order working"; e.title = "A live order is being worked at the broker (checked every 15 seconds)"; td.append(e); } }
+      if (k === "name") { td.className = "nm"; td.textContent = v; td.title = s.name; td.insertAdjacentHTML("beforeend", " " + cmpBtnHTML("desk", s.id, s.name)); if (s.lab_status === "failed") { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Failed lab test"; e.title = s.lab_note || "Its lab result did not pass the tougher test"; td.append(e); } if (s.last_error) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Error"; td.append(e); } if (s.kill_at) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Kill rule"; e.title = s.kill_note || "New trades stopped: far worse than its backtest"; td.append(e); } if (s.exec_state === "working") { const e = document.createElement("span"); e.className = "chip yellow"; e.style.marginLeft = "6px"; e.textContent = "Order working"; e.title = "A live order is being worked at the broker (checked every 15 seconds)"; td.append(e); } }
       else if (t === "num") { td.className = "n " + (v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""); td.textContent = rupees(v); }
       else if (t === "int") { td.className = "n"; td.textContent = String(v); }
       else if (t === "wrap") { td.className = "wr"; td.textContent = v; }
@@ -6383,7 +6779,7 @@ function renderListCards(cols, rows) {
     const a = p(s), side = s.position === "LONG" ? "l" : s.position === "SHORT" ? "s" : "f";
     const tf = hideRules(s) ? "" : cxStratTf(s) === "D" ? "Daily" : `${cxStratTf(s)} min`;
     const el = document.createElement("div"); el.className = "lpc" + (s.position !== "FLAT" ? " open" : "") + (lsel.has(s.id) ? " sel" : ""); el.tabIndex = 0;
-    el.innerHTML = `<div class="top"><div class="nm"></div><input type="checkbox" class="ck" aria-label="Select" ${lsel.has(s.id) ? "checked" : ""}></div>
+    el.innerHTML = `<div class="top"><div class="nm"></div>${cmpBtnHTML("desk", s.id, s.name)}<input type="checkbox" class="ck" aria-label="Select" ${lsel.has(s.id) ? "checked" : ""}></div>
       <div class="sub">${esc(assetLabel(s.underlying))} · ${esc(instName(s))}${tf ? ` · ${esc(tf)}` : ""}</div>
       <div class="chips">${s.archived ? '<span class="chip">Archived</span>' : s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>'}${s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>'}${s.lab_status === "failed" ? `<span class="chip red" title="${esc(s.lab_note || "")}">Failed lab test</span>` : ""}${s.last_error ? '<span class="chip red">Error</span>' : ""}${s.kill_at ? '<span class="chip red">Kill rule</span>' : ""}${s.exec_state === "working" ? '<span class="chip yellow" title="A live order is being worked at the broker (checked every 15 seconds)">Order working</span>' : ""}</div>
       <div class="pos"><div><div class="side ${side}">${s.position === "FLAT" ? "Flat" : `${s.position === "LONG" ? "Long" : "Short"}${s.pos_lots ? ` · ${s.pos_lots} lot${s.pos_lots === 1 ? "" : "s"}` : ""}`}</div>${s.position === "FLAT" ? '<div class="px">Waiting for a signal</div>' : `<div class="px" data-ltp="${s.id}">${posPriceText(s)}</div>`}</div>

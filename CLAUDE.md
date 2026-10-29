@@ -82,7 +82,15 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   Exit positions now (`desk_engine` flatten per open one; live ones warned), Allow new trades again (`kill_allow`), Archive
   (flat only), Restore. Strategy Lab (admins) — tick rows / select all shown → Save as strategies (the version the table
   shows, paused + paper; skips ones still in the tougher test or already on the desk), Star / Remove star, Download Excel.
-  Test: `tests/ui/ui_bulk.mjs`.
+  Test: `tests/ui/ui_bulk.mjs`. Also "Delete permanently" for ticked archived strategies (delete filtered on
+  `archived = true`; Papa asked for it so the list doesn't grow too heavy).
+- **Compare** (29 Oct 2026; sidebar "Compare", `cmpPane`, `renderCmp`): "⇄ Compare" on lab rows/cards/detail and desk
+  list rows/cards/strategy page, or ⇄ Compare in either bulk bar; up to 4 (list in this browser's localStorage `cmp`,
+  each keeps its colour slot `c`; a bar at the bottom shows the picks). Lab strategies use their futures backtest
+  (`trades_long`), desk strategies their lab backtest if `lab_id`, else their own paper/live trades. Shows cards, profit
+  curve, falls from the peak, profit per year, a figure table with the best marked (records under half the longest
+  aren't marked) and an "All together" column, how alike their months are (correlation), and the rules. Period
+  1Y/3Y/5Y/All. Colours `--cmp1..4` validated for both looks. Test: `tests/ui/ui_compare.mjs` (args: theme width).
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
