@@ -3993,14 +3993,25 @@ async function loadLabRun(stale) {
     if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
     return q.order("score", { ascending: false }).order("id", { ascending: false });
   };
-  // The best-scoring 1,000 show straight away; the rest load behind them (up to 15,000 rows, 1,000 per request).
-  const all = [];
+  // The best-scoring 300 show straight away; the rest load behind them (up to 15,000 rows, 300 per request). Small
+  // requests, each tried up to 3 times, so a moment of database slowness (disk throttling on the small compute) costs
+  // a short wait instead of "canceling statement due to statement timeout" (29 Oct 2026).
+  const all = [], PAGE = 300;
   const shape = (rows) => rows.map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
-  for (let from = 0; from < 15000; from += 1000) {
-    const page = must(await build().range(from, from + 999));
+  const getPage = async (from) => {
+    for (let k = 0; ; k++) {
+      const { data, error } = await build().range(from, from + PAGE - 1);
+      if (!error) return data || [];
+      if (k >= 2 || !/timeout|57014|upstream|503|504/i.test(`${error.code} ${error.message}`)) throw error;
+      await new Promise((r) => setTimeout(r, 1500 * (k + 1)));
+      if (stale()) return [];
+    }
+  };
+  for (let from = 0; from < 15000; from += PAGE) {
+    const page = await getPage(from);
     if (stale()) return;
     all.push(...page);
-    if (page.length < 1000) break;
+    if (page.length < PAGE) break;
     if (from === 0 && lab.open) { lab.rows = shape(all); lab.long = lab.long || {}; lab.loadingMore = true; try { renderLabStatus(); renderLabTable(); } catch (e) { console.error(e); } }
   }
   lab.loadingMore = false;
