@@ -94,6 +94,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   The lab strategy page (admin and public detail) has the same charts for the version open (`labCurveHTML` /
   `drawLabCurve`): profit curve, falls from the peak with the max drawdown marked (dates, days down, days to make back),
   profit per year / quarter / month, period 1Y/3Y/5Y/All.
+- Lab strategy details open right under the clicked row (a `tr.ldrow` holding `#lab_detail`; after its card on a
+  phone) instead of below the whole table; `labPlaceDetail` / `labParkDetail` move the one panel, `labShowDetail` scrolls
+  only enough to show it. The lab table's CSS is scoped to its own rows (`.lab-table > tbody > tr > td`, `> thead`) so
+  it doesn't leak into the tables inside the panel.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

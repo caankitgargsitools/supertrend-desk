@@ -122,8 +122,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .btn { min-height: 38px; }
   .stats { grid-template-columns: 1fr 1fr !important; }
   .labgrid { max-height: calc(100vh - var(--barH, 56px) - 8px) !important; }
-  .lab-table td.lbl { min-width: 170px; }
-  .lab-table td.lbl .chips { display: none; }
+  .lab-table > tbody > tr > td.lbl { min-width: 170px; }
+  .lab-table > tbody > tr > td.lbl .chips { display: none; }
   .head { flex-wrap: wrap; gap: 8px; }
   .head .actions { width: 100%; }
   #confirmBox .confirm { width: 100%; }
@@ -359,37 +359,37 @@ tr.openrow td { background: var(--bg); }
 /* strategy lab */
 .labbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; }
 .labbar .f { min-width: 0; }
-.lab-table td.lbl { min-width: 210px; max-width: 420px; }
-.lab-table td, .lab-table th { padding-left: 6px; padding-right: 6px; }
+.lab-table > tbody > tr > td.lbl { min-width: 210px; max-width: 420px; }
+.lab-table > tbody > tr > td, .lab-table > thead > tr > th { padding-left: 6px; padding-right: 6px; }
 /* Strategy Lab grid: its own scroll box, so the header row stays fixed at the top while you scroll the results. */
 .labgrid { margin-top: 8px; overflow: auto; max-height: calc(100vh - 150px); min-height: 320px; border: 1px solid var(--line); border-radius: var(--r); }
 .lab-table { border-collapse: separate; border-spacing: 0; }
-.lab-table thead th { position: sticky; z-index: 2; background: var(--ink); color: var(--panel); font-size: 12px; letter-spacing: .04em; padding: 10px 6px 8px; border-bottom: 0; }
-.lab-table thead tr.t th { top: 0; }
-.lab-table thead tr.fl th { top: var(--labhead, 40px); background: var(--blue-soft); padding: 6px; border-bottom: 2px solid var(--blue); }
-.lab-table thead th.sort { cursor: pointer; user-select: none; white-space: normal; line-height: 1.25; }
-.lab-table thead th.sort:hover { color: var(--logo-yellow); }
-.lab-table thead th.sort::after { content: none !important; }
-.lab-table thead tr.fl .btn { color: var(--ink); background: var(--panel); }
-.lab-table thead th .ar { display: inline-block; min-width: 1em; color: var(--logo-yellow); }
-.lab-table thead th[aria-sort="none"] .ar::after { content: "↕"; opacity: .45; }
-.lab-table thead th[aria-sort="ascending"] .ar::after { content: "▲"; } .lab-table thead th[aria-sort="descending"] .ar::after { content: "▼"; }
-.lab-table thead tr.fl input, .lab-table thead tr.fl select { width: 100%; min-width: 46px; padding: 5px 6px; font: 12px var(--font-data); border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
-.lab-table thead tr.fl input.on, .lab-table thead tr.fl select.on { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-soft); font-weight: 600; }
-.lab-table tbody td { border-bottom: 1px solid var(--line); }
+.lab-table > thead th { position: sticky; z-index: 2; background: var(--ink); color: var(--panel); font-size: 12px; letter-spacing: .04em; padding: 10px 6px 8px; border-bottom: 0; }
+.lab-table > thead tr.t th { top: 0; }
+.lab-table > thead tr.fl th { top: var(--labhead, 40px); background: var(--blue-soft); padding: 6px; border-bottom: 2px solid var(--blue); }
+.lab-table > thead th.sort { cursor: pointer; user-select: none; white-space: normal; line-height: 1.25; }
+.lab-table > thead th.sort:hover { color: var(--logo-yellow); }
+.lab-table > thead th.sort::after { content: none !important; }
+.lab-table > thead tr.fl .btn { color: var(--ink); background: var(--panel); }
+.lab-table > thead th .ar { display: inline-block; min-width: 1em; color: var(--logo-yellow); }
+.lab-table > thead th[aria-sort="none"] .ar::after { content: "↕"; opacity: .45; }
+.lab-table > thead th[aria-sort="ascending"] .ar::after { content: "▲"; } .lab-table > thead th[aria-sort="descending"] .ar::after { content: "▼"; }
+.lab-table > thead tr.fl input, .lab-table > thead tr.fl select { width: 100%; min-width: 46px; padding: 5px 6px; font: 12px var(--font-data); border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
+.lab-table > thead tr.fl input.on, .lab-table > thead tr.fl select.on { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-soft); font-weight: 600; }
+.lab-table > tbody > tr > td { border-bottom: 1px solid var(--line); }
 /* two figures per column: top in normal type, underneath in grey (the header names both the same way) */
-.lab-table td.two .b2 { color: var(--muted); font-size: 11px; margin-top: 3px; }
-.lab-table thead .sk { cursor: pointer; user-select: none; }
-.lab-table thead .sk:hover { color: var(--logo-yellow); }
-.lab-table thead .h2 { opacity: .7; font-size: 10px; margin-top: 3px; font-weight: 400; }
-.lab-table thead tr.fl .f2 { margin-top: 3px; }
-.lab-table thead [aria-sort="none"] .ar::after { content: "↕"; opacity: .45; }
-.lab-table thead [aria-sort="ascending"] .ar::after { content: "▲"; } .lab-table thead [aria-sort="descending"] .ar::after { content: "▼"; }
+.lab-table > tbody > tr > td.two .b2 { color: var(--muted); font-size: 11px; margin-top: 3px; }
+.lab-table > thead .sk { cursor: pointer; user-select: none; }
+.lab-table > thead .sk:hover { color: var(--logo-yellow); }
+.lab-table > thead .h2 { opacity: .7; font-size: 10px; margin-top: 3px; font-weight: 400; }
+.lab-table > thead tr.fl .f2 { margin-top: 3px; }
+.lab-table > thead [aria-sort="none"] .ar::after { content: "↕"; opacity: .45; }
+.lab-table > thead [aria-sort="ascending"] .ar::after { content: "▲"; } .lab-table > thead [aria-sort="descending"] .ar::after { content: "▼"; }
 .sc { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px; margin: 0 3px 0 0; border-radius: 9px; font: 600 10.5px var(--font-ui, inherit); background: var(--line); color: var(--ink); cursor: help; }
 .sc.green { background: var(--green-soft, #d8f3e3); color: var(--green, #137a3f); } .sc.red { background: var(--red-soft, #fbe0e0); color: var(--red, #b42318); }
 .sc.blue { background: var(--blue-soft); color: var(--blue); } .sc.yellow { background: #fff3c4; color: #8a6100; }
 .sc.desk { background: var(--logo-green, #1f9d55); color: #fff; } .sc.desk2 { background: transparent; border: 1px solid var(--logo-green, #1f9d55); color: var(--logo-green, #1f9d55); }
-.lab-table td.lbl .scs { margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.lab-table > tbody > tr > td.lbl .scs { margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
 .lablegend { margin-top: 8px; font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
 .lablegend .lg { display: inline-flex; align-items: center; margin-right: 10px; white-space: nowrap; }
 /* Lab grid: the table sizes each column to its content (numbers never cut off) and scrolls inside its own box,
@@ -397,25 +397,25 @@ tr.openrow td { background: var(--bg); }
 body.wide .wrap { max-width: 1840px; }
 .labgrid { overflow: auto !important; max-height: calc(100vh - var(--barH, 56px) - 12px) !important; }
 .lab-table { table-layout: auto; width: max-content; min-width: 100%; }
-.lab-table thead tr.t th { top: 0 !important; text-align: center; vertical-align: middle; white-space: normal; line-height: 1.2; }
-.lab-table thead tr.fl th { top: var(--labhead, 40px) !important; }
-.lab-table thead th { font-size: 10.5px; letter-spacing: .02em; padding: 7px 4px 6px; }
-.lab-table thead tr.fl input, .lab-table thead tr.fl select { min-width: 0; padding: 3px 4px; font-size: 11px; }
-.lab-table td, .lab-table th { padding-left: 6px; padding-right: 6px; }
-.lab-table tbody td { font-size: 12px; padding-top: 6px; padding-bottom: 6px; vertical-align: top; }
-.lab-table td.n { font: 11.5px var(--font-ui, inherit); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: visible; }
-.lab-table td.lbl { min-width: 0; max-width: none; white-space: normal; overflow-wrap: anywhere; }
-.lab-table td.lbl .t { font-size: 12px; font-weight: 600; }
-.lab-table td.lbl .chips { display: flex; flex-wrap: wrap; gap: 3px; }
-.lab-table td.lbl .chip { font-size: 9.5px; padding: 3px 5px; }
-.lab-table .hint.sm { font-size: 10.5px; line-height: 1.1; }
+.lab-table > thead tr.t th { top: 0 !important; text-align: center; vertical-align: middle; white-space: normal; line-height: 1.2; }
+.lab-table > thead tr.fl th { top: var(--labhead, 40px) !important; }
+.lab-table > thead th { font-size: 10.5px; letter-spacing: .02em; padding: 7px 4px 6px; }
+.lab-table > thead tr.fl input, .lab-table > thead tr.fl select { min-width: 0; padding: 3px 4px; font-size: 11px; }
+.lab-table > tbody > tr > td, .lab-table > thead > tr > th { padding-left: 6px; padding-right: 6px; }
+.lab-table > tbody > tr > td { font-size: 12px; padding-top: 6px; padding-bottom: 6px; vertical-align: top; }
+.lab-table > tbody > tr > td.n { font: 11.5px var(--font-ui, inherit); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: visible; }
+.lab-table > tbody > tr > td.lbl { min-width: 0; max-width: none; white-space: normal; overflow-wrap: anywhere; }
+.lab-table > tbody > tr > td.lbl .t { font-size: 12px; font-weight: 600; }
+.lab-table > tbody > tr > td.lbl .chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.lab-table > tbody > tr > td.lbl .chip { font-size: 9.5px; padding: 3px 5px; }
+.lab-table > tbody > tr:not(.ldrow) .hint.sm { font-size: 10.5px; line-height: 1.1; }
 /* The first two columns stay in view when the table scrolls sideways. */
-.lab-table tbody td:nth-child(1), .lab-table thead th:nth-child(1) { position: sticky; left: 0; z-index: 1; }
-.lab-table tbody td:nth-child(2), .lab-table thead th:nth-child(2) { position: sticky; left: var(--labc1, 34px); z-index: 1; box-shadow: 1px 0 0 var(--line); }
-.lab-table thead th:nth-child(1), .lab-table thead th:nth-child(2) { z-index: 3; }
-.lab-table tbody td:nth-child(1), .lab-table tbody td:nth-child(2) { background: var(--panel); }
-.lab-table tbody tr.sub td:nth-child(1), .lab-table tbody tr.sub td:nth-child(2) { background: var(--bg); }
-.lab-table tr.sel td, .lab-table tr.sel td:nth-child(1), .lab-table tr.sel td:nth-child(2) { background: var(--blue-soft); }
+.lab-table > tbody > tr > td:nth-child(1), .lab-table > thead th:nth-child(1) { position: sticky; left: 0; z-index: 1; }
+.lab-table > tbody > tr > td:nth-child(2), .lab-table > thead th:nth-child(2) { position: sticky; left: var(--labc1, 34px); z-index: 1; box-shadow: 1px 0 0 var(--line); }
+.lab-table > thead th:nth-child(1), .lab-table > thead th:nth-child(2) { z-index: 3; }
+.lab-table > tbody > tr > td:nth-child(1), .lab-table > tbody > tr > td:nth-child(2) { background: var(--panel); }
+.lab-table > tbody > tr.sub > td:nth-child(1), .lab-table > tbody > tr.sub > td:nth-child(2) { background: var(--bg); }
+.lab-table > tbody > tr.sel > td, .lab-table > tbody > tr.sel > td:nth-child(1), .lab-table > tbody > tr.sel > td:nth-child(2) { background: var(--blue-soft); }
 .months { display: grid; grid-template-columns: repeat(auto-fit, minmax(42px, 1fr)); gap: 4px; align-items: end; height: 150px; margin-top: 8px; }
 .months .mb { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 3px; min-width: 0; }
 .months .mbar { width: 100%; border-radius: 3px 3px 0 0; min-height: 2px; }
@@ -424,8 +424,8 @@ body.wide .wrap { max-width: 1840px; }
 .months .split { outline: 2px dashed var(--yellow); outline-offset: 2px; }
 .kv { display: grid; grid-template-columns: minmax(130px, max-content) 1fr; gap: 6px 14px; font-size: 13px; }
 .kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
-.lab-table tr.sub td { background: var(--bg); }
-.lab-table tr.sub td.lbl { padding-left: 26px; }
+.lab-table > tbody > tr.sub > td { background: var(--bg); }
+.lab-table > tbody > tr.sub > td.lbl { padding-left: 26px; }
 .lab-table .famBtn { margin-left: 6px; }
 .assetpick { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .assetpick label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; cursor: pointer; }
@@ -454,8 +454,8 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 .big-table tfoot td .hint.sm { font-weight: 400; }
 .chip.desk { background: var(--green); color: #fff; font-weight: 700; }
 .chip.desk2 { background: var(--green-soft); color: var(--green); border: 1px dashed var(--green); }
-.lab-table tr.ondesk td, .lab-table tr.ondesk td:nth-child(1), .lab-table tr.ondesk td:nth-child(2) { background: var(--green-soft); }
-.lab-table tr.ondesk td:nth-child(1) { box-shadow: inset 4px 0 0 var(--green); }
+.lab-table > tbody > tr.ondesk > td, .lab-table > tbody > tr.ondesk > td:nth-child(1), .lab-table > tbody > tr.ondesk > td:nth-child(2) { background: var(--green-soft); }
+.lab-table > tbody > tr.ondesk > td:nth-child(1) { box-shadow: inset 4px 0 0 var(--green); }
 .lcd.ondesk { border-color: var(--green); box-shadow: inset 4px 0 0 var(--green); }
 .labfocus { animation: labFocus 2.4s ease-out; }
 @keyframes labFocus { 0%, 40% { outline: 3px solid var(--blue); outline-offset: -3px; } 100% { outline: 3px solid transparent; outline-offset: -3px; } }
@@ -505,8 +505,8 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
   .ntflist li b { display: block; font-size: 13.5px; } .ntflist li span { font-size: 12.5px; }
   .bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line, #d0d7de); border-radius: 8px; background: var(--panel, transparent); position: sticky; top: var(--barH, 0); z-index: 3; }
   .bulkbar #lp_bulk_n, .bulkbar #lab_bulk_n { font-weight: 600; margin-right: 4px; }
-  .lab-table td.n input.lpk, .lab-table th input#lab_all, .lcd input.lpk { width: 16px; height: 16px; cursor: pointer; vertical-align: middle; margin: 0 4px 0 0; }
-  .lab-table tr.picked td { background: var(--blue-soft); }
+  .lab-table > tbody > tr > td.n input.lpk, .lab-table > thead > tr > th input#lab_all, .lcd input.lpk { width: 16px; height: 16px; cursor: pointer; vertical-align: middle; margin: 0 4px 0 0; }
+  .lab-table > tbody > tr.picked > td { background: var(--blue-soft); }
   .lcd.picked { outline: 2px solid var(--blue); }
   td.ck, th.ck { width: 34px; text-align: center; }
   /* Compare (29 Oct 2026): four colour slots, validated for both looks (direct labels + table cover the light-look contrast). */
@@ -653,7 +653,7 @@ td { padding: 9px 10px; border-bottom: 1px solid var(--line); }
 tbody tr { transition: background .12s; }
 tbody tr:hover td { background: rgba(139,124,255,.05); }
 .scroll thead th, .tdesk thead th { position: sticky; top: 0; z-index: 1; }
-.lab-table thead th { background: var(--panel-2) !important; color: var(--muted) !important; border-bottom: 1px solid var(--line) !important; }
+.lab-table > thead th { background: var(--panel-2) !important; color: var(--muted) !important; border-bottom: 1px solid var(--line) !important; }
 tfoot td { font-weight: 600; background: var(--panel-2); }
 
 /* folding sections, trade cards */
@@ -693,7 +693,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
   .wrap { max-width: 1480px; padding-inline: 28px; padding-block: 26px 48px; margin-left: var(--side); margin-right: 0; }
   .topalert { margin: 20px 28px 0 calc(var(--side) + 28px); width: auto; max-width: 1424px; }
 
-  .lab-table tbody td { padding-top: 6px; padding-bottom: 6px; }
+  .lab-table > tbody > tr > td { padding-top: 6px; padding-bottom: 6px; }
   body.wide .wrap { max-width: none; }
   .bar { background: var(--panel); backdrop-filter: none; -webkit-backdrop-filter: none; }
   footer.disclaim { margin-left: var(--side) !important; padding-left: 28px; padding-right: 28px; }
@@ -733,6 +733,12 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dot.off { background: var(--red); box-shadow: 0 0 0 3px rgba(248,113,113,.18); }
 @media (min-width: 1000px) { .mkts { display: grid; grid-template-columns: auto auto auto; gap: 5px; } .mx { padding: 6px 7px; gap: 5px; font-size: 11.5px; justify-content: center; } }
 @media (max-width: 760px) { .mx { padding: 4px 8px; font-size: 11px; } }
+
+/* A lab strategy's details open right under its row (29 Oct 2026): one cell across the table, the panel as wide as
+   the visible table and pinned to its left edge while the table scrolls sideways. */
+.lab-table > tbody > tr.ldrow > td { position: static; padding: 0 0 14px; background: transparent; border-bottom: 2px solid var(--blue); font-size: 14px; vertical-align: top; white-space: normal; box-shadow: none; }
+.lab-table > tbody > tr.ldrow #lab_detail { position: sticky; left: 0; width: var(--labgw, 100%); max-width: var(--labgw, 100%); box-sizing: border-box; margin: 0; border-radius: 0 0 var(--r) var(--r); border-top: 0; }
+#lab_cards > #lab_detail { margin: 0 0 12px; }
 </style>
 </head>
 <body>
@@ -4852,6 +4858,7 @@ function fitLabGrid() {
   const g = $("lab_grid"), t = g && g.querySelector("table"); if (!t) return;
   // Keeps the sticky Strategy column right after the # column.
   const c1 = t.querySelector("thead tr.t th"); if (c1) g.style.setProperty("--labc1", `${c1.getBoundingClientRect().width}px`);
+  g.style.setProperty("--labgw", `${g.clientWidth}px`);
 }
 window.addEventListener("resize", () => { if (lab.open) fitLabGrid(); });
 function renderLabHead() {
@@ -4892,6 +4899,7 @@ function renderLabTable() {
   requestAnimationFrame(fitLabGrid);
   const hd = $("lab_head");
   if (!hd.children.length || (renderLabTable.rowsFor !== lab.rows && !hd.contains(document.activeElement))) { renderLabTable.rowsFor = lab.rows; renderLabHead(); }
+  labParkDetail();
   const fams = labGroup(); const body = $("lab_body"); body.innerHTML = "";
   lab.shownG = [];
 
@@ -4907,6 +4915,7 @@ function renderLabTable() {
     const tr = document.createElement("tr"); tr.className = "pick" + (sub ? " sub" : "") + (lab.sel === r.id ? " sel" : "") + (deskOpen(g) ? " ondesk" : "") + (lab.pick.has(r.id) ? " picked" : "");
     lab.shownG.push(g);
     if (g.deskS) tr.dataset.desk = g.deskS.map((x) => x.id).join(" ");
+    tr.dataset.lid = r.id;
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : lab.view === "SPREAD" ? r.osp : r.os) : null;
     const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} twins / similar</button>` : "";
     tr.innerHTML = LAB_GROUPS.map((gp) => {
@@ -4922,7 +4931,7 @@ function renderLabTable() {
     });
     return tr;
   };
-  if (labPhone()) { renderLabCards(fams, pc, rs); renderLabBulk(); return; }
+  if (labPhone()) { renderLabCards(fams, pc, rs); renderLabBulk(); labPlaceDetail(); return; }
   $("lab_cards").innerHTML = "";
   const shown = lab.showN || 150;
   labMoreButton(fams.length, shown);
@@ -4931,6 +4940,7 @@ function renderLabTable() {
     if (lab.openFam.has(f.key)) f.members.slice(1).forEach((g, j) => body.append(rowFor(g, `${i + 1}.${j + 2}`, f, true)));
   });
   renderLabBulk();
+  labPlaceDetail();
 }
 /** "Show more" under the list: nothing is cut off, the list just grows 150 groups at a time. */
 function labMoreButton(total, shown) {
@@ -4960,6 +4970,7 @@ function renderLabCards(fams, pc, rs) {
     const el = document.createElement("div"); el.className = "lcd" + (lab.sel === r.id ? " sel" : "") + (deskOpen(g) ? " ondesk" : "") + (lab.pick.has(r.id) ? " picked" : ""); el.tabIndex = 0;
     lab.shownG.push(g);
     if (g.deskS) el.dataset.desk = g.deskS.map((x) => x.id).join(" ");
+    el.dataset.lid = r.id;
     const status = labStatusHTML(g, f, sub);
     const cell = (k, v) => `<div><span class="k">${k}</span><b>${v}</b></div>`;
     const ratio = (ok, n, need = 1) => n == null ? "–" : `<span class="${n && ok >= need ? "pos-num" : "neg-num"}">${ok ?? 0}/${n}</span>`;
@@ -5006,7 +5017,7 @@ async function openLabDetail(id) {
   lab.sel = id; renderLabTable();
   const r = must(await db.from("lab_results").select("*, run:lab_runs(id, from_day, split_day, to_day, created_at, settings)").eq("id", id).single());
   labDetailRow = r;
-  const box = $("lab_detail"); box.hidden = false;
+  const box = $("lab_detail"); box.hidden = false; labPlaceDetail(); let first = true;
   const c = r.config, labRun = r.run || {}, a = PRESETS[c.underlying] || {};
   const versions = [{ key: "FUT", label: c.data_segment === "MCX_COMM" ? "MCX futures (near month)" : "Index futures (index price as proxy)", side: null, risk: c.risk, metrics: r.metrics, trades: r.trades || [] }];
   for (const [col, side] of [["opt_buy", "BUY"], ["opt_sell", "SELL"], ["opt_struct", "SPREAD"]]) for (const v of ((r[col] && r[col].variants) || [])) versions.push({ key: side, label: v.label, side, risk: v.risk, structure: v.structure || null, metrics: v.metrics, trades: v.trades || [], skipped: v.skipped });
@@ -5072,7 +5083,7 @@ async function openLabDetail(id) {
     $("ld_var").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: !!(r.config.rules && r.config.rules.daily), title: `Lab #${r.id}` }));
     $("ld_mtest").addEventListener("click", () => variationForm($("ld_form"), { labId: r.id, asset: r.asset, daily: !!(r.config.rules && r.config.rules.daily), title: `Lab #${r.id}`, manual: true }));
     renderLongTests(r.id); wireTrades(box, r, v, tm); drawLabCurve(r, v);
-    box.scrollIntoView({ block: "start", behavior: "smooth" });
+    if (first) { first = false; labShowDetail(); }
   };
   draw();
 }
@@ -5080,7 +5091,7 @@ async function openLabDetail(id) {
 async function openLabDetailPublic(id) {
   lab.sel = id; renderLabTable();
   const r = must(await db.rpc("lab_public_detail", { p_id: id }));
-  const box = $("lab_detail"); box.hidden = false;
+  const box = $("lab_detail"); box.hidden = false; labPlaceDetail(); let first = true;
   const versions = (r.versions || []).map((v) => ({ ...v, trades: v.trades || [] }));
   // Open on the version the table row shows: the best-scoring one of the chosen side.
   const sideVs = versions.map((v, i) => [v, i]).filter(([v]) => v.key === lab.view);
@@ -5139,7 +5150,7 @@ async function openLabDetailPublic(id) {
         toast("Added to your strategies. It starts paused, in paper mode."); await loadAll(); openStrat(nid);
       }));
     });
-    box.scrollIntoView({ block: "start", behavior: "smooth" });
+    if (first) { first = false; labShowDetail(); }
   };
   draw();
 }
@@ -6627,6 +6638,39 @@ function drawLabCurve(r, v) {
   cmpBars($("ld_yr"), [{ c: 1, name: nm, st: { yrs: per } }], keys, `Profit per ${{ Y: "year", Q: "quarter", M: "month" }[ldBucket]}`);
 }
 window.addEventListener("resize", () => { if (ldArgs && $("ld_eq") && !$("ld_eq").closest("[hidden]")) { clearTimeout(drawLabCurve.rt); drawLabCurve.rt = setTimeout(() => drawLabCurve(...ldArgs), 150); } });
+
+/* ---------- A lab strategy's details open right under its row or card (29 Oct 2026, Papa) ----------
+ * The detail panel is one element; it lives under the table until a strategy is opened, then moves into a row of its
+ * own right after that strategy's row (or after its card on a phone), and goes back home when closed or when the list
+ * is redrawn without that strategy. */
+const labDetailHome = (() => { const d = document.getElementById("lab_detail"), m = document.createComment(" lab detail home "); if (d) d.before(m); return m; })();
+function labParkDetail() {
+  const d = $("lab_detail");
+  if (d && d.previousSibling !== labDetailHome) labDetailHome.after(d);
+  document.querySelectorAll("#lab_body tr.ldrow").forEach((x) => x.remove());
+}
+function labPlaceDetail() {
+  const d = $("lab_detail");
+  if (!d || d.hidden || lab.sel == null) return labParkDetail();
+  const row = document.querySelector(`#lab_body tr[data-lid="${lab.sel}"]`), card = document.querySelector(`#lab_cards [data-lid="${lab.sel}"]`);
+  if (row && !labPhone()) {
+    let tr = document.querySelector("#lab_body tr.ldrow");
+    if (!tr) { tr = document.createElement("tr"); tr.className = "ldrow"; const td = document.createElement("td"); td.colSpan = LAB_GROUPS.length; tr.append(td); }
+    row.after(tr); tr.firstChild.append(d);
+  } else if (card && labPhone()) card.after(d);
+  else labParkDetail();
+}
+/** On opening: keep the clicked row where it is, and scroll only as much as needed to show the start of the panel. */
+function labShowDetail() {
+  const d = $("lab_detail"); if (!d || d.hidden) return;
+  const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--barH")) || 0;
+  const row = document.querySelector(`#lab_body tr[data-lid="${lab.sel}"]`) || document.querySelector(`#lab_cards [data-lid="${lab.sel}"]`);
+  const r = d.getBoundingClientRect(), rr = row ? row.getBoundingClientRect() : r;
+  // Bring the panel's first part into view, but never push the strategy's own row off the top.
+  const want = Math.min(r.top + Math.min(r.height, innerHeight * 0.55) - innerHeight, rr.top - top - 60);
+  if (want > 0) window.scrollBy({ top: want, behavior: "smooth" });
+  else if (rr.top < top) window.scrollBy({ top: rr.top - top - 60, behavior: "smooth" });
+}
 /* ---------- several strategies at once: tick them, then activate / pause / go live / back to paper ---------- */
 const lsel = new Set();
 function renderBulkBar() {

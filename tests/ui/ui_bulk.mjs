@@ -100,6 +100,27 @@ await p.click('#lab_bulk [data-lbulk="clear"]'); await p.waitForTimeout(200);
 if (await p.evaluate(() => lab.pick.size || !document.getElementById("lab_bulk").hidden)) fail("lab clear");
 console.log("ok   lab: tick rows / select all, bulk star, bulk save as paused paper strategies, clear");
 
+// Details open right under the clicked row (29 Oct 2026), the page doesn't jump to the bottom; closing puts them back.
+await p.evaluate(() => { lab.pick.clear(); const t0 = lab.rows[0]; lab.rows = Array.from({ length: 30 }, (_, i) => ({ ...t0, id: 7100 + i, fingerprint: "q" + i, family: "qf" + i, label: "Row " + i, twin_of: null })); lab.per = 0; renderLabHead(); renderLabTable(); });
+await p.locator('#lab_body tr[data-lid="7104"] .t').scrollIntoViewIfNeeded();
+const y0 = await p.evaluate(() => scrollY);
+await p.click('#lab_body tr[data-lid="7104"] .t'); await p.waitForTimeout(1500);
+const pl = await p.evaluate(() => { const d = document.getElementById("lab_detail"), tr = d.closest("tr.ldrow"), row = document.querySelector('#lab_body tr[data-lid="7104"]').getBoundingClientRect();
+  return { inRow: !!tr, after: tr && tr.previousElementSibling && tr.previousElementSibling.dataset.lid, hidden: d.hidden, rowTop: Math.round(row.top), vh: innerHeight, scrolled: Math.round(scrollY),
+    dTop: Math.round(d.getBoundingClientRect().top), dW: Math.round(d.getBoundingClientRect().width), gW: document.getElementById("lab_grid").clientWidth,
+    nested: getComputedStyle(d.querySelector("table td") || d).position }; });
+console.log(JSON.stringify({ y0, ...pl }));
+if (process.env.SHOT) await p.screenshot({ path: `${process.env.SHOT}/lab_inline.png` });
+if (!pl.inRow || pl.after !== "7104" || pl.hidden || pl.rowTop < 0 || pl.rowTop > pl.vh || Math.abs(pl.dW - pl.gW) > 4 || pl.nested === "sticky") fail("detail under row", pl);
+// Sorting / filtering keeps it under its row; closing sends it home.
+await p.evaluate(() => { lab.sortDir = -lab.sortDir; renderLabTable(); });
+const after2 = await p.evaluate(() => { const tr = document.getElementById("lab_detail").closest("tr.ldrow"); return tr && tr.previousElementSibling.dataset.lid; });
+if (after2 !== "7104") fail("re-sort", after2);
+await p.click("#ld_close"); await p.waitForTimeout(300);
+const home = await p.evaluate(() => ({ rows: document.querySelectorAll("#lab_body tr.ldrow").length, inTable: !!document.getElementById("lab_detail").closest("table"), hidden: document.getElementById("lab_detail").hidden }));
+if (home.rows || home.inTable || !home.hidden) fail("close", home);
+console.log("ok   lab details open right under the clicked row, stay with it on re-sort, page stays put, close puts them back");
+
 // ---- Strategies page ----
 await p.evaluate(() => showPage("list")); await p.waitForTimeout(800);
 await p.evaluate(() => { lsel.clear(); for (const s of state.strategies) if (["s1", "s2"].includes(s.id)) lsel.add(s.id); renderList(); });
