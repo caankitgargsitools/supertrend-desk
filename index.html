@@ -504,7 +504,10 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
   .ntflist li { padding: 7px 2px; border-bottom: 1px solid var(--line, #d0d7de); }
   .ntflist li b { display: block; font-size: 13.5px; } .ntflist li span { font-size: 12.5px; }
   .bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line, #d0d7de); border-radius: 8px; background: var(--panel, transparent); position: sticky; top: var(--barH, 0); z-index: 3; }
-  .bulkbar #lp_bulk_n { font-weight: 600; margin-right: 4px; }
+  .bulkbar #lp_bulk_n, .bulkbar #lab_bulk_n { font-weight: 600; margin-right: 4px; }
+  .lab-table td.n input.lpk, .lab-table th input#lab_all, .lcd input.lpk { width: 16px; height: 16px; cursor: pointer; vertical-align: middle; margin: 0 4px 0 0; }
+  .lab-table tr.picked td { background: var(--blue-soft); }
+  .lcd.picked { outline: 2px solid var(--blue); }
   td.ck, th.ck { width: 34px; text-align: center; }
   td.ck input, th.ck input { width: 18px; height: 18px; cursor: pointer; }
 
@@ -1114,6 +1117,14 @@ details.xp > summary:hover { background: var(--blue-soft); }
         <div id="lab_runsum" hidden></div>
         <p class="hint" id="lab_count" style="margin:10px 0 0"></p>
         <div id="lab_legend" class="lablegend"></div>
+        <div class="bulkbar" id="lab_bulk" hidden>
+          <span id="lab_bulk_n"></span>
+          <button class="btn small primary" type="button" data-lbulk="save">Save as strategies (paused, paper)</button>
+          <button class="btn small" type="button" data-lbulk="star">☆ Star</button>
+          <button class="btn small" type="button" data-lbulk="unstar">Remove star</button>
+          <button class="btn small" type="button" data-lbulk="xlsx">Download Excel</button>
+          <button class="btn small" type="button" data-lbulk="clear">Clear selection</button>
+        </div>
         <div id="lab_mtools" class="labmtools">
           <input id="lab_msearch" type="search" placeholder="Search strategies…" autocomplete="off" aria-label="Search strategies">
           <select id="lab_msort" aria-label="Sort by"></select>
@@ -1223,6 +1234,10 @@ details.xp > summary:hover { background: var(--blue-soft); }
         <button class="btn small" type="button" data-bulk="off">Pause</button>
         <button class="btn small danger" type="button" data-bulk="live">Go live</button>
         <button class="btn small" type="button" data-bulk="paper">Back to paper</button>
+        <button class="btn small danger" type="button" data-bulk="exit" hidden>Exit positions now</button>
+        <button class="btn small" type="button" data-bulk="allow" hidden>Allow new trades again</button>
+        <button class="btn small" type="button" data-bulk="archive">Archive</button>
+        <button class="btn small" type="button" data-bulk="restore" hidden>Restore</button>
         <button class="btn small" type="button" data-bulk="clear">Clear selection</button>
       </div>
       <div class="lpm" id="lp_m">
@@ -3766,7 +3781,7 @@ $("capForm").addEventListener("submit", (e) => {
 });
 
 /* ---------- strategy lab ---------- */
-const lab = { open: false, settings: null, runs: [], rows: [], view: "FUT", asset: "ALL", period: "all", stopf: "ANY", only: true, deskKeep: false, per: 5, sort: "score", poll: null, sel: null };
+const lab = { open: false, settings: null, runs: [], rows: [], view: "FUT", asset: "ALL", period: "all", stopf: "ANY", only: true, deskKeep: false, per: 5, sort: "score", poll: null, sel: null, pick: new Map() };
 const LAB_IND = { ST: "Supertrend", HA: "Heikin Ashi", RSI: "RSI", EMA: "EMA", SMA: "SMA", MACD: "MACD", VWAP: "VWAP", BB: "Bollinger", ADX: "ADX", ATR: "ATR", PDHL: "Prev-day H/L", ORB: "Opening range", SWEEP: "Liquidity sweep" };
 function condText(c) {
   const def = IND_DEFS[c.ind] || { name: c.ind, ops: [] };
@@ -4751,7 +4766,7 @@ function renderLabHead() {
   const head = $("lab_head");
   const tbl = head.closest("table");
   let cg = tbl.querySelector("colgroup"); if (!cg) { cg = document.createElement("colgroup"); tbl.prepend(cg); }
-  const W = { no: 30, name: 240 };
+  const W = { no: isAdmin() ? 54 : 30, name: 240 };
   cg.innerHTML = LAB_GROUPS.map((gp) => `<col style="width:${W[gp[0]] || 62}px">`).join("");
   const opts = (c) => [...new Set(lab.rows.map((r) => c.v({ r, m: { full: {}, test: {} } })))].filter((x) => x && x !== "–").sort();
   const sortAttr = (c) => `data-k="${c.k}" aria-sort="${lab.sortKey === c.k ? (lab.sortDir > 0 ? "ascending" : "descending") : "none"}" tabindex="0" role="button"${c.tip ? ` title="${esc(c.tip)}"` : ` title="${esc(c.t)}"`}`;
@@ -4762,7 +4777,7 @@ function renderLabHead() {
       if (gp[0] === "no") return '<th class="n">#</th>';
       if (gp[0] === "name") return `<th class="nm"><div class="h1 sk" ${sortAttr(cs[0])}>Strategy <span class="ar"></span></div><div class="h2">status numbers: see the legend above</div></th>`;
       return `<th class="n two">${cs.map(label).join("")}</th>`; }).join("")}</tr>
-    <tr class="fl">${LAB_GROUPS.map((gp) => gp[0] === "no" ? `<th><button type="button" class="btn small" id="lab_fclear" title="Clear all filters" aria-label="Clear all filters" style="padding:3px 8px;font-size:13px">✕</button></th>`
+    <tr class="fl">${LAB_GROUPS.map((gp) => gp[0] === "no" ? `<th>${isAdmin() ? '<input type="checkbox" id="lab_all" aria-label="Select every strategy shown" title="Select every strategy shown">' : ""}<button type="button" class="btn small" id="lab_fclear" title="Clear all filters" aria-label="Clear all filters" style="padding:3px 8px;font-size:13px">✕</button></th>`
       : `<th>${gp.map(labCol).map((c, i) => `<div class="${i ? "f2" : ""}">${filt(c)}</div>`).join("")}</th>`).join("")}</tr>`;
   head.querySelectorAll("tr.t [data-k]").forEach((el) => {
     const go = () => { const k = el.dataset.k; if (lab.sortKey === k) lab.sortDir = -lab.sortDir; else { lab.sortKey = k; lab.sortDir = ["name", "asset", "style", "dd", "margin"].includes(k) ? 1 : -1; } renderLabHead(); renderLabTable(); };
@@ -4774,6 +4789,7 @@ function renderLabHead() {
     const apply = () => { lab.filters[el.dataset.f] = el.value.trim(); el.classList.toggle("on", !!el.value.trim()); clearTimeout(t); t = setTimeout(renderLabTable, 200); };
     el.addEventListener(el.tagName === "SELECT" ? "change" : "input", apply);
   });
+  const all = $("lab_all"); if (all) all.addEventListener("change", () => { for (const g of lab.shownG || []) all.checked ? lab.pick.set(g.r.id, g) : lab.pick.delete(g.r.id); renderLabTable(); });
   const clr = $("lab_fclear"); if (clr) clr.addEventListener("click", () => { lab.filters = {}; renderLabHead(); renderLabTable(); });
   renderLabLegend();
   // The filter row sits right under the title row.
@@ -4785,6 +4801,7 @@ function renderLabTable() {
   const hd = $("lab_head");
   if (!hd.children.length || (renderLabTable.rowsFor !== lab.rows && !hd.contains(document.activeElement))) { renderLabTable.rowsFor = lab.rows; renderLabHead(); }
   const fams = labGroup(); const body = $("lab_body"); body.innerHTML = "";
+  lab.shownG = [];
 
   lab.openFam = lab.openFam || new Set();
   const nStrat = fams.reduce((a, f) => a + f.members.length, 0);
@@ -4795,23 +4812,25 @@ function renderLabTable() {
   const rs = (v) => v == null ? "–" : `<span title="${rupees(v)}">${rupeesShort(v)}</span>`;
   const rowFor = (g, num, f, sub) => {
     const m = g.m, r = g.r, c = r.config || {}, pub = !r.config;
-    const tr = document.createElement("tr"); tr.className = "pick" + (sub ? " sub" : "") + (lab.sel === r.id ? " sel" : "") + (deskOpen(g) ? " ondesk" : "");
+    const tr = document.createElement("tr"); tr.className = "pick" + (sub ? " sub" : "") + (lab.sel === r.id ? " sel" : "") + (deskOpen(g) ? " ondesk" : "") + (lab.pick.has(r.id) ? " picked" : "");
+    lab.shownG.push(g);
     if (g.deskS) tr.dataset.desk = g.deskS.map((x) => x.id).join(" ");
     const ver = lab.view !== "FUT" ? (lab.view === "BUY" ? r.ob : lab.view === "SPREAD" ? r.osp : r.os) : null;
     const more = !sub && f.members.length > 1 ? `<button type="button" class="btn small famBtn">${lab.openFam.has(f.key) ? "Hide" : "+" + (f.members.length - 1)} twins / similar</button>` : "";
     tr.innerHTML = LAB_GROUPS.map((gp) => {
-      if (gp[0] === "no") return `<td class="n">${num}</td>`;
+      if (gp[0] === "no") return `<td class="n">${labPickBox(r)}${num}</td>`;
       if (gp[0] === "name") return `<td class="lbl"><div class="t"></div><div class="scs">${labStatusHTML(g, f, sub)}${more}</div>${ver && ver.label ? `<div class="hint">${esc(ver.label)}</div>` : ""}</td>`;
       return `<td class="n two"><div>${LAB_SHOW[gp[0]](g)}</div>${gp[1] ? `<div class="b2">${LAB_SHOW[gp[1]](g)}</div>` : ""}</td>`;
     }).join("");
     tr.querySelector(".t").textContent = r.label;
     tr.addEventListener("click", (e) => {
+      if (e.target.closest(".lpk")) { labPickToggle(g, e.target.checked); tr.classList.toggle("picked", e.target.checked); return; }
       if (e.target.closest(".famBtn")) { if (lab.openFam.has(f.key)) lab.openFam.delete(f.key); else lab.openFam.add(f.key); renderLabTable(); return; }
       openLabDetail(r.id).catch((er) => toast(errorText(er)));
     });
     return tr;
   };
-  if (labPhone()) { renderLabCards(fams, pc, rs); return; }
+  if (labPhone()) { renderLabCards(fams, pc, rs); renderLabBulk(); return; }
   $("lab_cards").innerHTML = "";
   const shown = lab.showN || 150;
   labMoreButton(fams.length, shown);
@@ -4819,6 +4838,7 @@ function renderLabTable() {
     body.append(rowFor(f.best, i + 1, f, false));
     if (lab.openFam.has(f.key)) f.members.slice(1).forEach((g, j) => body.append(rowFor(g, `${i + 1}.${j + 2}`, f, true)));
   });
+  renderLabBulk();
 }
 /** "Show more" under the list: nothing is cut off, the list just grows 150 groups at a time. */
 function labMoreButton(total, shown) {
@@ -4845,13 +4865,14 @@ function renderLabCards(fams, pc, rs) {
   const box = $("lab_cards"); box.innerHTML = "";
   const card = (g, num, f, sub) => {
     const m = g.m, r = g.r, x = robOf(r);
-    const el = document.createElement("div"); el.className = "lcd" + (lab.sel === r.id ? " sel" : "") + (deskOpen(g) ? " ondesk" : ""); el.tabIndex = 0;
+    const el = document.createElement("div"); el.className = "lcd" + (lab.sel === r.id ? " sel" : "") + (deskOpen(g) ? " ondesk" : "") + (lab.pick.has(r.id) ? " picked" : ""); el.tabIndex = 0;
+    lab.shownG.push(g);
     if (g.deskS) el.dataset.desk = g.deskS.map((x) => x.id).join(" ");
     const status = labStatusHTML(g, f, sub);
     const cell = (k, v) => `<div><span class="k">${k}</span><b>${v}</b></div>`;
     const ratio = (ok, n, need = 1) => n == null ? "–" : `<span class="${n && ok >= need ? "pos-num" : "neg-num"}">${ok ?? 0}/${n}</span>`;
     const done = x && x.status === "done";
-    el.innerHTML = `<div class="tt"><span class="no">${num}</span><span class="nm"></span></div>
+    el.innerHTML = `<div class="tt">${labPickBox(r)}<span class="no">${num}</span><span class="nm"></span></div>
       <div class="sub">${esc(labAssetName(r.asset))} · ${esc(labStyle(r))}${g.passes ? ` · passed ${g.passes} of ${g.nights} run${g.nights === 1 ? "" : "s"}` : ""}</div>
       <div class="chips">${labDeskChip(g, f, sub)}${status}${g.rechecking ? '<span class="chip blue">Re-checking today</span>' : ""}${r.refresh ? '<span class="chip blue">Re-tested (current rules)</span>' : r.champion ? '<span class="chip green">Re-tested</span>' : ""}${r.starred ? '<span class="chip yellow">★</span>' : ""}</div>
       <div class="mg">${cell("Net (1 yr)", pc(m.full.net) + longNetLine(r))}${cell("Win %", m.full.win_rate)}${cell("Trades", m.full.n)}
@@ -4861,6 +4882,7 @@ function renderLabCards(fams, pc, rs) {
       ${!sub && f.members.length > 1 ? `<button type="button" class="btn small fam">${lab.openFam.has(f.key) ? "Hide similar" : `+${f.members.length - 1} similar`}</button>` : ""}`;
     el.querySelector(".nm").textContent = r.label;
     el.addEventListener("click", (e) => {
+      if (e.target.closest(".lpk")) { labPickToggle(g, e.target.checked); el.classList.toggle("picked", e.target.checked); return; }
       if (e.target.closest(".fam")) { if (lab.openFam.has(f.key)) lab.openFam.delete(f.key); else lab.openFam.add(f.key); renderLabTable(); return; }
       openLabDetail(r.id).catch((er) => toast(errorText(er)));
     });
@@ -5157,7 +5179,8 @@ async function downloadLabExcel(r, v, kv) {
   XLSX.writeFile(wb, `Lab-${r.id}-${r.asset}-${v.key}.xlsx`);
   toast("Excel file downloaded.");
 }
-async function promoteLab(r, v) {
+/** The new strategy's settings from a lab result and one of its versions (futures, or an option version). */
+function labStrategyRow(r, v) {
   const c = r.config;
   const keys = ["strategy_kind", "underlying", "data_security_id", "data_segment", "data_instrument", "exchange", "dhan_symbol", "futures_symbol", "timeframe_min", "rules", "direction", "entry_mode",
     "session_start", "last_entry", "square_off", "intraday", "trade_type", "option_side", "lots", "lot_size", "qty_mode", "product_type", "strike_step", "strike_offset", "expiry_weekday", "expiry_flag",
@@ -5168,11 +5191,83 @@ async function promoteLab(r, v) {
   // Lots stay fixed until you choose to size from capital; the tested worst drawdown for 1 lot is filled in for that.
   row.sizing = { mode: "FIXED", alloc_pct: 20, dd_pct: 25, dd_per_lot: Math.trunc((v.metrics && v.metrics.full && v.metrics.full.max_dd) || 0) || null, dd_mult: 1.5, margin_pct: c.data_segment === "MCX_COMM" || c.data_segment === "DELTA" ? 10 : 12, max_lots: 10 };
   row.active = false; row.live = false; row.lab_id = r.id;
+  return row;
+}
+async function promoteLab(r, v) {
+  const row = labStrategyRow(r, v);
   const created = must(await db.from("algo_strategies").insert(row).select("id").single());
   must(await db.from("lab_results").update({ promoted_id: created.id }).eq("id", r.id));
   formDirty = false; await loadAll(); openStrat(created.id); showTab("set");
   toast("Saved as a new strategy, paused and in paper mode. Check the lot size, symbols and order format before using it.");
 }
+/* ---------- several lab strategies at once: tick them, then save / star / download ---------- */
+function labPickBox(r) { return isAdmin() && r.config ? `<input type="checkbox" class="lpk" aria-label="Select lab strategy #${r.id}" ${lab.pick.has(r.id) ? "checked" : ""}>` : ""; }
+function labPickToggle(g, on) { on ? lab.pick.set(g.r.id, g) : lab.pick.delete(g.r.id); renderLabBulk(); }
+function renderLabBulk() {
+  const bar = $("lab_bulk"); if (!bar) return;
+  const n = lab.pick.size; bar.hidden = !n || !isAdmin();
+  const all = $("lab_all");
+  if (all) { const sh = lab.shownG || []; all.checked = sh.length > 0 && sh.every((g) => lab.pick.has(g.r.id)); all.indeterminate = !all.checked && sh.some((g) => lab.pick.has(g.r.id)); }
+  if (!n) return;
+  const gs = [...lab.pick.values()], star = gs.filter((g) => g.r.starred).length;
+  const hidden = gs.filter((g) => !(lab.shownG || []).includes(g)).length;
+  $("lab_bulk_n").textContent = `${n} selected${star ? ` (${star} starred)` : ""}${hidden ? `, ${hidden} not in the list shown now` : ""}`;
+  bar.querySelector('[data-lbulk="save"]').textContent = `Save as strategies${lab.view === "FUT" ? "" : ` (${LAB_VIEW_NAME[lab.view]})`}, paused, paper`;
+}
+const LAB_VIEW_NAME = { FUT: "futures", BUY: "option buying", SELL: "option writing", SPREAD: "spread" };
+/** The version a lab result is saved as: futures, or its best-scoring option version of the side the table shows. */
+function labVersionOf(r, view) {
+  if (view === "FUT") return { key: "FUT", side: null, label: "Futures", risk: r.config.risk, metrics: r.metrics };
+  const col = { BUY: "opt_buy", SELL: "opt_sell", SPREAD: "opt_struct" }[view], vs = (r[col] && r[col].variants) || [];
+  if (!vs.length) return null;
+  const v = vs.reduce((a, b) => ((b.metrics && b.metrics.score) > (a.metrics && a.metrics.score) ? b : a));
+  return { key: view, side: view, label: v.label, risk: v.risk, structure: v.structure || null, metrics: v.metrics };
+}
+async function labBulk(kind, btn) {
+  if (kind === "clear") { lab.pick.clear(); renderLabTable(); return; }
+  const ids = [...lab.pick.keys()]; if (!ids.length) return;
+  if (kind === "star" || kind === "unstar") {
+    const on = kind === "star", todo = ids.filter((id) => !!lab.pick.get(id).r.starred !== on);
+    if (!todo.length) { toast(on ? "They are all starred already." : "None of them is starred."); return; }
+    return run(btn, async () => {
+      for (let i = 0; i < todo.length; i += 100) must(await db.from("lab_results").update({ starred: on }).in("id", todo.slice(i, i + 100)));
+      for (const id of todo) { lab.pick.get(id).r.starred = on; const r = lab.rows.find((x) => x.id === id); if (r) r.starred = on; }
+      renderLabTable(); toast(on ? `${todo.length} starred: kept beyond 45 days.` : `Star removed from ${todo.length}.`);
+    });
+  }
+  if (kind === "xlsx") return run(btn, async () => {
+    await loadScript("vendor/xlsx.mini.min.js");
+    const cols = LAB_COLS.filter((c) => c.v && c.k !== "no");
+    const rows = [...lab.pick.values()].map((g) => Object.fromEntries([["Lab #", g.r.id], ...cols.map((c) => [c.t, c.v(g) ?? ""])]));
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Lab strategies");
+    XLSX.writeFile(wb, `lab-selected-${rows.length}-${istDate(0)}.xlsx`);
+  });
+  if (kind === "save") {
+    const view = lab.view, col = { BUY: "opt_buy", SELL: "opt_sell", SPREAD: "opt_struct" }[view];
+    askConfirm(`<strong>Save ${ids.length} lab strateg${ids.length === 1 ? "y" : "ies"} as strategies?</strong><br>Each is added as its ${LAB_VIEW_NAME[view]} version, <b>paused and in paper mode</b>, with 1 lot. Ones still in the tougher test, or already on your desk, are skipped. Check the lot size, symbols and order format of each before using it.`, "Save", () => run(btn, async () => {
+      const made = [], skip = { pending: 0, desk: 0, nover: 0 };
+      for (let i = 0; i < ids.length; i += 10) {
+        const part = must(await db.from("lab_results").select(`id, label, config, metrics, basic_passed, robust_status, rstat:robust->>status, promoted_id${col ? ", " + col : ""}`).in("id", ids.slice(i, i + 10)));
+        for (const r of part) {
+          r.robust = { status: r.rstat };
+          if (!r.config) continue;
+          if (labPending(r)) { skip.pending++; continue; }
+          if (state.strategies.some((x) => !x.archived && (x.id === r.promoted_id || (x.lab_id === r.id && (view === "FUT" ? x.trade_type !== "OPTIONS" : x.trade_type === "OPTIONS"))))) { skip.desk++; continue; }
+          const v = labVersionOf(r, view); if (!v) { skip.nover++; continue; }
+          const created = must(await db.from("algo_strategies").insert(labStrategyRow(r, v)).select("id").single());
+          must(await db.from("lab_results").update({ promoted_id: created.id }).eq("id", r.id));
+          made.push(r.id);
+        }
+      }
+      formDirty = false; await loadAll();
+      for (const id of made) lab.pick.delete(id);
+      renderLabTable();
+      const why = [skip.pending && `${skip.pending} still in the tougher test`, skip.desk && `${skip.desk} already on your desk`, skip.nover && `${skip.nover} without a ${LAB_VIEW_NAME[view]} version`].filter(Boolean).join(", ");
+      toast(`${made.length} saved as strategies, paused and in paper mode (Strategies page).${why ? ` Skipped: ${why}.` : ""}`);
+    }));
+  }
+}
+document.querySelectorAll("#lab_bulk [data-lbulk]").forEach((b) => b.addEventListener("click", () => labBulk(b.dataset.lbulk, b)));
 function renderLabSettings() {
   const s = lab.settings || {};
   $("ls_enabled").value = s.enabled === false ? "false" : "true"; $("ls_mode").value = s.schedule_mode || "nightly"; $("ls_per_night").value = s.per_night ?? 300; $("ls_capital").value = s.capital ?? 500000; $("ls_long").value = s.long_per_night ?? 10; $("ls_has_pct").value = s.ha_strength_pct ?? 8;
@@ -6090,15 +6185,62 @@ function renderBulkBar() {
   $("lp_bulk").hidden = !n;
   if (!n) return;
   const sel = state.strategies.filter((s) => lsel.has(s.id));
-  const act = sel.filter((s) => s.active).length, live = sel.filter((s) => s.live).length;
-  $("lp_bulk_n").textContent = `${n} selected (${act} active, ${live} live)`;
+  const act = sel.filter((s) => s.active && !s.archived).length, live = sel.filter((s) => s.live && !s.archived).length, arch = sel.filter((s) => s.archived).length;
+  $("lp_bulk_n").textContent = `${n} selected (${act} active, ${live} live${arch ? `, ${arch} archived` : ""})`;
+  const b = (k) => document.querySelector(`#lp_bulk [data-bulk="${k}"]`);
+  b("exit").hidden = !sel.some((s) => s.position !== "FLAT" && !s.archived);
+  b("restore").hidden = !arch; b("allow").hidden = !sel.some((s) => s.kill_at && !s.archived);
+  for (const k of ["on", "off", "live", "paper", "archive"]) b(k).hidden = arch === n;
 }
 async function bulkAction(kind) {
   if (kind === "clear") { lsel.clear(); renderList(); return; }
-  const sel = state.strategies.filter((s) => lsel.has(s.id) && !s.archived);
-  if (!sel.length) return;
   const names = (xs) => xs.slice(0, 8).map((s) => esc(s.name)).join(", ") + (xs.length > 8 ? ` and ${xs.length - 8} more` : "");
   const btn = document.querySelector(`#lp_bulk [data-bulk="${kind}"]`);
+  const ids100 = async (xs, patch) => { for (let i = 0; i < xs.length; i += 100) must(await db.from("algo_strategies").update(patch).in("id", xs.slice(i, i + 100).map((s) => s.id))); };
+  const nS = (k) => `${k} strateg${k === 1 ? "y" : "ies"}`;
+  if (kind === "restore") {
+    const todo = state.strategies.filter((s) => lsel.has(s.id) && s.archived);
+    if (!todo.length) { toast("None of them is archived."); return; }
+    run(btn, async () => { await ids100(todo, { archived: false, archived_at: null }); await loadAll(); toast(`${nS(todo.length)} restored. They are paused and in paper mode.`); });
+    return;
+  }
+  const sel = state.strategies.filter((s) => lsel.has(s.id) && !s.archived);
+  if (!sel.length) { toast("They are all archived; use Restore first."); return; }
+  if (kind === "archive") {
+    const open = sel.filter((s) => s.position !== "FLAT"), todo = sel.filter((s) => s.position === "FLAT");
+    if (!todo.length) { toast("Exit the open positions before archiving these strategies."); return; }
+    askConfirm(`<strong>Archive ${nS(todo.length)}?</strong><br>${names(todo)}.<br>Each is paused, switched to paper mode and moved to the Archived list (tick “Archived” above to see them). You can restore them from there.${open.length ? `<br>${open.length} with an open position (${names(open)}) ${open.length === 1 ? "is" : "are"} left as ${open.length === 1 ? "it is" : "they are"}: exit the position first.` : ""}`, "Archive", () => run(btn, async () => {
+      await ids100(todo, { archived: true, archived_at: new Date().toISOString(), active: false, live: false });
+      for (const s of todo) lsel.delete(s.id);
+      await loadAll(); toast(`${nS(todo.length)} archived.`);
+    }));
+    return;
+  }
+  if (kind === "exit") {
+    const todo = sel.filter((s) => s.position !== "FLAT"), live = todo.filter((s) => s.live);
+    if (!todo.length) { toast("None of them has an open position."); return; }
+    askConfirm(`<strong>Exit ${todo.length} open position${todo.length === 1 ? "" : "s"} now?</strong><br>${names(todo)}.<br>${live.length ? `<b>${live.length} ${live.length === 1 ? "is" : "are"} live: real exit orders will be sent to ${live.some((s) => isCrypto(s.data_segment)) && live.some((s) => !isCrypto(s.data_segment)) ? "Dhan and Delta Exchange" : live.some((s) => isCrypto(s.data_segment)) ? "Delta Exchange" : "Dhan"}</b> (${names(live)}).` : "All in paper mode: the exits are only logged."}${todo.length < sel.length ? `<br>${sel.length - todo.length} selected without a position ${sel.length - todo.length === 1 ? "is" : "are"} left as ${sel.length - todo.length === 1 ? "it is" : "they are"}.` : ""}<br>The strategies stay active and can enter again on their next signal; pause them too if you don't want that.`,
+      "Exit now", () => run(btn, async () => {
+        const bad = [];
+        for (const s of todo) { const { error } = await db.rpc("desk_engine", { p_action: "flatten", p_strategy: s.id }); if (error) bad.push(`${s.name}: ${errorText(error)}`); }
+        toast(`Exit sent for ${todo.length - bad.length} position${todo.length - bad.length === 1 ? "" : "s"}; checking…`);
+        await new Promise((r) => setTimeout(r, Math.min(20000, 6000 + todo.length * 1500)));
+        await loadAll();
+        const still = state.strategies.filter((s) => todo.some((t) => t.id === s.id) && s.position !== "FLAT");
+        toast(bad.length ? `${bad.length} exit${bad.length === 1 ? "" : "s"} not sent (${bad[0]}).` : still.length ? `${todo.length - still.length} closed; ${still.length} still open (${still.slice(0, 3).map((s) => s.name).join(", ")}): live orders may still be working; check the Orders tab.` : `All ${todo.length} position${todo.length === 1 ? "" : "s"} closed. Check the log.`);
+      }), true);
+    return;
+  }
+  if (kind === "allow") {
+    const todo = sel.filter((s) => s.kill_at);
+    if (!todo.length) { toast("None of them was stopped by the kill rule."); return; }
+    askConfirm(`<strong>Allow new trades again for ${nS(todo.length)}?</strong><br>${names(todo)}.<br>The kill rule stopped them because their own trades were far worse than their backtest. From now on each is judged on its new trades only.`, "Allow new trades", () => run(btn, async () => {
+      const bad = [];
+      for (const s of todo) { const { error } = await db.rpc("kill_allow", { p_strategy: s.id }); if (error) bad.push(`${s.name}: ${errorText(error)}`); }
+      await loadAll(); toast(bad.length ? `${todo.length - bad.length} allowed; ${bad.length} not changed (${bad[0]})` : `New trades allowed again for ${nS(todo.length)}.`);
+    }));
+    return;
+  }
   if (kind === "on" || kind === "off") {
     const todo = sel.filter((s) => !!s.active !== (kind === "on"));
     if (!todo.length) { toast(kind === "on" ? "They are all active already." : "They are all paused already."); return; }
@@ -6158,7 +6300,7 @@ function renderList() {
   sel.value = assets.includes(keep) ? keep : "";
   $("lf_src").querySelector('option[value="MASTER"]').hidden = !isAdmin();
   $("newFlip2").hidden = !(isAdmin() || me.can_build);
-  const allIds = listRows().filter((s) => !s.archived).map((s) => s.id);
+  const allIds = listRows().map((s) => s.id);
   for (const id of [...lsel]) if (!state.strategies.some((s) => s.id === id)) lsel.delete(id);
   const allOn = allIds.length > 0 && allIds.every((id) => lsel.has(id));
   $("lp_head").innerHTML = `<tr><th class="ck"><input type="checkbox" id="lp_all" aria-label="Select all strategies shown" ${allOn ? "checked" : ""} ${allIds.length ? "" : "disabled"}></th>` + cols.map(([k, label, , t]) => `<th class="sort${["num", "int", "pct", "money", "upnl", "booked"].includes(t) ? " n" : ""}" data-k="${k}" aria-sort="${lsort.key === k ? (lsort.dir > 0 ? "ascending" : "descending") : "none"}" tabindex="0">${esc(label)}</th>`).join("") + "</tr>";
@@ -6179,7 +6321,7 @@ function renderList() {
   for (const s of rows) {
     const tr = document.createElement("tr"); tr.className = "pick"; tr.tabIndex = 0;
     const ck = document.createElement("td"); ck.className = "ck";
-    if (!s.archived) {
+    {
       const box = document.createElement("input"); box.type = "checkbox"; box.checked = lsel.has(s.id); box.setAttribute("aria-label", `Select ${s.name}`);
       box.addEventListener("click", (e) => e.stopPropagation());
       box.addEventListener("change", () => { box.checked ? lsel.add(s.id) : lsel.delete(s.id); renderList(); });
@@ -6241,7 +6383,7 @@ function renderListCards(cols, rows) {
     const a = p(s), side = s.position === "LONG" ? "l" : s.position === "SHORT" ? "s" : "f";
     const tf = hideRules(s) ? "" : cxStratTf(s) === "D" ? "Daily" : `${cxStratTf(s)} min`;
     const el = document.createElement("div"); el.className = "lpc" + (s.position !== "FLAT" ? " open" : "") + (lsel.has(s.id) ? " sel" : ""); el.tabIndex = 0;
-    el.innerHTML = `<div class="top"><div class="nm"></div>${s.archived ? "" : `<input type="checkbox" class="ck" aria-label="Select" ${lsel.has(s.id) ? "checked" : ""}>`}</div>
+    el.innerHTML = `<div class="top"><div class="nm"></div><input type="checkbox" class="ck" aria-label="Select" ${lsel.has(s.id) ? "checked" : ""}></div>
       <div class="sub">${esc(assetLabel(s.underlying))} · ${esc(instName(s))}${tf ? ` · ${esc(tf)}` : ""}</div>
       <div class="chips">${s.archived ? '<span class="chip">Archived</span>' : s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>'}${s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>'}${s.lab_status === "failed" ? `<span class="chip red" title="${esc(s.lab_note || "")}">Failed lab test</span>` : ""}${s.last_error ? '<span class="chip red">Error</span>' : ""}${s.kill_at ? '<span class="chip red">Kill rule</span>' : ""}${s.exec_state === "working" ? '<span class="chip yellow" title="A live order is being worked at the broker (checked every 15 seconds)">Order working</span>' : ""}</div>
       <div class="pos"><div><div class="side ${side}">${s.position === "FLAT" ? "Flat" : `${s.position === "LONG" ? "Long" : "Short"}${s.pos_lots ? ` · ${s.pos_lots} lot${s.pos_lots === 1 ? "" : "s"}` : ""}`}</div>${s.position === "FLAT" ? '<div class="px">Waiting for a signal</div>' : `<div class="px" data-ltp="${s.id}">${posPriceText(s)}</div>`}</div>

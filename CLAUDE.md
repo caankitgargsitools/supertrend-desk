@@ -78,6 +78,11 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   Realtime). The minute tick and the order manager reuse these prices (no extra Dhan quote calls).
 - Stops/targets/trailing stops are checked every second (`secondRisk`) and on 1-minute candles (`liveRisk`);
   exits are claimed with `exec_state='stopping'` + `exec_at` so they never run twice. Option premiums: minute only.
+- Bulk actions (29 Oct 2026): Strategies page — tick rows (archived too) → Activate, Pause, Go live, Back to paper,
+  Exit positions now (`desk_engine` flatten per open one; live ones warned), Allow new trades again (`kill_allow`), Archive
+  (flat only), Restore. Strategy Lab (admins) — tick rows / select all shown → Save as strategies (the version the table
+  shows, paused + paper; skips ones still in the tougher test or already on the desk), Star / Remove star, Download Excel.
+  Test: `tests/ui/ui_bulk.mjs`.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
