@@ -148,7 +148,10 @@ export async function runCombos(sb: SupabaseClient, budgetMs = 900): Promise<Rec
   }
   if (!pick) return { idle: true, groups: groups.size };
   const { asset, tf, size } = pick;
-  const fresh = !pick.row || pick.row.state !== "working" || pick.row.sig !== pick.sig;
+  // A pass in progress always runs to its end, even when the group's list changed meanwhile (busy groups such as Gold
+  // daily get new strategies every few lab runs and would otherwise restart for ever); it keeps the signature it
+  // started with, so the next call sees the change and starts a new pass that covers it.
+  const fresh = !pick.row || pick.row.state !== "working";
   const g = fresh ? { asset, tf, size, sig: pick.sig, cursor: 0, pass_started: new Date().toISOString(), state: "working", baseline_at: pick.row?.baseline_at ?? null, found: 0, checked: 0 } : { ...pick.row };
   // 3. The strategies to combine: the best of each rule family, plus those on an admin's desk (as the page does).
   const pool: Pool[] = [];

@@ -89,5 +89,18 @@ await t("big groups are worked in instalments (position carried between calls)",
   let r = r2; for (let i = 0; i < 10 && !r.finished; i++) r = await C.runCombos(sb, 1e9);
   assert.equal(r.finished, true); assert.equal(db.lab_combo_groups.find((g) => g.size === 3).checked, 9880);
 });
+await t("a pass in progress isn't restarted by a new strategy; a new pass follows to cover it", async () => {
+  db.lab_combo_groups = []; db.lab_combos = [];
+  const r1 = await C.runCombos(sb, 1e9); assert.equal(r1.size, 2); // pairs done
+  const r2 = await C.runCombos(sb, 1e9); assert.equal(r2.finished, false); // threes under way
+  const before = db.lab_combo_groups.find((g) => g.size === 3);
+  db.lab_results.push({ ...db.lab_results[0], id: 299, fingerprint: "g-new", config: { timeframe_min: 375, direction: "BOTH", rules: { daily: true, long: { conds: [{ ind: "NEW", op: ">" }] }, short: { conds: [] } } } });
+  const r3 = await C.runCombos(sb, 1e9);
+  const g3 = db.lab_combo_groups.find((g) => g.size === 3);
+  assert.equal(r3.size, 3); assert.equal(g3.cursor, before.cursor + r3.checked, "carried on, not restarted"); assert.equal(g3.sig, before.sig);
+  let r = r3; for (let i = 0; i < 10 && !(r.size === 3 && r.finished); i++) r = await C.runCombos(sb, 1e9);
+  const next = await C.runCombos(sb, 1e9);
+  assert.ok(!next.idle && next.size === 2, "the change is picked up by a new pass: " + JSON.stringify(next));
+});
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);
