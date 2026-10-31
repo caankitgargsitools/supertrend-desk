@@ -102,5 +102,14 @@ await t("a pass in progress isn't restarted by a new strategy; a new pass follow
   const next = await C.runCombos(sb, 1e9);
   assert.ok(!next.idle && next.size === 2, "the change is picked up by a new pass: " + JSON.stringify(next));
 });
+await t("a group never checked goes ahead of a busy group's re-check (Gold can't starve the rest)", async () => {
+  let r; for (let i = 0; i < 20; i++) { r = await C.runCombos(sb, 1e9); if (r.idle) break; } assert.ok(r.idle);
+  // a new asset with three strategies, and at the same time a new strategy on the busy Gold Mini group
+  for (const id of [401, 402, 403]) db.lab_results.push({ ...row(id, id - 400), asset: "SILVERM", fingerprint: "s" + id });
+  db.lab_results.push({ ...row(404, 5), fingerprint: "g404" });
+  const a = await C.runCombos(sb, 1e9); assert.equal(a.asset, "SILVERM", JSON.stringify(a)); assert.equal(a.size, 2);
+  const b = await C.runCombos(sb, 1e9); assert.equal(b.asset, "SILVERM", JSON.stringify(b)); assert.equal(b.size, 3);
+  const c = await C.runCombos(sb, 1e9); assert.equal(c.asset, "GOLDM", JSON.stringify(c));
+});
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);

@@ -138,13 +138,15 @@ export async function runCombos(sb: SupabaseClient, budgetMs = 900): Promise<Rec
   for (const r of light) { const k = `${r.asset}|${r.daily ? "D" : String(r.tf)}`; if (!groups.has(k)) groups.set(k, []); groups.get(k)!.push(r.id); }
   const { data: rows } = await sb.from("lab_combo_groups").select("*");
   const state = new Map((rows ?? []).map((g: any) => [`${g.asset}|${g.tf}|${g.size}`, g]));
-  // 2. Pick one piece of work: an unfinished pass first, then a group whose list changed.
-  let pick: { asset: string; tf: string; size: number; sig: string; row: any } | null = null;
+  // 2. Pick one piece of work: an unfinished pass first, then a group never checked, then the group whose list
+  //    changed longest ago (so busy groups like Gold, re-checked as the lab adds strategies, can't starve the rest).
+  let pick: { asset: string; tf: string; size: number; sig: string; row: any } | null = null, pref = [9, ""];
   for (const size of [2, 3]) for (const [k, ids] of groups) {
     if (ids.length < size) continue;
     const [asset, tf] = k.split("|"), sig = hash(ids.sort((a, b) => a - b).join(",")), row = state.get(`${k}|${size}`);
-    if (row && row.state === "working") { pick = { asset, tf, size, sig, row }; break; }
-    if (!pick && (!row || row.sig !== sig)) pick = { asset, tf, size, sig, row };
+    const rank = row && row.state === "working" ? 0 : !row ? 1 : row.sig !== sig ? 2 : 9;
+    const at = String(row?.updated_at ?? "");
+    if (rank < Number(pref[0]) || (rank === pref[0] && rank === 2 && at < String(pref[1]))) { pick = { asset, tf, size, sig, row }; pref = [rank, at]; }
   }
   if (!pick) return { idle: true, groups: groups.size };
   const { asset, tf, size } = pick;
