@@ -565,6 +565,17 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
   .cmprules .cr { border: 1px solid var(--line); border-left: 4px solid var(--cc); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); }
   .cmprules .top { display: flex; align-items: center; margin-bottom: 6px; } .cmprules dl { margin: 0; font-size: 12.5px; } .cmprules dt { color: var(--muted); font-size: 11px; margin-top: 6px; } .cmprules dd { margin: 0; }
   #cmp_per { display: inline-flex; }
+  /* System health: status colours carry an icon-like dot and a word, never colour alone. */
+  .hl-ok { color: var(--green); } .hl-warn { color: var(--yellow-ink); } .hl-fail { color: var(--red); }
+  .hdot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); margin-left: auto; box-shadow: 0 0 0 3px var(--red-soft); flex: none; }
+  #nav .btn .hdot { position: relative; }
+  .hlst { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; white-space: nowrap; } .hlst i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .hlst.ok { color: var(--green); } .hlst.ok i { background: var(--green); } .hlst.warn { color: var(--yellow-ink); } .hlst.warn i { background: var(--yellow); }
+  .hlst.fail { color: var(--red); } .hlst.fail i { background: var(--red); } .hlst.off { color: var(--muted); } .hlst.off i { background: var(--line); border: 1px solid var(--muted); }
+  .hltbl tr.grp td { padding-top: 14px; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+  .hltbl tr.hl-fail td { background: var(--red-soft); } .hltbl tr.hl-warn td { background: var(--yellow-soft); }
+  .hhs { white-space: nowrap; } .hh { display: inline-block; width: 7px; height: 14px; margin-right: 2px; border-radius: 2px; background: var(--line); vertical-align: middle; }
+  .hh.ok { background: var(--green); } .hh.warn { background: var(--yellow); } .hh.fail { background: var(--red); } .hh.off { background: var(--muted); opacity: .4; }
   /* Sortable headings everywhere (th.sort): an arrow shows the order; the floating heading copy keeps them in view. */
   th.sort { cursor: pointer; user-select: none; }
   th.autosort::after, .cotbl th.sort::after { content: " ↕"; opacity: .4; font-size: .9em; }
@@ -784,6 +795,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
     <button class="btn small" id="openCap" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2"/><path d="M3 10h18"/></svg><span>Capital</span></button>
     <button class="btn small" id="nav_wallet" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7H5a2 2 0 0 1 0-4h13v4"/><path d="M3 5v14a2 2 0 0 0 2 2h15V7"/><circle cx="16" cy="14" r="1.2"/></svg><span>Wallet</span></button>
     <button class="btn small" id="openSettings" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7V3M15 7V3"/><path d="M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v4"/></svg><span>Connections</span></button>
+    <button class="btn small" id="nav_health" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span>System health</span><i class="hdot" id="nav_health_dot" hidden></i></button>
     <button class="btn small" id="nav_admin" type="button" data-admin hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4v5c0 5-3.4 8.3-8 9-4.6-.7-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg><span>Admin</span></button>
   </nav>
   <div class="acct"><button class="btn small themebtn" id="themeBtn" type="button" title="Light or dark look" aria-label="Switch between light and dark look"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg><span>Theme</span></button>
@@ -1352,6 +1364,14 @@ details.xp > summary:hover { background: var(--blue-soft); }
       <div class="scroll lp-desk"><table class="big-table"><thead id="lp_head"></thead><tbody id="lp_body"></tbody><tfoot id="lp_tfoot"></tfoot></table></div>
       <p class="hint" id="lp_foot" style="margin:8px 0 0"></p>
       </div>
+    </section>
+
+    <section class="card" id="healthPane" hidden>
+      <div class="head"><div><span class="label">Daily self-audit</span><h2>System health</h2></div>
+        <div class="actions"><button class="btn small" id="hl_now" type="button">Check now</button></div></div>
+      <p class="hint" style="margin:6px 0 0">Every service of the portal is checked every hour (and you get a summary every morning at 08:11, plus an alert as soon as something stops working). <b class="hl-ok">Green</b> = working, <b class="hl-warn">amber</b> = working but worth a look, <b class="hl-fail">red</b> = not working, grey = switched off on purpose. A red dot on this page's link in the menu means something is red now.</p>
+      <div id="hl_sum" style="margin-top:12px"></div>
+      <div id="hl_body" style="margin-top:8px"></div>
     </section>
 
     <section class="card" id="comboPane" hidden>
@@ -5473,7 +5493,7 @@ const isAdmin = () => !!me && me.role === "admin";
 const myStrats = () => state.strategies.filter((x) => me && x.owner_id === me.user_id && !x.is_master);
 function instName(s) { return s.trade_type === "OPTIONS" ? (s.option_side === "SELL" ? "Option writing" : "Option buying") : "Futures"; }
 function assetLabel(k) { return (PRESETS[k] && PRESETS[k].name) || k || "–"; }
-const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane", "ideasPane", "predPane", "cmpPane", "comboPane"];
+const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane", "ideasPane", "predPane", "cmpPane", "comboPane", "healthPane"];
 function hideNewPanes() { NEW_PANES.forEach((id) => $(id).hidden = true); }
 function markNav(id) { document.querySelectorAll("#nav .btn").forEach((b) => b.id === id ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")); }
 /** One page at a time: list, strat, market, wallet, admin, conn, cap, lab, terms. */
@@ -5484,7 +5504,7 @@ function showPage(name) {
   page = name;
   hideNewPanes();
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true;
-  const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab", ideas: "nav_ideas", pred: "nav_pred", cmp: "nav_cmp", combo: "nav_combo" }[name];
+  const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab", ideas: "nav_ideas", pred: "nav_pred", cmp: "nav_cmp", combo: "nav_combo", health: "nav_health" }[name];
   if (name !== "ideas") stopIdeasPoll();
   if (name !== "pred") stopPredPoll();
   markNav(navId);
@@ -5497,6 +5517,7 @@ function showPage(name) {
   else if (name === "ideas") { $("ideasPane").hidden = false; withLoading($("ideasPane"), renderIdeas(true)).catch((e) => toast(errorText(e))); startIdeasPoll(); }
   else if (name === "pred") { $("predPane").hidden = false; withLoading($("predPane"), renderPred()).catch((e) => toast(errorText(e))); startPredPoll(); }
   else if (name === "pass") { $("passPane").hidden = false; $("np_msg").textContent = ""; }
+  else if (name === "health") { $("healthPane").hidden = false; withLoading($("healthPane"), renderHealth()).catch((e) => toast(errorText(e))); }
   else if (name === "combo") { $("comboPane").hidden = false; withLoading($("comboPane"), renderCombo()).catch((e) => toast(errorText(e))); }
   else if (name === "cmp") { $("cmpPane").hidden = false; cmpCache.clear(); withLoading($("cmpPane"), renderCmp()).catch((e) => toast(errorText(e))); }
   else if (name === "cap") openCap();
@@ -6023,7 +6044,7 @@ function listRows() {
 /* ---------- phone notifications (web push to the installed app) ---------- */
 const VAPID_PUBLIC = "BLyDxFopHCv-MOmA9kzMEF_ZkvmKj55TiWC4YzV0WTFu9rCkW0zIabbKAx71j5XTsaInAsb0MNPfw2q7X30mjyE";
 const NTF_KINDS = [["trade", "New positions and exits (with P&L)"], ["error", "Errors and failed orders"], ["live", "Strategies going live / back to paper"],
-  ["account", "Dhan token problems"], ["lab", "Strategy Lab results (admin)"], ["shukrana", "Clients owing Shukrana (admin)"]];
+  ["account", "Dhan token problems"], ["lab", "Strategy Lab results (admin)"], ["shukrana", "Clients owing Shukrana (admin)"], ["health", "System health (admin)"]];
 const b64uBytes = (b) => { const p = "=".repeat((4 - (b.length % 4)) % 4), raw = atob((b + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from([...raw].map((c) => c.charCodeAt(0))); };
 async function loadNotifyCard() {
   const box = $("ntf_box"); if (!box) return;
@@ -6034,7 +6055,7 @@ async function loadNotifyCard() {
   const row = sub ? (await db.from("push_subs").select("id, prefs").eq("endpoint", sub.endpoint).maybeSingle()).data : null;
   const blocked = Notification.permission === "denied";
   const { data: recent } = await db.from("notifications").select("id, kind, title, body, created_at, push_note").order("id", { ascending: false }).limit(15);
-  const kinds = NTF_KINDS.filter(([k]) => (k !== "lab" && k !== "shukrana") || isAdmin());
+  const kinds = NTF_KINDS.filter(([k]) => !["lab", "shukrana", "health"].includes(k) || isAdmin());
   box.innerHTML = `${row ? `<p style="margin:0">On for this phone. You'll be told about the kinds ticked below as they happen.</p>
       <div class="ntfkinds">${kinds.map(([k, t]) => `<label class="showtr"><input type="checkbox" data-ntf="${k}" ${row.prefs && row.prefs[k] === false ? "" : "checked"}> ${esc(t)}</label>`).join("")}</div>
       <div class="formbar"><button class="btn small" type="button" id="ntf_test">Send a test</button><button class="btn small" type="button" id="ntf_off">Turn off on this phone</button><span class="hint" id="ntf_msg"></span></div>`
@@ -7038,6 +7059,47 @@ function floatHeads() {
 { let q = 0; const tick = () => { if (!q) q = requestAnimationFrame(() => { q = 0; floatHeads(); }); };
   window.addEventListener("scroll", tick, { passive: true }); window.addEventListener("resize", tick);
   document.addEventListener("scroll", (e) => { if (e.target !== document && e.target.classList && e.target.classList.contains("scroll")) tick(); }, { capture: true, passive: true }); }
+
+/* ---------- System health (31 Oct 2026, Papa) ----------
+ * The database checks every service every hour (desk_health → health_runs); this page shows the latest check, when
+ * each service last changed state and its last 24 checks. The menu link carries a red dot while anything is red, or
+ * when the checks themselves stopped running (none for over 2 hours). */
+const HL_LABEL = { ok: "Working", warn: "Worth a look", fail: "Not working", off: "Switched off" };
+async function healthDot() {
+  const { data } = await db.from("health_runs").select("run_at, fail, warn").order("id", { ascending: false }).limit(1);
+  const r = data && data[0], stale = !r || Date.now() - Date.parse(r.run_at) > 2 * 3600000;
+  const dot = $("nav_health_dot"); if (!dot) return;
+  dot.hidden = !(stale || Number(r.fail) > 0);
+  dot.title = stale ? "The health checks haven't run for over 2 hours" : `${r.fail} service${r.fail === 1 ? "" : "s"} not working`;
+}
+setInterval(() => { if (isAdmin()) healthDot().catch(() => {}); }, 5 * 60000);
+async function renderHealth() {
+  const runs = must(await db.from("health_runs").select("id, run_at, ok, warn, fail, items").order("id", { ascending: false }).limit(48)) || [];
+  healthDot().catch(() => {});
+  if (!runs.length) { $("hl_sum").innerHTML = '<p class="hint">No check has run yet. Press “Check now”.</p>'; $("hl_body").innerHTML = ""; return; }
+  const last = runs[0], items = last.items || [];
+  const age = Math.round((Date.now() - Date.parse(last.run_at)) / 60000);
+  $("hl_sum").innerHTML = `<div class="stats">
+    <div class="stat"><span class="label">Last check</span><span class="v">${esc(istText(last.run_at))}</span><span class="hint">${age < 1 ? "just now" : `${age} min ago`} · every hour at :11</span></div>
+    <div class="stat"><span class="label">Working</span><span class="v hl-ok">${last.ok}</span></div>
+    <div class="stat"><span class="label">Worth a look</span><span class="v ${last.warn ? "hl-warn" : ""}">${last.warn}</span></div>
+    <div class="stat"><span class="label">Not working</span><span class="v ${last.fail ? "hl-fail" : ""}">${last.fail}</span></div></div>
+    ${age > 120 ? '<div class="banner err" style="margin-top:10px">The health checks themselves haven’t run for over 2 hours: the database or its scheduler may be down.</div>' : ""}`;
+  // Since when each service has been in its current state (going back through the kept checks).
+  const since = (key, st) => { let t = last.run_at; for (const r of runs) { const e = (r.items || []).find((x) => x.key === key); if (!e || e.status !== st) break; t = r.run_at; } return t; };
+  const hist = (key) => runs.slice(0, 24).reverse().map((r) => { const e = (r.items || []).find((x) => x.key === key), st = e ? e.status : "none";
+    return `<i class="hh ${st}" title="${esc(istText(r.run_at))}: ${esc(e ? HL_LABEL[e.status] + " · " + e.detail : "not checked")}"></i>`; }).join("");
+  const groups = [...new Set(items.map((e) => e.grp))];
+  $("hl_body").innerHTML = `<div class="scroll"><table class="big-table hltbl" id="hl_tbl"><thead><tr><th>Service</th><th>State</th><th>Details</th><th>Since</th><th>Last 24 checks</th></tr></thead><tbody>${
+    groups.map((g) => `<tr class="grp"><td colspan="5">${esc(g)}</td></tr>` + items.filter((e) => e.grp === g).map((e) => `<tr class="hl-${e.status}">
+      <td><b>${esc(e.name)}</b></td><td><span class="hlst ${e.status}"><i></i>${HL_LABEL[e.status] || e.status}</span></td><td class="hint">${esc(e.detail || "")}</td>
+      <td class="when">${esc(istText(since(e.key, e.status)))}</td><td class="hhs">${hist(e.key)}</td></tr>`).join("")).join("")}</tbody></table></div>`;
+}
+$("nav_health").addEventListener("click", () => showPage("health"));
+$("hl_now").addEventListener("click", (e) => run(e.currentTarget, async () => {
+  must(await db.rpc("health_check_now"));
+  await renderHealth(); toast("Checked. The website answer is read on the next check (it is fetched now).");
+}));
 /* ---------- several strategies at once: tick them, then activate / pause / go live / back to paper ---------- */
 const lsel = new Set();
 function renderBulkBar() {
@@ -7809,7 +7871,7 @@ const DECLARATIONS = [
   ["Backtests and past results", "Backtests are simulations on historical prices with estimated charges and assumed fills. They don't include every real-world cost (slippage, gaps, liquidity, delays, rejections). Past or backtested performance does not guarantee future returns."],
   ["Your own broker account", "Orders go to your own Dhan account through your own API token and webhook. Your funds stay with your broker. Broker, exchange and SEBI rules on algorithmic trading by retail investors apply to you; check your broker's terms for algo / API orders."],
   ["Technology risk", "Automated orders can fail, be delayed or be duplicated because of internet, broker, exchange or software problems, and a position may stay open. Watch your positions in Dhan and use the exit button or Dhan directly when needed."],
-  ["Fees", "Fees (deployment fee and strategy price) are as shown on your Wallet page. No share of your trading profit is charged."],
+  ["Fees", "Fees (deployment fee and strategy price) are as shown on your Wallet page. Where a Shukrana (a share of new trading profit) has been agreed with you, it is shown on your Wallet page and settled with the admin directly; nothing is taken from your wallet or broker account."],
 ];
 function renderDeclarations() {
   $("disclaimBox").innerHTML = DECLARATIONS.map(([h, t]) => `<p style="margin:0"><strong>${esc(h)}.</strong> ${esc(t)}</p>`).join("");
@@ -7824,7 +7886,8 @@ $("terms_go").addEventListener("click", (e) => run(e.currentTarget, async () => 
 function applyRole() {
   document.querySelectorAll("[data-admin]").forEach((el) => el.hidden = !isAdmin());
   $("openLab").hidden = !(isAdmin() || (me && me.can_build));
-  $("nav_ideas").hidden = !isAdmin(); $("nav_combo").hidden = !isAdmin();
+  $("nav_ideas").hidden = !isAdmin(); $("nav_combo").hidden = !isAdmin(); $("nav_health").hidden = !isAdmin();
+  if (isAdmin()) healthDot().catch(() => {});
   $("nav_pred").hidden = !isAdmin();
   ["lab_settings_btn", "lab_run"].forEach((id) => $(id).hidden = !isAdmin());
   $("newFlip").hidden = !(isAdmin() || (me && me.can_build));
@@ -7909,6 +7972,7 @@ function openDeepLink(href) {
     if (sId && (state.strategies || []).some((x) => x.id === sId)) openStrat(sId);
     else if (u.searchParams.get("lab") && isAdmin()) openLab();
     else if (u.searchParams.get("combo") && isAdmin()) showPage("combo");
+    else if (u.searchParams.get("health") && isAdmin()) showPage("health");
     else if (u.searchParams.get("shukrana") && isAdmin()) { ad.tab = "shukrana"; showPage("admin"); }
     else if (u.searchParams.get("conn")) openConn();
     if (u.search) history.replaceState(null, "", location.pathname + location.hash);

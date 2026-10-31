@@ -141,6 +141,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   drive its own sort (`combo.sort` / `combo.sortDir`). `floatHeads()`: a fixed copy of a long table's heading row stays
   under the top bar while the table scrolls past (`#gfhead`; clicks go to the real heading); the Strategy Lab keeps
   its own `labFloatHead`.
+- **System health** (31 Oct 2026, Papa: daily self-audit of every service; migration 58): `desk_health()` (SQL) checks 20
+  services — website (fetched by `health_ping` at :09, read at :11), database, engine call answers, cron jobs, market
+  and crypto ticks, live prices of open positions, live orders, broker match, Dhan token (amber within 3 h of expiry),
+  strategy errors, daily self-check, margins, phone notifications, Strategy Lab, family counts, Ideas Lab, Combinations,
+  Prediction Lab server, backtests (last 7 days) — ok / warn / fail / off, stored in `health_runs`. Cron `desk-health`
+  hourly at :11, `desk-health-day` 08:11 IST sends admins a summary (kind "health", `/?health=1`); a check newly red
+  alerts at once. Admin sidebar "System health" (`healthPane`, `renderHealth`, "Check now" → `health_check_now`) with a
+  red dot on the link (`healthDot`, every 5 min) while anything is red or no check ran for 2 h. Test: `tests/ui/ui_health.mjs`.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
