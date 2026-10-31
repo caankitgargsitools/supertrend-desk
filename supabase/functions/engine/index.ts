@@ -1746,6 +1746,68 @@ async function alert(s: Strategy, title: string, body: string, tag?: string) {
 }
 const brokerKey = (seg: string, sec: string) => `${seg}|${sec}`;
 
+/** What the account's other live strategies hold at Dhan, contract by contract (their own broker records). */
+async function othersHolding(s: Strategy): Promise<Map<string, number>> {
+  const { data } = await sb.from("algo_strategies").select("id, position, pos_broker").eq("owner_id", s.owner_id).eq("live", true).neq("id", s.id);
+  const out = new Map<string, number>();
+  for (const o of data ?? []) {
+    if (o.position === "FLAT") continue;
+    for (const l of ((o.pos_broker as PosBroker | null)?.legs ?? [])) out.set(brokerKey(l.seg, l.sec), (out.get(brokerKey(l.seg, l.sec)) ?? 0) + Number(l.qty));
+  }
+  return out;
+}
+
+/**
+ * Matching opposite orders inside the desk (31 Oct 2026, Papa: pairs of strategies that are often on opposite sides).
+ * When two live strategies of the same account want opposite orders in the same contract at the same time (both act at
+ * the session open, for example), sending both to Dhan would put a buy and a sell of the same client against each other:
+ * the exchange's self-trade check cancels one, and the desk would treat it as a rejection. Instead, before an order goes
+ * to Dhan, an opposite order of another strategy still resting there unfilled is cancelled and the two are matched here
+ * at the last traded price: no order at Dhan for the matched part, the same net position as if both had traded. A
+ * bigger order sends only what is left to Dhan, and its fill price becomes the average of the matched part and Dhan's.
+ * Returns true when the whole order was matched.
+ */
+async function crossInside(r: LiveRow, c: Creds, px: number | null): Promise<boolean> {
+  if (r.broker !== "DHAN" || r.market_retry) return false;
+  const { data: opp } = await sb.from("live_orders").select("*").eq("user_id", r.user_id).eq("broker", "DHAN").eq("seg", r.seg).eq("sec", r.sec)
+    .eq("state", "working").neq("side", r.side).neq("strategy_id", r.strategy_id).order("id");
+  const { data: names } = await sb.from("algo_strategies").select("id, name").in("id", [r.strategy_id, ...(opp ?? []).map((o) => o.strategy_id)]);
+  const nameOf = (id: string) => String((names ?? []).find((x) => x.id === id)?.name ?? "another strategy").slice(0, 60);
+  for (const o of opp ?? []) {
+    if (Number(r.qty) <= 0) break;
+    if (String(o.product ?? "") !== String(r.product ?? "") || !o.broker_order_id) continue;
+    // Only an order that hasn't traded at all is taken back; one already (partly) at the exchange is left alone.
+    const st = await dhanStatus(c, o.broker_order_id).catch(() => null);
+    if (!st || Number(st.filled) > 0 || /TRADED|REJECT|CANCEL/i.test(String(st.status))) continue;
+    try { await dhanCancel(c, o.broker_order_id); } catch { continue; }
+    const again = await dhanStatus(c, o.broker_order_id).catch(() => null);
+    if (!again || Number(again.filled) > 0 || /TRADED/i.test(String(again.status))) {
+      if (again && /TRADED/i.test(String(again.status))) await onFilled(o, again); // it filled just before the cancel
+      continue;
+    }
+    const P = Number(px ?? o.limit_px ?? r.ref_px), m = Math.min(Number(r.qty), Number(o.qty));
+    if (!(P > 0) || !(m > 0)) continue;
+    const note = (x: LiveRow, y: LiveRow) => `${m} matched inside the desk with ${nameOf(y.strategy_id)} (${y.side.toLowerCase()} ${y.label}) at ${P}: no order at Dhan for it`;
+    for (const [x, y] of [[r, o], [o, r]] as const) {
+      const cq = Number(x.cross_qty) || 0;
+      x.cross_px = +((cq * (Number(x.cross_px) || 0) + m * P) / (cq + m)).toFixed(4);
+      x.cross_qty = cq + m; x.qty = Number(x.qty) - m; x.note = note(x, y);
+    }
+    const crossedSt: BrokerStatus = { status: "TRADED", filled: 0, qty: 0, avg: null, reason: null, price: null, orderType: null };
+    // The other strategy's order: done if fully matched, otherwise what is left goes back to Dhan.
+    await sb.from("live_orders").update({ qty: o.qty, cross_qty: o.cross_qty, cross_px: o.cross_px, note: o.note, updated_at: nowIso(),
+      ...(o.qty > 0 ? { state: "queued", broker_order_id: null } : {}) }).eq("id", o.id);
+    if (o.qty > 0) await placeRow({ ...o, state: "queued", broker_order_id: null }, c);
+    else await onFilled(o, crossedSt);
+    await sb.from("live_orders").update({ qty: r.qty, cross_qty: r.cross_qty, cross_px: r.cross_px, note: r.note, updated_at: nowIso() }).eq("id", r.id);
+  }
+  if (Number(r.cross_qty) > 0 && Number(r.qty) <= 0) {
+    await onFilled(r, { status: "TRADED", filled: 0, qty: 0, avg: null, reason: null, price: null, orderType: null });
+    return true;
+  }
+  return false;
+}
+
 /**
  * A live Dhan order: each leg resolved to its contract, written to live_orders and worked by the order manager.
  * The exit legs go first; an entry leg is placed only once the exit before it has filled. Before an exit, the stop
@@ -1792,12 +1854,17 @@ async function queueDhan(s: Strategy, set: Settings, event: string, legs: Record
     const open = exits.filter((r) => r.state !== "filled");
     if (open.length) {
       const held = await dhanPositions(c).catch(() => null);
+      // Other live strategies of the same account may hold the same contract: Dhan shows one net position (a long and a
+      // short net to nothing), so only what is left after theirs is this strategy's (31 Oct 2026).
+      const others = held ? await othersHolding(s) : new Map<string, number>();
       for (const r of open) {
         if (!pb) { r.state = "cancelled"; r.note = "not sent: the desk has no record of this position being opened at Dhan"; continue; }
         if (!held) continue; // positions couldn't be read: send the exit anyway
-        const h = held.get(brokerKey(r.seg, r.sec)) ?? 0, want = r.side === "SELL" ? 1 : -1; // selling closes a long
-        if (Math.sign(h) !== want) { r.state = "cancelled"; r.note = `not sent: Dhan shows no ${want === 1 ? "long" : "short"} position in ${r.label}`; continue; }
-        if (Math.abs(h) < r.qty) { r.note = `Dhan holds ${Math.abs(h)} of ${r.qty}; closing what it holds`; r.qty = Math.abs(h); }
+        const key = brokerKey(r.seg, r.sec), theirs = others.get(key) ?? 0;
+        const h = (held.get(key) ?? 0) - theirs, want = r.side === "SELL" ? 1 : -1; // selling closes a long
+        const after = theirs ? ` (Dhan's net ${held.get(key) ?? 0} less ${theirs} held by your other strategies)` : "";
+        if (Math.sign(h) !== want) { r.state = "cancelled"; r.note = `not sent: Dhan shows no ${want === 1 ? "long" : "short"} position in ${r.label}${after}`; continue; }
+        if (Math.abs(h) < r.qty) { r.note = `Dhan holds ${Math.abs(h)} of ${r.qty}${after}; closing what it holds`; r.qty = Math.abs(h); }
       }
       for (const r of open.filter((r) => r.state === "cancelled")) {
         await alert(s, "Exit not sent", `${r.label}: ${r.note}. The desk is now flat; check your Dhan positions.`);
@@ -1828,6 +1895,7 @@ async function placeRow(r: LiveRow, c: Creds): Promise<boolean> {
   const px = ltp ?? (Number(r.ref_px) > 0 ? Number(r.ref_px) : null);
   const market = r.market_retry || (px == null && r.purpose === "exit");
   if (px == null && !market) return failRow(r, "no price to place the order at");
+  if (!market && await crossInside(r, c, px)) return true;
   const limit = market ? null : toTick(px!, Number(r.tick), r.side);
   const tag = `ag${r.id}x${r.market_retry ? "m" : ""}${Date.now() % 100000}`;
   try {
@@ -1841,7 +1909,7 @@ async function placeRow(r: LiveRow, c: Creds): Promise<boolean> {
       id = found.id;
     }
     await sb.from("live_orders").update({ state: "working", broker_order_id: id, correlation_id: tag, limit_px: limit, ref_px: r.ref_px ?? px, step: stepFor(px ?? 0, Number(r.tick), !!r.option),
-      placed_at: nowIso(), updated_at: nowIso(), note: market ? "market order" : null }).eq("id", r.id);
+      placed_at: nowIso(), updated_at: nowIso(), note: market ? "market order" : Number(r.cross_qty) > 0 ? `${r.note ?? ""}; the other ${r.qty} sent to Dhan`.slice(0, 300) : null }).eq("id", r.id);
     return true;
   } catch (e) {
     return failRow(r, e instanceof Error ? e.message : String(e));
@@ -1886,19 +1954,24 @@ async function afterRow(strategyId: string, batch: string) {
 
 /** An order filled: its price goes on the signal, the position's broker record and (for an exit) the ledger. */
 async function onFilled(r: LiveRow, st: BrokerStatus) {
-  const avg = st.avg ?? Number(r.limit_px) ?? null;
-  await sb.from("live_orders").update({ state: "filled", avg_px: avg, filled_qty: st.filled || r.qty, done_at: nowIso(), updated_at: nowIso() }).eq("id", r.id);
+  // Part (or all) of the order may have been matched inside the desk with another strategy's opposite order.
+  const cq = Number(r.cross_qty) || 0, cp = Number(r.cross_px) || 0;
+  const exch = Number(r.qty) > 0 ? (st.filled || Number(r.qty)) : 0, exAvg = st.avg ?? (r.limit_px != null ? Number(r.limit_px) : null);
+  const avg = cq ? (exch && exAvg ? +((cq * cp + exch * exAvg) / (cq + exch)).toFixed(4) : cp) : exAvg;
+  const total = cq + exch;
+  st = { ...st, filled: total, avg };
+  await sb.from("live_orders").update({ state: "filled", avg_px: avg, filled_qty: total, done_at: nowIso(), updated_at: nowIso() }).eq("id", r.id);
   if (r.signal_id && avg) {
     const { data: g } = await sb.from("algo_signals").select("fills").eq("id", r.signal_id).single();
     const fills = (g?.fills ?? []) as Fill[];
     const f = fills.find((x) => x.leg === (r.purpose === "exit" ? "Exit" : "Entry") && x.broker_px == null && x.side === r.side);
-    if (f) { f.broker_px = +Number(avg).toFixed(2); f.broker_qty = st.filled || r.qty; f.broker_ids = [String(r.broker_order_id)]; f.broker_at = nowIso(); await sb.from("algo_signals").update({ fills }).eq("id", r.signal_id); }
+    if (f) { f.broker_px = +Number(avg).toFixed(2); f.broker_qty = st.filled || r.qty; f.broker_ids = [String(r.broker_order_id ?? "matched inside the desk")]; f.broker_at = nowIso(); await sb.from("algo_signals").update({ fills }).eq("id", r.signal_id); }
   }
   const s = (await sb.from("algo_strategies").select("*").eq("id", r.strategy_id).single()).data as Strategy | null;
   if (!s) return;
   if (r.purpose === "entry") {
     const pb = ((s.pos_broker ?? null) as PosBroker | null) ?? { broker: "DHAN", legs: [], tick: Number(r.tick), step: Number(r.step) || stepFor(avg ?? 0, Number(r.tick), !!r.option), option: !!r.option, offset: 0, fill: null };
-    pb.legs.push({ sec: r.sec, seg: r.seg, qty: (r.side === "BUY" ? 1 : -1) * Number(st.filled || r.qty), product: r.product });
+    pb.legs.push({ sec: r.sec, seg: r.seg, qty: (r.side === "BUY" ? 1 : -1) * Number(st.filled), product: r.product });
     pb.fill = avg;
     // Index futures trade above / below the index the desk watches: the gap at the fill moves the broker stop with it.
     const indexFut = !r.option && r.seg !== "MCX_COMM";
@@ -1954,6 +2027,9 @@ async function runOrders(passes = 4) {
           const set = await accountFor(sb, r.user_id, r.broker, accts);
           if (!set?.dhan_access_token) continue;
           if (r.state === "resting") { await checkStop(r, set); continue; }
+          // An order matched inside the desk earlier in this pass (crossInside) has moved on: never judge it on old data.
+          const { data: fresh } = await sb.from("live_orders").select("state, broker_order_id").eq("id", r.id).maybeSingle();
+          if (!fresh || fresh.state !== r.state || fresh.broker_order_id !== r.broker_order_id) continue;
           const c = credsOf(set);
           const st = await dhanStatus(c, r.broker_order_id);
           const ltp = await dhanLtp(c, r.seg, r.sec);

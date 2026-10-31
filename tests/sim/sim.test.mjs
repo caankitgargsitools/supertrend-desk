@@ -171,6 +171,97 @@ await t("reconcile: matching positions → match", async () => {
   assert.match(JSON.stringify(await E.reconcile()), /match/);
 });
 
+// ---------- two live strategies on opposite sides of the same contract (31 Oct 2026) ----------
+db.algo_strategies.push({ ...base, id: "s2", name: "Nifty pair B" });
+const S2 = () => db.algo_strategies.find((x) => x.id === "s2");
+const reset = () => { for (const x of [S(), S2()]) Object.assign(x, { position: "FLAT", pos_broker: null, pos_risk: null, exec_state: null, active: true, last_error: null }); dhan.positions = [];
+  for (const r of lo()) if (["working", "queued"].includes(r.state)) r.state = "cancelled"; };
+const nOrders = () => dhan.next;
+await t("pair: opposite entries at the same moment are matched inside the desk, no self-trade at Dhan", async () => {
+  reset(); dhan.ltp["35001"] = 25200;
+  const n0 = nOrders();
+  await E.queueDhan(S(), set, "ENTRY", [leg("B")], "A buys", { c: 25100 });
+  const aOrd = dhan.orders.get(String(n0)); assert.equal(aOrd.transactionType, "BUY");
+  dhan.ltp["35001"] = 25204;
+  await E.queueDhan(S2(), set, "ENTRY", [leg("S")], "B sells", { c: 25100 });
+  assert.equal(nOrders(), n0 + 1, "no second order sent to Dhan");
+  assert.equal(aOrd.orderStatus, "CANCELLED", "A's resting order taken back");
+  const ra = lo().find((r) => r.strategy_id === "s1" && r.batch && r.state === "filled" && r.cross_qty), rb = lo().find((r) => r.strategy_id === "s2" && r.state === "filled");
+  assert.ok(ra && rb); assert.equal(ra.avg_px, 25204); assert.equal(rb.avg_px, 25204); assert.equal(ra.filled_qty, 75); assert.equal(rb.filled_qty, 75);
+  assert.match(rb.note, /matched inside the desk with Nifty test/);
+  assert.equal(S().pos_broker.legs[0].qty, 75); assert.equal(S2().pos_broker.legs[0].qty, -75);
+  assert.equal(S().exec_state, null); assert.equal(S2().exec_state, null);
+  Object.assign(S(), { position: "LONG", pos_qty: 1 }); Object.assign(S2(), { position: "SHORT", pos_qty: 1 });
+});
+await t("pair: reconcile sees Dhan's net 0 as matching +75 and −75", async () => {
+  dhan.positions = [];
+  assert.match(JSON.stringify(await E.reconcile()), /match/);
+});
+await t("pair: one exits while Dhan shows 0 → the exit is still sent (the other's short is subtracted)", async () => {
+  dhan.positions = []; const n0 = nOrders();
+  await E.queueDhan(S(), set, "EXIT", [leg("S")], "A sells to close", { c: 25150 });
+  const ex = dhan.orders.get(String(n0));
+  assert.ok(ex, "exit sent"); assert.equal(ex.transactionType, "SELL"); assert.equal(ex.quantity, 75);
+  assert.ok(!db.notifications.some((n) => /Exit not sent/.test(n.title) && n.created_at > new Date(clock - 1000).toISOString()));
+  fill(n0, 25150); await E.runOrders(1);
+  dhan.positions = [{ exchangeSegment: "NSE_FNO", securityId: "35001", netQty: -75 }];
+  Object.assign(S(), { position: "FLAT", pos_broker: null, exec_state: null });
+  assert.match(JSON.stringify(await E.reconcile()), /match/);
+});
+await t("pair: an exit is still refused when even after the others Dhan doesn't hold it", async () => {
+  Object.assign(S(), { position: "LONG", pos_qty: 1, pos_broker: { broker: "DHAN", legs: [{ sec: "35001", seg: "NSE_FNO", qty: 75 }], tick: 0.05, step: 5, option: false, offset: 0, fill: 25000 } });
+  dhan.positions = [{ exchangeSegment: "NSE_FNO", securityId: "35001", netQty: -75 }]; // only B's short is there: A's long was closed outside the desk
+  const n0 = nOrders(), k0 = db.notifications.length;
+  await E.queueDhan(S(), set, "EXIT", [leg("S")], "A sells", { c: 25150 });
+  assert.equal(nOrders(), n0);
+  assert.ok(db.notifications.slice(k0).some((n) => /Exit not sent/.test(n.title) && /less -75 held by your other strategies/.test(n.body)));
+  reset();
+});
+await t("pair: a bigger order sends only the rest to Dhan; its price is the average", async () => {
+  reset(); dhan.ltp["35001"] = 25300;
+  const twoLots = { ...leg("B"), quantity: "2" };
+  const n0 = nOrders();
+  await E.queueDhan(S(), set, "ENTRY", [twoLots], "A buys 2", { c: 25200 });
+  assert.equal(dhan.orders.get(String(n0)).quantity, 150);
+  await E.queueDhan(S2(), set, "ENTRY", [leg("S")], "B sells 1", { c: 25200 });
+  assert.equal(dhan.orders.get(String(n0)).orderStatus, "CANCELLED");
+  const rest = dhan.orders.get(String(n0 + 1)); assert.ok(rest, "the rest re-sent"); assert.equal(rest.quantity, 75); assert.equal(rest.transactionType, "BUY");
+  assert.equal(S2().pos_broker.legs[0].qty, -75);
+  fill(n0 + 1, 25310); await E.runOrders(1);
+  const ra = lo().filter((r) => r.strategy_id === "s1").pop();
+  assert.equal(ra.state, "filled"); assert.equal(ra.filled_qty, 150); assert.equal(ra.avg_px, 25305);
+  assert.equal(S().pos_broker.legs[0].qty, 150); assert.equal(S().exec_state, null);
+  reset();
+});
+await t("pair: an opposite order already partly traded at Dhan is left alone", async () => {
+  reset(); dhan.ltp["35001"] = 25400;
+  const n0 = nOrders();
+  await E.queueDhan(S(), set, "ENTRY", [leg("B")], "A buys", { c: 25300 });
+  Object.assign(dhan.orders.get(String(n0)), { filledQty: 25, orderStatus: "PART_TRADED" });
+  await E.queueDhan(S2(), set, "ENTRY", [leg("S")], "B sells", { c: 25300 });
+  assert.equal(nOrders(), n0 + 2, "B goes to Dhan as usual");
+  assert.notEqual(dhan.orders.get(String(n0)).orderStatus, "CANCELLED");
+  reset();
+});
+await t("pair: same-side orders are never matched", async () => {
+  reset(); dhan.ltp["35001"] = 25500;
+  const n0 = nOrders();
+  await E.queueDhan(S(), set, "ENTRY", [leg("B")], "A buys", { c: 25400 });
+  await E.queueDhan(S2(), set, "ENTRY", [leg("B")], "B buys", { c: 25400 });
+  assert.equal(nOrders(), n0 + 2); assert.notEqual(dhan.orders.get(String(n0)).orderStatus, "CANCELLED");
+  reset();
+});
+await t("pair: the order manager skips an order matched earlier in the same pass (no false rejection)", async () => {
+  reset(); dhan.ltp["35001"] = 25600;
+  const n0 = nOrders();
+  await E.queueDhan(S(), set, "ENTRY", [leg("B")], "A buys", { c: 25500 });
+  await E.queueDhan(S2(), set, "ENTRY", [leg("S")], "B sells", { c: 25500 });
+  await E.runOrders(1);
+  assert.equal(S().active, true); assert.equal(S().last_error ?? null, null); assert.equal(S2().active, true);
+  assert.ok(!lo().some((r) => r.state === "failed" && r.created_at >= new Date(clock - 60000).toISOString()));
+  reset();
+});
+
 // ---------- Delta Exchange ----------
 const delta = { orders: new Map(), next: 500, positions: [], partial: false, calls: [] };
 rpcs.delta_send = (a) => {

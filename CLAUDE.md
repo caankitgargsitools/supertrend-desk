@@ -107,7 +107,16 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   scoring better only because their trades fell at different times) AND net÷fall together > every member alone.
   Long-only / short-only members are tagged. Filters: opposite sides ≥ 0/20/30/40/50%, only those that lessen, search; row opens charts (members + all
   together). Computed in the browser from `trades_long`, nothing stored. Trades closing at the same moment count as one
-  step for falls (also fixed in Compare's `cmpStats`). Next with Papa: how opposite positions net in one Dhan account.
+  step for falls (also fixed in Compare's `cmpStats`).
+- **Opposite positions in one Dhan account** (31 Oct 2026, migration 55): Dhan shows one net position per contract and
+  product (a long and a short of two strategies = 0). `crossInside` (engine): before an order goes to Dhan, another live
+  strategy's opposite order in the same contract/product still resting unfilled is cancelled and the two are matched in
+  the desk at the LTP (`live_orders.cross_qty` / `cross_px`; a bigger order sends only the rest, its price = average) —
+  avoids the exchange's self-trade check cancelling one of two same-moment opposite orders. Exit check subtracts the
+  account's other live strategies' holdings (`othersHolding`) before deciding Dhan holds the position. The order manager
+  re-reads each order's state before acting (a matched one is skipped). Reconcile already compares per-contract nets.
+  Still to check in the supervised test (Gold Mini pair): margin Dhan blocks for each strategy's broker stop order
+  while the account is net flat. Tests: `tests/sim/sim.test.mjs` "pair:" cases.
   Test: `tests/ui/ui_combo.mjs` (args: theme width).
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
