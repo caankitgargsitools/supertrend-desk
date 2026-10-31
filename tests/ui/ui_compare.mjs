@@ -143,6 +143,25 @@ if (!(q > ld.bars * 3 && mo.n > q * 2 && mo.labels < 40 && ly1 <= 13 && ly1 >= 1
 await p.click('#ld_cbk [data-b="Y"]'); await p.click('#ld_cper [data-p="max"]'); await p.waitForTimeout(200);
 await p.locator(".ldcurve").screenshot({ path: `${SHOT}/ldcurve_${theme}_${width}.png` });
 console.log("ok   lab strategy page: profit curve, falls from the peak with max drawdown marked, profit per year/quarter/month, period buttons");
+// The trade list scrolls with the mouse wheel when the details are open under their row inside the table (31 Oct 2026).
+if (width > 760) {
+  await p.evaluate(async () => { const t0 = lab.rows[0]; lab.rows = [7003].map((id) => ({ ...t0, id, label: "Lab strategy " + id, fingerprint: "f" + id, family: "fm" + id, twin_of: null })); lab.per = 0; renderLabTable();
+    await openLabDetail(7003); });
+  await p.waitForTimeout(1200);
+  await p.evaluate(() => { const d = document.querySelector('#lab_detail details[data-xp="trades"]'); if (d) d.open = true; const mx = [...document.querySelectorAll("#tr_per button")].pop(); if (mx) mx.click(); });
+  await p.waitForTimeout(400);
+  const box = p.locator("#lab_detail #tr_body").locator("xpath=ancestor::div[contains(@class,'scroll')][1]");
+  await box.scrollIntoViewIfNeeded();
+  const inGrid = await p.evaluate(() => !!document.getElementById("lab_detail").closest("#lab_grid"));
+  const bb = await box.boundingBox();
+  await p.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
+  const y0 = await p.evaluate(() => scrollY);
+  await p.mouse.wheel(0, 400); await p.waitForTimeout(400);
+  const st = await box.evaluate((el) => ({ top: el.scrollTop, h: el.scrollHeight, c: el.clientHeight }));
+  console.log(JSON.stringify({ inGrid, st }));
+  if (!inGrid || !(st.h > st.c) || st.top < 100) fail("trade list scroll inside the lab table", { inGrid, st });
+  console.log("ok   lab details inside the table: the trade list scrolls with the mouse wheel");
+}
 // Bulk permanent delete: only archived ones.
 await p.evaluate(() => { state.strategies.find((s) => s.id === "s1").archived = true; showPage("list"); document.getElementById("lf_arch").checked = true; document.getElementById("lf_arch").dispatchEvent(new Event("change")); lsel.clear(); lsel.add("s1"); lsel.add("s2"); renderList(); });
 const pb = await p.evaluate(() => !document.querySelector('#lp_bulk [data-bulk="purge"]').hidden);

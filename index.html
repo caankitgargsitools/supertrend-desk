@@ -4863,6 +4863,9 @@ function labPassFilters(g) {
   const g = $("lab_grid"); if (!g) return;
   g.addEventListener("wheel", (e) => {
     if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; // zoom or sideways: leave it to the browser
+    // A strategy's details open inside the table (under its row): there the wheel scrolls as usual, so the trade list
+    // and other boxes in the panel scroll themselves (31 Oct 2026).
+    if (e.target.closest && e.target.closest("#lab_detail")) return;
     const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * innerHeight : e.deltaY;
     const bar = $("lab_grid").getBoundingClientRect().top - (document.querySelector("header.bar")?.offsetHeight || 0);
     const atTop = g.scrollTop <= 0, atEnd = g.scrollTop + g.clientHeight >= g.scrollHeight - 1;
