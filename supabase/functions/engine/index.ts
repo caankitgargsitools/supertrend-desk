@@ -15,6 +15,7 @@ import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules
 import { atr as atrSeries } from "./indicators.ts";
 import { effectiveStop, hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
 import { LAB_ASSETS, labNext, labOptStep, labReverdict, labStart, labStep, loadCryptoAssets, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
+import { runCombos } from "./combos.ts";
 import { contractsFor, CRYPTO, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaCancel, deltaOrderChecked, deltaOrderState, deltaPositions, deltaStop, deltaStopMove, niceLot } from "./crypto.ts";
 import {
   brokerQty, type BrokerStatus, brokerStopTrigger, chaseDecision, type Creds, dhanByTag, dhanCancel, dhanLtp, dhanModify, dhanPlace, dhanPositions, dhanStatus,
@@ -2308,6 +2309,7 @@ Deno.serve(async (req) => {
     return Response.json({ action, accepted: true, batch });
   }
   if (action === "pred_feed") return Response.json({ action, ...(await predFeed(sb, credsOf(await adminAccount(sb)))) });
+  if (action === "combos") return Response.json({ action, ...(await runCombos(sb)) });
   if (action === "lab_reverdict") return Response.json({ action, ...(await labReverdict(sb, Math.min(200, Number((body as any).limit) || 50))) });
   if (action === "marks" && body.user_id) return Response.json({ action, marks: await liveMarks(body.user_id, false) });
   if (action === "lab_opt") {

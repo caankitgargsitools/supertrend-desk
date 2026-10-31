@@ -2,11 +2,13 @@
 export const db = {};
 let seq = 1000;
 const T = (n) => (db[n] ??= []);
+// Column defaults the real tables have (only where a test needs them).
+const DEFAULTS = { lab_combos: { first_seen: () => new Date().toISOString(), current: () => true } };
 class Q {
   constructor(t) { this.t = t; this.f = []; this.op = "select"; this.ord = null; this.lim = null; this.one = null; this.ret = false; }
-  select() { if (this.op !== "select") this.ret = true; return this; }
+  select(_cols, opts) { if (this.op !== "select") this.ret = true; if (opts && opts.count) { this.cnt = true; this.head = !!opts.head; } return this; }
   insert(rows) { this.op = "insert"; this.rows = Array.isArray(rows) ? rows : [rows]; return this; }
-  upsert(rows) { this.op = "upsert"; this.rows = Array.isArray(rows) ? rows : [rows]; return this; }
+  upsert(rows, opts) { this.op = "upsert"; this.rows = Array.isArray(rows) ? rows : [rows]; this.conflict = opts && opts.onConflict ? String(opts.onConflict).split(",").map((x) => x.trim()) : null; return this; }
   update(v) { this.op = "update"; this.v = v; return this; }
   delete() { this.op = "delete"; return this; }
   eq(k, v) { this.f.push((r) => r[k] === v || (r[k] != null && v != null && String(r[k]) === String(v))); return this; }
@@ -47,7 +49,12 @@ class Q {
     if (this.op === "insert" || this.op === "upsert") {
       out = this.rows.map((r) => {
         const row = { id: r.id ?? ++seq, created_at: new Date().toISOString(), ...(this.t === 'live_orders' ? { steps: 0, market_retry: false } : {}), ...JSON.parse(JSON.stringify(r)) };
-        if (this.op === "upsert") { const i = tab.findIndex((x) => x.sec_id === row.sec_id && x.seg === row.seg); if (i >= 0) { tab[i] = { ...tab[i], ...row }; return tab[i]; } }
+        if (this.op === "upsert") {
+          const same = this.conflict ? (x) => this.conflict.every((k) => String(x[k]) === String(row[k])) : (x) => x.sec_id === row.sec_id && x.seg === row.seg;
+          const i = tab.findIndex(same);
+          if (i >= 0) { const keep = { ...tab[i] }; tab[i] = { ...keep, ...JSON.parse(JSON.stringify(r)), id: keep.id, created_at: keep.created_at }; return tab[i]; }
+        }
+        const d = DEFAULTS[this.t]; if (d) for (const [k, f] of Object.entries(d)) if (row[k] === undefined) row[k] = f();
         tab.push(row); return row;
       });
     } else {
@@ -58,6 +65,7 @@ class Q {
       if (this.lim != null) out = out.slice(this.off ?? 0, (this.off ?? 0) + this.lim);
     }
     out = out.map((r) => ({ ...r }));
+    if (this.cnt) return { data: this.head ? null : out, count: out.length, error: null };
     if (this.one) return { data: out[0] ?? null, error: this.one === "single" && !out[0] ? { message: "no row" } : null };
     return { data: this.op === "select" || this.ret ? out : null, error: null };
   }

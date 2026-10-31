@@ -12,3 +12,4 @@ tests/sim/kill.mjs
 tests/sim/ideas.mjs
 tests/sim/pred.mjs
 __pycache__/
+tests/sim/combos.mjs

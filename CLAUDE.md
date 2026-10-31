@@ -105,7 +105,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   share of that on opposite sides, each one's net / max fall / net÷fall and the same together; "lessens the
   drawdown" = opposite sides ≥ 20% (`COMBO_MIN_OPP`, 31 Oct, after Papa saw long-only pairs on the same side 100%
   scoring better only because their trades fell at different times) AND net÷fall together > every member alone.
-  Long-only / short-only members are tagged. Filters: opposite sides ≥ 0/20/30/40/50%, only those that lessen, search; row opens charts (members + all
+  Long-only / short-only members are tagged. Background check (31 Oct, migration 56, engine `combos.ts`, cron `lab-combos`
+  every 10 min → action `combos`): a cheap per-group signature check; a changed asset/timeframe is re-checked in
+  instalments (5,000 combinations ≈ 0.5 s CPU, position in `lab_combo_groups.cursor`), pairs then threes, same pool and
+  rules as the page; combinations that lessen are upserted into `lab_combos` with `first_seen` (no longer qualifying →
+  `current = false`, never deleted); the first full pass sets `baseline_at`, later new finds notify admins (kind "lab",
+  link `/?combo=1`). Page shows a "New" tag (first seen after the baseline, last 30 days), an "Only new" filter and the
+  last check time. Months alike = correlation over every calendar month of the common period (0 when no trades), the
+  same in page and engine. Test: `tests/sim/combos.test.mjs`. Filters: opposite sides ≥ 0/20/30/40/50%, only those that lessen, search; row opens charts (members + all
   together). Computed in the browser from `trades_long`, nothing stored. Trades closing at the same moment count as one
   step for falls (also fixed in Compare's `cmpStats`).
 - **Opposite positions in one Dhan account** (31 Oct 2026, migration 55): Dhan shows one net position per contract and

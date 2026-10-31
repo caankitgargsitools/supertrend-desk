@@ -571,6 +571,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
   .cotbl thead th { font-size: 11.5px; color: var(--muted); text-align: right; white-space: nowrap; } .cotbl thead th:nth-child(2) { text-align: left; } .cotbl thead small { font-weight: 400; }
   .cotbl tr.pick { cursor: pointer; } .cotbl tr.pick:hover td { background: var(--panel-2); } .cotbl tr.sel td { background: var(--blue-soft); }
   .cotbl .cm { display: flex; align-items: baseline; gap: 2px; margin-bottom: 3px; } .cotbl .cm .t { font-weight: 600; } .cotbl .ondesk { color: var(--green); }
+  .cotbl .newtag { font-size: 9.5px; padding: 2px 6px; margin: 0 0 4px; display: inline-block; }
   .cotbl .dirtag { font-size: 9.5px; padding: 2px 6px; margin-left: 4px; vertical-align: 1px; }
   .cotbl .al { white-space: nowrap; font-family: var(--font-data); font-size: 11.5px; }
   .oppbar { height: 4px; border-radius: 2px; background: var(--line); margin: 4px 0 2px auto; width: 70px; overflow: hidden; } .oppbar span { display: block; height: 100%; background: var(--blue); }
@@ -1351,6 +1352,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
         <label class="f"><span>Sort by</span><select id="co_sort"><option value="ratio">Profit ÷ fall together</option><option value="gain">Better by (vs best alone)</option><option value="opp">Opposite sides</option><option value="net">Profit together</option><option value="dd">Smallest fall together</option></select></label>
         <label class="f"><span>Find a strategy</span><input id="co_q" type="search" placeholder="name or Lab #" autocomplete="off"></label>
         <label class="showtr" style="align-self:end"><input type="checkbox" id="co_better" checked> Only those that lessen the drawdown</label>
+        <label class="showtr" style="align-self:end"><input type="checkbox" id="co_new"> Only new</label>
       </div>
       <p class="hint" id="co_sum" style="margin:10px 0 0"></p>
       <div id="co_body" style="margin-top:8px"></div>
@@ -6709,7 +6711,20 @@ function labShowDetail() {
  * biggest fall, and the same together. A combination "lessens the drawdown" when profit ÷ biggest fall together beats
  * every member alone. Worked out in the browser from the lab's stored trade lists (futures, 1 lot each, after charges);
  * nothing is written. */
-const combo = { groups: null, key: null, size: 2, minOpp: 30, onlyBetter: true, q: "", sort: "ratio", res: null, pool: null, sel: null, showN: 100, busy: false };
+const combo = { groups: null, key: null, size: 2, minOpp: 30, onlyBetter: true, onlyNew: false, q: "", sort: "ratio", res: null, pool: null, sel: null, showN: 100, busy: false, bg: null };
+const comboKeyOf = (size, ids) => `${size}:${[...ids].sort((a, b) => a - b).join("+")}`;
+/** What the background check (engine, every 10 minutes) has seen for this asset, timeframe and size: its last full
+ *  check, its starting point, and the combinations first seen after that ("new"). */
+async function comboBackground(key, size) {
+  const [asset, tf] = key.split("|");
+  const [g, rows] = await Promise.all([
+    db.from("lab_combo_groups").select("done_at, baseline_at, state, checked").eq("asset", asset).eq("tf", tf).eq("size", size).maybeSingle().then((x) => x.data).catch(() => null),
+    db.from("lab_combos").select("key, first_seen").eq("asset", asset).eq("tf", tf).eq("size", size).eq("current", true).limit(5000).then((x) => x.data || []).catch(() => []),
+  ]);
+  const since = g && g.baseline_at, recent = Date.now() - 30 * 86400000;
+  const fresh = new Map(rows.filter((r) => since && r.first_seen > since && Date.parse(r.first_seen) > recent).map((r) => [r.key, r.first_seen]));
+  return { g, fresh };
+}
 const COMBO_MAX = { 2: 150, 3: 50 }, COMBO_MIN_OPP = 20;
 function comboTfName(tf) { return tf === "D" ? "Daily" : `${tf}-minute`; }
 async function comboGroups() {
@@ -6755,6 +6770,16 @@ async function comboPool(key) {
   for (const r of pick) r.fam = familyKey(r);
   return { asset, tf, passed: rows.length, families: fam.size, used: pick, capped: best.length > cap };
 }
+const comboMonth = (t) => { const d = new Date(t + 19800000); return d.getUTCFullYear() * 12 + d.getUTCMonth(); };
+/** Correlation of two strategies' monthly profit over calendar months f..t (a month without trades counts as 0). */
+function comboCorr(a, b, f, t) {
+  const n = t - f + 1; if (n < 6) return null;
+  const va = (m) => { const i = m - a.m0; return i >= 0 && i < a.mv.length ? a.mv[i] : 0; }, vb = (m) => { const i = m - b.m0; return i >= 0 && i < b.mv.length ? b.mv[i] : 0; };
+  let sx = 0, sy = 0; for (let m = f; m <= t; m++) { sx += va(m); sy += vb(m); }
+  const mx = sx / n, my = sy / n;
+  let sxy = 0, sxx = 0, syy = 0; for (let m = f; m <= t; m++) { const x = va(m) - mx, y = vb(m) - my; sxy += x * y; sxx += x * x; syy += y * y; }
+  return sxx && syy ? sxy / Math.sqrt(sxx * syy) : null;
+}
 /** One strategy's trades as sorted arrays: exits and nets, and its time in a trade as [start, end) segments with a side. */
 function comboPrep(r, tl) {
   const tr = unpackLong(tl).map((t) => ({ s: cmpTime(t.entry), e: cmpTime(t.exit), d: t.side === "SHORT" ? -1 : 1, n: Number(t.net) || 0 })).filter((t) => t.s && t.e && t.e >= t.s).sort((a, b) => a.s - b.s);
@@ -6762,8 +6787,11 @@ function comboPrep(r, tl) {
   let last = -Infinity;
   for (const t of tr) { const s = Math.max(t.s, last); if (t.e <= s) continue; B.push(s, t.e); D.push(t.d); last = t.e; }
   const ex = tr.map((t) => [t.e, t.n]).sort((a, b) => a[0] - b[0]);
-  const mons = new Map(); for (const [t, n] of ex) { const m = cmpIst(t).slice(0, 7); mons.set(m, (mons.get(m) || 0) + n); }
-  return { r, B: Float64Array.from(B), D: Int8Array.from(D), exT: Float64Array.from(ex.map((x) => x[0])), exN: Float64Array.from(ex.map((x) => x[1])), first: ex.length ? tr[0].s : null, last: ex.length ? ex[ex.length - 1][0] : null, mons };
+  // Monthly profit as a numbered list of calendar months (the engine's background check does the same).
+  const m0 = ex.length ? comboMonth(ex[0][0]) : 0, mv = new Float64Array(ex.length ? comboMonth(ex[ex.length - 1][0]) - m0 + 1 : 0);
+  const exY = new Int16Array(ex.length);
+  ex.forEach(([t, n], i) => { const mn = comboMonth(t); mv[mn - m0] += n; exY[i] = Math.floor(mn / 12); });
+  return { r, B: Float64Array.from(B), D: Int8Array.from(D), exT: Float64Array.from(ex.map((x) => x[0])), exN: Float64Array.from(ex.map((x) => x[1])), first: ex.length ? tr[0].s : null, last: ex.length ? ex[ex.length - 1][0] : null, m0, mv, exY };
 }
 /** Everything about one combination, over the period all its members were tested. */
 function comboEval(ms) {
@@ -6794,23 +6822,20 @@ function comboEval(ms) {
     let jb = -1, tb = Infinity;
     for (let j = 0; j < k; j++) { const T = ms[j].exT; if (q[j] < T.length && T[q[j]] < tb) { tb = T[q[j]]; jb = j; } }
     if (jb < 0 || tb > to) break;
-    const v = ms[jb].exN[q[jb]++];
+    const y = ms[jb].exY[q[jb]], v = ms[jb].exN[q[jb]++];
     cum[jb] += v; n[jb]++; if (cum[jb] > pk[jb]) pk[jb] = cum[jb]; if (pk[jb] - cum[jb] > dd[jb]) dd[jb] = pk[jb] - cum[jb];
     C += v;
     // Trades closing at the same moment count as one step (otherwise their order would invent a fall).
     let more = false; for (let j = 0; j < k; j++) { const T = ms[j].exT; if (q[j] < T.length && T[q[j]] === tb) more = true; }
     if (!more) { if (C > P) P = C; if (P - C > DD) DD = P - C; }
-    const y = cmpIst(tb).slice(0, 4); yrs.set(y, (yrs.get(y) || 0) + v);
+    yrs.set(y, (yrs.get(y) || 0) + v);
   }
   const alone = ms.map((m, j) => ({ net: cum[j], dd: dd[j], n: n[j], ratio: dd[j] ? cum[j] / dd[j] : cum[j] > 0 ? Infinity : 0 }));
   if (alone.some((a) => !a.n)) return null;
   const ratio = DD ? C / DD : C > 0 ? Infinity : 0, bestAlone = Math.max(...alone.map((a) => a.ratio));
   // How alike their months are (average of each pair's correlation).
-  const mFrom = cmpIst(from).slice(0, 7), mTo = cmpIst(to).slice(0, 7), cors = [];
-  for (let a = 0; a < k; a++) for (let b = a + 1; b < k; b++) {
-    const months = [...new Set([...ms[a].mons.keys(), ...ms[b].mons.keys()])].filter((m) => m >= mFrom && m <= mTo).sort();
-    const c = cmpCorr(ms[a].mons, ms[b].mons, months); if (c != null) cors.push(c);
-  }
+  const mFrom = comboMonth(from), mTo = comboMonth(to), cors = [];
+  for (let a = 0; a < k; a++) for (let b = a + 1; b < k; b++) { const c = comboCorr(ms[a], ms[b], mFrom, mTo); if (c != null) cors.push(c); }
   const yv = [...yrs.values()];
   return { ids: ms.map((m) => m.r.id), from, to, years: (to - from) / (365.25 * 86400000), opp: two ? (opp / two) * 100 : 0, together: two && anyIn ? (two / anyIn) * 100 : 0,
     // Lessens the drawdown only when they really offset each other some of the time (Papa, 31 Oct): opposite sides at
@@ -6846,6 +6871,7 @@ async function comboRun() {
       if (i % 400 === 399) { say(0.4 + (i / sets.length) * 0.6, `Checking ${size === 2 ? "pairs" : "threes"} (${(i + 1).toLocaleString("en-IN")} of ${sets.length.toLocaleString("en-IN")})…`); await new Promise((r) => setTimeout(r, 0)); if (key !== combo.key || size !== combo.size) return; }
     }
     combo.pool = { ...pool, ms, byId: new Map(ms.map((m) => [m.r.id, m])), checked: sets.length };
+    combo.bg = await comboBackground(key, size).catch(() => null);
     combo.res = { key: `${key}|${size}`, rows: out };
     combo.showN = 100;
     comboTable();
@@ -6856,6 +6882,8 @@ function comboTable() {
   const name = (id) => { const m = P.byId.get(id); return m ? m.r.label : `#${id}`; };
   let rows = rows0.filter((x) => x.opp >= combo.minOpp && (!combo.onlyBetter || x.better));
   if (q) rows = rows.filter((x) => x.ids.some((id) => String(id).includes(q.replace(/^#/, "")) || name(id).toLowerCase().includes(q)));
+  const fresh = (combo.bg && combo.bg.fresh) || new Map(), isNew = (x) => fresh.get(comboKeyOf(combo.size, x.ids));
+  if (combo.onlyNew) rows = rows.filter(isNew);
   const key = { ratio: (x) => x.ratio, gain: (x) => x.gain ?? -1e9, opp: (x) => x.opp, net: (x) => x.net, dd: (x) => -x.dd }[combo.sort];
   rows.sort((a, b) => key(b) - key(a));
   const fin = (v) => Number.isFinite(v) ? `${v.toFixed(2)}×` : "∞";
@@ -6863,12 +6891,12 @@ function comboTable() {
   const dirTag = (r) => { const d = r && r.config && r.config.direction; return d === "LONG_ONLY" ? ' <span class="chip dirtag" title="Only ever buys: it can never be on the opposite side of a strategy that buys">long only</span>' : d === "SHORT_ONLY" ? ' <span class="chip dirtag" title="Only ever sells">short only</span>' : ""; };
   const nm = (id, c) => { const m = P.byId.get(id), r = m && m.r; return `<div class="cm"><i class="sw c${c}"></i><span class="t">${esc(r ? r.label : "#" + id)}</span>${dirTag(r)} <span class="hint sm">#${id}${r && r.desk ? ' · <b class="ondesk">✓ on my desk</b>' : ""}</span></div>`; };
   const better = rows0.filter((x) => x.opp >= combo.minOpp && x.better).length;
-  $("co_sum").innerHTML = `${P.passed} passed ${esc(labAssetName(P.asset))} ${esc(comboTfName(P.tf).toLowerCase())} strategies in ${P.families} rule famil${P.families === 1 ? "y" : "ies"}; the best of ${P.capped ? `the top ${COMBO_MAX[combo.size]} families` : "each family"}${P.used.some((r) => r.desk) ? " plus the ones on your desk" : ""} combined: ${P.checked.toLocaleString("en-IN")} ${combo.size === 2 ? "pairs" : "threes"} checked, <b>${better.toLocaleString("en-IN")}</b> lessen the drawdown: on opposite sides at least ${Math.max(combo.minOpp, COMBO_MIN_OPP)}% of the time they are in a trade together <b>and</b> a better profit ÷ fall than any of their members alone. “Opposite sides” counts only the time two or more are in a trade at once; see “In a trade together” for how much of the time that is. Strategies that only ever buy (long only) can never be opposite each other: if they score better together it is because their trades and falls came at different times, not because one protects the other.`;
+  $("co_sum").innerHTML = `${P.passed} passed ${esc(labAssetName(P.asset))} ${esc(comboTfName(P.tf).toLowerCase())} strategies in ${P.families} rule famil${P.families === 1 ? "y" : "ies"}; the best of ${P.capped ? `the top ${COMBO_MAX[combo.size]} families` : "each family"}${P.used.some((r) => r.desk) ? " plus the ones on your desk" : ""} combined: ${P.checked.toLocaleString("en-IN")} ${combo.size === 2 ? "pairs" : "threes"} checked, <b>${better.toLocaleString("en-IN")}</b> lessen the drawdown: on opposite sides at least ${Math.max(combo.minOpp, COMBO_MIN_OPP)}% of the time they are in a trade together <b>and</b> a better profit ÷ fall than any of their members alone. “Opposite sides” counts only the time two or more are in a trade at once; see “In a trade together” for how much of the time that is. Strategies that only ever buy (long only) can never be opposite each other: if they score better together it is because their trades and falls came at different times, not because one protects the other.<br>${(() => { const g = combo.bg && combo.bg.g; return !g ? "The background check (every 10 minutes, for every asset including crypto) hasn't reached this group yet." : `Background check, every 10 minutes: ${g.state === "working" ? "checking now" : `last full check ${esc(istText(g.done_at))}`}${g.baseline_at ? `; <b>${fresh.size}</b> new since its first full check on ${esc(istText(g.baseline_at))} (tagged <span class="chip green newtag">New</span>; you are notified of new ones)` : ""}.`; })()}`;
   const shown = rows.slice(0, combo.showN);
   $("co_body").innerHTML = !rows.length ? '<p class="hint" style="margin-top:12px">None for these settings. Try a lower opposite-sides share, or switch off “only those that lessen the drawdown”.</p>' : `
     <div class="scroll"><table class="cotbl"><thead><tr><th class="n">#</th><th>Strategies</th><th class="n" title="Of the time any of them was in a trade, the share when ${combo.size === 2 ? "both were" : "two or more were"} in a trade at once">In a trade<br><small>together</small></th><th class="n" title="Of the time two or more were in a trade at once, the share with at least one long and one short">Opposite sides<br><small>while together</small></th>
       <th class="n">Together<br><small>profit · biggest fall</small></th><th class="n">Profit ÷ fall<br><small>together</small></th><th class="n">Alone<br><small>profit · fall · profit ÷ fall</small></th><th class="n" title="How much better profit ÷ fall is together than the best member alone">Better by</th><th class="n" title="Correlation of monthly profit: 1 = same months good and bad, 0 = unrelated, −1 = opposite">Months alike</th><th class="n">Years +<br><small>together</small></th></tr></thead>
-    <tbody>${shown.map((x, i) => `<tr class="pick${combo.sel === x ? " sel" : ""}" data-i="${i}"><td class="n">${i + 1}</td><td>${x.ids.map((id, j) => nm(id, j + 1)).join("")}<div class="hint sm">${x.years.toFixed(1)} years together · ${esc(new Date(x.from + 19800000).toISOString().slice(0, 7))} to ${esc(new Date(x.to + 19800000).toISOString().slice(0, 7))}</div></td>
+    <tbody>${shown.map((x, i) => `<tr class="pick${combo.sel === x ? " sel" : ""}" data-i="${i}"><td class="n">${i + 1}</td><td>${isNew(x) ? `<span class="chip green newtag" title="First found by the background check on ${esc(istText(isNew(x)))}">New</span>` : ""}${x.ids.map((id, j) => nm(id, j + 1)).join("")}<div class="hint sm">${x.years.toFixed(1)} years together · ${esc(new Date(x.from + 19800000).toISOString().slice(0, 7))} to ${esc(new Date(x.to + 19800000).toISOString().slice(0, 7))}</div></td>
       <td class="n"><b>${Math.round(x.together)}%</b><div class="hint sm">of their time in the market</div></td>
       <td class="n"><b>${Math.round(x.opp)}%</b><div class="oppbar"><span style="width:${Math.min(100, x.opp)}%"></span></div><div class="hint sm">same side ${Math.round(100 - x.opp)}%</div></td>
       <td class="n"><span class="${pos(x.net)}">${rupees(x.net)}</span><div class="neg-num">−${rupees(x.dd)}</div></td>
@@ -6914,6 +6942,7 @@ $("co_group").addEventListener("change", (e) => { combo.key = e.target.value; co
 $("co_size").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { combo.size = Number(b.dataset.n); combo.res = null; withLoading($("comboPane"), renderCombo()).catch((er) => toast(errorText(er))); }));
 $("co_opp").addEventListener("change", (e) => { combo.minOpp = Number(e.target.value); combo.showN = 100; if (combo.res) comboTable(); });
 $("co_better").addEventListener("change", (e) => { combo.onlyBetter = e.target.checked; combo.showN = 100; if (combo.res) comboTable(); });
+$("co_new").addEventListener("change", (e) => { combo.onlyNew = e.target.checked; combo.showN = 100; if (combo.res) comboTable(); });
 $("co_sort").addEventListener("change", (e) => { combo.sort = e.target.value; if (combo.res) comboTable(); });
 { let t = null; $("co_q").addEventListener("input", (e) => { combo.q = e.target.value; clearTimeout(t); t = setTimeout(() => { combo.showN = 100; if (combo.res) comboTable(); }, 250); }); }
 window.addEventListener("resize", () => { if (page === "combo" && combo.sel) { clearTimeout(comboDetail.rt); comboDetail.rt = setTimeout(() => combo.res && comboTable(), 200); } });
@@ -7700,12 +7729,13 @@ async function enterDesk(session) {
   loadNotifyCard().catch(() => {});
   openDeepLink(location.href);
 }
-/** Links from notifications: ?s=<strategy> opens it, ?lab=1 the Strategy Lab, ?conn=1 Connections. */
+/** Links from notifications: ?s=<strategy> opens it, ?lab=1 the Strategy Lab, ?combo=1 Combinations, ?conn=1 Connections. */
 function openDeepLink(href) {
   try {
     const u = new URL(href, location.origin), sId = u.searchParams.get("s");
     if (sId && (state.strategies || []).some((x) => x.id === sId)) openStrat(sId);
     else if (u.searchParams.get("lab") && isAdmin()) openLab();
+    else if (u.searchParams.get("combo") && isAdmin()) showPage("combo");
     else if (u.searchParams.get("conn")) openConn();
     if (u.search) history.replaceState(null, "", location.pathname + location.hash);
   } catch { /* ignore */ }

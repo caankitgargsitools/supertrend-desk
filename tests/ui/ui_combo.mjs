@@ -63,6 +63,8 @@ await p.route(/supabase\.co/, (r) => {
   if (/\/rest\/v1\/lab_results\?/.test(u) && /select=id,asset,tf/.test(u.replace(/\s/g, ""))) return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(comboRows.map(({ id, asset, tf, daily }) => ({ id, asset, tf, daily }))) });
   if (/\/rest\/v1\/lab_results\?/.test(u) && /cons:robust_list/.test(u)) return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(comboRows) });
   if (/\/rest\/v1\/lab_results\?/.test(u) && /select=id,trades_long/.test(u.replace(/\s/g, ""))) { const ids = (u.match(/id=in\.\(([^)]*)\)/) || [])[1].split(",").map(Number); return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ids.map((id) => ({ id, trades_long: mkTL(id) }))) }); }
+  if (/\/rest\/v1\/lab_combo_groups\?/.test(u)) { const g = { done_at: now, baseline_at: "2026-10-01T00:00:00Z", state: "done", checked: 15 }; return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(/vnd\.pgrst\.object/.test(r.request().headers()["accept"] || "") ? g : [g]) }); }
+  if (/\/rest\/v1\/lab_combos\?/.test(u)) return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ key: "2:9001+9002", first_seen: now }, { key: "2:9003+9004", first_seen: "2026-09-01T00:00:00Z" }]) });
   if (/\/rest\/v1\/lab_results\?/.test(u) && /select=fingerprint/.test(u)) return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{ fingerprint: "fp9002" }]) });
   if (/\/auth\/v1\/user/.test(u)) return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: uid, email: me.email }) });
   const m = u.match(/\/rest\/v1\/(rpc\/[a-z_]+|[a-z_]+)/);
@@ -107,6 +109,13 @@ const t1 = await p.evaluate(() => ({ group: document.getElementById("co_group").
   first: (document.querySelector("#co_body tr.pick") || {}).textContent || "", desk: document.querySelectorAll("#co_body .ondesk").length, side: document.documentElement.scrollWidth > innerWidth + 1 }));
 console.log(JSON.stringify({ ...t1, first: t1.first.slice(0, 200) }));
 if (t1.group !== "GOLD|D" || !/6 passed Gold/.test(t1.sum) || !/15 pairs checked/.test(t1.sum.replace(/\s+/g, " "))) fail("summary", t1);
+// The background check's finds: 9001+9002 first seen after its starting point → New; 9003+9004 before it → not new.
+const nw = await p.evaluate(() => ({ tags: [...document.querySelectorAll("#co_body .newtag")].length, line: /Background check, every 10 minutes/.test(document.getElementById("co_sum").textContent) && /1 new since/.test(document.getElementById("co_sum").textContent.replace(/\s+/g, " ")) }));
+if (nw.tags !== 1 || !nw.line) fail("new tag", nw);
+await p.click("#co_new"); await p.waitForTimeout(200);
+const onlyNew = await p.evaluate(() => [...document.querySelectorAll("#co_body tr.pick")].map((tr) => tr.textContent.includes("#9001") && tr.textContent.includes("#9002")));
+if (onlyNew.length !== 1 || !onlyNew[0]) fail("only new", onlyNew);
+await p.click("#co_new"); await p.waitForTimeout(200);
 // The opposite pair (9001 + 9002) must be there with a high opposite share; the desk one is marked.
 await p.selectOption("#co_opp", "0"); await p.click("#co_better"); await p.waitForTimeout(300);
 const all = await p.evaluate(() => combo.res.rows.map((x) => ({ ids: x.ids.join("+"), opp: Math.round(x.opp), better: x.better })));
