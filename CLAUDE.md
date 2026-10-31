@@ -13,7 +13,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 - Never show the Dhan token, webhook URL or secret, Delta API keys, the private push key, or webhook secrets in the
   browser (the Orders page strips them).
 - P&L is shown in whole rupees, truncated.
-- No profit share is charged (billing code exists but is not used).
+- No profit share is taken from the wallet (old billing code unused). Instead **Shukrana** (31 Oct 2026, migration 57):
+  Papa's share of clients' new profit, settled by hand outside the portal on a running basis. Only "Shukrana due" and
+  "Shukrana accepted" (amount, date, optional note; no payment mode). Due = rate × each rise of the client's running
+  LIVE net (after charges, hidden trades out) above its previous best, from when their rate was set (`shukrana_rates`,
+  a changed rate applies to later rises); accepted = `shukrana_accepted` (never deleted; corrections are negative
+  entries); balance = accepted − due, below zero = owed. Functions `shukrana_summary` / `shukrana_overview` /
+  `shukrana_set_rate` / `shukrana_accept`; admins reminded daily 10:17 IST (`shukrana_remind`, notification kind
+  "shukrana", link `/?shukrana=1`). Client: card on the Wallet page; admin: Admin › Shukrana. Test: `tests/ui/ui_shukrana.mjs`.
 - Backtests: don't add the futures premium. Every-year-profitable rule stands; minute strategies with < 3 years of
   history use the quarter rule (3 of the last 4 quarters), approved by Papa.
 - Nothing goes live with real money until a supervised 1-lot test (engine action `live_test`).
@@ -129,6 +136,11 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   there), and its stop at Delta is plain instead of reduce-only (`pos_broker.stopRO`; re-placed when that changes).
   Market orders don't rest, so no matching inside the desk is needed on Delta. Tests: "delta pair:" cases.
   Test: `tests/ui/ui_combo.mjs` (args: theme width).
+- Tables (31 Oct 2026, Papa): `makeSortable(table)` makes any heading without its own sort clickable (numbers by value,
+  text A–Z, `td[data-v]` overrides; remembered per table id) — used by the Prediction Lab table; Combinations headings
+  drive its own sort (`combo.sort` / `combo.sortDir`). `floatHeads()`: a fixed copy of a long table's heading row stays
+  under the top bar while the table scrolls past (`#gfhead`; clicks go to the real heading); the Strategy Lab keeps
+  its own `labFloatHead`.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

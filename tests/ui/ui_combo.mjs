@@ -128,6 +128,19 @@ const rule = await p.evaluate(() => ({ lowOppBetter: combo.res.rows.filter((x) =
   together: combo.res.rows.every((x) => x.together > 0 && x.together <= 100), tags: [...document.querySelectorAll("#co_body .dirtag")].map((t) => t.textContent) }));
 console.log(JSON.stringify(rule));
 if (rule.lowOppBetter || !rule.head.includes("in a trade together") || !rule.head.includes("opposite sides while together") || !rule.together || !rule.tags.length || rule.tags.some((t) => t !== "long only")) fail("three changes", rule);
+// Click a heading to sort (again to reverse); the floating heading stays at the top while scrolling the table.
+await p.click('#co_body th[data-s="opp"]'); await p.waitForTimeout(150);
+const o1 = await p.evaluate(() => ({ sort: combo.sort, dir: combo.sortDir, sel: document.getElementById("co_sort").value, v: combo.view.map((x) => x.opp) }));
+await p.click('#co_body th[data-s="opp"]'); await p.waitForTimeout(150);
+const o2 = await p.evaluate(() => combo.view.map((x) => x.opp));
+const desc = o1.v.every((v, i) => i === 0 || o1.v[i - 1] >= v), asc = o2.every((v, i) => i === 0 || o2[i - 1] <= v);
+if (o1.sort !== "opp" || o1.sel !== "opp" || !desc || !asc) fail("heading sort", { o1, o2 });
+const fh = await p.evaluate(async () => { const t = document.getElementById("co_tbl"), y = t.getBoundingClientRect().top + scrollY + 120; window.scrollTo(0, y); await new Promise((r) => setTimeout(r, 120));
+  const f = document.getElementById("gfhead"); return { shown: !!f && !f.hidden, ths: f ? f.querySelectorAll("th").length : 0, real: t.tHead.querySelectorAll("th").length, top: f && Math.round(f.getBoundingClientRect().top),
+    bar: Math.round(parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--barH")) || 0) }; });
+console.log(JSON.stringify(fh));
+if (!fh.shown || fh.ths !== fh.real || Math.abs(fh.top - fh.bar) > 2) fail("floating heading (just under the top bar)", fh);
+await p.evaluate(() => window.scrollTo(0, 0)); await p.waitForTimeout(120);
 await p.fill("#co_q", "9002"); await p.waitForTimeout(500);
 const f = await p.evaluate(() => ({ n: document.querySelectorAll("#co_body tr.pick").length, desk: document.querySelectorAll("#co_body .ondesk").length }));
 if (f.n !== 5 || f.desk !== 5) fail("search / desk mark", f);

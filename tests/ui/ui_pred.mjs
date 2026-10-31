@@ -97,6 +97,17 @@ const ftTxt = await p.evaluate(() => document.getElementById("pred_ft").textCont
 const okFt = /original vs fine-tuned/.test(ftTxt) && /trained on candles before 2025-09-01/.test(ftTxt) && /55\.0%/.test(ftTxt) && /Fine-tuned better/.test(ftTxt);
 if (!okFt) { console.log("FAIL ft", ftTxt.slice(0, 600)); process.exit(1); }
 const ok2 = r2.chart && /Confidence and the correction layer/.test(r2.detail) && /all 5 paths/.test(r2.detail) && /70\.0%/.test(r2.detail) && /right on 64\.0%/.test(r2.detail) && /By candles ahead/.test(r2.detail) && /Month by month/.test(r2.detail) && /right/.test(r2.detail);
+// Click a heading to sort (31 Oct 2026): timeframe by minutes, again to reverse; the order survives a redraw.
+const order = () => p.evaluate(() => [...document.querySelectorAll("#pred_tbl tbody tr")].map((tr) => tr.cells[1].textContent.trim()));
+await p.click("#pred_tbl thead th:nth-child(2)"); await p.waitForTimeout(150);
+const asc = await order();
+await p.click("#pred_tbl thead th:nth-child(2)"); await p.waitForTimeout(150);
+const desc = await order();
+await p.evaluate(() => renderPred()); await p.waitForTimeout(600);
+const kept = await order();
+console.log(JSON.stringify({ asc, desc, kept }));
+if (asc.join() !== "5 min,15 min,Daily" || desc.join() !== "Daily,15 min,5 min" || kept.join() !== desc.join()) { console.log("FAIL header sort"); process.exit(1); }
+console.log("ok   Prediction Lab: click a heading to sort, again to reverse, kept after a refresh");
 await p.evaluate(() => document.querySelector('[data-xp="predkey"]').open = true);
 await p.click("#pred_newkey"); await p.waitForTimeout(600);
 const r3 = await p.evaluate(() => (document.getElementById("pred_script") || {}).textContent || "");

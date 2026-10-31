@@ -565,6 +565,18 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
   .cmprules .cr { border: 1px solid var(--line); border-left: 4px solid var(--cc); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); }
   .cmprules .top { display: flex; align-items: center; margin-bottom: 6px; } .cmprules dl { margin: 0; font-size: 12.5px; } .cmprules dt { color: var(--muted); font-size: 11px; margin-top: 6px; } .cmprules dd { margin: 0; }
   #cmp_per { display: inline-flex; }
+  /* Sortable headings everywhere (th.sort): an arrow shows the order; the floating heading copy keeps them in view. */
+  th.sort { cursor: pointer; user-select: none; }
+  th.autosort::after, .cotbl th.sort::after { content: " ↕"; opacity: .4; font-size: .9em; }
+  th.autosort[aria-sort="ascending"]::after, .cotbl th.sort[aria-sort="ascending"]::after { content: " ▲"; opacity: .9; }
+  th.autosort[aria-sort="descending"]::after, .cotbl th.sort[aria-sort="descending"]::after { content: " ▼"; opacity: .9; }
+  .gfhead { position: fixed; z-index: 24; overflow: hidden; background: var(--panel-2); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 10px 10px; box-shadow: 0 10px 24px -14px rgba(0,0,0,.5); }
+  .gfhead table { table-layout: fixed; margin: 0; } .gfhead th { background: var(--panel-2); }
+  .skcard { margin-top: 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); border-left: 4px solid var(--green); }
+  .skcard.owed { border-left-color: var(--yellow); }
+  .skcard .skhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 8px; } .skcard h3 { margin: 0; font-size: 16px; }
+  .sknew { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-left: auto; }
+  .sktbl tr.owes td { background: var(--yellow-soft); } .sktbl tr.skform td { background: var(--panel-2); }
   /* Combinations: the "all together" line is the ink colour, the members keep slots 1–3. */
   .cT { --cc: var(--ink); }
   .cotbl { width: 100%; border-collapse: collapse; font-size: 12.5px; } .cotbl th, .cotbl td { padding: 8px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -1400,6 +1412,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
     <section class="card" id="walletPane" hidden>
       <div class="head"><h2>Wallet</h2></div>
       <div id="wl_stats" style="margin-top:12px"></div>
+      <div id="wl_shukrana"></div>
       <div class="grid" style="margin-top:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
         <div>
           <h3 style="font-size:16px">Recharge</h3>
@@ -1431,6 +1444,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
       <div class="subtabs" id="ad_tabs" style="margin-top:12px">
         <button class="btn small" data-t="users" aria-pressed="true" type="button">Users</button>
         <button class="btn small" data-t="recharges" type="button">Recharge requests</button>
+        <button class="btn small" data-t="shukrana" type="button">Shukrana</button>
         <button class="btn small" data-t="billing" type="button">Billing settings</button>
       </div>
       <div id="ad_users">
@@ -1456,6 +1470,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
       <div id="ad_recharges" hidden>
         <div class="scroll"><table class="big-table"><thead><tr><th>When</th><th>User</th><th class="n">Amount</th><th>Reference</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody id="ar_body"></tbody></table></div>
       </div>
+      <div id="ad_shukrana" hidden></div>
       <div id="ad_billing" hidden>
         <form id="ab_form" novalidate>
           <div class="grid">
@@ -5578,12 +5593,13 @@ async function renderPred() {
   const beat = rows.filter((r) => r.f.wins.length).length, judged = rows.filter((r) => r.f.n >= PRED_MIN).length;
   $("pred_board").innerHTML = !rows.length ? '<p class="hint">No scored forecasts yet for this choice.</p>' : `<p class="hint" style="margin:0 0 6px">${h} candle${h === 1 ? "" : "s"} ahead · ${judged} asset–timeframe pairs with enough forecasts, <b>${beat}</b> beating a simple guess. “Beats” needs a t-value over 2 (about 95% sure); forecasts close together in time overlap, so treat it as a first sign, not proof. Open a row for its chart and detail.</p>
     <div class="scroll"><table class="mini" id="pred_tbl"><thead><tr><th>Asset</th><th>Timeframe</th><th class="n">Forecasts</th><th class="n" title="Share of real moves Chaturbhuj called the right way (flat moves left out)">Direction right</th><th class="n" title="The same for 'the last candle's move continues'">Last move continues</th><th class="n" title="Chaturbhuj's call after the correction layer, which learns month by month (only from earlier months) when to trust it">Corrected</th><th class="n" title="Direction right when all 5 of Chaturbhuj's paths agreed (1-hour, 4-hour and daily, where 5 paths are drawn)">All paths agree</th><th class="n" title="How much smaller Chaturbhuj's closing-price error is than 'the price stays the same' (t-value)">Closing price vs no change</th><th class="n" title="How much smaller Chaturbhuj's high–low range error is than the recent average swing (t-value)">Range vs average swing</th><th>Verdict</th></tr></thead><tbody>
-    ${rows.map((r) => `<tr class="pick${pred.sel === `${r.asset}|${r.tf}` ? " sel" : ""}" data-k="${esc(r.asset)}|${r.tf}"><td>${esc(labAssetName(r.asset))}</td><td>${PRED_TF[r.tf] || r.tf}</td><td class="n">${r.f.n.toLocaleString("en-IN")}</td>
+    ${rows.map((r) => `<tr class="pick${pred.sel === `${r.asset}|${r.tf}` ? " sel" : ""}" data-k="${esc(r.asset)}|${r.tf}"><td>${esc(labAssetName(r.asset))}</td><td data-v="${r.tf}">${PRED_TF[r.tf] || r.tf}</td><td class="n">${r.f.n.toLocaleString("en-IN")}</td>
       <td class="n"><b class="${r.f.hit > 0.5 ? "pos-num" : r.f.hit < 0.5 ? "neg-num" : ""}">${predPct(r.f.hit)}</b></td><td class="n">${predPct(r.f.mom)}</td>
       <td class="n">${r.f.calN ? `<b class="${r.f.cal > 0.5 ? "pos-num" : r.f.cal < 0.5 ? "neg-num" : ""}">${predPct(r.f.cal)}</b><div class="hint sm">${r.f.calN.toLocaleString("en-IN")} calls</div>` : '<span class="hint">learning</span>'}</td>
       <td class="n">${r.f.bands.hi && r.f.bands.hi.n ? `${predPct(r.f.bands.hi.hit)}<div class="hint sm">${r.f.bands.hi.n.toLocaleString("en-IN")} calls</div>` : '<span class="hint">–</span>'}</td>
       <td class="n">${predSigned(r.f.close)}<div class="hint sm">t ${r.f.tc == null ? "–" : r.f.tc.toFixed(1)}</div></td><td class="n">${predSigned(r.f.range)}<div class="hint sm">t ${r.f.tr == null ? "–" : r.f.tr.toFixed(1)}</div></td><td>${predVerdictChip(r.f)}</td></tr>`).join("")}</tbody></table></div>`;
   $("pred_board").querySelectorAll("tr[data-k]").forEach((tr) => tr.addEventListener("click", () => { pred.sel = tr.dataset.k; renderPred().catch((e) => toast(errorText(e))); }));
+  makeSortable($("pred_tbl"));
   if (pred.sel) await renderPredDetail(...pred.sel.split("|"));
   else $("pred_detail").innerHTML = "";
   renderPredKey(set);
@@ -6004,7 +6020,7 @@ function listRows() {
 /* ---------- phone notifications (web push to the installed app) ---------- */
 const VAPID_PUBLIC = "BLyDxFopHCv-MOmA9kzMEF_ZkvmKj55TiWC4YzV0WTFu9rCkW0zIabbKAx71j5XTsaInAsb0MNPfw2q7X30mjyE";
 const NTF_KINDS = [["trade", "New positions and exits (with P&L)"], ["error", "Errors and failed orders"], ["live", "Strategies going live / back to paper"],
-  ["account", "Dhan token problems"], ["lab", "Strategy Lab results (admin)"]];
+  ["account", "Dhan token problems"], ["lab", "Strategy Lab results (admin)"], ["shukrana", "Clients owing Shukrana (admin)"]];
 const b64uBytes = (b) => { const p = "=".repeat((4 - (b.length % 4)) % 4), raw = atob((b + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from([...raw].map((c) => c.charCodeAt(0))); };
 async function loadNotifyCard() {
   const box = $("ntf_box"); if (!box) return;
@@ -6015,7 +6031,7 @@ async function loadNotifyCard() {
   const row = sub ? (await db.from("push_subs").select("id, prefs").eq("endpoint", sub.endpoint).maybeSingle()).data : null;
   const blocked = Notification.permission === "denied";
   const { data: recent } = await db.from("notifications").select("id, kind, title, body, created_at, push_note").order("id", { ascending: false }).limit(15);
-  const kinds = NTF_KINDS.filter(([k]) => k !== "lab" || isAdmin());
+  const kinds = NTF_KINDS.filter(([k]) => (k !== "lab" && k !== "shukrana") || isAdmin());
   box.innerHTML = `${row ? `<p style="margin:0">On for this phone. You'll be told about the kinds ticked below as they happen.</p>
       <div class="ntfkinds">${kinds.map(([k, t]) => `<label class="showtr"><input type="checkbox" data-ntf="${k}" ${row.prefs && row.prefs[k] === false ? "" : "checked"}> ${esc(t)}</label>`).join("")}</div>
       <div class="formbar"><button class="btn small" type="button" id="ntf_test">Send a test</button><button class="btn small" type="button" id="ntf_off">Turn off on this phone</button><span class="hint" id="ntf_msg"></span></div>`
@@ -6884,8 +6900,10 @@ function comboTable() {
   if (q) rows = rows.filter((x) => x.ids.some((id) => String(id).includes(q.replace(/^#/, "")) || name(id).toLowerCase().includes(q)));
   const fresh = (combo.bg && combo.bg.fresh) || new Map(), isNew = (x) => fresh.get(comboKeyOf(combo.size, x.ids));
   if (combo.onlyNew) rows = rows.filter(isNew);
-  const key = { ratio: (x) => x.ratio, gain: (x) => x.gain ?? -1e9, opp: (x) => x.opp, net: (x) => x.net, dd: (x) => -x.dd }[combo.sort];
-  rows.sort((a, b) => key(b) - key(a));
+  const key = { ratio: (x) => x.ratio, gain: (x) => x.gain ?? -1e9, opp: (x) => x.opp, net: (x) => x.net, dd: (x) => -x.dd, together: (x) => x.together, alone: (x) => x.bestAlone,
+    corr: (x) => x.corr ?? 9, years: (x) => x.yN ? x.yOk / x.yN : 0, name: (x) => 0 }[combo.sort] || ((x) => x.ratio);
+  const dir = combo.sortDir || -1, fv = (v) => Number.isFinite(v) ? v : v > 0 ? 1e15 : -1e15;
+  rows.sort((a, b) => (fv(key(a)) - fv(key(b))) * dir);
   const fin = (v) => Number.isFinite(v) ? `${v.toFixed(2)}×` : "∞";
   const pos = (v) => v > 0 ? "pos-num" : v < 0 ? "neg-num" : "";
   const dirTag = (r) => { const d = r && r.config && r.config.direction; return d === "LONG_ONLY" ? ' <span class="chip dirtag" title="Only ever buys: it can never be on the opposite side of a strategy that buys">long only</span>' : d === "SHORT_ONLY" ? ' <span class="chip dirtag" title="Only ever sells">short only</span>' : ""; };
@@ -6894,8 +6912,8 @@ function comboTable() {
   $("co_sum").innerHTML = `${P.passed} passed ${esc(labAssetName(P.asset))} ${esc(comboTfName(P.tf).toLowerCase())} strategies in ${P.families} rule famil${P.families === 1 ? "y" : "ies"}; the best of ${P.capped ? `the top ${COMBO_MAX[combo.size]} families` : "each family"}${P.used.some((r) => r.desk) ? " plus the ones on your desk" : ""} combined: ${P.checked.toLocaleString("en-IN")} ${combo.size === 2 ? "pairs" : "threes"} checked, <b>${better.toLocaleString("en-IN")}</b> lessen the drawdown: on opposite sides at least ${Math.max(combo.minOpp, COMBO_MIN_OPP)}% of the time they are in a trade together <b>and</b> a better profit ÷ fall than any of their members alone. “Opposite sides” counts only the time two or more are in a trade at once; see “In a trade together” for how much of the time that is. Strategies that only ever buy (long only) can never be opposite each other: if they score better together it is because their trades and falls came at different times, not because one protects the other.<br>${(() => { const g = combo.bg && combo.bg.g; return !g ? "The background check (every 10 minutes, for every asset including crypto) hasn't reached this group yet." : `Background check, every 10 minutes: ${g.state === "working" ? "checking now" : `last full check ${esc(istText(g.done_at))}`}${g.baseline_at ? `; <b>${fresh.size}</b> new since its first full check on ${esc(istText(g.baseline_at))} (tagged <span class="chip green newtag">New</span>; you are notified of new ones)` : ""}.`; })()}`;
   const shown = rows.slice(0, combo.showN);
   $("co_body").innerHTML = !rows.length ? '<p class="hint" style="margin-top:12px">None for these settings. Try a lower opposite-sides share, or switch off “only those that lessen the drawdown”.</p>' : `
-    <div class="scroll"><table class="cotbl"><thead><tr><th class="n">#</th><th>Strategies</th><th class="n" title="Of the time any of them was in a trade, the share when ${combo.size === 2 ? "both were" : "two or more were"} in a trade at once">In a trade<br><small>together</small></th><th class="n" title="Of the time two or more were in a trade at once, the share with at least one long and one short">Opposite sides<br><small>while together</small></th>
-      <th class="n">Together<br><small>profit · biggest fall</small></th><th class="n">Profit ÷ fall<br><small>together</small></th><th class="n">Alone<br><small>profit · fall · profit ÷ fall</small></th><th class="n" title="How much better profit ÷ fall is together than the best member alone">Better by</th><th class="n" title="Correlation of monthly profit: 1 = same months good and bad, 0 = unrelated, −1 = opposite">Months alike</th><th class="n">Years +<br><small>together</small></th></tr></thead>
+    <div class="scroll"><table class="cotbl" id="co_tbl"><thead><tr><th class="n">#</th><th>Strategies</th><th class="n" data-s="together" title="Of the time any of them was in a trade, the share when ${combo.size === 2 ? "both were" : "two or more were"} in a trade at once">In a trade<br><small>together</small></th><th class="n" data-s="opp" title="Of the time two or more were in a trade at once, the share with at least one long and one short">Opposite sides<br><small>while together</small></th>
+      <th class="n" data-s="net">Together<br><small>profit · biggest fall</small></th><th class="n" data-s="ratio">Profit ÷ fall<br><small>together</small></th><th class="n" data-s="alone">Alone<br><small>profit · fall · profit ÷ fall</small></th><th class="n" data-s="gain" title="How much better profit ÷ fall is together than the best member alone">Better by</th><th class="n" data-s="corr" title="Correlation of monthly profit: 1 = same months good and bad, 0 = unrelated, −1 = opposite">Months alike</th><th class="n" data-s="years">Years +<br><small>together</small></th></tr></thead>
     <tbody>${shown.map((x, i) => `<tr class="pick${combo.sel === x ? " sel" : ""}" data-i="${i}"><td class="n">${i + 1}</td><td>${isNew(x) ? `<span class="chip green newtag" title="First found by the background check on ${esc(istText(isNew(x)))}">New</span>` : ""}${x.ids.map((id, j) => nm(id, j + 1)).join("")}<div class="hint sm">${x.years.toFixed(1)} years together · ${esc(new Date(x.from + 19800000).toISOString().slice(0, 7))} to ${esc(new Date(x.to + 19800000).toISOString().slice(0, 7))}</div></td>
       <td class="n"><b>${Math.round(x.together)}%</b><div class="hint sm">of their time in the market</div></td>
       <td class="n"><b>${Math.round(x.opp)}%</b><div class="oppbar"><span style="width:${Math.min(100, x.opp)}%"></span></div><div class="hint sm">same side ${Math.round(100 - x.opp)}%</div></td>
@@ -6906,6 +6924,13 @@ function comboTable() {
       <td class="n">${x.corr == null ? "–" : x.corr.toFixed(2)}</td><td class="n">${x.yOk}/${x.yN}</td></tr>`).join("")}</tbody></table></div>
     ${rows.length > shown.length ? `<p style="margin:8px 0 0"><button class="btn small" id="co_more" type="button">Show more (${rows.length - shown.length} more)</button></p>` : ""}`;
   combo.view = shown;
+  // Click a heading to sort by it (again to reverse); the “Sort by” list follows.
+  $("co_body").querySelectorAll("th[data-s]").forEach((th) => {
+    th.classList.add("sort"); th.tabIndex = 0; th.setAttribute("aria-sort", combo.sort === th.dataset.s ? ((combo.sortDir || -1) > 0 ? "ascending" : "descending") : "none");
+    const go = () => { if (combo.sort === th.dataset.s) combo.sortDir = -(combo.sortDir || -1); else { combo.sort = th.dataset.s; combo.sortDir = th.dataset.s === "corr" ? 1 : -1; }
+      if ([...$("co_sort").options].some((o) => o.value === combo.sort)) $("co_sort").value = combo.sort; comboTable(); };
+    th.addEventListener("click", go); th.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  });
   $("co_body").querySelectorAll("tr.pick").forEach((tr) => tr.addEventListener("click", () => { const x = combo.view[Number(tr.dataset.i)]; combo.sel = combo.sel === x ? null : x; comboTable(); }));
   if ($("co_more")) $("co_more").addEventListener("click", () => { combo.showN += 100; comboTable(); });
   if (combo.sel && shown.includes(combo.sel)) comboDetail(combo.sel);
@@ -6943,10 +6968,73 @@ $("co_size").querySelectorAll("button").forEach((b) => b.addEventListener("click
 $("co_opp").addEventListener("change", (e) => { combo.minOpp = Number(e.target.value); combo.showN = 100; if (combo.res) comboTable(); });
 $("co_better").addEventListener("change", (e) => { combo.onlyBetter = e.target.checked; combo.showN = 100; if (combo.res) comboTable(); });
 $("co_new").addEventListener("change", (e) => { combo.onlyNew = e.target.checked; combo.showN = 100; if (combo.res) comboTable(); });
-$("co_sort").addEventListener("change", (e) => { combo.sort = e.target.value; if (combo.res) comboTable(); });
+$("co_sort").addEventListener("change", (e) => { combo.sort = e.target.value; combo.sortDir = -1; if (combo.res) comboTable(); });
 { let t = null; $("co_q").addEventListener("input", (e) => { combo.q = e.target.value; clearTimeout(t); t = setTimeout(() => { combo.showN = 100; if (combo.res) comboTable(); }, 250); }); }
 window.addEventListener("resize", () => { if (page === "combo" && combo.sel) { clearTimeout(comboDetail.rt); comboDetail.rt = setTimeout(() => combo.res && comboTable(), 200); } });
 
+
+/* ---------- Tables: click a heading to sort; headings stay in view while scrolling (31 Oct 2026, Papa) ----------
+ * makeSortable(table): any heading without its own sort becomes a sort button (numbers by value, text A–Z; a second
+ * click reverses); the choice is remembered by table id, so a table redrawn later keeps its order.
+ * The floating heading: when a long table's heading row has scrolled above the top of the screen, a copy of it stays
+ * pinned there (same column widths, follows sideways scrolling; clicking it clicks the real heading). The Strategy Lab
+ * table has its own (labFloatHead). */
+const tblSort = new Map();
+function cellValue(td) {
+  if (!td) return null;
+  if (td.dataset.v != null) { const n = Number(td.dataset.v); return Number.isFinite(n) ? n : td.dataset.v; }
+  // A cell that starts with a number (signs, ₹ and commas allowed) sorts by that number; anything else as text.
+  const t = td.textContent.replace(/\s+/g, " ").trim(), m = t.replace(/,/g, "").match(/^([-−+]?)\s*₹?\s*(\d+(?:\.\d+)?)/);
+  return m ? Number(m[2]) * (m[1] === "-" || m[1] === "−" ? -1 : 1) : t.toLowerCase();
+}
+function makeSortable(table, key = table && table.id) {
+  if (!table || !table.tHead || !table.tBodies[0]) return;
+  const ths = [...table.tHead.rows[table.tHead.rows.length - 1].cells];
+  const apply = (i, dir) => {
+    const body = table.tBodies[0], rows = [...body.rows].filter((r) => r.cells.length > 1);
+    rows.sort((a, b) => { const x = cellValue(a.cells[i]), y = cellValue(b.cells[i]);
+      if (x === y) return 0; if (x == null || x === "" || x === "–") return 1; if (y == null || y === "" || y === "–") return -1;
+      return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y))) * dir; });
+    for (const r of rows) body.append(r);
+    ths.forEach((th, j) => th.setAttribute("aria-sort", j === i ? (dir > 0 ? "ascending" : "descending") : "none"));
+  };
+  ths.forEach((th, i) => {
+    if (th.classList.contains("sort") || th.dataset.k || !th.textContent.trim()) return;
+    th.classList.add("sort", "autosort"); th.tabIndex = 0; th.setAttribute("aria-sort", "none");
+    const go = () => { const st = tblSort.get(key), dir = st && st.i === i ? -st.dir : (th.classList.contains("n") ? -1 : 1); tblSort.set(key, { i, dir }); apply(i, dir); };
+    th.addEventListener("click", go); th.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  });
+  const st = key && tblSort.get(key); if (st && ths[st.i]) apply(st.i, st.dir);
+}
+const floatHead = { el: null, src: null, html: "" };
+function floatHeads() {
+  const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--barH")) || 0;
+  let pick = null, pickTop = -Infinity;
+  for (const t of document.querySelectorAll("main table, section table")) {
+    if (!t.tHead || !t.tBodies[0] || t.tBodies[0].rows.length < 4 || t.closest(".labfhead, #gfhead, #lab_grid") || !t.offsetParent) continue;
+    const r = t.getBoundingClientRect(), hh = t.tHead.getBoundingClientRect().height;
+    if (r.top < top && r.bottom > top + hh + 24 && r.top > pickTop) { pick = t; pickTop = r.top; }
+  }
+  let f = floatHead.el;
+  if (!pick) { if (f) f.hidden = true; return; }
+  if (!f) {
+    f = floatHead.el = document.createElement("div"); f.id = "gfhead"; f.className = "gfhead"; f.hidden = true; document.body.append(f);
+    f.addEventListener("click", (e) => { const th = e.target.closest("th"); if (!th || !floatHead.src) return; const all = [...f.querySelectorAll("th")], i = all.indexOf(th); const real = floatHead.src.tHead.querySelectorAll("th")[i]; if (real) real.click(); requestAnimationFrame(floatHeads); });
+  }
+  if (floatHead.src !== pick || floatHead.html !== pick.tHead.innerHTML) {
+    f.innerHTML = `<table class="${pick.className}"><thead>${pick.tHead.innerHTML}</thead></table>`;
+    floatHead.src = pick; floatHead.html = pick.tHead.innerHTML;
+  }
+  const src = [...pick.tHead.querySelectorAll("th")], dst = [...f.querySelectorAll("th")];
+  src.forEach((th, i) => { const w = `${th.getBoundingClientRect().width}px`; if (dst[i]) { dst[i].style.width = w; dst[i].style.minWidth = w; dst[i].style.maxWidth = w; dst[i].setAttribute("aria-sort", th.getAttribute("aria-sort") || "none"); } });
+  const box = pick.closest(".scroll") || pick.parentElement, br = box.getBoundingClientRect();
+  f.querySelector("table").style.width = `${pick.offsetWidth}px`;
+  Object.assign(f.style, { left: `${br.left + box.clientLeft}px`, width: `${box.clientWidth}px`, top: `${top}px` });
+  f.hidden = false; f.scrollLeft = box.scrollLeft;
+}
+{ let q = 0; const tick = () => { if (!q) q = requestAnimationFrame(() => { q = 0; floatHeads(); }); };
+  window.addEventListener("scroll", tick, { passive: true }); window.addEventListener("resize", tick);
+  document.addEventListener("scroll", (e) => { if (e.target !== document && e.target.classList && e.target.classList.contains("scroll")) tick(); }, { capture: true, passive: true }); }
 /* ---------- several strategies at once: tick them, then activate / pause / go live / back to paper ---------- */
 const lsel = new Set();
 function renderBulkBar() {
@@ -7411,11 +7499,14 @@ async function loadWallet() {
     db.from("daily_pnl").select("day, desk_net, dhan_realised, matched, note").eq("user_id", me.user_id).order("day", { ascending: false }).limit(60).then(must),
   ]);
   const b = me.billing || {}, e = me.entries || {};
+  const sk = await db.rpc("shukrana_summary").then((x) => x.data).catch(() => null);
+  const skList = sk && sk.pct != null ? await db.from("shukrana_accepted").select("amount, accepted_on, note").eq("user_id", me.user_id).order("id", { ascending: false }).limit(100).then((x) => x.data || []).catch(() => []) : [];
+  renderShukranaCard($("wl_shukrana"), sk, skList, false);
   const tile = (l, v, cls, sub) => `<div class="stat"><span class="label">${esc(l)}</span><span class="v ${cls || ""}">${esc(v)}</span>${sub ? `<span class="hint">${esc(sub)}</span>` : ""}</div>`;
   $("wl_stats").innerHTML = (e.ok === false ? `<div class="banner err" style="margin-bottom:10px">New trades are paused: ${esc(e.why || "")} Exits still go through.</div>` : "") + `<div class="stats">
     ${tile("Balance", rupees(b.balance), Number(b.balance) < 0 ? "down" : "", b.min_balance > 0 ? `minimum ${rupees(b.min_balance)} to open trades` : "")}
     ${tile("Free trial", b.trial_active ? `till ${b.trial_until}` : b.trial_until ? "ended" : "–", "", b.trial_active ? "nothing is charged during the trial" : "")}
-    ${tile("Profit share", "None", "", "you keep all your trading profit")}
+    ${tile("Shukrana", sk && sk.pct != null ? `${Number(sk.pct)}% of new profit` : "None", "", sk && sk.pct != null ? "settled with the admin directly; see below" : "you keep all your trading profit")}
     ${tile("Deployment fee", Number(b.deploy_fee) > 0 ? rupees(b.deploy_fee) : "None", "", Number(b.deploy_fee) > 0 ? (b.deploy_fee_period === "ONE_TIME" ? "once per strategy" : "per strategy, per month live") : "")}
   </div>`;
   $("wl_payto").innerHTML = b.pay_to ? `Pay to: <strong></strong>${b.pay_note ? `<br><span></span>` : ""}` : "The admin hasn't added payment details yet. Ask them how to pay.";
@@ -7437,13 +7528,92 @@ $("wl_form").addEventListener("submit", (e) => {
   });
 });
 
+
+/* ---------- Shukrana (31 Oct 2026, Papa) ----------
+ * A share of new trading profit, settled with the admin directly (nothing is taken from the wallet). Shukrana due is
+ * worked out live by the database (shukrana_summary) from LIVE trades since the rate was set, on new highs only;
+ * Shukrana accepted is what the admin records when it is paid. Balance below zero = owed. */
+function shukranaWhat(sk) {
+  return `Shukrana is ${Number(sk.pct)}% of your <b>new</b> trading profit (live trades, after charges) since ${esc(istText(sk.since).replace(/,.*$/, ""))}: it grows only when your running profit goes above its previous best, so profit that only makes back an earlier loss adds nothing, and a loss never takes back what is already due. It is settled with the admin directly; nothing is taken from your wallet.`;
+}
+function renderShukranaCard(box, sk, list, adminView) {
+  if (!box) return;
+  if (!sk || sk.pct == null) { box.innerHTML = ""; return; }
+  const bal = Number(sk.balance), owed = bal < 0;
+  box.innerHTML = `<div class="skcard${owed ? " owed" : ""}">
+    <div class="skhead"><h3>Shukrana</h3><span class="hint">${Number(sk.pct)}% of new profit · running, no fixed periods</span></div>
+    <div class="stats">
+      <div class="stat"><span class="label">Shukrana due</span><span class="v">${rupees(sk.due)}</span><span class="hint">so far, from ${Number(sk.trades)} live trade${Number(sk.trades) === 1 ? "" : "s"}</span></div>
+      <div class="stat"><span class="label">Shukrana accepted</span><span class="v">${rupees(sk.accepted)}</span><span class="hint">${sk.last_accepted ? `last on ${esc(sk.last_accepted)}` : "none yet"}</span></div>
+      <div class="stat"><span class="label">Balance</span><span class="v ${owed ? "down" : bal > 0 ? "up" : ""}">${owed ? `${rupees(-bal)} due` : bal > 0 ? `${rupees(bal)} ahead` : "Settled"}</span><span class="hint">accepted − due</span></div>
+      <div class="stat"><span class="label">Live profit since start</span><span class="v ${Number(sk.net) >= 0 ? "up" : "down"}">${rupees(sk.net)}</span><span class="hint">${Number(sk.to_recover) > 0 ? `${rupees(sk.to_recover)} below its best: no new Shukrana until that is made back` : "at its best so far"}</span></div>
+    </div>
+    <p class="hint" style="margin:8px 0 0">${shukranaWhat(sk)}</p>
+    ${list.length ? `<div class="scroll" style="margin-top:8px"><table class="mini"><thead><tr><th>Date</th><th class="n">Shukrana accepted</th><th>Note</th></tr></thead><tbody>${list.map((r) => `<tr><td class="when">${esc(r.accepted_on)}</td><td class="n ${Number(r.amount) < 0 ? "neg-num" : ""}">${rupees(r.amount)}${Number(r.amount) < 0 ? ' <span class="hint sm">correction</span>' : ""}</td><td class="hint">${esc(r.note || "")}</td></tr>`).join("")}</tbody></table></div>` : ""}
+  </div>`;
+}
+/** Admin › Shukrana: every client with a rate, what is due, accepted and owed; set rates and record Shukrana accepted. */
+const skAd = { rows: [], sort: { key: "balance", dir: 1 }, owing: false, open: null };
+async function loadShukranaAdmin() {
+  skAd.rows = must(await db.rpc("shukrana_overview")) || [];
+  if (!adminUsers.length) await loadAdminUsers();
+  renderShukranaAdmin();
+}
+function renderShukranaAdmin() {
+  const box = $("ad_shukrana"); if (!box) return;
+  const v = (r, k) => k === "who" ? (r.full_name || r.email || "").toLowerCase() : Number(r.s && r.s[k]);
+  const rows = skAd.rows.filter((r) => !skAd.owing || Number(r.s.balance) < 0)
+    .sort((a, b) => { const x = v(a, skAd.sort.key), y = v(b, skAd.sort.key); return (typeof x === "string" ? x.localeCompare(y) : x - y) * skAd.sort.dir; });
+  const owed = skAd.rows.filter((r) => Number(r.s.balance) < 0), totOwed = owed.reduce((a, r) => a - Number(r.s.balance), 0);
+  const cols = [["who", "Client"], ["pct", "Rate", "n"], ["net", "Live profit since start", "n"], ["due", "Shukrana due", "n"], ["accepted", "Shukrana accepted", "n"], ["balance", "Balance", "n"]];
+  const without = adminUsers.filter((u) => !skAd.rows.some((r) => r.user_id === u.user_id));
+  box.innerHTML = `<div class="stats" style="margin:4px 0 12px">
+      <div class="stat"><span class="label">Clients owing Shukrana</span><span class="v ${owed.length ? "down" : ""}">${owed.length}</span><span class="hint">of ${skAd.rows.length} with a rate · reminded daily at 10:17</span></div>
+      <div class="stat"><span class="label">Shukrana owed in all</span><span class="v ${totOwed ? "down" : ""}">${rupees(totOwed)}</span></div>
+      <div class="stat"><span class="label">Accepted in all</span><span class="v">${rupees(skAd.rows.reduce((a, r) => a + Number(r.s.accepted), 0))}</span></div></div>
+    <div class="filters"><label class="showtr"><input type="checkbox" id="sk_owing" ${skAd.owing ? "checked" : ""}> Only clients owing</label>
+      <form id="sk_new" class="sknew" novalidate><label class="f"><span>Set a rate for</span><select id="sk_user">${without.map((u) => `<option value="${u.user_id}">${esc(u.full_name ? `${u.full_name} · ${u.email}` : u.email)}</option>`).join("") || "<option value=''>Every user has a rate</option>"}</select></label>
+        <label class="f"><span>Rate %</span><input id="sk_pct" type="number" min="0" max="100" step="0.5" value="20"></label><button class="btn small" type="submit">Set rate</button></form></div>
+    <div class="scroll"><table class="big-table sktbl"><thead><tr>${cols.map(([k, l, c]) => `<th class="sort${c ? " n" : ""}" data-k="${k}" tabindex="0" aria-sort="${skAd.sort.key === k ? (skAd.sort.dir > 0 ? "ascending" : "descending") : "none"}">${esc(l)}</th>`).join("")}<th></th></tr></thead>
+      <tbody>${rows.length ? rows.map((r) => { const s = r.s, bal = Number(s.balance);
+        return `<tr data-u="${r.user_id}"${bal < 0 ? ' class="owes"' : ""}><td>${esc(r.full_name || r.email)}<div class="hint sm">${esc(r.email)} · since ${esc(istText(s.since).replace(/,.*$/, ""))}</div></td><td class="n">${Number(s.pct)}%</td>
+          <td class="n ${Number(s.net) >= 0 ? "pos-num" : "neg-num"}">${rupees(s.net)}${Number(s.to_recover) > 0 ? `<div class="hint sm">${rupees(s.to_recover)} to make back</div>` : ""}</td><td class="n">${rupees(s.due)}</td><td class="n">${rupees(s.accepted)}</td>
+          <td class="n"><b class="${bal < 0 ? "neg-num" : bal > 0 ? "pos-num" : ""}">${bal < 0 ? `${rupees(-bal)} due` : bal > 0 ? `${rupees(bal)} ahead` : "Settled"}</b></td>
+          <td><button class="btn small" type="button" data-open="${r.user_id}">${skAd.open === r.user_id ? "Close" : "Record / rate"}</button></td></tr>
+          ${skAd.open === r.user_id ? `<tr class="skform"><td colspan="7"><form data-acc="${r.user_id}" class="grid" novalidate>
+            <label class="f"><span>Shukrana accepted ₹ (negative to correct an entry)</span><input name="amt" type="number" step="1" value="${bal < 0 ? Math.trunc(-bal) : ""}"></label>
+            <label class="f"><span>Date</span><input name="on" type="date" value="${istDate(0)}"></label>
+            <label class="f wide"><span>Note (optional)</span><input name="note" autocomplete="off"></label>
+            <div class="formbar"><button class="btn primary" type="submit">Record Shukrana accepted</button></div></form>
+            <form data-rate="${r.user_id}" class="grid" novalidate style="margin-top:8px"><label class="f"><span>New rate % (applies to new profit from now on)</span><input name="pct" type="number" min="0" max="100" step="0.5" value="${Number(s.pct)}"></label>
+            <div class="formbar"><button class="btn" type="submit">Change rate</button></div></form><div data-hist="${r.user_id}" class="hint">Loading entries…</div></td></tr>` : ""}`; }).join("")
+        : `<tr><td colspan="7" class="hint">${skAd.rows.length ? "No client owes Shukrana." : "No client has a Shukrana rate yet. Set one above."}</td></tr>`}</tbody></table></div>`;
+  box.querySelectorAll("th.sort").forEach((th) => th.addEventListener("click", () => { skAd.sort.dir = skAd.sort.key === th.dataset.k ? -skAd.sort.dir : (th.dataset.k === "balance" ? 1 : -1); skAd.sort.key = th.dataset.k; renderShukranaAdmin(); }));
+  $("sk_owing").addEventListener("change", (e) => { skAd.owing = e.target.checked; renderShukranaAdmin(); });
+  $("sk_new").addEventListener("submit", (e) => { e.preventDefault(); const u = $("sk_user").value, pct = Number($("sk_pct").value);
+    if (!u) return; if (!(pct >= 0 && pct <= 100)) { toast("Rate must be 0 to 100%."); return; }
+    run(e.submitter, async () => { must(await db.rpc("shukrana_set_rate", { p_user: u, p_pct: pct })); toast("Rate set. Shukrana counts new profit from now on."); await loadShukranaAdmin(); }); });
+  box.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => { skAd.open = skAd.open === b.dataset.open ? null : b.dataset.open; renderShukranaAdmin(); }));
+  box.querySelectorAll("form[data-acc]").forEach((f) => f.addEventListener("submit", (e) => { e.preventDefault();
+    const amt = Math.trunc(Number(f.amt.value)); if (!amt) { toast("Enter an amount."); return; }
+    run(e.submitter, async () => { must(await db.rpc("shukrana_accept", { p_user: f.dataset.acc, p_amount: amt, p_on: f.on.value || null, p_note: f.note.value.trim() || null })); toast(amt > 0 ? "Shukrana accepted recorded." : "Correction recorded."); await loadShukranaAdmin(); }); }));
+  box.querySelectorAll("form[data-rate]").forEach((f) => f.addEventListener("submit", (e) => { e.preventDefault(); const pct = Number(f.pct.value);
+    if (!(pct >= 0 && pct <= 100)) { toast("Rate must be 0 to 100%."); return; }
+    run(e.submitter, async () => { must(await db.rpc("shukrana_set_rate", { p_user: f.dataset.rate, p_pct: pct })); toast("Rate changed for new profit from now on."); await loadShukranaAdmin(); }); }));
+  const hist = box.querySelector("[data-hist]");
+  if (hist) db.from("shukrana_accepted").select("amount, accepted_on, note, created_at").eq("user_id", hist.dataset.hist).order("id", { ascending: false }).limit(200).then((x) => {
+    const rs = x.data || [];
+    hist.innerHTML = rs.length ? `<table class="mini" style="margin-top:8px"><thead><tr><th>Date</th><th class="n">Shukrana accepted</th><th>Note</th><th>Entered</th></tr></thead><tbody>${rs.map((r) => `<tr><td>${esc(r.accepted_on)}</td><td class="n ${Number(r.amount) < 0 ? "neg-num" : ""}">${rupees(r.amount)}</td><td>${esc(r.note || "")}</td><td class="when">${esc(istText(r.created_at))}</td></tr>`).join("")}</tbody></table>` : "No Shukrana accepted yet.";
+  }).catch(() => { hist.textContent = ""; });
+}
 /* ---------- admin ---------- */
 const ad = { tab: "users", sort: { key: "created_at", dir: -1 }, edit: null };
 async function loadAdminUsers() { if (isAdmin()) adminUsers = must(await db.rpc("admin_users")) || []; return adminUsers; }
 async function loadAdmin() {
   await loadAdminUsers();
   $("ad_tabs").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.t === ad.tab ? "true" : "false"));
-  $("ad_users").hidden = ad.tab !== "users"; $("ad_recharges").hidden = ad.tab !== "recharges"; $("ad_billing").hidden = ad.tab !== "billing";
+  $("ad_users").hidden = ad.tab !== "users"; $("ad_recharges").hidden = ad.tab !== "recharges"; $("ad_billing").hidden = ad.tab !== "billing"; $("ad_shukrana").hidden = ad.tab !== "shukrana";
+  if (ad.tab === "shukrana") await loadShukranaAdmin();
   if (ad.tab === "users") renderUsers();
   if (ad.tab === "recharges") await loadRecharges();
   if (ad.tab === "billing") await loadBilling();
@@ -7736,6 +7906,7 @@ function openDeepLink(href) {
     if (sId && (state.strategies || []).some((x) => x.id === sId)) openStrat(sId);
     else if (u.searchParams.get("lab") && isAdmin()) openLab();
     else if (u.searchParams.get("combo") && isAdmin()) showPage("combo");
+    else if (u.searchParams.get("shukrana") && isAdmin()) { ad.tab = "shukrana"; showPage("admin"); }
     else if (u.searchParams.get("conn")) openConn();
     if (u.search) history.replaceState(null, "", location.pathname + location.hash);
   } catch { /* ignore */ }
