@@ -51,11 +51,11 @@ const IND = ["RSI", "EMA", "MACD", "ADX", "BB", "VWAP"];
 const mkTL = (id) => { let seed = id * 7; const rnd = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
   const e = [], x = [], sd = [], n = []; let t = Date.UTC(2018, 0, 2);
   while (t < Date.UTC(2026, 9, 1)) { const len = (3 + Math.floor(rnd() * 8)) * 86400000, d0 = new Date(t).toISOString().slice(0, 10), d1 = new Date(t + len).toISOString().slice(0, 10);
-    const up = Math.floor(t / (40 * 86400000)) % 2 === 0; const side = id === 9002 ? (up ? "S" : "L") : id === 9001 ? (up ? "L" : "S") : (rnd() > .5 ? "L" : "S");
+    const up = Math.floor(t / (40 * 86400000)) % 2 === 0; const side = id === 9002 ? (up ? "S" : "L") : id === 9001 ? (up ? "L" : "S") : id === 9003 ? "L" : (rnd() > .5 ? "L" : "S");
     e.push(d0 + " 09:00"); x.push(d1 + " 23:25"); sd.push(side); n.push(Math.round((rnd() - 0.4) * 60000)); t += len + (1 + Math.floor(rnd() * 4)) * 86400000; }
   return { e, x, s: sd, i: e.map(() => 1), o: e.map(() => 1), n, w: e.map(() => 0), why: ["Signal"] }; };
 const comboRows = [9001, 9002, 9003, 9004, 9005, 9006].map((id, k) => ({ id, label: `Gold rule ${IND[k]} ${id}`, asset: "GOLD", twin_of: null, fingerprint: "fp" + id, tf: 375, daily: true, cons: 90 - k,
-  config: { timeframe_min: 375, direction: "BOTH", rules: { daily: true, long: { conds: [{ ind: IND[k], op: ">" }] }, short: { conds: [{ ind: IND[k], op: "<" }] } } } }));
+  config: { timeframe_min: 375, direction: id === 9003 ? "LONG_ONLY" : "BOTH", rules: { daily: true, long: { conds: [{ ind: IND[k], op: ">" }] }, short: { conds: [{ ind: IND[k], op: "<" }] } } } }));
 const writes = [];
 await p.route(/supabase\.co/, (r) => {
   const u = decodeURIComponent(r.request().url().replace(/^.*supabase\.co/, ""));
@@ -113,6 +113,12 @@ const all = await p.evaluate(() => combo.res.rows.map((x) => ({ ids: x.ids.join(
 const ab = all.find((x) => x.ids === "9001+9002");
 console.log(JSON.stringify(ab), all.length);
 if (!ab || ab.opp < 90 || all.length !== 15) fail("opposite pair", { ab, n: all.length });
+// Lessening needs opposite sides at least 20% of the time together; the new column and the long-only tag show.
+const rule = await p.evaluate(() => ({ lowOppBetter: combo.res.rows.filter((x) => x.better && x.opp < 20).length,
+  head: [...document.querySelectorAll("#co_body thead th")].map((t) => t.innerText.replace(/\s+/g, " ").trim().toLowerCase()),
+  together: combo.res.rows.every((x) => x.together > 0 && x.together <= 100), tags: [...document.querySelectorAll("#co_body .dirtag")].map((t) => t.textContent) }));
+console.log(JSON.stringify(rule));
+if (rule.lowOppBetter || !rule.head.includes("in a trade together") || !rule.head.includes("opposite sides while together") || !rule.together || !rule.tags.length || rule.tags.some((t) => t !== "long only")) fail("three changes", rule);
 await p.fill("#co_q", "9002"); await p.waitForTimeout(500);
 const f = await p.evaluate(() => ({ n: document.querySelectorAll("#co_body tr.pick").length, desk: document.querySelectorAll("#co_body .ondesk").length }));
 if (f.n !== 5 || f.desk !== 5) fail("search / desk mark", f);

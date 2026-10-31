@@ -101,9 +101,11 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 - **Combinations** (31 Oct 2026, Papa; admin sidebar tab, `comboPane`, `renderCombo` / `comboRun` / `comboEval`): pairs
   and threes of current passed lab strategies on the same asset and timeframe, different rules (best of each
   `familyKey` by consistency, top 150 families for pairs / 50 for threes, plus desk strategies' current results). Over
-  the period all members were tested: share of time on opposite sides while ≥ 2 are in a trade, each one's net / max
-  fall / net÷fall and the same together; "lessens the drawdown" = net÷fall together > every member alone (Papa's
-  choice). Filters: opposite sides ≥ 0/20/30/40/50%, only those that lessen, search; row opens charts (members + all
+  the period all members were tested: share of their market time spent in a trade together ("In a trade together"),
+  share of that on opposite sides, each one's net / max fall / net÷fall and the same together; "lessens the
+  drawdown" = opposite sides ≥ 20% (`COMBO_MIN_OPP`, 31 Oct, after Papa saw long-only pairs on the same side 100%
+  scoring better only because their trades fell at different times) AND net÷fall together > every member alone.
+  Long-only / short-only members are tagged. Filters: opposite sides ≥ 0/20/30/40/50%, only those that lessen, search; row opens charts (members + all
   together). Computed in the browser from `trades_long`, nothing stored. Trades closing at the same moment count as one
   step for falls (also fixed in Compare's `cmpStats`). Next with Papa: how opposite positions net in one Dhan account.
   Test: `tests/ui/ui_combo.mjs` (args: theme width).

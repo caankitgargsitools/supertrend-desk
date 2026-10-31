@@ -571,6 +571,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
   .cotbl thead th { font-size: 11.5px; color: var(--muted); text-align: right; white-space: nowrap; } .cotbl thead th:nth-child(2) { text-align: left; } .cotbl thead small { font-weight: 400; }
   .cotbl tr.pick { cursor: pointer; } .cotbl tr.pick:hover td { background: var(--panel-2); } .cotbl tr.sel td { background: var(--blue-soft); }
   .cotbl .cm { display: flex; align-items: baseline; gap: 2px; margin-bottom: 3px; } .cotbl .cm .t { font-weight: 600; } .cotbl .ondesk { color: var(--green); }
+  .cotbl .dirtag { font-size: 9.5px; padding: 2px 6px; margin-left: 4px; vertical-align: 1px; }
   .cotbl .al { white-space: nowrap; font-family: var(--font-data); font-size: 11.5px; }
   .oppbar { height: 4px; border-radius: 2px; background: var(--line); margin: 4px 0 2px auto; width: 70px; overflow: hidden; } .oppbar span { display: block; height: 100%; background: var(--blue); }
   .cotbl tr.codet > td { padding: 0 0 14px; background: transparent; } .cobox { border: 1px solid var(--line); border-radius: 0 0 12px 12px; padding: 12px 14px; background: var(--panel-2); }
@@ -1342,11 +1343,11 @@ details.xp > summary:hover { background: var(--blue-soft); }
 
     <section class="card" id="comboPane" hidden>
       <div class="head"><div><span class="label">Strategy Lab</span><h2>Combinations</h2></div></div>
-      <p class="hint" style="margin:6px 0 0">Pairs and threes of strategies that <b>passed the lab</b>, on the <b>same asset and the same timeframe</b>, built on <b>different rules</b> (twins and settings-only variants count as the same rules, so the best of each is used). For each combination: how often they sit on <b>opposite sides</b> while two or more are in a trade, each one's profit and biggest fall, and the same <b>together</b>. A combination <b>lessens the drawdown</b> when profit ÷ biggest fall together is better than every member alone. Figures from the lab's backtests (futures, 1 lot each, after charges), over the years all members were tested. In one Dhan account, opposite positions in the same contract net off: how that works in practice is still to be checked.</p>
+      <p class="hint" style="margin:6px 0 0">Pairs and threes of strategies that <b>passed the lab</b>, on the <b>same asset and the same timeframe</b>, built on <b>different rules</b> (twins and settings-only variants count as the same rules, so the best of each is used). For each combination: how often they sit on <b>opposite sides</b> while two or more are in a trade, each one's profit and biggest fall, and the same <b>together</b>. A combination <b>lessens the drawdown</b> when they are on opposite sides at least 20% of the time they are in a trade together <b>and</b> profit ÷ biggest fall together is better than every member alone. Figures from the lab's backtests (futures, 1 lot each, after charges), over the years all members were tested. In one Dhan account, opposite positions in the same contract net off: how that works in practice is still to be checked.</p>
       <div class="labbar" style="margin-top:12px">
         <label class="f"><span>Asset and timeframe</span><select id="co_group"></select></label>
         <div class="f"><span>Combine</span><div class="seg" id="co_size" role="group" aria-label="Combine"><button type="button" data-n="2" aria-pressed="true">Pairs</button><button type="button" data-n="3" aria-pressed="false">Threes</button></div></div>
-        <label class="f"><span>Opposite sides at least</span><select id="co_opp"><option value="0">Any</option><option value="20">20% of the time</option><option value="30">30% of the time</option><option value="40">40% of the time</option><option value="50">50% of the time</option></select></label>
+        <label class="f"><span>Opposite sides at least</span><select id="co_opp"><option value="0">Any (only those that lessen: 20% at least)</option><option value="20">20% of the time</option><option value="30">30% of the time</option><option value="40">40% of the time</option><option value="50">50% of the time</option></select></label>
         <label class="f"><span>Sort by</span><select id="co_sort"><option value="ratio">Profit ÷ fall together</option><option value="gain">Better by (vs best alone)</option><option value="opp">Opposite sides</option><option value="net">Profit together</option><option value="dd">Smallest fall together</option></select></label>
         <label class="f"><span>Find a strategy</span><input id="co_q" type="search" placeholder="name or Lab #" autocomplete="off"></label>
         <label class="showtr" style="align-self:end"><input type="checkbox" id="co_better" checked> Only those that lessen the drawdown</label>
@@ -6709,7 +6710,7 @@ function labShowDetail() {
  * every member alone. Worked out in the browser from the lab's stored trade lists (futures, 1 lot each, after charges);
  * nothing is written. */
 const combo = { groups: null, key: null, size: 2, minOpp: 30, onlyBetter: true, q: "", sort: "ratio", res: null, pool: null, sel: null, showN: 100, busy: false };
-const COMBO_MAX = { 2: 150, 3: 50 };
+const COMBO_MAX = { 2: 150, 3: 50 }, COMBO_MIN_OPP = 20;
 function comboTfName(tf) { return tf === "D" ? "Daily" : `${tf}-minute`; }
 async function comboGroups() {
   // Small columns only: the asset and timeframe of every current passed strategy.
@@ -6812,7 +6813,9 @@ function comboEval(ms) {
   }
   const yv = [...yrs.values()];
   return { ids: ms.map((m) => m.r.id), from, to, years: (to - from) / (365.25 * 86400000), opp: two ? (opp / two) * 100 : 0, together: two && anyIn ? (two / anyIn) * 100 : 0,
-    net: C, dd: DD, ratio, alone, bestAlone, better: ratio > bestAlone, gain: bestAlone > 0 && Number.isFinite(bestAlone) ? (ratio / bestAlone - 1) * 100 : null,
+    // Lessens the drawdown only when they really offset each other some of the time (Papa, 31 Oct): opposite sides at
+    // least COMBO_MIN_OPP% of the overlap, and a better profit ÷ fall than every member alone.
+    net: C, dd: DD, ratio, alone, bestAlone, better: ratio > bestAlone && (two ? (opp / two) * 100 : 0) >= COMBO_MIN_OPP, gain: bestAlone > 0 && Number.isFinite(bestAlone) ? (ratio / bestAlone - 1) * 100 : null,
     corr: cors.length ? cors.reduce((s, x) => s + x, 0) / cors.length : null, yOk: yv.filter((v) => v > 0).length, yN: yv.length };
 }
 async function comboRun() {
@@ -6857,14 +6860,16 @@ function comboTable() {
   rows.sort((a, b) => key(b) - key(a));
   const fin = (v) => Number.isFinite(v) ? `${v.toFixed(2)}×` : "∞";
   const pos = (v) => v > 0 ? "pos-num" : v < 0 ? "neg-num" : "";
-  const nm = (id, c) => { const m = P.byId.get(id), r = m && m.r; return `<div class="cm"><i class="sw c${c}"></i><span class="t">${esc(r ? r.label : "#" + id)}</span> <span class="hint sm">#${id}${r && r.desk ? ' · <b class="ondesk">✓ on my desk</b>' : ""}</span></div>`; };
+  const dirTag = (r) => { const d = r && r.config && r.config.direction; return d === "LONG_ONLY" ? ' <span class="chip dirtag" title="Only ever buys: it can never be on the opposite side of a strategy that buys">long only</span>' : d === "SHORT_ONLY" ? ' <span class="chip dirtag" title="Only ever sells">short only</span>' : ""; };
+  const nm = (id, c) => { const m = P.byId.get(id), r = m && m.r; return `<div class="cm"><i class="sw c${c}"></i><span class="t">${esc(r ? r.label : "#" + id)}</span>${dirTag(r)} <span class="hint sm">#${id}${r && r.desk ? ' · <b class="ondesk">✓ on my desk</b>' : ""}</span></div>`; };
   const better = rows0.filter((x) => x.opp >= combo.minOpp && x.better).length;
-  $("co_sum").innerHTML = `${P.passed} passed ${esc(labAssetName(P.asset))} ${esc(comboTfName(P.tf).toLowerCase())} strategies in ${P.families} rule famil${P.families === 1 ? "y" : "ies"}; the best of ${P.capped ? `the top ${COMBO_MAX[combo.size]} families` : "each family"}${P.used.some((r) => r.desk) ? " plus the ones on your desk" : ""} combined: ${P.checked.toLocaleString("en-IN")} ${combo.size === 2 ? "pairs" : "threes"} checked, <b>${better.toLocaleString("en-IN")}</b> on opposite sides at least ${combo.minOpp}% of the time <b>and</b> with a better profit ÷ fall than any of their members alone.`;
+  $("co_sum").innerHTML = `${P.passed} passed ${esc(labAssetName(P.asset))} ${esc(comboTfName(P.tf).toLowerCase())} strategies in ${P.families} rule famil${P.families === 1 ? "y" : "ies"}; the best of ${P.capped ? `the top ${COMBO_MAX[combo.size]} families` : "each family"}${P.used.some((r) => r.desk) ? " plus the ones on your desk" : ""} combined: ${P.checked.toLocaleString("en-IN")} ${combo.size === 2 ? "pairs" : "threes"} checked, <b>${better.toLocaleString("en-IN")}</b> lessen the drawdown: on opposite sides at least ${Math.max(combo.minOpp, COMBO_MIN_OPP)}% of the time they are in a trade together <b>and</b> a better profit ÷ fall than any of their members alone. “Opposite sides” counts only the time two or more are in a trade at once; see “In a trade together” for how much of the time that is. Strategies that only ever buy (long only) can never be opposite each other: if they score better together it is because their trades and falls came at different times, not because one protects the other.`;
   const shown = rows.slice(0, combo.showN);
   $("co_body").innerHTML = !rows.length ? '<p class="hint" style="margin-top:12px">None for these settings. Try a lower opposite-sides share, or switch off “only those that lessen the drawdown”.</p>' : `
-    <div class="scroll"><table class="cotbl"><thead><tr><th class="n">#</th><th>Strategies</th><th class="n" title="Of the time two or more were in a trade, the share with at least one long and one short">Opposite sides</th>
+    <div class="scroll"><table class="cotbl"><thead><tr><th class="n">#</th><th>Strategies</th><th class="n" title="Of the time any of them was in a trade, the share when ${combo.size === 2 ? "both were" : "two or more were"} in a trade at once">In a trade<br><small>together</small></th><th class="n" title="Of the time two or more were in a trade at once, the share with at least one long and one short">Opposite sides<br><small>while together</small></th>
       <th class="n">Together<br><small>profit · biggest fall</small></th><th class="n">Profit ÷ fall<br><small>together</small></th><th class="n">Alone<br><small>profit · fall · profit ÷ fall</small></th><th class="n" title="How much better profit ÷ fall is together than the best member alone">Better by</th><th class="n" title="Correlation of monthly profit: 1 = same months good and bad, 0 = unrelated, −1 = opposite">Months alike</th><th class="n">Years +<br><small>together</small></th></tr></thead>
     <tbody>${shown.map((x, i) => `<tr class="pick${combo.sel === x ? " sel" : ""}" data-i="${i}"><td class="n">${i + 1}</td><td>${x.ids.map((id, j) => nm(id, j + 1)).join("")}<div class="hint sm">${x.years.toFixed(1)} years together · ${esc(new Date(x.from + 19800000).toISOString().slice(0, 7))} to ${esc(new Date(x.to + 19800000).toISOString().slice(0, 7))}</div></td>
+      <td class="n"><b>${Math.round(x.together)}%</b><div class="hint sm">of their time in the market</div></td>
       <td class="n"><b>${Math.round(x.opp)}%</b><div class="oppbar"><span style="width:${Math.min(100, x.opp)}%"></span></div><div class="hint sm">same side ${Math.round(100 - x.opp)}%</div></td>
       <td class="n"><span class="${pos(x.net)}">${rupees(x.net)}</span><div class="neg-num">−${rupees(x.dd)}</div></td>
       <td class="n"><b>${fin(x.ratio)}</b></td>
@@ -6882,7 +6887,7 @@ function comboDetail(x) {
   const tr = $("co_body").querySelector(`tr.pick[data-i="${combo.view.indexOf(x)}"]`); if (!tr) return;
   const P = combo.pool, ms = x.ids.map((id) => P.byId.get(id));
   const d = document.createElement("tr"); d.className = "codet";
-  d.innerHTML = `<td colspan="9"><div class="cobox">
+  d.innerHTML = `<td colspan="10"><div class="cobox">
     <div class="sh"><h3>Profit over time</h3><span class="hint">Each strategy alone and all together (dark line), 1 lot each, over the ${x.years.toFixed(1)} years they were all tested.</span>
       <span class="actions" style="margin-left:auto"><button class="btn small" type="button" id="co_cmp">⇄ Open in Compare</button>${x.ids.map((id) => `<button class="btn small" type="button" data-open="${id}">Lab #${id}</button>`).join("")}</span></div>
     <div class="legend">${x.ids.map((id, j) => `<span><i class="sw c${j + 1}"></i>${esc(P.byId.get(id).r.label.slice(0, 60))}</span>`).join("")}<span><i class="sw cT"></i>All together</span></div>
