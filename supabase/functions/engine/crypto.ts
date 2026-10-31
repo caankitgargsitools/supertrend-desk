@@ -259,11 +259,12 @@ export async function deltaOrderChecked(sb: SupabaseClient, userId: string, o: {
   }
   return st;
 }
-/** A stop-loss market order resting at Delta (reduce-only, so it can only close the position). */
-export async function deltaStop(sb: SupabaseClient, userId: string, o: { symbol: string; size: number; side: "buy" | "sell"; stop: number }): Promise<string> {
+/** A stop-loss market order resting at Delta: reduce-only (it can only close the position), unless another strategy of
+ *  the account holds the same coin (then the account's net position isn't this strategy's alone, and it is a plain one). */
+export async function deltaStop(sb: SupabaseClient, userId: string, o: { symbol: string; size: number; side: "buy" | "sell"; stop: number; reduceOnly?: boolean }): Promise<string> {
   const a = CRYPTO[o.symbol];
   const body: Record<string, unknown> = { product_symbol: o.symbol, size: Math.trunc(o.size), side: o.side, order_type: "market_order", stop_order_type: "stop_loss_order",
-    stop_price: String(o.stop), reduce_only: true };
+    stop_price: String(o.stop), reduce_only: o.reduceOnly !== false };
   if (a?.product_id) body.product_id = a.product_id;
   const r = (await deltaPrivate(sb, userId, "POST", "/v2/orders", "", body))?.result;
   if (!r?.id) throw new Error("Delta didn't return an id for the stop order.");

@@ -117,6 +117,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   re-reads each order's state before acting (a matched one is skipped). Reconcile already compares per-contract nets.
   Still to check in the supervised test (Gold Mini pair): margin Dhan blocks for each strategy's broker stop order
   while the account is net flat. Tests: `tests/sim/sim.test.mjs` "pair:" cases.
+  Delta (same day): one net position per coin too. When another live strategy of the account holds the coin, an exit
+  goes as a plain market order for this strategy's own part (after subtracting the others; refused if nothing of it is
+  there), and its stop at Delta is plain instead of reduce-only (`pos_broker.stopRO`; re-placed when that changes).
+  Market orders don't rest, so no matching inside the desk is needed on Delta. Tests: "delta pair:" cases.
   Test: `tests/ui/ui_combo.mjs` (args: theme width).
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags

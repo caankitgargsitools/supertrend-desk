@@ -305,6 +305,53 @@ await t("delta partial fill → reported as failed (strategy gets paused by the 
   delta.partial = false;
 });
 
+// Two live crypto strategies on the same coin, one long and one short (31 Oct 2026): Delta holds the net.
+db.algo_strategies.push({ ...C(), id: "c2", name: "BTC pair B", position: "FLAT", pos_broker: null, pos_risk: null });
+const C2 = () => db.algo_strategies.find((x) => x.id === "c2");
+const bleg = (n) => ({ broker: "DELTA", symbol: "BTCUSD", side: "B", qty: n, reduce_only: false }), sleg = (n, ro = false) => ({ broker: "DELTA", symbol: "BTCUSD", side: "S", qty: n, reduce_only: ro });
+await t("delta pair: stops are plain (not reduce-only) while the other strategy holds the coin", async () => {
+  Object.assign(C(), { position: "FLAT", pos_broker: null, pos_risk: null, exec_state: null });
+  await E.sendDelta(C(), dset, "ENTRY", [bleg(1)], "A buys", { c: 64000 });
+  Object.assign(C(), { position: "LONG", pos_qty: 1, pos_risk: { basis: "UNDERLYING", dir: 1, stop: 63360, tgt: null, trail: null, best: 64000, scanFrom: 0 } });
+  await E.syncStop(C(), dset);
+  const s1 = String(C().pos_broker.stopId); assert.equal(delta.orders.get(s1).reduce_only, true, "alone: reduce-only");
+  await E.sendDelta(C2(), dset, "ENTRY", [sleg(1)], "B sells", { c: 64000 });
+  Object.assign(C2(), { position: "SHORT", pos_qty: 1, pos_risk: { basis: "UNDERLYING", dir: -1, stop: 64640, tgt: null, trail: null, best: 64000, scanFrom: 0 } });
+  await E.syncStop(C2(), dset);
+  assert.equal(delta.orders.get(String(C2().pos_broker.stopId)).reduce_only, false, "B's stop is plain");
+  await E.syncStop(C(), dset);
+  assert.equal(delta.orders.get(s1).state, "cancelled", "A's reduce-only stop replaced");
+  const s1b = String(C().pos_broker.stopId); assert.notEqual(s1b, s1); assert.equal(delta.orders.get(s1b).reduce_only, false);
+});
+await t("delta pair: A exits while Delta's net is 0 → plain sell for A's own part, not refused", async () => {
+  const size = Math.abs(C().pos_broker.legs[0].qty);
+  delta.positions = [{ product_symbol: "BTCUSD", size: 0 }];
+  const n0 = delta.next;
+  assert.equal(await E.sendDelta(C(), dset, "EXIT", [sleg(1, true)], "A sells to close", { c: 64100 }), true);
+  const ex = [...delta.orders.values()].find((o) => o.id >= n0 && !o.stop_order_type);
+  assert.ok(ex, "exit sent"); assert.equal(ex.side, "sell"); assert.equal(ex.reduce_only, undefined); assert.equal(ex.size, size);
+  assert.equal(C().pos_broker, null);
+  Object.assign(C(), { position: "FLAT", pos_risk: null });
+});
+await t("delta pair: exit refused when Delta holds nothing of this strategy after the other's part", async () => {
+  Object.assign(C(), { position: "LONG", pos_broker: { broker: "DELTA", symbol: "BTCUSD", legs: [{ sec: "BTCUSD", seg: "DELTA", qty: 1 }], tick: 0.5, step: 1, option: false, offset: 0, fill: 64000 } });
+  delta.positions = [{ product_symbol: "BTCUSD", size: -1 }]; // only B's short is there
+  const n0 = delta.next, k0 = db.notifications.length;
+  await E.sendDelta(C(), dset, "EXIT", [sleg(1, true)], "A sells", { c: 64100 });
+  assert.ok(![...delta.orders.values()].some((o) => o.id >= n0 && !o.stop_order_type), "no exit order");
+  assert.ok(db.notifications.slice(k0).some((n) => /Exit not sent/.test(n.title)));
+  Object.assign(C(), { position: "FLAT", pos_broker: null, pos_risk: null });
+});
+await t("delta pair: alone again → the exit stays reduce-only", async () => {
+  Object.assign(C2(), { position: "FLAT", pos_broker: null });
+  Object.assign(C(), { position: "LONG", pos_broker: { broker: "DELTA", symbol: "BTCUSD", legs: [{ sec: "BTCUSD", seg: "DELTA", qty: 1 }], tick: 0.5, step: 1, option: false, offset: 0, fill: 64000 } });
+  const n0 = delta.next;
+  await E.sendDelta(C(), dset, "EXIT", [sleg(1, true)], "A sells", { c: 64100 });
+  const ex = [...delta.orders.values()].find((o) => o.id >= n0 && !o.stop_order_type);
+  assert.equal(ex.reduce_only, true);
+  Object.assign(C(), { position: "FLAT", pos_broker: null, pos_risk: null });
+});
+
 await t("supervised live test: 1 lot NATGASMINI, worked, filled, stop placed in the same run, closed", async () => {
   db.mcx_contracts = [{ sec_id: "460001", underlying: "NATGASMINI", display: "NATGASMINI NOV FUT", expiry: "2026-10-27", lot: 1, tick: 0.1, synced_at: iso() }];
   const tplm = tpl;

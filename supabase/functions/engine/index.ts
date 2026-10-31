@@ -568,10 +568,31 @@ async function sendDelta(s: Strategy, set: Settings, event: string, legs: Record
       }
       status = "SENT";
       let opened: PosBroker | null = null;
+      // Delta holds one net position per coin: when another live strategy of the account holds the same coin (one long,
+      // one short), a reduce-only exit would be refused (there may be nothing to reduce). Then the exit goes as a plain
+      // order for this strategy's own part, after checking that part is really there (31 Oct 2026).
+      const others = payload.orders.some((o) => o.reduce_only) ? await othersHolding(s) : new Map<string, number>();
+      let held: Map<string, number> | null | undefined;
       for (const o of payload.orders) {
         if (o.reduce_only && stopClosed) continue;
+        let reduceOnly = o.reduce_only;
+        if (o.reduce_only) {
+          const key = brokerKey("DELTA", String(o.symbol)), theirs = others.get(key) ?? 0;
+          if (theirs) {
+            if (held === undefined) held = await deltaPositions(sb, set.user_id).catch(() => null);
+            // A coin Delta doesn't list is a net of 0; positions that couldn't be read count as this strategy's own.
+            const want = o.side === "sell" ? 1 : -1, mine = held ? (held.get(key) ?? 0) - theirs : want * Number(o.size);
+            if (held && Math.sign(mine) !== want) {
+              out.push(`${o.side} ${o.size} ${o.symbol}: not sent, Delta's net ${held.get(key) ?? 0} less ${theirs} held by your other strategies leaves no ${want === 1 ? "long" : "short"} of this strategy`);
+              await alert(s, "Exit not sent", `${o.symbol}: Delta's position after your other strategies' holdings shows nothing of this strategy to close. The desk is now flat; check your Delta positions.`);
+              continue;
+            }
+            if (held && Math.abs(mine) < Number(o.size)) o.size = Math.abs(mine);
+            reduceOnly = false;
+          }
+        }
         try {
-          const st = await deltaOrderChecked(sb, set.user_id, { symbol: String(o.symbol), size: Number(o.size), side: o.side as "buy" | "sell", reduceOnly: o.reduce_only });
+          const st = await deltaOrderChecked(sb, set.user_id, { symbol: String(o.symbol), size: Number(o.size), side: o.side as "buy" | "sell", reduceOnly });
           const filled = st.size - st.unfilled;
           out.push(`${o.side} ${o.size} ${o.symbol}: order ${st.id || "?"} ${st.state}${st.avg ? ` filled at ${st.avg}` : ""}${st.unfilled ? `, ${st.unfilled} unfilled` : ""}`);
           if (o.reduce_only) deltaFill.exit = st.avg ?? deltaFill.exit;
@@ -1724,7 +1745,7 @@ async function liveTest(id: string) {
 type LiveRow = Record<string, any>;
 type BrokerLeg = { sec: string; seg: string; qty: number; product?: string };
 type PosBroker = { broker: "DHAN" | "DELTA"; legs: BrokerLeg[]; tick: number; step: number; option: boolean; offset: number; fill: number | null;
-  stopId?: string | null; stopTrig?: number | null; stopRow?: number | null; stopErrAt?: string | null; symbol?: string };
+  stopId?: string | null; stopTrig?: number | null; stopRow?: number | null; stopErrAt?: string | null; symbol?: string; stopRO?: boolean };
 const EXIT_EVENTS = new Set(["EXIT", "STOP_LOSS", "TRAIL_STOP", "TARGET", "SQUARE_OFF", "FLATTEN"]);
 const nowIso = () => new Date().toISOString();
 /** Crypto fills of the order just sent (for the ledger). */
@@ -2099,6 +2120,19 @@ async function syncStop(s: Strategy, set: Settings): Promise<Strategy> {
   if (pb.stopErrAt && Date.now() - Date.parse(pb.stopErrAt) < 10 * 60000) return s;
   const w = wantedStop(s, pb);
   if (!w) return s;
+  // Delta: a reduce-only stop can't work while another strategy of the account holds the same coin (the net position
+  // may be nothing, or the other way): then the stop is a plain one, and it is re-placed whenever that changes.
+  let ro = true;
+  if (pb.broker === "DELTA") {
+    const sym0 = String(pb.symbol ?? pb.legs[0]?.sec);
+    ro = !((await othersHolding(s)).get(brokerKey("DELTA", sym0)) ?? 0);
+    if (pb.stopId && (pb.stopRO ?? true) !== ro) {
+      await deltaCancel(sb, set.user_id, sym0, pb.stopId).catch(() => {});
+      await sb.from("live_orders").update({ state: "cancelled", done_at: nowIso(), note: ro ? "replaced by a reduce-only stop (no other strategy holds this coin now)" : "replaced by a plain stop (another strategy holds this coin)" })
+        .eq("broker_order_id", pb.stopId).eq("state", "resting");
+      pb.stopId = null; pb.stopTrig = null;
+    }
+  }
   if (pb.stopId && pb.stopTrig != null && (w.long ? w.trig <= pb.stopTrig : w.trig >= pb.stopTrig)) return s; // not tighter
   const leg = pb.legs[0], side: Side = w.long ? "SELL" : "BUY", qty = Math.abs(leg.qty);
   const next: PosBroker = { ...pb, stopErrAt: null };
@@ -2106,7 +2140,7 @@ async function syncStop(s: Strategy, set: Settings): Promise<Strategy> {
     if (pb.broker === "DELTA") {
       const sym = String(pb.symbol ?? leg.sec);
       if (pb.stopId) await deltaStopMove(sb, set.user_id, sym, pb.stopId, w.trig);
-      else next.stopId = await deltaStop(sb, set.user_id, { symbol: sym, size: qty, side: side === "BUY" ? "buy" : "sell", stop: w.trig });
+      else { next.stopId = await deltaStop(sb, set.user_id, { symbol: sym, size: qty, side: side === "BUY" ? "buy" : "sell", stop: w.trig, reduceOnly: ro }); next.stopRO = ro; }
     } else {
       const c = credsOf(set);
       if (pb.stopId) await dhanModify(c, pb.stopId, { type: "STOP_LOSS", qty, price: w.limit, trigger: w.trig });
