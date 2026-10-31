@@ -98,6 +98,15 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   phone) instead of below the whole table; `labPlaceDetail` / `labParkDetail` move the one panel, `labShowDetail` scrolls
   only enough to show it. The lab table's CSS is scoped to its own rows (`.lab-table > tbody > tr > td`, `> thead`) so
   it doesn't leak into the tables inside the panel.
+- **Combinations** (31 Oct 2026, Papa; admin sidebar tab, `comboPane`, `renderCombo` / `comboRun` / `comboEval`): pairs
+  and threes of current passed lab strategies on the same asset and timeframe, different rules (best of each
+  `familyKey` by consistency, top 150 families for pairs / 50 for threes, plus desk strategies' current results). Over
+  the period all members were tested: share of time on opposite sides while ≥ 2 are in a trade, each one's net / max
+  fall / net÷fall and the same together; "lessens the drawdown" = net÷fall together > every member alone (Papa's
+  choice). Filters: opposite sides ≥ 0/20/30/40/50%, only those that lessen, search; row opens charts (members + all
+  together). Computed in the browser from `trades_long`, nothing stored. Trades closing at the same moment count as one
+  step for falls (also fixed in Compare's `cmpStats`). Next with Papa: how opposite positions net in one Dhan account.
+  Test: `tests/ui/ui_combo.mjs` (args: theme width).
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

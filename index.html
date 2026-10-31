@@ -565,6 +565,17 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
   .cmprules .cr { border: 1px solid var(--line); border-left: 4px solid var(--cc); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); }
   .cmprules .top { display: flex; align-items: center; margin-bottom: 6px; } .cmprules dl { margin: 0; font-size: 12.5px; } .cmprules dt { color: var(--muted); font-size: 11px; margin-top: 6px; } .cmprules dd { margin: 0; }
   #cmp_per { display: inline-flex; }
+  /* Combinations: the "all together" line is the ink colour, the members keep slots 1–3. */
+  .cT { --cc: var(--ink); }
+  .cotbl { width: 100%; border-collapse: collapse; font-size: 12.5px; } .cotbl th, .cotbl td { padding: 8px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .cotbl thead th { font-size: 11.5px; color: var(--muted); text-align: right; white-space: nowrap; } .cotbl thead th:nth-child(2) { text-align: left; } .cotbl thead small { font-weight: 400; }
+  .cotbl tr.pick { cursor: pointer; } .cotbl tr.pick:hover td { background: var(--panel-2); } .cotbl tr.sel td { background: var(--blue-soft); }
+  .cotbl .cm { display: flex; align-items: baseline; gap: 2px; margin-bottom: 3px; } .cotbl .cm .t { font-weight: 600; } .cotbl .ondesk { color: var(--green); }
+  .cotbl .al { white-space: nowrap; font-family: var(--font-data); font-size: 11.5px; }
+  .oppbar { height: 4px; border-radius: 2px; background: var(--line); margin: 4px 0 2px auto; width: 70px; overflow: hidden; } .oppbar span { display: block; height: 100%; background: var(--blue); }
+  .cotbl tr.codet > td { padding: 0 0 14px; background: transparent; } .cobox { border: 1px solid var(--line); border-radius: 0 0 12px 12px; padding: 12px 14px; background: var(--panel-2); }
+  .cobox .sh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 6px; } .cobox h3 { margin: 0; font-size: 14.5px; }
+  .cobox .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; margin-bottom: 4px; } .cobox .legend span { display: inline-flex; align-items: center; }
   .ldkpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 4px 0 10px; }
   .ldkpis > div { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); min-width: 0; }
   .ldkpis span { display: block; color: var(--muted); font-size: 11.5px; } .ldkpis b { display: block; font: 700 18px var(--font-data); } .ldkpis small { display: block; color: var(--muted); font-size: 11.5px; }
@@ -752,6 +763,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
     <button class="btn small" id="nav_strats" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-5 4 4 8-8"/><path d="M15 8h5v5"/></svg><span>Strategies</span></button>
     <button class="btn small" id="openLab" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/><path d="M7.5 15h9"/></svg><span>Strategy Lab</span></button>
     <button class="btn small" id="nav_cmp" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Compare</span><b class="navbadge" id="nav_cmp_n" hidden></b></button>
+    <button class="btn small" id="nav_combo" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/></svg><span>Combinations</span></button>
     <button class="btn small" id="nav_ideas" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg><span>Ideas Lab</span></button>
     <button class="btn small" id="nav_pred" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l4-4 3 3 5-6"/><path d="M15 10l2-2 4 0" stroke-dasharray="2 2"/><circle cx="19" cy="6" r="2"/></svg><span>Prediction Lab</span></button>
     <button class="btn small" id="nav_market" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16l-1.5 11a2 2 0 0 1-2 1.7H7.5a2 2 0 0 1-2-1.7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg><span>Marketplace</span></button>
@@ -1326,6 +1338,21 @@ details.xp > summary:hover { background: var(--blue-soft); }
       <div class="scroll lp-desk"><table class="big-table"><thead id="lp_head"></thead><tbody id="lp_body"></tbody><tfoot id="lp_tfoot"></tfoot></table></div>
       <p class="hint" id="lp_foot" style="margin:8px 0 0"></p>
       </div>
+    </section>
+
+    <section class="card" id="comboPane" hidden>
+      <div class="head"><div><span class="label">Strategy Lab</span><h2>Combinations</h2></div></div>
+      <p class="hint" style="margin:6px 0 0">Pairs and threes of strategies that <b>passed the lab</b>, on the <b>same asset and the same timeframe</b>, built on <b>different rules</b> (twins and settings-only variants count as the same rules, so the best of each is used). For each combination: how often they sit on <b>opposite sides</b> while two or more are in a trade, each one's profit and biggest fall, and the same <b>together</b>. A combination <b>lessens the drawdown</b> when profit ÷ biggest fall together is better than every member alone. Figures from the lab's backtests (futures, 1 lot each, after charges), over the years all members were tested. In one Dhan account, opposite positions in the same contract net off: how that works in practice is still to be checked.</p>
+      <div class="labbar" style="margin-top:12px">
+        <label class="f"><span>Asset and timeframe</span><select id="co_group"></select></label>
+        <div class="f"><span>Combine</span><div class="seg" id="co_size" role="group" aria-label="Combine"><button type="button" data-n="2" aria-pressed="true">Pairs</button><button type="button" data-n="3" aria-pressed="false">Threes</button></div></div>
+        <label class="f"><span>Opposite sides at least</span><select id="co_opp"><option value="0">Any</option><option value="20">20% of the time</option><option value="30">30% of the time</option><option value="40">40% of the time</option><option value="50">50% of the time</option></select></label>
+        <label class="f"><span>Sort by</span><select id="co_sort"><option value="ratio">Profit ÷ fall together</option><option value="gain">Better by (vs best alone)</option><option value="opp">Opposite sides</option><option value="net">Profit together</option><option value="dd">Smallest fall together</option></select></label>
+        <label class="f"><span>Find a strategy</span><input id="co_q" type="search" placeholder="name or Lab #" autocomplete="off"></label>
+        <label class="showtr" style="align-self:end"><input type="checkbox" id="co_better" checked> Only those that lessen the drawdown</label>
+      </div>
+      <p class="hint" id="co_sum" style="margin:10px 0 0"></p>
+      <div id="co_body" style="margin-top:8px"></div>
     </section>
 
     <section class="card" id="ideasPane" hidden>
@@ -5425,7 +5452,7 @@ const isAdmin = () => !!me && me.role === "admin";
 const myStrats = () => state.strategies.filter((x) => me && x.owner_id === me.user_id && !x.is_master);
 function instName(s) { return s.trade_type === "OPTIONS" ? (s.option_side === "SELL" ? "Option writing" : "Option buying") : "Futures"; }
 function assetLabel(k) { return (PRESETS[k] && PRESETS[k].name) || k || "–"; }
-const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane", "ideasPane", "predPane", "cmpPane"];
+const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane", "ideasPane", "predPane", "cmpPane", "comboPane"];
 function hideNewPanes() { NEW_PANES.forEach((id) => $(id).hidden = true); }
 function markNav(id) { document.querySelectorAll("#nav .btn").forEach((b) => b.id === id ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")); }
 /** One page at a time: list, strat, market, wallet, admin, conn, cap, lab, terms. */
@@ -5436,7 +5463,7 @@ function showPage(name) {
   page = name;
   hideNewPanes();
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true;
-  const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab", ideas: "nav_ideas", pred: "nav_pred", cmp: "nav_cmp" }[name];
+  const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab", ideas: "nav_ideas", pred: "nav_pred", cmp: "nav_cmp", combo: "nav_combo" }[name];
   if (name !== "ideas") stopIdeasPoll();
   if (name !== "pred") stopPredPoll();
   markNav(navId);
@@ -5449,6 +5476,7 @@ function showPage(name) {
   else if (name === "ideas") { $("ideasPane").hidden = false; withLoading($("ideasPane"), renderIdeas(true)).catch((e) => toast(errorText(e))); startIdeasPoll(); }
   else if (name === "pred") { $("predPane").hidden = false; withLoading($("predPane"), renderPred()).catch((e) => toast(errorText(e))); startPredPoll(); }
   else if (name === "pass") { $("passPane").hidden = false; $("np_msg").textContent = ""; }
+  else if (name === "combo") { $("comboPane").hidden = false; withLoading($("comboPane"), renderCombo()).catch((e) => toast(errorText(e))); }
   else if (name === "cmp") { $("cmpPane").hidden = false; cmpCache.clear(); withLoading($("cmpPane"), renderCmp()).catch((e) => toast(errorText(e))); }
   else if (name === "cap") openCap();
   else if (name === "lab") openLab();
@@ -6380,8 +6408,10 @@ async function cmpLoad(x) {
 function cmpStats(tr) {
   let cum = 0, peak = 0, dd = 0, gp = 0, gl = 0, wins = 0, run = 0, streak = 0, best = null, worst = null;
   const yrs = new Map(), mons = new Map();
-  for (const x of tr) {
-    cum += x.net; peak = Math.max(peak, cum); dd = Math.max(dd, peak - cum);
+  for (let i = 0; i < tr.length; i++) {
+    const x = tr[i];
+    // Trades closing at the same moment (several strategies together) count as one step.
+    cum += x.net; if (!(tr[i + 1] && tr[i + 1].t === x.t)) { peak = Math.max(peak, cum); dd = Math.max(dd, peak - cum); }
     if (x.net > 0) { gp += x.net; wins++; run = 0; } else { gl -= x.net; run++; streak = Math.max(streak, run); }
     best = best == null ? x.net : Math.max(best, x.net); worst = worst == null ? x.net : Math.min(worst, x.net);
     const d = cmpIst(x.t); yrs.set(d.slice(0, 4), (yrs.get(d.slice(0, 4)) || 0) + x.net); mons.set(d.slice(0, 7), (mons.get(d.slice(0, 7)) || 0) + x.net);
@@ -6671,6 +6701,218 @@ function labShowDetail() {
   if (want > 0) window.scrollBy({ top: want, behavior: "smooth" });
   else if (rr.top < top) window.scrollBy({ top: rr.top - top - 60, behavior: "smooth" });
 }
+/* ---------- Combinations (31 Oct 2026, Papa) ----------
+ * Pairs and threes of lab strategies that passed, on the same asset and the same timeframe, built on different rules
+ * (one per rule family: twins and settings-only variants count as the same rules), judged together over the period all
+ * members were tested: how often they sit on opposite sides when both (or more) are in a trade, each one's profit and
+ * biggest fall, and the same together. A combination "lessens the drawdown" when profit ÷ biggest fall together beats
+ * every member alone. Worked out in the browser from the lab's stored trade lists (futures, 1 lot each, after charges);
+ * nothing is written. */
+const combo = { groups: null, key: null, size: 2, minOpp: 30, onlyBetter: true, q: "", sort: "ratio", res: null, pool: null, sel: null, showN: 100, busy: false };
+const COMBO_MAX = { 2: 150, 3: 50 };
+function comboTfName(tf) { return tf === "D" ? "Daily" : `${tf}-minute`; }
+async function comboGroups() {
+  // Small columns only: the asset and timeframe of every current passed strategy.
+  const rows = [];
+  for (let from = 0; from < 20000; from += 1000) {
+    const page = must(await db.from("lab_results").select("id, asset, tf:config->timeframe_min, daily:config->rules->daily").eq("passed", true).is("superseded_by", null).eq("robust_status", "done").order("id").range(from, from + 999));
+    rows.push(...page); if (page.length < 1000) break;
+  }
+  const m = new Map();
+  for (const r of rows) { const k = `${r.asset}|${r.daily ? "D" : r.tf}`; m.set(k, (m.get(k) || 0) + 1); }
+  return [...m].map(([k, n]) => ({ k, asset: k.split("|")[0], tf: k.split("|")[1], n })).filter((g) => g.n >= 2).sort((a, b) => b.n - a.n);
+}
+async function renderCombo() {
+  if (!combo.groups) combo.groups = await comboGroups();
+  const gs = combo.groups;
+  if (!combo.key || !gs.some((g) => g.k === combo.key)) combo.key = (gs.find((g) => g.k === "GOLD|D") || gs[0] || {}).k || null;
+  $("co_group").innerHTML = gs.map((g) => `<option value="${esc(g.k)}"${g.k === combo.key ? " selected" : ""}>${esc(labAssetName(g.asset))} · ${esc(comboTfName(g.tf))} (${g.n} passed)</option>`).join("");
+  $("co_size").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.n) === combo.size)));
+  $("co_opp").value = String(combo.minOpp); $("co_better").checked = combo.onlyBetter; $("co_sort").value = combo.sort;
+  if (!gs.length) { $("co_body").innerHTML = '<p class="hint">No asset has two or more passed strategies on the same timeframe yet.</p>'; return; }
+  if (!combo.res || combo.res.key !== `${combo.key}|${combo.size}`) await comboRun();
+  else comboTable();
+}
+/** The strategies to combine: the best of each rule family (by consistency), plus any on the desk. */
+async function comboPool(key) {
+  const [asset, tf] = key.split("|");
+  const rows = [];
+  for (let from = 0; from < 5000; from += 500) {
+    const page = must(await db.from("lab_results").select("id, label, asset, twin_of, fingerprint, config, cons:robust_list->consistency->score").eq("passed", true).is("superseded_by", null).eq("robust_status", "done").eq("asset", asset).order("id").range(from, from + 499));
+    rows.push(...page.filter((r) => labTfKey(r) === tf)); if (page.length < 500) break;
+  }
+  // Desk strategies come from older lab ids; their current result shares the fingerprint.
+  const deskIds = [...new Set(state.strategies.filter((s) => s.lab_id && !s.archived).map((s) => Number(s.lab_id)))];
+  const deskFp = new Set();
+  for (let i = 0; i < deskIds.length; i += 150) for (const r of (await db.from("lab_results").select("fingerprint").in("id", deskIds.slice(i, i + 150)).then((x) => x.data).catch(() => null)) || []) deskFp.add(r.fingerprint);
+  const fam = new Map();
+  for (const r of rows) { r.desk = deskFp.has(r.fingerprint); const k = familyKey(r); if (!fam.has(k)) fam.set(k, []); fam.get(k).push(r); }
+  const best = [...fam.values()].map((xs) => xs.sort((a, b) => (Number(b.cons) || 0) - (Number(a.cons) || 0))[0]).sort((a, b) => (Number(b.cons) || 0) - (Number(a.cons) || 0));
+  const cap = COMBO_MAX[combo.size];
+  const pick = best.slice(0, cap);
+  for (const r of rows) if (r.desk && !pick.includes(r)) pick.push(r);
+  for (const r of pick) r.fam = familyKey(r);
+  return { asset, tf, passed: rows.length, families: fam.size, used: pick, capped: best.length > cap };
+}
+/** One strategy's trades as sorted arrays: exits and nets, and its time in a trade as [start, end) segments with a side. */
+function comboPrep(r, tl) {
+  const tr = unpackLong(tl).map((t) => ({ s: cmpTime(t.entry), e: cmpTime(t.exit), d: t.side === "SHORT" ? -1 : 1, n: Number(t.net) || 0 })).filter((t) => t.s && t.e && t.e >= t.s).sort((a, b) => a.s - b.s);
+  const B = [], D = [];
+  let last = -Infinity;
+  for (const t of tr) { const s = Math.max(t.s, last); if (t.e <= s) continue; B.push(s, t.e); D.push(t.d); last = t.e; }
+  const ex = tr.map((t) => [t.e, t.n]).sort((a, b) => a[0] - b[0]);
+  const mons = new Map(); for (const [t, n] of ex) { const m = cmpIst(t).slice(0, 7); mons.set(m, (mons.get(m) || 0) + n); }
+  return { r, B: Float64Array.from(B), D: Int8Array.from(D), exT: Float64Array.from(ex.map((x) => x[0])), exN: Float64Array.from(ex.map((x) => x[1])), first: ex.length ? tr[0].s : null, last: ex.length ? ex[ex.length - 1][0] : null, mons };
+}
+/** Everything about one combination, over the period all its members were tested. */
+function comboEval(ms) {
+  const from = Math.max(...ms.map((m) => m.first)), to = Math.min(...ms.map((m) => m.last));
+  if (!(to - from > 180 * 86400000)) return null;
+  // Time on opposite sides, while two or more are in a trade.
+  const k = ms.length, p = new Int32Array(k);
+  for (let j = 0; j < k; j++) { const B = ms[j].B; let a = 0; while (a < B.length && B[a] <= from) a++; p[j] = a; }
+  let t = from, two = 0, opp = 0, anyIn = 0;
+  for (;;) {
+    let nt = Infinity;
+    for (let j = 0; j < k; j++) { const B = ms[j].B; if (p[j] < B.length && B[p[j]] < nt) nt = B[p[j]]; }
+    if (nt > to) nt = to;
+    let lo = 0, sh = 0;
+    for (let j = 0; j < k; j++) if (p[j] & 1) { if (ms[j].D[p[j] >> 1] > 0) lo++; else sh++; }
+    const dur = nt - t;
+    if (dur > 0) { if (lo + sh) anyIn += dur; if (lo + sh >= 2) { two += dur; if (lo && sh) opp += dur; } }
+    if (nt >= to) break;
+    for (let j = 0; j < k; j++) { const B = ms[j].B; while (p[j] < B.length && B[p[j]] <= nt) p[j]++; }
+    t = nt;
+  }
+  // Profit and biggest fall: each member alone and all together, closed trades in time order.
+  const q = new Int32Array(k), cum = new Float64Array(k), pk = new Float64Array(k), dd = new Float64Array(k), n = new Int32Array(k);
+  for (let j = 0; j < k; j++) { const T = ms[j].exT; let a = 0; while (a < T.length && T[a] < from) a++; q[j] = a; }
+  let C = 0, P = 0, DD = 0;
+  const yrs = new Map();
+  for (;;) {
+    let jb = -1, tb = Infinity;
+    for (let j = 0; j < k; j++) { const T = ms[j].exT; if (q[j] < T.length && T[q[j]] < tb) { tb = T[q[j]]; jb = j; } }
+    if (jb < 0 || tb > to) break;
+    const v = ms[jb].exN[q[jb]++];
+    cum[jb] += v; n[jb]++; if (cum[jb] > pk[jb]) pk[jb] = cum[jb]; if (pk[jb] - cum[jb] > dd[jb]) dd[jb] = pk[jb] - cum[jb];
+    C += v;
+    // Trades closing at the same moment count as one step (otherwise their order would invent a fall).
+    let more = false; for (let j = 0; j < k; j++) { const T = ms[j].exT; if (q[j] < T.length && T[q[j]] === tb) more = true; }
+    if (!more) { if (C > P) P = C; if (P - C > DD) DD = P - C; }
+    const y = cmpIst(tb).slice(0, 4); yrs.set(y, (yrs.get(y) || 0) + v);
+  }
+  const alone = ms.map((m, j) => ({ net: cum[j], dd: dd[j], n: n[j], ratio: dd[j] ? cum[j] / dd[j] : cum[j] > 0 ? Infinity : 0 }));
+  if (alone.some((a) => !a.n)) return null;
+  const ratio = DD ? C / DD : C > 0 ? Infinity : 0, bestAlone = Math.max(...alone.map((a) => a.ratio));
+  // How alike their months are (average of each pair's correlation).
+  const mFrom = cmpIst(from).slice(0, 7), mTo = cmpIst(to).slice(0, 7), cors = [];
+  for (let a = 0; a < k; a++) for (let b = a + 1; b < k; b++) {
+    const months = [...new Set([...ms[a].mons.keys(), ...ms[b].mons.keys()])].filter((m) => m >= mFrom && m <= mTo).sort();
+    const c = cmpCorr(ms[a].mons, ms[b].mons, months); if (c != null) cors.push(c);
+  }
+  const yv = [...yrs.values()];
+  return { ids: ms.map((m) => m.r.id), from, to, years: (to - from) / (365.25 * 86400000), opp: two ? (opp / two) * 100 : 0, together: two && anyIn ? (two / anyIn) * 100 : 0,
+    net: C, dd: DD, ratio, alone, bestAlone, better: ratio > bestAlone, gain: bestAlone > 0 && Number.isFinite(bestAlone) ? (ratio / bestAlone - 1) * 100 : null,
+    corr: cors.length ? cors.reduce((s, x) => s + x, 0) / cors.length : null, yOk: yv.filter((v) => v > 0).length, yN: yv.length };
+}
+async function comboRun() {
+  const key = combo.key, size = combo.size, started = Date.now();
+  combo.busy = true; combo.sel = null;
+  const body = $("co_body"), say = (frac, label) => { body.innerHTML = progressHTML(frac, started, label); };
+  try {
+    say(null, "Reading the passed strategies…");
+    const pool = await comboPool(key);
+    const ms = [];
+    for (let i = 0; i < pool.used.length; i += 20) {
+      say(i / pool.used.length * 0.4, `Reading trade lists (${i} of ${pool.used.length})…`);
+      const got = must(await db.from("lab_results").select("id, trades_long").in("id", pool.used.slice(i, i + 20).map((r) => r.id)));
+      const by = new Map(got.map((g) => [g.id, g.trades_long]));
+      for (const r of pool.used.slice(i, i + 20)) { const m = comboPrep(r, by.get(r.id)); if (m.exT.length >= 10) ms.push(m); }
+    }
+    if (key !== combo.key || size !== combo.size) return;
+    // Every pair (or three) of different rule families.
+    const sets = [];
+    for (let a = 0; a < ms.length; a++) for (let b = a + 1; b < ms.length; b++) {
+      if (ms[a].r.fam === ms[b].r.fam) continue;
+      if (size === 2) { sets.push([a, b]); continue; }
+      for (let c = b + 1; c < ms.length; c++) if (ms[c].r.fam !== ms[a].r.fam && ms[c].r.fam !== ms[b].r.fam) sets.push([a, b, c]);
+    }
+    const out = [];
+    for (let i = 0; i < sets.length; i++) {
+      const e = comboEval(sets[i].map((j) => ms[j])); if (e) out.push(e);
+      if (i % 400 === 399) { say(0.4 + (i / sets.length) * 0.6, `Checking ${size === 2 ? "pairs" : "threes"} (${(i + 1).toLocaleString("en-IN")} of ${sets.length.toLocaleString("en-IN")})…`); await new Promise((r) => setTimeout(r, 0)); if (key !== combo.key || size !== combo.size) return; }
+    }
+    combo.pool = { ...pool, ms, byId: new Map(ms.map((m) => [m.r.id, m])), checked: sets.length };
+    combo.res = { key: `${key}|${size}`, rows: out };
+    combo.showN = 100;
+    comboTable();
+  } finally { combo.busy = false; }
+}
+function comboTable() {
+  const P = combo.pool, rows0 = combo.res.rows, q = combo.q.trim().toLowerCase();
+  const name = (id) => { const m = P.byId.get(id); return m ? m.r.label : `#${id}`; };
+  let rows = rows0.filter((x) => x.opp >= combo.minOpp && (!combo.onlyBetter || x.better));
+  if (q) rows = rows.filter((x) => x.ids.some((id) => String(id).includes(q.replace(/^#/, "")) || name(id).toLowerCase().includes(q)));
+  const key = { ratio: (x) => x.ratio, gain: (x) => x.gain ?? -1e9, opp: (x) => x.opp, net: (x) => x.net, dd: (x) => -x.dd }[combo.sort];
+  rows.sort((a, b) => key(b) - key(a));
+  const fin = (v) => Number.isFinite(v) ? `${v.toFixed(2)}×` : "∞";
+  const pos = (v) => v > 0 ? "pos-num" : v < 0 ? "neg-num" : "";
+  const nm = (id, c) => { const m = P.byId.get(id), r = m && m.r; return `<div class="cm"><i class="sw c${c}"></i><span class="t">${esc(r ? r.label : "#" + id)}</span> <span class="hint sm">#${id}${r && r.desk ? ' · <b class="ondesk">✓ on my desk</b>' : ""}</span></div>`; };
+  const better = rows0.filter((x) => x.opp >= combo.minOpp && x.better).length;
+  $("co_sum").innerHTML = `${P.passed} passed ${esc(labAssetName(P.asset))} ${esc(comboTfName(P.tf).toLowerCase())} strategies in ${P.families} rule famil${P.families === 1 ? "y" : "ies"}; the best of ${P.capped ? `the top ${COMBO_MAX[combo.size]} families` : "each family"}${P.used.some((r) => r.desk) ? " plus the ones on your desk" : ""} combined: ${P.checked.toLocaleString("en-IN")} ${combo.size === 2 ? "pairs" : "threes"} checked, <b>${better.toLocaleString("en-IN")}</b> on opposite sides at least ${combo.minOpp}% of the time <b>and</b> with a better profit ÷ fall than any of their members alone.`;
+  const shown = rows.slice(0, combo.showN);
+  $("co_body").innerHTML = !rows.length ? '<p class="hint" style="margin-top:12px">None for these settings. Try a lower opposite-sides share, or switch off “only those that lessen the drawdown”.</p>' : `
+    <div class="scroll"><table class="cotbl"><thead><tr><th class="n">#</th><th>Strategies</th><th class="n" title="Of the time two or more were in a trade, the share with at least one long and one short">Opposite sides</th>
+      <th class="n">Together<br><small>profit · biggest fall</small></th><th class="n">Profit ÷ fall<br><small>together</small></th><th class="n">Alone<br><small>profit · fall · profit ÷ fall</small></th><th class="n" title="How much better profit ÷ fall is together than the best member alone">Better by</th><th class="n" title="Correlation of monthly profit: 1 = same months good and bad, 0 = unrelated, −1 = opposite">Months alike</th><th class="n">Years +<br><small>together</small></th></tr></thead>
+    <tbody>${shown.map((x, i) => `<tr class="pick${combo.sel === x ? " sel" : ""}" data-i="${i}"><td class="n">${i + 1}</td><td>${x.ids.map((id, j) => nm(id, j + 1)).join("")}<div class="hint sm">${x.years.toFixed(1)} years together · ${esc(new Date(x.from + 19800000).toISOString().slice(0, 7))} to ${esc(new Date(x.to + 19800000).toISOString().slice(0, 7))}</div></td>
+      <td class="n"><b>${Math.round(x.opp)}%</b><div class="oppbar"><span style="width:${Math.min(100, x.opp)}%"></span></div><div class="hint sm">same side ${Math.round(100 - x.opp)}%</div></td>
+      <td class="n"><span class="${pos(x.net)}">${rupees(x.net)}</span><div class="neg-num">−${rupees(x.dd)}</div></td>
+      <td class="n"><b>${fin(x.ratio)}</b></td>
+      <td class="n">${x.alone.map((a, j) => `<div class="al"><i class="sw c${j + 1}"></i><span class="${pos(a.net)}">${rupeesShort(a.net)}</span> · <span class="neg-num">−${rupeesShort(a.dd)}</span> · ${fin(a.ratio)}</div>`).join("")}</td>
+      <td class="n">${x.gain == null ? "–" : `<b class="${x.gain > 0 ? "pos-num" : "neg-num"}">${x.gain > 0 ? "+" : ""}${Math.round(x.gain)}%</b>`}</td>
+      <td class="n">${x.corr == null ? "–" : x.corr.toFixed(2)}</td><td class="n">${x.yOk}/${x.yN}</td></tr>`).join("")}</tbody></table></div>
+    ${rows.length > shown.length ? `<p style="margin:8px 0 0"><button class="btn small" id="co_more" type="button">Show more (${rows.length - shown.length} more)</button></p>` : ""}`;
+  combo.view = shown;
+  $("co_body").querySelectorAll("tr.pick").forEach((tr) => tr.addEventListener("click", () => { const x = combo.view[Number(tr.dataset.i)]; combo.sel = combo.sel === x ? null : x; comboTable(); }));
+  if ($("co_more")) $("co_more").addEventListener("click", () => { combo.showN += 100; comboTable(); });
+  if (combo.sel && shown.includes(combo.sel)) comboDetail(combo.sel);
+}
+/** Under the chosen row: the members and the combination on one chart, their falls, and profit per year. */
+function comboDetail(x) {
+  const tr = $("co_body").querySelector(`tr.pick[data-i="${combo.view.indexOf(x)}"]`); if (!tr) return;
+  const P = combo.pool, ms = x.ids.map((id) => P.byId.get(id));
+  const d = document.createElement("tr"); d.className = "codet";
+  d.innerHTML = `<td colspan="9"><div class="cobox">
+    <div class="sh"><h3>Profit over time</h3><span class="hint">Each strategy alone and all together (dark line), 1 lot each, over the ${x.years.toFixed(1)} years they were all tested.</span>
+      <span class="actions" style="margin-left:auto"><button class="btn small" type="button" id="co_cmp">⇄ Open in Compare</button>${x.ids.map((id) => `<button class="btn small" type="button" data-open="${id}">Lab #${id}</button>`).join("")}</span></div>
+    <div class="legend">${x.ids.map((id, j) => `<span><i class="sw c${j + 1}"></i>${esc(P.byId.get(id).r.label.slice(0, 60))}</span>`).join("")}<span><i class="sw cT"></i>All together</span></div>
+    <div id="co_eq" class="cmpchart"></div>
+    <div class="sh" style="margin-top:12px"><h3>Falls from the peak</h3><span class="hint">Together (dark) against each alone: where the dark area is shallower than the coloured ones, the combination is smoothing the falls.</span></div><div id="co_dd" class="cmpchart"></div>
+    <div class="sh" style="margin-top:12px"><h3>Profit per year</h3></div><div id="co_yr" class="cmpchart"></div></div></td>`;
+  tr.after(d);
+  const curve = (exT, exN) => { const pts = [[x.from, 0]]; let c = 0; for (let i = 0; i < exT.length; i++) if (exT[i] >= x.from && exT[i] <= x.to) pts.push([exT[i], (c += exN[i])]); return pts; };
+  const fall = (pts) => { let pk = 0; return pts.map(([t, v]) => { pk = Math.max(pk, v); return [t, v - pk]; }); };
+  const all = ms.flatMap((m) => [...m.exT].map((t, i) => [t, m.exN[i]])).sort((a, b) => a[0] - b[0]);
+  const togetherPts = curve(Float64Array.from(all.map((a) => a[0])), Float64Array.from(all.map((a) => a[1])));
+  const series = ms.map((m, j) => ({ c: j + 1, name: m.r.label.slice(0, 30), pts: curve(m.exT, m.exN) }));
+  const T = { c: "T", name: "All together", pts: togetherPts };
+  cmpLines($("co_eq"), [...series, T], { from: x.from, to: x.to, h: 300 });
+  cmpLines($("co_dd"), [...series.map((s) => ({ ...s, pts: fall(s.pts) })), { ...T, pts: fall(T.pts) }], { from: x.from, to: x.to, h: 190, area: true });
+  const yr = (pts) => { const m = new Map(); let prev = 0; for (const [t, v] of pts.slice(1)) { const y = cmpIst(t).slice(0, 4); m.set(y, (m.get(y) || 0) + (v - prev)); prev = v; } return m; };
+  const items = [...series.map((s) => ({ c: s.c, name: s.name, st: { yrs: yr(s.pts) } })), { c: "T", name: "All together", st: { yrs: yr(T.pts) } }];
+  cmpBars($("co_yr"), items, [...new Set(items.flatMap((it) => [...it.st.yrs.keys()]))].sort(), "Profit per year");
+  $("co_cmp").addEventListener("click", () => { cmpSet(x.ids.map((id) => ({ k: "lab", id: String(id), name: P.byId.get(id).r.label }))); showPage("cmp"); });
+  d.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => { showPage("lab"); setTimeout(() => openLabDetail(Number(b.dataset.open)).catch((e) => toast(errorText(e))), 700); }));
+}
+$("nav_combo").addEventListener("click", () => showPage("combo"));
+$("co_group").addEventListener("change", (e) => { combo.key = e.target.value; combo.res = null; withLoading($("comboPane"), renderCombo()).catch((er) => toast(errorText(er))); });
+$("co_size").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { combo.size = Number(b.dataset.n); combo.res = null; withLoading($("comboPane"), renderCombo()).catch((er) => toast(errorText(er))); }));
+$("co_opp").addEventListener("change", (e) => { combo.minOpp = Number(e.target.value); combo.showN = 100; if (combo.res) comboTable(); });
+$("co_better").addEventListener("change", (e) => { combo.onlyBetter = e.target.checked; combo.showN = 100; if (combo.res) comboTable(); });
+$("co_sort").addEventListener("change", (e) => { combo.sort = e.target.value; if (combo.res) comboTable(); });
+{ let t = null; $("co_q").addEventListener("input", (e) => { combo.q = e.target.value; clearTimeout(t); t = setTimeout(() => { combo.showN = 100; if (combo.res) comboTable(); }, 250); }); }
+window.addEventListener("resize", () => { if (page === "combo" && combo.sel) { clearTimeout(comboDetail.rt); comboDetail.rt = setTimeout(() => combo.res && comboTable(), 200); } });
+
 /* ---------- several strategies at once: tick them, then activate / pause / go live / back to paper ---------- */
 const lsel = new Set();
 function renderBulkBar() {
@@ -7375,7 +7617,7 @@ $("terms_go").addEventListener("click", (e) => run(e.currentTarget, async () => 
 function applyRole() {
   document.querySelectorAll("[data-admin]").forEach((el) => el.hidden = !isAdmin());
   $("openLab").hidden = !(isAdmin() || (me && me.can_build));
-  $("nav_ideas").hidden = !isAdmin();
+  $("nav_ideas").hidden = !isAdmin(); $("nav_combo").hidden = !isAdmin();
   $("nav_pred").hidden = !isAdmin();
   ["lab_settings_btn", "lab_run"].forEach((id) => $(id).hidden = !isAdmin());
   $("newFlip").hidden = !(isAdmin() || (me && me.can_build));
