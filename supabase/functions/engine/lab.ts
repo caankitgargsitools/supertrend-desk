@@ -832,7 +832,8 @@ export async function refreshAsset(sb: SupabaseClient, creds: { client: string; 
   await saveCandles(sb, { asset: key, kind: "I5", from_day: ist(rows[0]?.t ?? lo).date, to_day: ist(rows.at(-1)?.t ?? lo).date, bars: toCol(rows, false) });
   if (a.stock) jumps.i.push(...findSplits(daysOf(rows)));
   jumps.i.push(...await refreshYearChunks(sb, dhan, a, today));
-  if (a.stock) await saveStockActions(sb, key, jumps.d, jumps.i);
+  if (a.stock) await saveStockActions(sb, key, jumps.d, jumps.i, {
+    d: daily.length > 1 ? [daily[0].day, daily.at(-1)!.day] : undefined, i: rows.length > 1 ? [ist(rows[0].t).date, ist(rows.at(-1)!.t).date] : undefined });
 }
 /**
  * Older 5-minute candles of an index for the year-by-year test, one stored row per calendar year ("I5Y:2022"),

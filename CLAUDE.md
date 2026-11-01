@@ -160,8 +160,16 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   stores them in `stock_actions` (never deleted); every read (`readCandles`, and Dhan candles for NSE_EQ) multiplies
   earlier prices by the factor; files keep raw prices (`readCandles(..., raw = true)`). Not in the Prediction Lab (small
   server). Lab weight 1 per stock (as a commodity); strict-mode class "S". UI: preset group "Stocks (F&O)" (`STK`),
-  `VAR_STOCK`. Not handled yet: a held stock future across an ex-date (the exchange adjusts the contract and lot) — keep
-  an eye before going live. Tests: `tests/sim/stocks.test.mjs`, `tests/ui/ui_stocks.mjs`.
+  `VAR_STOCK`. Tests: `tests/sim/stocks.test.mjs`, `tests/ui/ui_stocks.mjs`.
+  Ex-dates (same day, migration 60; `stockExDate` in index.ts, `adjustPosition` / `splitFactor` in stocks.ts): the day's
+  first price of a stock strategy (per-second loop and minute tick, before any stop check) against its own price from
+  an earlier day (pos_ltp, or last_close when flat), else Dhan's raw close; a split / bonus ratio → `stock_actions` row
+  for today (in_daily / in_intraday = whether Dhan's raw candles still show the jump) and each strategy adjusted once
+  (`ca_day`): units and lot size ÷ f (lots unchanged), entry / stop / target / best / trailing points or ATR / broker fill /
+  waiting breakout trigger × f, broker stop cancelled (syncStop places a new one), owner notified. 1:2 / 1:3 bonuses
+  (25–33% gaps) count only when Dhan's F&O list shows the new lot (re-downloaded to check; else "price gapped" alert, no
+  change). Flat stock strategies take Dhan's current lot (`stockLotSync`). The nightly download re-judges a known action
+  inside unbroken raw candles (Dhan later adjusting its history turns that flag off). Test: `tests/sim/exdate.test.mjs`.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

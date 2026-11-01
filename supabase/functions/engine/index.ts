@@ -29,6 +29,7 @@ import { auditStrategy } from "./audit.ts";
 import { ownDaily, ownIntraday } from "./owncandles.ts";
 import { KILL_EARLY, KILL_FULL, killVerdict } from "./kill.ts";
 import { ideasStep } from "./ideas.ts";
+import { actionsFor, adjustPosition, loadStockActions, splitFactor, stockLots } from "./stocks.ts";
 import { githubOidcOk, predFeed, predKeyOk, predPull, predPush } from "./prediction.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
@@ -1468,9 +1469,11 @@ async function pricesTick(rows: Strategy[]) {
   const marks: { strategy_id: string; owner_id: string; ltp: number; upnl: number | null; at: string }[] = [];
   const checks: Promise<unknown>[] = [];
   const slow: PromiseLike<unknown>[] = [];
-  for (const { s, key } of want.values()) {
-    if (s.position === "FLAT" || s.trade_type === "OPTIONS" || isMulti(s)) continue;
+  for (const { s: s0, key } of want.values()) {
+    if (s0.position === "FLAT" || s0.trade_type === "OPTIONS" || isMulti(s0)) continue;
     const p = px.get(key); if (!(Number(p) > 0)) continue;
+    // A stock future on its split / bonus ex-date is adjusted before its stop is looked at.
+    const s = s0.data_segment === "NSE_EQ" ? await stockExDate(s0, p!).catch((e) => { console.error("ex-date", e); return s0; }) : s0;
     const pr = (s.pos_risk ?? {}) as PosRisk;
     const inPx = Number(s.pos_entry_px ?? pr.entry ?? 0), dir = s.position === "LONG" ? 1 : -1;
     const upnl = inPx > 0 ? Math.trunc((p! - inPx) * dir * unitsOf(s)) : null;
@@ -1483,6 +1486,92 @@ async function pricesTick(rows: Strategy[]) {
   await Promise.all(checks);
   await Promise.all(slow);
   return { prices: px.size, marks: marks.length };
+}
+/* ---------- stock futures across a split / bonus ex-date ---------- */
+// On the ex-date the exchange gives a held stock future 1/f times the shares at f times the price (Kotak 5:1: f = 0.2).
+// The desk sees it in the day's first price against the last one it saw (the strategy's own price from before today,
+// else Dhan's raw close of the day before), records it in stock_actions (with whether Dhan's candles already carry it),
+// and adjusts every strategy on that stock once (ca_day): quantity, prices, stops, the broker stop order. This runs
+// before any stop is checked, so the jump can never look like a stop being hit.
+const stockDayMemo = new Map<string, number | null>(); // "STOCK|day" -> factor (null: checked, nothing today)
+let stockLotMemo: { at: number; lots: Record<string, number> } | null = null;
+async function stockLotNow(key: string): Promise<number | null> {
+  if (!stockLotMemo || Date.now() - stockLotMemo.at > 600000) stockLotMemo = { at: Date.now(), lots: await stockLots(sb).catch(() => ({})) };
+  return stockLotMemo.lots[key] ?? null;
+}
+const istDay = (iso: string | null | undefined) => iso ? ist(Date.parse(iso) / 1000).date : null;
+async function stockActionToday(s: Strategy, px: number, today: string): Promise<number | null> {
+  const key = String(s.underlying), mk = `${key}|${today}`;
+  const known = actionsFor(key).find((a) => a.day === today);
+  if (known) return known.factor;
+  if (stockDayMemo.has(mk)) return stockDayMemo.get(mk)!;
+  // The strategy's own last price from an earlier day (as seen live, never re-adjusted by anyone).
+  const own = s.position !== "FLAT" ? (istDay(s.pos_ltp_at) && istDay(s.pos_ltp_at)! < today ? Number(s.pos_ltp) : 0)
+    : (istDay(s.last_run_at) && istDay(s.last_run_at)! < today ? Number(s.last_close) : 0);
+  let f = own > 0 ? splitFactor(px / own) : null;
+  // Dhan's raw candles of the days before (also tells whether Dhan has already adjusted its history).
+  let rawD: number | null = null, rawI: number | null = null, asked = false;
+  const set = s.owner_id ? await accountFor(sb, s.owner_id, "DHAN", new Map()).catch(() => null) : null;
+  if (set?.dhan_access_token && (f || !(own > 0))) {
+    asked = true;
+    const raw = dhanFor(set); raw.adjust = false;
+    try { rawD = (await raw.daily(String(s.data_security_id), "NSE_EQ", "EQUITY", addDays(today, -10), today)).filter((d) => d.day < today).at(-1)?.c ?? null; } catch { rawD = null; }
+    try { rawI = (await raw.intraday(String(s.data_security_id), "NSE_EQ", "EQUITY", 5, `${addDays(today, -6)} 09:00:00`, `${addDays(today, -1)} 23:59:00`)).at(-1)?.c ?? null; } catch { rawI = null; }
+    if (!f && rawD) f = splitFactor(px / rawD);
+  }
+  if (!f) { if (asked || own > 0) stockDayMemo.set(mk, null); return null; }
+  // A 1:2 or 1:3 bonus (a 25–33% gap) could also be a real crash: it counts only when Dhan's F&O list shows the
+  // exchange's new lot (the list is downloaded again to make sure). A gap of half or more is never a real move here.
+  if (f > 0.6) {
+    const oldLot = Number(s.lot_size) || 0, want = Math.round(oldLot / f);
+    const near = (x: number | null) => !!x && want > 0 && Math.abs(x / want - 1) < 0.02; // the exchange rounds the new lot
+    let lot = await stockLotNow(key);
+    if (!near(lot) && set?.dhan_access_token) { await syncFno(sb, credsOf(set)).catch(() => {}); stockLotMemo = null; lot = await stockLotNow(key); }
+    if (!near(lot)) {
+      stockDayMemo.set(mk, null);
+      await alert(s, `${key}: price gapped ${Math.round((1 - f) * 100)}% at the open`, `That matches a bonus (${Math.round(1 / f * 100) / 100}× shares), but Dhan's F&O list still shows a lot of ${lot ?? "?"} (a bonus would make it ${want}), so the desk treats it as a real price move. Check the stock's news.`, `cagap-${key}-${today}`);
+      return null;
+    }
+  }
+  const jump = (ref: number | null) => !!ref && splitFactor(px / ref) === f;
+  await sb.from("stock_actions").upsert({ asset: key, day: today, factor: f, in_daily: jump(rawD), in_intraday: jump(rawI), seen_at: nowIso() }, { onConflict: "asset,day" });
+  await loadStockActions(sb, true);
+  stockDayMemo.set(mk, f);
+  return f;
+}
+/** Adjusts one stock strategy for today's split / bonus (once; ca_day). Returns the strategy as it stands afterwards. */
+async function stockExDate(s: Strategy, px: number): Promise<Strategy> {
+  if (s.data_segment !== "NSE_EQ" || s.trade_type === "OPTIONS" || isMulti(s) || !(px > 0)) return s;
+  const today = todayIst();
+  if (s.ca_day && String(s.ca_day).slice(0, 10) >= today) return s;
+  const f = await stockActionToday(s, px, today);
+  if (!f) return s;
+  // Only state from before the ex-date is adjusted (a position opened today is already in the new prices).
+  if (s.position !== "FLAT" && String(s.pos_entry_date ?? "") >= today) { await sb.from("algo_strategies").update({ ca_day: today }).eq("id", s.id); return { ...s, ca_day: today }; }
+  const upd = { ...adjustPosition(s as any, f, await stockLotNow(String(s.underlying)), px), ca_day: today, ...(s.position !== "FLAT" ? { pos_ltp_at: nowIso() } : {}) };
+  const { data: done } = await sb.from("algo_strategies").update(upd).eq("id", s.id).eq("position", s.position).or(`ca_day.is.null,ca_day.lt.${today}`).select("id");
+  if (!done?.length) { const { data } = await sb.from("algo_strategies").select("*").eq("id", s.id).maybeSingle(); return data ? { ...s, ...data } as Strategy : s; }
+  const pb = s.pos_broker as PosBroker | null;
+  if (s.live && pb?.stopId && pb.broker === "DHAN") {
+    // The exchange normally cancels resting orders of the stock before an ex-date; if this one is still there it goes too,
+    // and the order manager places a new stop for the new quantity and price on its next round.
+    const set = await accountFor(sb, s.owner_id, "DHAN", new Map()).catch(() => null);
+    if (set) await dhanCancel(credsOf(set), pb.stopId).catch(() => {});
+    await sb.from("live_orders").update({ state: "cancelled", done_at: nowIso(), note: "split / bonus ex-date: replaced by a stop for the adjusted quantity" }).eq("broker_order_id", pb.stopId).eq("state", "resting");
+  }
+  if (s.position !== "FLAT") {
+    const what = f === 0.5 ? "1:1 bonus or 1:2 split" : `${Math.round(1 / f * 100) / 100}× shares (split / bonus)`;
+    await alert(s, `${s.underlying}: position adjusted for the ex-date`, `${what} today. The desk now holds ${upd.pos_qty ?? s.pos_qty} (was ${s.pos_qty}) at an entry price of ${upd.pos_entry_px} (was ${s.pos_entry_px}); stop, target and trailing stop moved the same way, so the position's value and P&L are unchanged.${s.live ? " The stop order at Dhan is placed again for the new quantity." : ""}`, `ca-${s.id}-${today}`);
+  }
+  return { ...s, ...upd } as Strategy;
+}
+/** Flat stock strategies take the lot size in Dhan's current list (NSE revisions; after a split the new lot). */
+async function stockLotSync(s: Strategy): Promise<Strategy> {
+  if (s.data_segment !== "NSE_EQ" || s.position !== "FLAT") return s;
+  const lot = await stockLotNow(String(s.underlying));
+  if (!lot || lot === Number(s.lot_size)) return s;
+  await sb.from("algo_strategies").update({ lot_size: lot }).eq("id", s.id).eq("position", "FLAT");
+  return { ...s, lot_size: lot };
 }
 /**
  * Stop loss, target and trailing stop on every second's price (the minute tick also checks completed 1-minute
@@ -2507,6 +2596,12 @@ Deno.serve(async (req) => {
       // New trades need the account in good standing; exits always go through.
       // The kill rule stops new trades of a strategy doing far worse than its backtest (exits still run).
       s = { ...s, _block: s.kill_at ? `the kill rule stopped new trades (${String(s.kill_note ?? "").slice(0, 160)})` : await entryGate(sb, s, gates).catch(() => null) };
+      if (tick && s.data_segment === "NSE_EQ") {
+        // Stock futures: a split / bonus ex-date first (before any stop is checked), then the lot size in Dhan's list.
+        const l = await dhanFor(set).ltp("NSE_EQ", String(s.data_security_id)).catch(() => null);
+        if (l) s = await stockExDate(s, l).catch((e) => { console.error("ex-date", e); return s; });
+        s = await stockLotSync(s).catch(() => s);
+      }
       if (tick) s = await liveRisk(s, set);
       if (tick && s.live) { const s0 = s; s = await actLocked(() => syncStop(s0, set)).catch((e) => { console.error("stop", e); return s0; }); }
       // A manual refresh outside market hours (or in the NSE/BSE pre-open) keeps the session's last price.

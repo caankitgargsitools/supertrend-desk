@@ -111,9 +111,14 @@ export const actionsFor = (key: string): Action[] => ACTIONS?.get(key) ?? [];
  * Records the splits / bonuses found in a stock's raw candles (daily and intraday separately: Dhan may have adjusted
  * one and not the other). Never deletes; a jump seen again only updates its flags.
  */
-export async function saveStockActions(sb: SupabaseClient, key: string, daily: { day: string; factor: number }[], intra: { day: string; factor: number }[]) {
+export async function saveStockActions(sb: SupabaseClient, key: string, daily: { day: string; factor: number }[], intra: { day: string; factor: number }[],
+  cover: { d?: [string, string]; i?: [string, string] } = {}) {
   const m = new Map<string, { asset: string; day: string; factor: number; in_daily: boolean; in_intraday: boolean }>();
-  for (const x of actionsFor(key)) m.set(x.day, { asset: key, day: x.day, factor: x.factor, in_daily: x.d, in_intraday: x.i });
+  // A known action inside an unbroken stretch of raw candles is re-judged from them: if Dhan has since adjusted its
+  // history the jump is gone, and the reads must stop adjusting (else prices before it would be adjusted twice).
+  const inside = (c: [string, string] | undefined, d: string) => !!c && d > c[0] && d <= c[1];
+  for (const x of actionsFor(key)) m.set(x.day, { asset: key, day: x.day, factor: x.factor,
+    in_daily: inside(cover.d, x.day) ? daily.some((y) => y.day === x.day) : x.d, in_intraday: inside(cover.i, x.day) ? intra.some((y) => y.day === x.day) : x.i });
   for (const x of daily) m.set(x.day, { ...(m.get(x.day) ?? { asset: key, day: x.day, factor: x.factor, in_intraday: false }), in_daily: true });
   for (const x of intra) m.set(x.day, { ...(m.get(x.day) ?? { asset: key, day: x.day, factor: x.factor, in_daily: false }), in_intraday: true });
   const rows = [...m.values()];
@@ -133,4 +138,48 @@ export async function stockLots(sb: SupabaseClient): Promise<Record<string, numb
   const out: Record<string, number> = {};
   for (const r of data ?? []) if (!(r.underlying in out) && Number(r.lot) > 0) out[r.underlying] = Number(r.lot);
   return out;
+}
+
+/* ---------- a held stock future across a split / bonus ex-date ---------- */
+/** The split / bonus factor a price jump matches (new ÷ old within 5%), or null. */
+export function splitFactor(ratio: number): number | null {
+  if (!(ratio > 0) || ratio > 0.85) return null;
+  return SPLIT_RATIOS.find((x) => Math.abs(ratio / x - 1) < 0.05) ?? null;
+}
+type PosLike = { position: string; qty_mode?: string; pos_qty?: number | null; lot_size?: number | null; pos_entry_px?: number | null; pos_risk?: any; pos_broker?: any;
+  pending_trigger?: number | null; trade_type?: string };
+const r2 = (x: number) => +x.toFixed(2);
+/**
+ * The strategy row after an ex-date with factor f (new price ÷ old): the exchange gives 1/f times the shares at f times
+ * the price, so the position's value and P&L stay the same. Prices (entry, stop, target, best price, trailing points /
+ * ATR, the broker fill, a waiting breakout trigger) × f; units and the lot size ÷ f (lots stay as they are); the broker
+ * stop is dropped (it is cancelled and placed again for the new quantity).
+ */
+export function adjustPosition(s: PosLike, f: number, lotNew: number | null, px: number): Record<string, any> {
+  const k = 1 / f, upd: Record<string, any> = {};
+  const lot = Number(s.lot_size) || 0;
+  upd.lot_size = lotNew && lotNew > 0 ? lotNew : Math.round(lot * k);
+  if (s.pending_trigger != null) upd.pending_trigger = r2(Number(s.pending_trigger) * f);
+  if (s.position === "FLAT") return upd;
+  if (s.qty_mode !== "LOTS" && s.pos_qty != null) upd.pos_qty = Math.round(Number(s.pos_qty) * k);
+  if (s.pos_entry_px != null) upd.pos_entry_px = r2(Number(s.pos_entry_px) * f);
+  const pr = s.pos_risk ? JSON.parse(JSON.stringify(s.pos_risk)) : null;
+  if (pr) {
+    for (const key of ["entry", "stop", "tgt", "best"]) if (pr[key] != null && Number(pr[key]) > 0) pr[key] = r2(Number(pr[key]) * f);
+    if (Number(pr.trailAtr) > 0) pr.trailAtr = +(Number(pr.trailAtr) * f).toFixed(4);
+    if (pr.trail && pr.trail.type === "POINTS" && Number(pr.trail.value) > 0) pr.trail = { ...pr.trail, value: r2(Number(pr.trail.value) * f) };
+    upd.pos_risk = pr;
+  }
+  const pb = s.pos_broker ? JSON.parse(JSON.stringify(s.pos_broker)) : null;
+  if (pb) {
+    pb.legs = (pb.legs ?? []).map((l: any) => ({ ...l, qty: Math.round(Number(l.qty) * k) }));
+    if (Number(pb.fill) > 0) pb.fill = r2(Number(pb.fill) * f);
+    pb.stopId = null; pb.stopTrig = null; pb.stopRow = null; pb.stopErrAt = null;
+    upd.pos_broker = pb;
+  }
+  upd.pos_ltp = r2(px);
+  const units = s.qty_mode === "LOTS" ? Number(s.pos_qty) * upd.lot_size : Number(upd.pos_qty ?? s.pos_qty);
+  const entry = Number(upd.pos_entry_px ?? 0), dir = s.position === "LONG" ? 1 : -1;
+  upd.pos_upnl = entry > 0 && units > 0 ? Math.trunc((px - entry) * dir * units) : null;
+  return upd;
 }

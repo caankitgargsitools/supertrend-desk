@@ -124,5 +124,11 @@ await t("the lab's candle download for a stock finds Kotak's 5:1 split in Dhan's
     assert.ok(Number(cfg.lot_size) > 0);
   }
 });
+await t("a later download re-judges a known action inside its unbroken raw candles (Dhan adjusted its history → reads stop adjusting)", async () => {
+  db.stock_actions = []; S.setStockActions([]);
+  await S.saveStockActions(sb, "SBIN", [{ day: "2026-06-10", factor: 0.5 }], [{ day: "2026-06-10", factor: 0.5 }]);
+  await S.saveStockActions(sb, "SBIN", [], [], { d: ["2015-01-01", "2026-10-30"], i: ["2026-07-01", "2026-10-30"] });
+  assert.deepEqual(S.actionsFor("SBIN"), [{ day: "2026-06-10", factor: 0.5, d: false, i: true }], "daily re-judged (inside), intraday kept (outside the stretch)");
+});
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);
