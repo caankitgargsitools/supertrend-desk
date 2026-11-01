@@ -149,6 +149,8 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   hourly at :11, `desk-health-day` 08:11 IST sends admins a summary (kind "health", `/?health=1`); a check newly red
   alerts at once. Admin sidebar "System health" (`healthPane`, `renderHealth`, "Check now" → `health_check_now`) with a
   red dot on the link (`healthDot`, every 5 min) while anything is red or no check ran for 2 h. Test: `tests/ui/ui_health.mjs`.
+  The cron checks read only the latest `cron.job_run_details` rows by runid (migration 62; the table can't be indexed);
+  job history is kept 7 days (cron job 34 `job-history-cleanup`, 02:53 IST, approved by Papa 1 Nov 2026). Check ≈ 0.6 s.
 - **Stock futures** (1 Nov 2026, Papa: "start with stock futures on 10 liquid Nifty 50 stocks"; `stocks.ts`, migration 59):
   RELIANCE, HDFCBANK, ICICIBANK, INFY, TCS, SBIN, BHARTIARTL, AXISBANK, LT, KOTAKBANK. Like the indices, signals and
   backtests use the share price (Dhan NSE_EQ, instrument EQUITY; no futures premium added) and orders go to the

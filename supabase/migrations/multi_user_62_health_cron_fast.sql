@@ -1,0 +1,11 @@
+-- "Check now" on System health timed out (1 Nov 2026): the scheduled-jobs check read the whole cron.job_run_details
+-- (264,000 rows, no index; Supabase owns the table, so no index can be added): 4 s + 18 s against the website's 8 s limit.
+-- desk_health's two cron queries now read only the latest rows by runid (the table's own key):
+--   failed in 24 h:  ... d.runid > (select max(r.runid) from cron.job_run_details r) - 80000 and d.start_time > now() - interval '24 hours' ...
+--   not running:     ... j.jobid not in (select distinct d.jobid from cron.job_run_details d
+--                        where d.runid > (select max(r.runid) from cron.job_run_details r) - 5000 and d.start_time > now() - interval '20 minutes')
+-- Applied by replacing just those two pieces of the function text (the rest of desk_health unchanged).
+-- Papa (1 Nov 2026) approved keeping 7 days of job history and ran in the SQL editor:
+--   delete from cron.job_run_details where start_time < now() - interval '7 days';
+--   select cron.schedule('job-history-cleanup', '23 21 * * *', $$delete from cron.job_run_details where start_time < now() - interval '7 days'$$);  -- job 34, 02:53 IST
+-- Result: 264k → 124k rows; the whole health check 0.6 s.
