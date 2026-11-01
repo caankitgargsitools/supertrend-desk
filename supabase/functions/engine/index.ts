@@ -29,7 +29,9 @@ import { auditStrategy } from "./audit.ts";
 import { ownDaily, ownIntraday } from "./owncandles.ts";
 import { KILL_EARLY, KILL_FULL, killVerdict } from "./kill.ts";
 import { ideasStep } from "./ideas.ts";
-import { actionsFor, adjustPosition, loadStockActions, splitFactor, stockLots } from "./stocks.ts";
+const fromCols = (b: any) => (b.t as number[]).map((t, i) => ({ t, o: b.o[i], c: b.c[i] }));
+import { actionsFor, adjustPosition, daysOf, loadStockActions, splitFactor, STOCK_KEYS, stockLots } from "./stocks.ts";
+import { readCandles } from "./candles.ts";
 import { githubOidcOk, predFeed, predKeyOk, predPull, predPush } from "./prediction.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
@@ -2399,6 +2401,23 @@ Deno.serve(async (req) => {
   }
   if (action === "pred_feed") return Response.json({ action, ...(await predFeed(sb, credsOf(await adminAccount(sb)))) });
   if (action === "combos") return Response.json({ action, ...(await runCombos(sb)) });
+  // Read-only check of the stocks' stored candles: the biggest overnight moves in Dhan's raw prices (a split / bonus
+  // shows as a jump of a half, a fifth …; none means Dhan's candles are already adjusted).
+  if (action === "stock_gaps" || action.startsWith("stock_gaps:")) { // "stock_gaps:KOTAKBANK" for one stock
+    const out: Record<string, unknown> = {};
+    for (const k of STOCK_KEYS.filter((x) => !action.includes(":") || x === action.split(":")[1])) {
+      const sets = await readCandles(sb, k, "long", true).catch(() => []);
+      const row: Record<string, unknown> = {};
+      for (const x of sets) {
+        if (!(x.kind === "D" || x.kind === "I5" || x.kind.startsWith("I5Y:"))) continue;
+        const days = x.kind === "D" ? (x.bars.t as number[]).map((t, i) => ({ day: ist(t).date, o: x.bars.o[i], c: x.bars.c[i] })) : daysOf(fromCols(x.bars));
+        const gaps = days.slice(1).map((d, i) => ({ day: d.day, r: +(d.o / days[i].c).toFixed(3) })).sort((a, b) => Math.abs(Math.log(b.r)) - Math.abs(Math.log(a.r))).slice(0, 2);
+        row[x.kind] = { first: days[0] && [days[0].day, days[0].c], last: days.at(-1) && [days.at(-1)!.day, days.at(-1)!.c], gaps };
+      }
+      out[k] = { actions: actionsFor(k), ...row };
+    }
+    return Response.json({ action, stocks: out });
+  }
   if (action === "lab_reverdict") return Response.json({ action, ...(await labReverdict(sb, Math.min(200, Number((body as any).limit) || 50))) });
   if (action === "marks" && body.user_id) return Response.json({ action, marks: await liveMarks(body.user_id, false) });
   if (action === "lab_opt") {
