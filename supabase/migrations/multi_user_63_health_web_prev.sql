@@ -1,0 +1,6 @@
+-- System health "Website" showed amber "not fetched yet" after every "Check now" (1 Nov 2026): health_check_now asks
+-- for the site and reads the answer in the same instant, before pg_net has it. health_ping now keeps the previous
+-- request id (health_state web_ping {id, prev}); desk_health reads the newest request that has answered.
+--   health_ping:  v = jsonb_build_object('id', rid, 'prev', old->'id')
+--   desk_health:  ... left join net._http_response r on r.id = coalesce((select r2.id from net._http_response r2
+--                     where r2.id = (s.v->>'id')::bigint), (s.v->>'prev')::bigint) where s.k = 'web_ping';
