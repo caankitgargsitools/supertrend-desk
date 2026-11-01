@@ -6069,7 +6069,7 @@ $("tf_clear").addEventListener("click", () => { ["tf_mode", "tf_asset", "tf_stra
 $("tf_toggle").addEventListener("click", () => { const box = $("tf_box"), on = !box.classList.contains("open"); box.classList.toggle("open", on); $("tf_toggle").setAttribute("aria-expanded", String(on)); $("tf_toggle").textContent = on ? "Hide filters" : "Filters"; });
 $("tf_csv").addEventListener("click", () => {
   // Text cells starting with = + - @ would run as formulas in Excel: a leading ' keeps them text (numbers stay numbers).
-  const rows = filteredTrades(), q = (v) => { let x = String(v ?? ""); if (typeof v === "string" && /^[=+\-@\t\r]/.test(x) && !/^-?\d/.test(x)) x = "'" + x; return `"${x.replace(/"/g, '""')}"`; };
+  const rows = filteredTrades(), q = (v) => { let x = String(v ?? ""); if (typeof v === "string" && /^[=+\-@\t\r]/.test(x) && !/^-?\d+(\.\d+)?$/.test(x)) x = "'" + x; return `"${x.replace(/"/g, '""')}"`; };
   const lines = [["Closed (IST)", "Opened", "Strategy", "Asset", "Mode", "Side", "Contract", "Lots", "Entry", "Exit", "Gross", "Charges", "Net", "Closed by", "Reason"].map(q).join(",")];
   for (const t of rows) { const s = stratOf(t.strategy_id); lines.push([istText(t.exit_at), t.entry_day || "", s ? s.name : "", assetOfStrat(s), t.mode, t.side, t.contract, t.lots, t.entry_px, t.exit_px, Math.trunc(Number(t.gross) || 0), Math.trunc(Number(t.costs) || 0), Math.trunc(Number(t.net) || 0), closedBy(t.exit_why), t.exit_why].map(q).join(",")); }
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\n")], { type: "text/csv" })); a.download = `trades-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
