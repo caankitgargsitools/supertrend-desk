@@ -170,6 +170,12 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (25–33% gaps) count only when Dhan's F&O list shows the new lot (re-downloaded to check; else "price gapped" alert, no
   change). Flat stock strategies take Dhan's current lot (`stockLotSync`). The nightly download re-judges a known action
   inside unbroken raw candles (Dhan later adjusting its history turns that flag off). Test: `tests/sim/exdate.test.mjs`.
+- Strategy Lab asset picker (1 Nov 2026, Papa; migration 61): a multiple-choice drop-down (`#lab_asset_btn` /
+  `#lab_asset_pop`) — "All assets", asset types (Indices, Stocks, Commodities (MCX), Crypto; `ASSET_TYPES`,
+  `assetTypeOf`) with a tick that selects the whole type (half-ticked when partly), and each asset. `lab.assets` ([] = all),
+  `lab.asset` = "ALL" or keys joined by commas (`lab_feed`'s p_asset takes a comma list); admin queries use
+  `labAssetQ` (`asset=in.(…)`). Remembered in this browser (localStorage `labAssets`). Test: `tests/ui/ui_lab_assets.mjs`
+  (args: theme width).
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

@@ -359,6 +359,22 @@ tr.openrow td { background: var(--bg); }
 /* strategy lab */
 .labbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; }
 .labbar .f { min-width: 0; }
+/* Multiple-choice asset picker (Strategy Lab): tick asset types (Indices, Stocks, Commodities, Crypto) or single assets. */
+.msel { position: relative; }
+.msel-btn { border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 8px; padding: 8px 30px 8px 10px; min-width: 200px; max-width: 320px;
+  font: inherit; text-align: left; cursor: pointer; position: relative; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msel-btn::after { content: ""; position: absolute; right: 12px; top: 50%; width: 6px; height: 6px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: translateY(-70%) rotate(45deg); }
+.msel-pop { position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; width: min(600px, calc(100vw - 32px)); max-height: 62vh; overflow: auto;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r); box-shadow: 0 10px 30px -10px rgba(0,0,0,.35); padding: 8px 12px 10px; }
+.msel-pop label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; cursor: pointer; }
+.msel-pop input[type="checkbox"] { accent-color: var(--blue); width: auto; min-width: 0; padding: 0; margin: 0; flex: 0 0 auto; }
+.msel-pop label { white-space: nowrap; }
+.msel-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 2px 0 6px; }
+.msel-grp { border-top: 1px solid var(--line); padding: 7px 0 5px; }
+.msel-grp > label { font-weight: 700; font-size: 13.5px; }
+.msel-grp > label small { font-weight: 400; color: var(--muted); }
+.msel-items { display: flex; flex-wrap: wrap; gap: 5px 14px; padding: 5px 0 2px 22px; }
+@media (max-width: 640px) { .msel, .msel-btn { width: 100%; max-width: none; } .msel-pop { position: static; width: auto; margin-top: 6px; max-height: none; } }
 .lab-table > tbody > tr > td.lbl { min-width: 210px; max-width: 420px; }
 .lab-table > tbody > tr > td, .lab-table > thead > tr > th { padding-left: 6px; padding-right: 6px; }
 /* Strategy Lab grid: its own scroll box, so the header row stays fixed at the top while you scroll the results. */
@@ -1217,7 +1233,8 @@ details.xp > summary:hover { background: var(--blue-soft); }
         <div class="labbar">
           <div class="f"><span>Results as</span><div class="seg" id="lab_view" role="group" aria-label="Instrument">
             <button type="button" data-v="FUT" aria-pressed="true">Futures</button><button type="button" data-v="BUY" aria-pressed="false">Option buying</button><button type="button" data-v="SELL" aria-pressed="false">Option writing</button><button type="button" data-v="SPREAD" aria-pressed="false">Spreads &amp; hedges</button></div></div>
-          <label class="f"><span>Asset</span><select id="lab_asset"><option value="ALL">All assets</option></select></label>
+          <div class="f"><span>Assets</span><div class="msel" id="lab_asset_box"><button type="button" class="msel-btn" id="lab_asset_btn" aria-haspopup="true" aria-expanded="false" aria-controls="lab_asset_pop">All assets</button>
+            <div class="msel-pop" id="lab_asset_pop" role="group" aria-label="Assets to show" hidden></div></div></div>
           <label class="f"><span>From</span><select id="lab_period"><option value="all" selected>All time (everything the lab kept)</option><option value="run">Latest run only</option><option value="7">Found in the last 7 days</option><option value="30">Found in the last 30 days</option></select></label>
           <label class="f"><span>Stop loss</span><select id="lab_stopf"><option value="ANY">With or without</option><option value="WITH">With stop / target</option><option value="WITHOUT">Without</option></select></label>
           <label class="f"><span>Show</span><select id="lab_only"><option value="passed">Passed only</option><option value="passed_desk">Passed, plus mine on my desk</option><option value="all">Everything (failed too)</option></select></label>
@@ -1626,12 +1643,60 @@ async function loadCryptoPresets() {
   buildCxControls(); paintCx(); fillLabAssetSelect();
 }
 /** The lab's Asset list: every index, MCX commodity and crypto coin, grouped. Refilled once the coins have loaded. */
+/* The lab's asset picker: several assets at once, or whole types (all stocks, all crypto …). lab.assets = the ticked
+   assets ([] = all); lab.asset = "ALL" or their keys joined by commas (what the server's lab_feed takes). Remembered in
+   this browser. */
+const ASSET_TYPES = [["IDX", "Indices"], ["STK", "Stocks"], ["MCX", "Commodities (MCX)"], ["CRY", "Crypto"]];
+const assetTypeOf = (p) => p.crypto ? "CRY" : p.stock ? "STK" : p.commodity ? "MCX" : "IDX";
+const labAssetQ = (q) => lab.asset === "ALL" ? q : q.in("asset", lab.assets);
+function labAssetsOf(type) { return Object.entries(PRESETS).filter(([, p]) => assetTypeOf(p) === type).map(([k]) => k); }
+function labAssetLabel() {
+  const a = lab.assets || [];
+  if (!a.length) return "All assets";
+  if (a.length === 1) return labAssetName(a[0]);
+  const whole = ASSET_TYPES.filter(([t]) => { const ks = labAssetsOf(t); return ks.length && ks.every((k) => a.includes(k)); });
+  const short = (n) => n.replace(/ \(MCX\)$/, "");
+  const parts = whole.map(([, n]) => short(n));
+  // Types only partly ticked: "9 stocks", or the asset's name when it is the only one of its type.
+  for (const [t, n] of ASSET_TYPES) {
+    if (whole.some(([w]) => w === t)) continue;
+    const some = a.filter((k) => PRESETS[k] && assetTypeOf(PRESETS[k]) === t);
+    if (some.length) parts.push(some.length === 1 ? labAssetName(some[0]) : `${some.length} ${short(n).toLowerCase()}`);
+  }
+  const unknown = a.filter((k) => !PRESETS[k]).length; // e.g. a coin no longer listed
+  if (unknown) parts.push(`${unknown} more`);
+  return parts.length <= 3 ? parts.join(" + ") : `${a.length} assets`;
+}
+function labAssetSet(list, reload = true) {
+  const all = Object.keys(PRESETS);
+  let a = [...new Set(list)];
+  if (a.length && all.every((k) => a.includes(k))) a = []; // everything ticked = all assets
+  lab.assets = a; lab.asset = a.length ? a.join(",") : "ALL";
+  try { localStorage.setItem("labAssets", JSON.stringify(a)); } catch { /* private window */ }
+  const b = $("lab_asset_btn"); if (b) { b.textContent = labAssetLabel(); b.title = a.length ? a.map(labAssetName).join(", ") : "All assets"; }
+  paintLabAssetPop();
+  if (reload) { clearTimeout(lab.assetT); lab.assetT = setTimeout(() => { lab.cmp = null; loadLab().catch((e) => toast(errorText(e))); }, 500); }
+}
 function fillLabAssetSelect() {
-  const sel = $("lab_asset"); if (!sel) return;
-  const keep = sel.value || "ALL", groups = {};
-  for (const [k, p] of Object.entries(PRESETS)) (groups[p.group || "Other"] = groups[p.group || "Other"] || []).push([k, p]);
-  sel.innerHTML = '<option value="ALL">All assets</option>' + Object.entries(groups).map(([g, list]) => `<optgroup label="${esc(g)}">${list.map(([k, p]) => `<option value="${esc(k)}">${esc(p.name)}</option>`).join("")}</optgroup>`).join("");
-  sel.value = [...sel.options].some((o) => o.value === keep) ? keep : "ALL";
+  const pop = $("lab_asset_pop"); if (!pop) return;
+  pop.innerHTML = `<div class="msel-top"><label><input type="checkbox" data-all> <b>All assets</b></label><button type="button" class="btn ghost" data-close>Done</button></div>` +
+    ASSET_TYPES.map(([t, name]) => { const ks = labAssetsOf(t); if (!ks.length) return "";
+      return `<div class="msel-grp"><label><input type="checkbox" data-type="${t}"> ${esc(name)} <small>(${ks.length})</small></label>
+        <div class="msel-items">${ks.map((k) => `<label><input type="checkbox" data-a="${esc(k)}"> ${esc(labAssetName(k))}</label>`).join("")}</div></div>`; }).join("");
+  if (!lab.assets) { let saved = []; try { saved = JSON.parse(localStorage.getItem("labAssets") || "[]"); } catch { saved = []; } lab.assets = Array.isArray(saved) ? saved : []; lab.asset = lab.assets.length ? lab.assets.join(",") : "ALL"; }
+  const b = $("lab_asset_btn"); if (b) { b.textContent = labAssetLabel(); b.title = lab.assets.length ? lab.assets.map(labAssetName).join(", ") : "All assets"; }
+  paintLabAssetPop();
+}
+function paintLabAssetPop() {
+  const pop = $("lab_asset_pop"); if (!pop) return;
+  const a = lab.assets || [], none = !a.length;
+  pop.querySelector("[data-all]").checked = none;
+  // "All assets" alone is ticked when nothing is picked; ticking a type or an asset then shows only that.
+  pop.querySelectorAll("[data-a]").forEach((i) => { i.checked = a.includes(i.dataset.a); });
+  pop.querySelectorAll("[data-type]").forEach((i) => {
+    const ks = labAssetsOf(i.dataset.type), on = ks.filter((k) => a.includes(k)).length;
+    i.checked = on > 0 && on === ks.length; i.indeterminate = on > 0 && on < ks.length;
+  });
 }
 function fillUnderlyingSelect(sel, withCustom) {
   sel.innerHTML = "";
@@ -3999,7 +4064,7 @@ function openLab() {
 const labKey = () => [lab.view, lab.asset, lab.period, lab.only, lab.deskKeep, lab.request || ""].join("|");
 /** From a strategy on my desk: open the lab on its asset and instrument, either on its own result or to compare. */
 function openLabFor(s, how) {
-  lab.asset = PRESETS[s.underlying] ? s.underlying : "ALL"; $("lab_asset").value = lab.asset;
+  labAssetSet(PRESETS[s.underlying] ? [s.underlying] : [], false);
   lab.view = s.trade_type === "OPTIONS" ? (s.structure ? "SPREAD" : s.option_side === "SELL" ? "SELL" : "BUY") : "FUT";
   $("lab_view").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x.dataset.v === lab.view ? "true" : "false")); $("lab_stopf").disabled = lab.view !== "FUT";
   lab.filters = {}; lab.mine = ""; $("lab_mine").value = ""; lab.showN = 0; lab.request = null;
@@ -4083,7 +4148,7 @@ async function loadLabRun(stale) {
     q = q.or("basic_passed.is.null,basic_passed.eq.false,robust_status.eq.done");
     if (lab.only && lab.view === "FUT") q = q.eq("passed", true);
     if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : lab.view === "SPREAD" ? "opt_struct" : "opt_sell", "is", null);
-    if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
+    q = labAssetQ(q);
     return q.order("score", { ascending: false }).order("id", { ascending: false });
   };
   // The best-scoring 300 show straight away; the rest load behind them (up to 15,000 rows, 300 per request). Small
@@ -4115,7 +4180,7 @@ async function loadLabRun(stale) {
     const miss = [...labDeskMap().keys()].filter((id) => !have.has(id));
     if (miss.length) {
       let q = db.from("lab_results_list").select(LAB_ROW_COLS).in("id", miss.slice(0, 200));
-      if (lab.asset !== "ALL") q = q.eq("asset", lab.asset);
+      q = labAssetQ(q);
       if (lab.view !== "FUT") q = q.not(lab.view === "BUY" ? "opt_buy" : lab.view === "SPREAD" ? "opt_struct" : "opt_sell", "is", null);
       const got = (await q.then((x) => x.data).catch(() => null)) || [];
       all.push(...got);
@@ -4125,7 +4190,7 @@ async function loadLabRun(stale) {
       let nrows = [];
       if (fps.length) {
         let q2 = db.from("lab_results_list").select(LAB_ROW_COLS).in("fingerprint", fps.slice(0, 200)).is("superseded_by", null);
-        if (lab.asset !== "ALL") q2 = q2.eq("asset", lab.asset);
+        q2 = labAssetQ(q2);
         nrows = ((await q2.then((x) => x.data).catch(() => null)) || []).filter((r) => !have.has(Number(r.id)));
       }
       all.push(...nrows);
@@ -5494,9 +5559,20 @@ $("lab_view").querySelectorAll("button").forEach((b) => b.addEventListener("clic
   $("lab_stopf").disabled = lab.view !== "FUT"; loadLab().catch((e) => toast(errorText(e)));
 }));
 {
-  const sel = $("lab_asset");
   fillLabAssetSelect();
-  sel.addEventListener("change", () => { lab.asset = sel.value; lab.cmp = null; loadLab().catch((e) => toast(errorText(e))); });
+  const btn = $("lab_asset_btn"), pop = $("lab_asset_pop");
+  const show = (on) => { pop.hidden = !on; btn.setAttribute("aria-expanded", on ? "true" : "false"); };
+  btn.addEventListener("click", () => show(pop.hidden));
+  document.addEventListener("click", (e) => { if (!pop.hidden && !e.target.closest("#lab_asset_box")) show(false); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !pop.hidden) { show(false); btn.focus(); } });
+  pop.addEventListener("click", (e) => { if (e.target.closest("[data-close]")) show(false); });
+  pop.addEventListener("change", (e) => {
+    const i = e.target, cur = new Set(lab.assets);
+    if (i.matches("[data-all]")) return labAssetSet([]); // back to every asset
+    if (i.matches("[data-type]")) labAssetsOf(i.dataset.type).forEach((k) => i.checked ? cur.add(k) : cur.delete(k));
+    else if (i.matches("[data-a]")) i.checked ? cur.add(i.dataset.a) : cur.delete(i.dataset.a);
+    labAssetSet([...cur]); // nothing left ticked = all assets again
+  });
   $("lab_per").addEventListener("change", () => { const v = $("lab_per").value; lab.per = parseInt(v, 10) || 0; lab.perTf = v.endsWith("tf"); lab.showN = 0; renderLabTable(); });
   $("lab_more").addEventListener("click", () => { lab.showN = (lab.showN || 150) + 150; renderLabTable(); });
   $("lab_period").addEventListener("change", () => { lab.period = $("lab_period").value; loadLab().catch((e) => toast(errorText(e))); });

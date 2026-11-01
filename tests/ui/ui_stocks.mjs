@@ -84,7 +84,7 @@ const r = await p.evaluate(() => {
   sel.value = "RELIANCE"; sel.dispatchEvent(new Event("change"));
   const v = (k) => document.getElementById("f_" + k)?.value;
   return { names, seg: v("data_segment"), sec: v("data_security_id"), instr: v("data_instrument"), fut: v("futures_symbol"), lot: v("lot_size"), tt: v("trade_type"), flag: v("expiry_flag"),
-    msg: document.getElementById("formMsg").textContent, lab: [...document.querySelectorAll("#lab_asset option")].some((o) => o.value === "KOTAKBANK") };
+    msg: document.getElementById("formMsg").textContent, lab: !!document.querySelector(`#lab_asset_pop [data-a="KOTAKBANK"]`) && !!document.querySelector(`#lab_asset_pop [data-type="STK"]`) };
 });
 console.log(JSON.stringify(r));
 const ok = r.names.length === 10 && r.seg === "NSE_EQ" && r.sec === "2885" && r.instr === "EQUITY" && r.fut === "RELIANCE1!" && r.lot === "500" && r.tt === "FUTURES" && r.flag === "MONTH" && /stock futures/.test(r.msg) && r.lab;

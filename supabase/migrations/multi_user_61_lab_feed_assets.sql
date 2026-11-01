@@ -1,0 +1,3 @@
+-- Strategy Lab asset picker takes several assets / whole types (1 Nov 2026, Papa): lab_feed's p_asset is 'ALL' or a
+-- comma-separated list of asset keys (a single key still works). Only this line of the function changed:
+--   and (p_asset = 'ALL' or l.asset = any(string_to_array(p_asset, ',')))
