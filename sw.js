@@ -30,7 +30,10 @@ self.addEventListener("push", (e) => {
 });
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
-  const url = new URL((e.notification.data && e.notification.data.url) || "/", self.location.origin).href;
+  // Only this site's own pages open from a notification (an outside link falls back to the home page).
+  let url = new URL((e.notification.data && e.notification.data.url) || "/", self.location.origin);
+  if (url.origin !== self.location.origin) url = new URL("/", self.location.origin);
+  url = url.href;
   e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((ws) => {
     for (const w of ws) { if (w.url.startsWith(self.location.origin)) { w.focus(); w.postMessage({ open: url }); return; } }
     return self.clients.openWindow(url);

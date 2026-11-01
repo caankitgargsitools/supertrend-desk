@@ -178,6 +178,15 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   `lab.asset` = "ALL" or keys joined by commas (`lab_feed`'s p_asset takes a comma list); admin queries use
   `labAssetQ` (`asset=in.(…)`). Remembered in this browser (localStorage `labAssets`). Test: `tests/ui/ui_lab_assets.mjs`
   (args: theme width).
+- **Security review 1 Nov 2026** (engine entry points, database rules, browser): the engine accepts only the engine
+  secret, a user JWT for `marks`, the prediction key or GitHub OIDC; `flatten` / `refresh` without a strategy_id are
+  refused (400). Fixed: a client could edit engine-owned columns of their own strategy (now blocked by `guard_strategy`,
+  migration 64 — SECURITY INVOKER, `current_user = 'authenticated'` = a direct app edit); `pos_option_type` was put on the
+  page unescaped (XSS against the admin); the Dhan webhook secret was logged in `algo_signals.payload` (no longer; 121 rows
+  stripped); private variation-run results reachable by id (migration 65); `esc()` now escapes `'`; CSV cells starting
+  with = + - @ are prefixed; notification links open only this site. Still open (Papa to decide): table grants to anon
+  are ALL (RLS is the only barrier) — revoke and grant back what the app needs; `set_live` lets a client go live without
+  the supervised test; `notify_test` has no rate limit.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
@@ -298,6 +307,11 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   entry logging idempotent per candle.
 
 ## Open items
+- **Held futures across their expiry (found 1 Nov 2026, awaiting Papa's choice):** a positional futures strategy keeps
+  its position past the contract's expiry in the desk's books, but the exchange settles it (index futures in cash,
+  stock futures by delivery of the shares). A later exit resolves to the next month's contract and would open a new
+  opposite position. Options: square off (and re-enter in the next month = roll) on the day before expiry, or block
+  positional futures over expiry. Must be fixed before any positional futures strategy goes live.
 - Supervised 1-lot live test (NATGASMINI, Lab #6038) once Papa adds Dhan funds and whitelists the IP.
 - Risk-based lot sizing per strategy (drawdown-based), and not running two strategies on the same asset at once
   (GOLD 1 kg contract dominated the paper loss) — proposed, awaiting Papa's go-ahead.

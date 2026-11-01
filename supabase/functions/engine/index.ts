@@ -541,7 +541,8 @@ async function sendOrders(s: Strategy, set: Settings, event: string, legs: Recor
       }
     }
   }
-  await logSignal(s, event, description, candle, status, payload, response);
+  // The webhook secret goes only to Dhan, never into the signal log the browser reads.
+  await logSignal(s, event, description, candle, status, { alertType: payload.alertType, order_legs: payload.order_legs }, response);
   return status !== "FAILED";
 }
 
@@ -1358,7 +1359,7 @@ let lastMarkAt = "";
  * One engine run per minute (cron) that prices every second until the next run takes over. A lock row keeps a
  * single loop going; the strategy list is re-read every 5 seconds (positions change), prices every second.
  */
-const PRICE_COLS = "id, owner_id, data_segment, data_security_id, position, trade_type, structure, pos_entry_px, pos_risk, pos_qty, qty_mode, lot_size, pos_ltp_at, active, archived";
+const PRICE_COLS = "id, owner_id, data_segment, data_security_id, position, trade_type, structure, pos_entry_px, pos_risk, pos_qty, qty_mode, lot_size, pos_ltp_at, active, archived, ca_day";
 async function pricesLoop() {
   // A fresh engine run every 10 seconds (cron) prices once a second for 10 seconds: each run stays well inside the
   // ~2 seconds of computing an engine run may use, and if one run dies the next takes over within 10 seconds.
@@ -1502,7 +1503,7 @@ async function stockLotNow(key: string): Promise<number | null> {
   return stockLotMemo.lots[key] ?? null;
 }
 const istDay = (iso: string | null | undefined) => iso ? ist(Date.parse(iso) / 1000).date : null;
-async function stockActionToday(s: Strategy, px: number, today: string): Promise<number | null> {
+async function stockActionToday(s: Strategy, px: number, today: string): Promise<number | null | undefined> {
   const key = String(s.underlying), mk = `${key}|${today}`;
   const known = actionsFor(key).find((a) => a.day === today);
   if (known) return known.factor;
@@ -1521,7 +1522,9 @@ async function stockActionToday(s: Strategy, px: number, today: string): Promise
     try { rawI = (await raw.intraday(String(s.data_security_id), "NSE_EQ", "EQUITY", 5, `${addDays(today, -6)} 09:00:00`, `${addDays(today, -1)} 23:59:00`)).at(-1)?.c ?? null; } catch { rawI = null; }
     if (!f && rawD) f = splitFactor(px / rawD);
   }
-  if (!f) { if (asked || own > 0) stockDayMemo.set(mk, null); return null; }
+  // Nothing found: remembered for the stock only when Dhan's raw close was compared (a stock-wide answer); a strategy
+  // that only compared its own price is settled for itself, and one that could compare nothing asks again later.
+  if (!f) { if (rawD) stockDayMemo.set(mk, null); return own > 0 || rawD ? null : undefined; }
   // A 1:2 or 1:3 bonus (a 25–33% gap) could also be a real crash: it counts only when Dhan's F&O list shows the
   // exchange's new lot (the list is downloaded again to make sure). A gap of half or more is never a real move here.
   if (f > 0.6) {
@@ -1530,36 +1533,60 @@ async function stockActionToday(s: Strategy, px: number, today: string): Promise
     let lot = await stockLotNow(key);
     if (!near(lot) && set?.dhan_access_token) { await syncFno(sb, credsOf(set)).catch(() => {}); stockLotMemo = null; lot = await stockLotNow(key); }
     if (!near(lot)) {
-      stockDayMemo.set(mk, null);
       await alert(s, `${key}: price gapped ${Math.round((1 - f) * 100)}% at the open`, `That matches a bonus (${Math.round(1 / f * 100) / 100}× shares), but Dhan's F&O list still shows a lot of ${lot ?? "?"} (a bonus would make it ${want}), so the desk treats it as a real price move. Check the stock's news.`, `cagap-${key}-${today}`);
       return null;
     }
   }
-  const jump = (ref: number | null) => !!ref && splitFactor(px / ref) === f;
+  // Whether Dhan's own candles still show the jump; when Dhan didn't answer, assume they do (not adjusted yet) — the
+  // nightly download re-judges it from the raw candles.
+  const jump = (ref: number | null) => ref == null || splitFactor(px / ref) === f;
   await sb.from("stock_actions").upsert({ asset: key, day: today, factor: f, in_daily: jump(rawD), in_intraday: jump(rawI), seen_at: nowIso() }, { onConflict: "asset,day" });
   await loadStockActions(sb, true);
   stockDayMemo.set(mk, f);
   return f;
 }
 /** Adjusts one stock strategy for today's split / bonus (once; ca_day). Returns the strategy as it stands afterwards. */
-async function stockExDate(s: Strategy, px: number): Promise<Strategy> {
-  if (s.data_segment !== "NSE_EQ" || s.trade_type === "OPTIONS" || isMulti(s) || !(px > 0)) return s;
+const exChecked = new Map<string, string>(); // strategy id -> IST day its ex-date check settled (nothing / adjusted)
+// What today's adjustment wrote, per strategy: the price loop keeps its rows for up to 5 seconds, and a row read before
+// the adjustment (ca_day not today) must not be checked against the old stop.
+const exUpd = new Map<string, { day: string; upd: Record<string, unknown> }>();
+async function stockExDate(s0: Strategy, px: number): Promise<Strategy> {
+  if (s0.data_segment !== "NSE_EQ" || s0.trade_type === "OPTIONS" || isMulti(s0) || !(px > 0)) return s0;
   const today = todayIst();
-  if (s.ca_day && String(s.ca_day).slice(0, 10) >= today) return s;
+  if (exChecked.get(String(s0.id)) === today) {
+    const u = exUpd.get(String(s0.id));
+    return u && u.day === today && String(s0.ca_day ?? "").slice(0, 10) !== today ? { ...s0, ...u.upd } as Strategy : s0;
+  }
+  // The per-second loop passes short rows: read the whole row once (position, broker legs, lot, last prices).
+  let s = s0;
+  if (!("underlying" in s0) || !("pos_broker" in s0) || !("ca_day" in s0)) {
+    const { data } = await sb.from("algo_strategies").select("*").eq("id", s0.id).maybeSingle();
+    if (!data) return s0;
+    s = { ...s0, ...data } as Strategy;
+  }
+  if (s.ca_day && String(s.ca_day).slice(0, 10) >= today) { exChecked.set(String(s.id), today); return s; }
   const f = await stockActionToday(s, px, today);
+  if (f === undefined) return s; // couldn't decide yet (Dhan didn't answer): asked again on the next price
+  exChecked.set(String(s.id), today);
   if (!f) return s;
   // Only state from before the ex-date is adjusted (a position opened today is already in the new prices).
   if (s.position !== "FLAT" && String(s.pos_entry_date ?? "") >= today) { await sb.from("algo_strategies").update({ ca_day: today }).eq("id", s.id); return { ...s, ca_day: today }; }
   const upd = { ...adjustPosition(s as any, f, await stockLotNow(String(s.underlying)), px), ca_day: today, ...(s.position !== "FLAT" ? { pos_ltp_at: nowIso() } : {}) };
   const { data: done } = await sb.from("algo_strategies").update(upd).eq("id", s.id).eq("position", s.position).or(`ca_day.is.null,ca_day.lt.${today}`).select("id");
   if (!done?.length) { const { data } = await sb.from("algo_strategies").select("*").eq("id", s.id).maybeSingle(); return data ? { ...s, ...data } as Strategy : s; }
+  exUpd.set(String(s.id), { day: today, upd });
   const pb = s.pos_broker as PosBroker | null;
   if (s.live && pb?.stopId && pb.broker === "DHAN") {
     // The exchange normally cancels resting orders of the stock before an ex-date; if this one is still there it goes too,
     // and the order manager places a new stop for the new quantity and price on its next round.
     const set = await accountFor(sb, s.owner_id, "DHAN", new Map()).catch(() => null);
-    if (set) await dhanCancel(credsOf(set), pb.stopId).catch(() => {});
-    await sb.from("live_orders").update({ state: "cancelled", done_at: nowIso(), note: "split / bonus ex-date: replaced by a stop for the adjusted quantity" }).eq("broker_order_id", pb.stopId).eq("state", "resting");
+    const gone = set ? await dhanCancel(credsOf(set), pb.stopId).then(() => true, async () => {
+      // Already cancelled by the exchange (usual before an ex-date) counts as gone; anything else is left to a person.
+      const st = await dhanStatus(credsOf(set), pb.stopId!).catch(() => null);
+      return !!st && /CANCEL|REJECT|EXPIRE/i.test(String(st.status));
+    }) : false;
+    if (gone) await sb.from("live_orders").update({ state: "cancelled", done_at: nowIso(), note: "split / bonus ex-date: replaced by a stop for the adjusted quantity" }).eq("broker_order_id", pb.stopId).eq("state", "resting");
+    else await alert(s, `${s.underlying}: check the stop order at Dhan`, `After today's split / bonus the desk couldn't cancel the old stop order (${pb.stopId}) at Dhan. Please cancel it in Dhan; the desk places a new stop for the adjusted quantity.`, `castop-${s.id}-${today}`);
   }
   if (s.position !== "FLAT") {
     const what = f === 0.5 ? "1:1 bonus or 1:2 split" : `${Math.round(1 / f * 100) / 100}× shares (split / bonus)`;
@@ -1570,6 +1597,7 @@ async function stockExDate(s: Strategy, px: number): Promise<Strategy> {
 /** Flat stock strategies take the lot size in Dhan's current list (NSE revisions; after a split the new lot). */
 async function stockLotSync(s: Strategy): Promise<Strategy> {
   if (s.data_segment !== "NSE_EQ" || s.position !== "FLAT") return s;
+  if (actionsFor(String(s.underlying)).some((a) => a.day === todayIst())) return s; // ex-date: the adjustment set the lot
   const lot = await stockLotNow(String(s.underlying));
   if (!lot || lot === Number(s.lot_size)) return s;
   await sb.from("algo_strategies").update({ lot_size: lot }).eq("id", s.id).eq("position", "FLAT");
@@ -2405,6 +2433,7 @@ Deno.serve(async (req) => {
   // shows as a jump of a half, a fifth …; none means Dhan's candles are already adjusted).
   if (action === "stock_gaps" || action.startsWith("stock_gaps:")) { // "stock_gaps:KOTAKBANK" for one stock
     const out: Record<string, unknown> = {};
+    await loadStockActions(sb, true);
     for (const k of STOCK_KEYS.filter((x) => !action.includes(":") || x === action.split(":")[1])) {
       const sets = await readCandles(sb, k, "long", true).catch(() => []);
       const row: Record<string, unknown> = {};
@@ -2503,6 +2532,7 @@ Deno.serve(async (req) => {
   // Exchange holidays today (no session, or MCX's evening session only).
   { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", nowIst.date); setHolidays(hol ?? []); }
   // Crypto trades every day: its own minute tick (tick_crypto) runs round the clock, the market tick on weekdays.
+  if ((action === "flatten" || action === "refresh") && !body.strategy_id) return Response.json({ error: `${action} needs a strategy_id` }, { status: 400 });
   const cryptoTick = action === "tick_crypto";
   if (action === "tick" && (nowIst.wd === 0 || nowIst.wd === 6)) return Response.json({ skipped: "weekend" });
 

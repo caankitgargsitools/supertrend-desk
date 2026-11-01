@@ -1,0 +1,13 @@
+-- Security review 1 Nov 2026: a client could edit their own strategy row's engine-owned columns directly through the
+-- API (PATCH algo_strategies) — e.g. pos_entry_px before an exit to book a made-up net (lowering Shukrana due), or
+-- pos_option_type with script that ran on the admin's screen. guard_strategy is now SECURITY INVOKER (so direct app
+-- edits run as role `authenticated`, while the desk's own SECURITY DEFINER functions run as their owner) and:
+--   * INSERT by a client: every engine column below reset to null, position 'FLAT';
+--   * UPDATE by `authenticated` (non-admin): raises if any engine column changes; lot_size / qty_mode can't change while
+--     a position is open. Reset-to-null of last_candle_ts / last_entry_day / pending_* (the strategy form) still works.
+-- Engine columns: position, pos_option_type, pos_strike, pos_expiry, pos_qty, pos_entry_date, pos_entry_px,
+--   pos_entry_prem, pos_lots, pos_margin, pos_ltp, pos_ltp_at, pos_upnl, pos_legs, pos_risk, pos_broker, pos_catchup,
+--   pos_option_side, exec_state, exec_at, kill_at, kill_note, kill_override_trades, live_since, day_pnl, day_pnl_date,
+--   last_trend, last_close, last_supertrend, last_run_at, last_error, ca_day, lab_checked_at.
+-- Tested as a client inside a rolled-back block: pos_entry_px / pos_option_type refused; name and the form's resets allowed.
+-- (Full function text: pg_get_functiondef('public.guard_strategy'::regproc).)

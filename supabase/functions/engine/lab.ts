@@ -52,10 +52,11 @@ export const LAB_ASSETS: Record<string, LabAsset> = Object.fromEntries([
  * P&L of one contract for a $1 move (coins per contract × rupees per dollar). Called at the start of every request.
  */
 export async function loadCryptoAssets(sb: SupabaseClient) {
+  // Stock split / bonus record first, so a crypto list failure can't leave live stock candles unadjusted.
+  await loadStockActions(sb, true).catch(() => {});
   await loadCrypto(sb);
   // Stock futures' lot sizes from Dhan's F&O list (NSE revises them twice a year), and their split / bonus record.
   try { for (const [k, lot] of Object.entries(await stockLots(sb))) if (LAB_ASSETS[k]) LAB_ASSETS[k].lot = lot; } catch (e) { console.error("stock lots", e); }
-  await loadStockActions(sb, true).catch(() => {});
   for (const [k, a] of Object.entries(LAB_ASSETS)) if (a.crypto && !CRYPTO[k]) delete LAB_ASSETS[k];
   for (const c of Object.values(CRYPTO)) {
     LAB_ASSETS[c.key] = { key: c.key, name: c.name, seg: "DELTA", sec: c.key, instr: "PERP", exchange: "DELTA", lot: cryptoLot(c), commodity: false, crypto: true };

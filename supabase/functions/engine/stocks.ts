@@ -158,7 +158,9 @@ const r2 = (x: number) => +x.toFixed(2);
 export function adjustPosition(s: PosLike, f: number, lotNew: number | null, px: number): Record<string, any> {
   const k = 1 / f, upd: Record<string, any> = {};
   const lot = Number(s.lot_size) || 0;
-  upd.lot_size = lotNew && lotNew > 0 ? lotNew : Math.round(lot * k);
+  // Dhan's list may not show the new lot yet on the morning of the ex-date: its lot is used only when it matches lot ÷ f.
+  const want = Math.round(lot * k);
+  upd.lot_size = lotNew && lotNew > 0 && want > 0 && Math.abs(lotNew / want - 1) < 0.02 ? lotNew : want;
   if (s.pending_trigger != null) upd.pending_trigger = r2(Number(s.pending_trigger) * f);
   if (s.position === "FLAT") return upd;
   if (s.qty_mode !== "LOTS" && s.pos_qty != null) upd.pos_qty = Math.round(Number(s.pos_qty) * k);

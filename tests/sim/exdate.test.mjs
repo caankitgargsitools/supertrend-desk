@@ -64,6 +64,13 @@ await t("the adjusted position's stop isn't hit by the new price", async () => {
   await E.secondRisk({ ...db.algo_strategies[0] }, 401, new Date().toISOString());
   assert.equal(db.algo_strategies[0].position, "LONG"); assert.ok(!db.algo_signals?.length);
 });
+await t("the price loop's older copy of the row (read before the adjustment) gets the adjusted stop, not the old one", async () => {
+  const old = { ...longRow(), ca_day: null }; // what the per-second loop may still hold for up to 5 seconds
+  const got = await E.stockExDate(old, 401);
+  assert.equal(got.pos_risk.stop, 380); assert.equal(got.pos_qty, 10000);
+  await E.secondRisk(got, 401, new Date().toISOString());
+  assert.equal(db.algo_strategies[0].position, "LONG", "no false stop");
+});
 await t("a short in LOTS mode: lots stay, the lot size follows the exchange; P&L unchanged", async () => {
   const before = (2010 - 2050) * -1 * 1 * 2000; // short 1 lot of 2,000 from 2,050, price 2,010
   db.algo_strategies = [{ ...longRow(), id: "k2", live: false, position: "SHORT", qty_mode: "LOTS", pos_qty: 1, pos_entry_px: 2050, pos_broker: null,
@@ -114,6 +121,7 @@ await t("…and the same gap with Dhan's lot gone from 10,000 to 13,333: adjuste
   assert.equal(db.algo_strategies[0].pos_qty, 13333); assert.equal(db.algo_strategies[0].lot_size, 13333); assert.equal(db.algo_strategies[0].pos_risk.stop, 285);
 });
 await t("flat stock strategies take Dhan's current lot size", async () => {
+  clock += 86400000; // a day without an ex-date (on one, the adjustment sets the lot and this sync waits)
   db.algo_strategies = [{ ...base, id: "k7", position: "FLAT", lot_size: 2000 }];
   await E.stockLotSync({ ...db.algo_strategies[0] });
   assert.equal(db.algo_strategies[0].lot_size, db.fno_contracts[0].lot);

@@ -1,0 +1,10 @@
+-- Security review 1 Nov 2026: a client's private variation-run results (lab_results.requested_by) could be reached by
+-- another client by id. lab_adopt, both request_lab_variations overloads and lab_public now only see rows with
+-- requested_by null, the caller's own, or any for admins:
+--   ... and (requested_by is null or requested_by = u or public.is_admin())        (lab_adopt, request_lab_variations)
+--   ... and (l.requested_by is null or l.requested_by = auth.uid() or public.is_admin())   (lab_public)
+-- Also: execute revoked from anon on audit_now, notify_test, lab_run_focus, request_lab_variations(…7 args)
+-- (each already checked the caller inside; defence in depth).
+-- Data fix (not a migration): the Dhan webhook secret was stored in algo_signals.payload by paper signals and readable
+-- in the browser; stripped from 121 rows with  update algo_signals set payload = payload - 'secret' where payload ? 'secret'
+-- and the engine no longer logs it.

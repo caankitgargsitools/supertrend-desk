@@ -1778,7 +1778,7 @@ function paintMarket() {
   set("mx_mcx", mcx, mcx ? "MCX open · engine checking every minute" : `MCX closed${hx ? ` (${hx.note || "holiday"}${hm(hx)})` : ""}`);
   set("mx_dlt", true, "Delta Exchange crypto trades round the clock, every day");
 }
-function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
 function errorText(e) {
   const m = (e && (e.message || e.error_description || e.error)) || String(e);
@@ -1851,7 +1851,7 @@ function chipsFor(s) {
   c.push(s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>');
   c.push(s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>');
   c.push(`<span class="chip blue">${kindName(s)}</span>`);
-  const optTxt = (side) => s.pos_option_type ? `${s.pos_option_side === "SELL" ? "Short" : "Holding"} ${s.pos_option_type}` : side;
+  const optTxt = (side) => s.pos_option_type ? `${s.pos_option_side === "SELL" ? "Short" : "Holding"} ${esc(s.pos_option_type)}` : side;
   if (s.position === "LONG") c.push(`<span class="chip green">${s.trade_type === "OPTIONS" ? optTxt("Bullish") : "Long"}</span>`);
   if (s.position === "SHORT") c.push(`<span class="chip red">${s.trade_type === "OPTIONS" ? optTxt("Bearish") : "Short"}</span>`);
   if (s.risk && s.risk.max_day_loss && String(s.day_pnl_date) === istDate(0) && Number(s.day_pnl) <= -s.risk.max_day_loss) c.push('<span class="chip red">Loss limit</span>');
@@ -6068,7 +6068,8 @@ $("tf_period").addEventListener("change", () => { const p = $("tf_period").value
 $("tf_clear").addEventListener("click", () => { ["tf_mode", "tf_asset", "tf_strat", "tf_side", "tf_res", "tf_why", "tf_inst", "tf_from", "tf_to", "tf_q"].forEach((id) => $(id).value = ""); $("tf_period").value = "all"; $("tf_arch").checked = false; renderAllTrades(); });
 $("tf_toggle").addEventListener("click", () => { const box = $("tf_box"), on = !box.classList.contains("open"); box.classList.toggle("open", on); $("tf_toggle").setAttribute("aria-expanded", String(on)); $("tf_toggle").textContent = on ? "Hide filters" : "Filters"; });
 $("tf_csv").addEventListener("click", () => {
-  const rows = filteredTrades(), q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  // Text cells starting with = + - @ would run as formulas in Excel: a leading ' keeps them text (numbers stay numbers).
+  const rows = filteredTrades(), q = (v) => { let x = String(v ?? ""); if (typeof v === "string" && /^[=+\-@\t\r]/.test(x) && !/^-?\d/.test(x)) x = "'" + x; return `"${x.replace(/"/g, '""')}"`; };
   const lines = [["Closed (IST)", "Opened", "Strategy", "Asset", "Mode", "Side", "Contract", "Lots", "Entry", "Exit", "Gross", "Charges", "Net", "Closed by", "Reason"].map(q).join(",")];
   for (const t of rows) { const s = stratOf(t.strategy_id); lines.push([istText(t.exit_at), t.entry_day || "", s ? s.name : "", assetOfStrat(s), t.mode, t.side, t.contract, t.lots, t.entry_px, t.exit_px, Math.trunc(Number(t.gross) || 0), Math.trunc(Number(t.costs) || 0), Math.trunc(Number(t.net) || 0), closedBy(t.exit_why), t.exit_why].map(q).join(",")); }
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\n")], { type: "text/csv" })); a.download = `trades-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
