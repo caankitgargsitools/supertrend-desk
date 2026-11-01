@@ -13,3 +13,6 @@ tests/sim/ideas.mjs
 tests/sim/pred.mjs
 __pycache__/
 tests/sim/combos.mjs
+tests/sim/stocks.mjs
+tests/sim/candles.mjs
+tests/sim/dhanS.mjs

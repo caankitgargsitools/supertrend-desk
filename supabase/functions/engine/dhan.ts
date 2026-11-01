@@ -1,6 +1,7 @@
 // Thin Dhan v2 data client with pacing and retry on rate limits.
 import { type DayBar, ist, normaliseTimestamps, type Raw } from "./logic.ts";
 import { cryptoDaily, cryptoIntraday, cryptoLtp } from "./crypto.ts";
+import { actionsFor, adjustRows, stockOfSec } from "./stocks.ts";
 
 export type OptBar = { t: number; o: number; h?: number; l?: number; c: number; strike: number | null; spot: number | null };
 
@@ -35,6 +36,8 @@ export class Dhan {
   static ownUsed = new Set<string>();
   /** Strategy ticks fall back to own candles when Dhan refuses a candle request; the lab never does. */
   useOwn = false;
+  /** Share prices adjusted for splits / bonuses (stock_actions); the lab's candle download turns it off to see the raw jumps. */
+  adjust = true;
   private last = 0;
   calls = 0;
   /** Epoch ms after which no more retries are attempted (keeps a backtest round inside the function's time limit). */
@@ -127,7 +130,9 @@ export class Dhan {
     }
     const ts: number[] = j.timestamp ?? [];
     const shift = normaliseTimestamps(ts, seg);
-    return ts.map((t, i) => ({ t: t + shift, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0) }));
+    const rows = ts.map((t, i) => ({ t: t + shift, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0) }));
+    const stk = this.adjust ? stockOfSec(seg, sec) : null;
+    return stk ? adjustRows(rows, actionsFor(stk), "i") : rows;
   }
 
   /** Daily candles; toDate is exclusive. */
@@ -145,8 +150,10 @@ export class Dhan {
       throw e;
     }
     const ts: number[] = j.timestamp ?? [];
-    return ts.map((t, i) => ({ t, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0), day: ist(t).date }))
+    const rows = ts.map((t, i) => ({ t, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0), day: ist(t).date }))
       .sort((a, b) => a.t - b.t);
+    const stk = this.adjust ? stockOfSec(seg, sec) : null;
+    return stk ? adjustRows(rows, actionsFor(stk), "d") : rows;
   }
 
   /** Expired index options (weekly or monthly series) by strike relative to spot (ATM, ATM+k). Up to 30 days per call. */

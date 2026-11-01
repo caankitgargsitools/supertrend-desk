@@ -649,7 +649,7 @@ function fillOf(st: Strategy, leg: "Entry" | "Exit", px: number | null | undefin
   const lots = st.qty_mode === "LOTS" ? Number(st.pos_qty) : Math.round(Number(st.pos_qty) / Number(st.lot_size));
   const cr = isCrypto(String(st.data_segment));
   return { leg, side: buy ? "BUY" : "SELL", ref: brokerRef(st), qty: st.exchange === "MCX" || cr ? lots : (st.qty_mode === "LOTS" ? Number(st.pos_qty) * Number(st.lot_size) : Number(st.pos_qty)),
-    px: px != null && Number(px) > 0 ? +Number(px).toFixed(4) : null, basis: opt ? "premium" : cr ? "Delta perpetual" : isCommodity(String(st.data_segment)) ? "futures" : "index" };
+    px: px != null && Number(px) > 0 ? +Number(px).toFixed(4) : null, basis: opt ? "premium" : cr ? "Delta perpetual" : isCommodity(String(st.data_segment)) ? "futures" : st.data_segment === "NSE_EQ" ? "share price" : "index" };
 }
 async function saveFills(fills: Fill[]) {
   if (lastSignalId && fills.length) await sb.from("algo_signals").update({ fills }).eq("id", lastSignalId);

@@ -78,7 +78,7 @@ export async function predFeed(sb: SupabaseClient, creds: { client: string; toke
   const dhan = new Dhan(creds.client, creds.token);
   const done: string[] = [], errors: Record<string, string> = {};
   for (const a of Object.values(LAB_ASSETS)) {
-    if (a.crypto) continue;
+    if (a.crypto || a.stock) continue; // stocks aren't forecast yet (the prediction server is small)
     const s = tradingSession(a.seg, today);
     if (!(now.min >= s.open && now.min <= s.close + 15)) continue;
     try {
@@ -103,7 +103,7 @@ export async function predFeed(sb: SupabaseClient, creds: { client: string; toke
 export async function predPull(sb: SupabaseClient, body: { files?: boolean }) {
   const { data: set } = await sb.from("pred_settings").select("enabled, model, tfs, horizon, lookback, replay_from, samples").eq("id", 1).maybeSingle();
   const today = ist(Date.now() / 1000).date;
-  const assets = Object.values(LAB_ASSETS).map((a) => ({
+  const assets = Object.values(LAB_ASSETS).filter((a) => !a.stock).map((a) => ({
     key: a.key, name: a.name, seg: a.seg, crypto: !!a.crypto, commodity: a.commodity,
     binance: a.crypto ? CRYPTO[a.sec]?.history_symbol ?? null : null,
   })).filter((a) => !a.crypto || a.binance);

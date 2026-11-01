@@ -24,6 +24,7 @@ async function fnoList(creds: { client: string; token: string }, seg: string, wa
   const head = text.slice(0, nl).replace(/\r$/, "").split(",");
   const col = (...names: string[]) => names.map((n) => head.indexOf(n)).find((i) => i >= 0) ?? -1;
   const iSec = col("SECURITY_ID", "SEM_SMST_SECURITY_ID"), iIns = col("INSTRUMENT", "SEM_INSTRUMENT_NAME"), iUnd = col("UNDERLYING_SYMBOL", "SM_SYMBOL_NAME");
+  const iSym = col("SYMBOL_NAME", "SEM_TRADING_SYMBOL");
   const iExp = col("SM_EXPIRY_DATE", "SEM_EXPIRY_DATE"), iStk = col("STRIKE_PRICE", "SEM_STRIKE_PRICE"), iOpt = col("OPTION_TYPE", "SEM_OPTION_TYPE"), iLot = col("LOT_SIZE", "SEM_LOT_UNITS");
   if ([iSec, iIns, iUnd, iExp].some((i) => i < 0)) throw new Error(`Dhan's ${seg} instrument list has an unexpected format: ${head.slice(0, 12).join(",")}`);
   const out: Row[] = [];
@@ -31,10 +32,11 @@ async function fnoList(creds: { client: string; token: string }, seg: string, wa
   while (pos < text.length) {
     let end = text.indexOf("\n", pos); if (end < 0) end = text.length;
     const line = text.slice(pos, end); pos = end + 1;
-    if (!line.includes("IDX")) continue; // FUTIDX / OPTIDX only
+    if (!line.includes("IDX") && !line.includes("FUTSTK")) continue; // FUTIDX / OPTIDX, and stock futures
     const a = line.replace(/\r$/, "").split(",");
-    if ((a[iIns] !== "FUTIDX" && a[iIns] !== "OPTIDX") || !wanted.has(a[iUnd])) continue;
-    out.push({ sec: a[iSec], inst: a[iIns], und: a[iUnd], exp: (a[iExp] ?? "").slice(0, 10), strike: Number(a[iStk] ?? 0), opt: a[iOpt] ?? "", lot: Number(a[iLot] ?? 0) });
+    const und = a[iUnd] || (a[iIns] === "FUTSTK" && iSym >= 0 ? String(a[iSym] ?? "").split("-")[0] : "");
+    if ((a[iIns] !== "FUTIDX" && a[iIns] !== "OPTIDX" && a[iIns] !== "FUTSTK") || !wanted.has(und)) continue;
+    out.push({ sec: a[iSec], inst: a[iIns], und, exp: (a[iExp] ?? "").slice(0, 10), strike: Number(a[iStk] ?? 0), opt: a[iOpt] ?? "", lot: Number(a[iLot] ?? 0) });
   }
   return out;
 }
@@ -82,7 +84,7 @@ export async function refreshMargins(sb: SupabaseClient, creds: { client: string
       } else {
         const seg = a.exchange === "BSE" ? "BSE_FNO" : "NSE_FNO";
         const rows = (lists.get(seg) ?? []).filter((r) => r.und === a.key && r.exp > today);
-        const fut = rows.filter((r) => r.inst === "FUTIDX").sort((x, y) => x.exp.localeCompare(y.exp))[0];
+        const fut = rows.filter((r) => r.inst === "FUTIDX" || r.inst === "FUTSTK").sort((x, y) => x.exp.localeCompare(y.exp))[0];
         const lot = fut?.lot || a.lot;
         detail.lot_dhan = lot;
         if (fut) {

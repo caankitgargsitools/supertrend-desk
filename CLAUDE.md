@@ -149,6 +149,19 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   hourly at :11, `desk-health-day` 08:11 IST sends admins a summary (kind "health", `/?health=1`); a check newly red
   alerts at once. Admin sidebar "System health" (`healthPane`, `renderHealth`, "Check now" → `health_check_now`) with a
   red dot on the link (`healthDot`, every 5 min) while anything is red or no check ran for 2 h. Test: `tests/ui/ui_health.mjs`.
+- **Stock futures** (1 Nov 2026, Papa: "start with stock futures on 10 liquid Nifty 50 stocks"; `stocks.ts`, migration 59):
+  RELIANCE, HDFCBANK, ICICIBANK, INFY, TCS, SBIN, BHARTIARTL, AXISBANK, LT, KOTAKBANK. Like the indices, signals and
+  backtests use the share price (Dhan NSE_EQ, instrument EQUITY; no futures premium added) and orders go to the
+  near-month stock future (`resolveLeg` → FUTSTK in `fno_contracts`, kept by `syncFno`; quantity = lots × lot size).
+  Lot sizes from Dhan's F&O list at every request (`stockLots`), fallbacks in `STOCKS`. Futures only (no stock options;
+  kept out of the lab's option-pricing queue), charges as index futures, slippage 0.03% (six busiest) / 0.04%, default
+  margin 20%. Splits / bonuses: the lab's candle download (Dhan client with `adjust = false`) looks for overnight jumps
+  matching a split / bonus ratio (`findSplits`, open and close must both match) in the raw daily and intraday candles and
+  stores them in `stock_actions` (never deleted); every read (`readCandles`, and Dhan candles for NSE_EQ) multiplies
+  earlier prices by the factor; files keep raw prices (`readCandles(..., raw = true)`). Not in the Prediction Lab (small
+  server). Lab weight 1 per stock (as a commodity); strict-mode class "S". UI: preset group "Stocks (F&O)" (`STK`),
+  `VAR_STOCK`. Not handled yet: a held stock future across an ex-date (the exchange adjusts the contract and lot) — keep
+  an eye before going live. Tests: `tests/sim/stocks.test.mjs`, `tests/ui/ui_stocks.mjs`.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

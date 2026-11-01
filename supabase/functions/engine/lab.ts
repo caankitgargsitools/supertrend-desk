@@ -17,12 +17,13 @@ import { readCandles, saveCandles } from "./candles.ts";
 import { deflatedSharpe, median, pbo } from "./stats.ts";
 import { closesFor, pValue, randomEntries, shuffledData } from "./noise.ts";
 export { readCandles, saveCandles };
+import { daysOf, findSplits, loadStockActions, saveStockActions, STOCKS, stockLots } from "./stocks.ts";
 import { CRYPTO, cryptoDaily, cryptoFunding, cryptoIntraday, cryptoLot, loadCrypto } from "./crypto.ts";
 
 /* ---------- assets ---------- */
 export type LabAsset = {
   key: string; name: string; seg: string; sec: string; instr: string; exchange: string; lot: number; commodity: boolean;
-  step?: number; wd?: number; flag?: "WEEK" | "MONTH"; crypto?: boolean;
+  step?: number; wd?: number; flag?: "WEEK" | "MONTH"; crypto?: boolean; stock?: boolean;
 };
 const IDX = (key: string, name: string, sec: string, exchange: string, step: number, wd: number, lot: number, flag: "WEEK" | "MONTH"): LabAsset =>
   ({ key, name, seg: "IDX_I", sec, instr: "INDEX", exchange, lot, commodity: false, step, wd, flag });
@@ -41,6 +42,8 @@ export const LAB_ASSETS: Record<string, LabAsset> = Object.fromEntries([
   MCX("NATGASMINI", "Natural Gas Mini", 250), MCX("COPPER", "Copper", 2500), MCX("ZINC", "Zinc", 5000), MCX("ZINCMINI", "Zinc Mini", 1000),
   MCX("LEAD", "Lead", 5000), MCX("LEADMINI", "Lead Mini", 1000), MCX("ALUMINIUM", "Aluminium", 5000), MCX("ALUMINI", "Aluminium Mini", 1000),
   MCX("NICKEL", "Nickel", 250),
+  // Stock futures (NSE, monthly): signals on the share price, orders to the near-month future. No options.
+  ...STOCKS.map((x): LabAsset => ({ key: x.key, name: x.name, seg: "NSE_EQ", sec: x.sec, instr: "EQUITY", exchange: "NSE", lot: x.lot, commodity: false, flag: "MONTH", wd: 2, stock: true })),
 ].map((a) => [a.key, a]));
 
 /* ---------- crypto (Delta Exchange perpetuals) ---------- */
@@ -50,6 +53,9 @@ export const LAB_ASSETS: Record<string, LabAsset> = Object.fromEntries([
  */
 export async function loadCryptoAssets(sb: SupabaseClient) {
   await loadCrypto(sb);
+  // Stock futures' lot sizes from Dhan's F&O list (NSE revises them twice a year), and their split / bonus record.
+  try { for (const [k, lot] of Object.entries(await stockLots(sb))) if (LAB_ASSETS[k]) LAB_ASSETS[k].lot = lot; } catch (e) { console.error("stock lots", e); }
+  await loadStockActions(sb, true).catch(() => {});
   for (const [k, a] of Object.entries(LAB_ASSETS)) if (a.crypto && !CRYPTO[k]) delete LAB_ASSETS[k];
   for (const c of Object.values(CRYPTO)) {
     LAB_ASSETS[c.key] = { key: c.key, name: c.name, seg: "DELTA", sec: c.key, instr: "PERP", exchange: "DELTA", lot: cryptoLot(c), commodity: false, crypto: true };
@@ -802,13 +808,15 @@ export async function refreshAsset(sb: SupabaseClient, creds: { client: string; 
   }
   if (a.crypto) return refreshCrypto(sb, a, today);
   const dhan = new Dhan(creds.client, creds.token);
+  dhan.adjust = false; // stocks: files keep Dhan's raw prices; splits / bonuses are found here and adjusted on reading
   const sec = (await dataSecurity(sb, creds, a.seg, a.sec, today)).sec;
   // 11 years of daily candles: the year-by-year test covers 10 years (plus warm-up for the indicators).
   const daily = await dhan.daily(sec, a.seg, a.instr, addDays(today, -4100), addDays(today, 1));
+  const jumps = { d: a.stock ? findSplits(daily) : [], i: [] as { day: string; factor: number }[] };
   await saveCandles(sb, { asset: key, kind: "D", from_day: daily[0]?.day ?? today, to_day: daily.at(-1)?.day ?? today, bars: toCol(daily, false) });
   const want = addDays(today, -(YEAR_DAYS + WARM_DAYS));
   if (a.commodity) return refreshMcxIntraday(sb, dhan, a, today, want);
-  const cached = (await readCandles(sb, key, ["I5"]))[0];
+  const cached = (await readCandles(sb, key, ["I5"], true))[0];
   const map = new Map<number, { t: number; o: number; h: number; l: number; c: number }>();
   let start = want;
   if (cached && cached.from_day <= addDays(want, 5)) {
@@ -822,13 +830,16 @@ export async function refreshAsset(sb: SupabaseClient, creds: { client: string; 
   const lo = Date.parse(`${want}T00:00:00+05:30`) / 1000;
   const rows = [...map.values()].filter((r) => r.t >= lo).sort((x, y) => x.t - y.t);
   await saveCandles(sb, { asset: key, kind: "I5", from_day: ist(rows[0]?.t ?? lo).date, to_day: ist(rows.at(-1)?.t ?? lo).date, bars: toCol(rows, false) });
-  await refreshYearChunks(sb, dhan, a, today);
+  if (a.stock) jumps.i.push(...findSplits(daysOf(rows)));
+  jumps.i.push(...await refreshYearChunks(sb, dhan, a, today));
+  if (a.stock) await saveStockActions(sb, key, jumps.d, jumps.i);
 }
 /**
  * Older 5-minute candles of an index for the year-by-year test, one stored row per calendar year ("I5Y:2022"),
  * fetched once a year is complete. Dhan keeps 5 years of intraday history.
  */
-async function refreshYearChunks(sb: SupabaseClient, dhan: Dhan, a: LabAsset, today: string) {
+async function refreshYearChunks(sb: SupabaseClient, dhan: Dhan, a: LabAsset, today: string): Promise<{ day: string; factor: number }[]> {
+  const found: { day: string; factor: number }[] = [];
   const first = addDays(today, -5 * 365 + 2), y0 = Number(first.slice(0, 4)), y1 = Number(today.slice(0, 4)) - 1;
   const { data: have } = await sb.from("lab_candles").select("kind").eq("asset", a.key).like("kind", "I5Y:%");
   const got = new Set((have ?? []).map((h) => h.kind));
@@ -843,7 +854,9 @@ async function refreshYearChunks(sb: SupabaseClient, dhan: Dhan, a: LabAsset, to
     const rows = [...map.values()].sort((x, z) => x.t - z.t);
     if (!rows.length) continue;
     await saveCandles(sb, { asset: a.key, kind: `I5Y:${y}`, from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, false) });
+    if (a.stock) found.push(...findSplits(daysOf(rows)));
   }
+  return found;
 }
 
 /**
@@ -1348,7 +1361,7 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
         // (one strategy at a time, oldest first, only while no run is going); the run itself is finished here.
         // (Positional once-a-day trades run across expiries, and commodities and crypto have no listed index options.)
         const { data: won } = await sb.from("lab_results").select("id, asset, mode").eq("run_id", run.id).eq("stage", "screened").eq("passed", true).limit(1000);
-        const ids = (won ?? []).filter((b) => !LAB_ASSETS[b.asset]?.commodity && !LAB_ASSETS[b.asset]?.crypto && b.mode === "INTRADAY").map((b) => b.id);
+        const ids = (won ?? []).filter((b) => !LAB_ASSETS[b.asset]?.commodity && !LAB_ASSETS[b.asset]?.crypto && !LAB_ASSETS[b.asset]?.stock && b.mode === "INTRADAY").map((b) => b.id);
         for (let i = 0; i < ids.length; i += 200) await sb.from("lab_results").update({ stage: "opt_queue" }).in("id", ids.slice(i, i + 200));
         const { count: passed } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).eq("passed", true);
         await prune(sb);
@@ -1481,7 +1494,7 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
     }
   });
   // New strategies, shared between assets (an index gets twice a commodity's share: it has intraday and option variants).
-  const w = assets.map((k) => LAB_ASSETS[k].commodity ? 1 : 2), wsum = w.reduce((a, b) => a + b, 0);
+  const w = assets.map((k) => LAB_ASSETS[k].commodity || LAB_ASSETS[k].stock ? 1 : 2), wsum = w.reduce((a, b) => a + b, 0);
   const nNew = Math.max(0, n - nMade);
   assets.forEach((k, i) => {
     const want = nNew ? Math.max(1, Math.round((nNew * w[i]) / wsum)) : 0;
@@ -1592,7 +1605,7 @@ async function forgetOld(sb: SupabaseClient, limit = 400) {
 }
 
 /* ---------- robustness: other assets, other timeframes, buy & hold ---------- */
-const clsOf = (a?: LabAsset) => a?.crypto ? "C" : a?.commodity ? "M" : "I";
+const clsOf = (a?: LabAsset) => a?.crypto ? "C" : a?.commodity ? "M" : a?.stock ? "S" : "I";
 /** Mini and micro contracts follow the same commodity, so they don't count as another asset. */
 export const assetRoot = (k: string) => /^GOLD/.test(k) ? "GOLD" : /^SILVER/.test(k) ? "SILVER" : /^CRUDE/.test(k) ? "CRUDE" : /^NAT/.test(k) ? "NATGAS" : /^ZINC/.test(k) ? "ZINC" : /^LEAD/.test(k) ? "LEAD" : /^ALUMIN/.test(k) ? "ALUMINIUM" : k;
 type Check = { kind: "self" | "asset" | "tf" | "year" | "step" | "vault"; asset: string; tf: number | null; config: LabConfig };

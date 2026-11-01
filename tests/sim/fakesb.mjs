@@ -50,7 +50,8 @@ class Q {
       out = this.rows.map((r) => {
         const row = { id: r.id ?? ++seq, created_at: new Date().toISOString(), ...(this.t === 'live_orders' ? { steps: 0, market_retry: false } : {}), ...JSON.parse(JSON.stringify(r)) };
         if (this.op === "upsert") {
-          const same = this.conflict ? (x) => this.conflict.every((k) => String(x[k]) === String(row[k])) : (x) => x.sec_id === row.sec_id && x.seg === row.seg;
+          const key = this.conflict ?? PK[this.t];
+          const same = key ? (x) => key.every((k) => String(x[k]) === String(row[k])) : (x) => x.sec_id === row.sec_id && x.seg === row.seg;
           const i = tab.findIndex(same);
           if (i >= 0) { const keep = { ...tab[i] }; tab[i] = { ...keep, ...JSON.parse(JSON.stringify(r)), id: keep.id, created_at: keep.created_at }; return tab[i]; }
         }
@@ -71,6 +72,8 @@ class Q {
   }
   then(res, rej) { try { res(this.run()); } catch (e) { rej(e); } }
 }
+// Primary keys the real tables have, for upserts made without onConflict.
+const PK = { lab_candles: ["asset", "kind"] };
 export const rpcCalls = [];
 export const rpcs = {};
 export const files = {};

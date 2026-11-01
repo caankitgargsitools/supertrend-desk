@@ -1563,6 +1563,8 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSe
 // verify before going live. Commodities: MCX futures; the data ID is the underlying symbol and the engine picks the
 // current near-month contract each day. For commodities "lot size" is the P&L multiplier per lot (price unit × lot).
 const IDX = (id, sym, ex, step, wd, lot, flag, name) => ({ group: "Indices (F&O)", name, data_security_id: id, data_segment: "IDX_I", data_instrument: "INDEX", exchange: ex, dhan_symbol: sym, futures_symbol: sym + "1!", strike_step: step, expiry_weekday: wd, expiry_flag: flag, lot_size: lot });
+// Stock futures (NSE, monthly): signals on the share price (Dhan NSE_EQ id), orders to the near-month stock future.
+const STK = (id, sym, name, lot) => ({ group: "Stocks (F&O)", name, data_security_id: id, data_segment: "NSE_EQ", data_instrument: "EQUITY", exchange: "NSE", dhan_symbol: sym, futures_symbol: sym + "1!", expiry_weekday: 2, expiry_flag: "MONTH", lot_size: lot, stock: true });
 const MCX = (sym, name, mult, group) => ({ group, name, data_security_id: sym, data_segment: "MCX_COMM", data_instrument: "FUTCOM", exchange: "MCX", dhan_symbol: sym, futures_symbol: sym + "1!", lot_size: mult, commodity: true });
 const PRESETS = {
   NIFTY: IDX("13", "NIFTY", "NSE", 50, 2, 65, "WEEK", "Nifty 50"),
@@ -1592,6 +1594,16 @@ const PRESETS = {
   ALUMINIUM: MCX("ALUMINIUM", "Aluminium (5 t)", 5000, "Base metals (MCX)"),
   ALUMINI: MCX("ALUMINI", "Aluminium Mini (1 t)", 1000, "Base metals (MCX)"),
   NICKEL: MCX("NICKEL", "Nickel (250 kg)", 250, "Base metals (MCX)"),
+  RELIANCE: STK("2885", "RELIANCE", "Reliance Industries", 500),
+  HDFCBANK: STK("1333", "HDFCBANK", "HDFC Bank", 650),
+  ICICIBANK: STK("4963", "ICICIBANK", "ICICI Bank", 700),
+  INFY: STK("1594", "INFY", "Infosys", 400),
+  TCS: STK("11536", "TCS", "Tata Consultancy Services", 225),
+  SBIN: STK("3045", "SBIN", "State Bank of India", 750),
+  BHARTIARTL: STK("10604", "BHARTIARTL", "Bharti Airtel", 475),
+  AXISBANK: STK("5900", "AXISBANK", "Axis Bank", 625),
+  LT: STK("11483", "LT", "Larsen & Toubro", 175),
+  KOTAKBANK: STK("1922", "KOTAKBANK", "Kotak Mahindra Bank", 2000),
 };
 const isMcx = (seg) => seg === "MCX_COMM";
 const isCrypto = (seg) => seg === "DELTA";
@@ -3433,6 +3445,11 @@ $("f_underlying").addEventListener("change", () => {
     $("f_session_start").value = "00:00"; $("f_last_entry").value = "23:59"; $("f_square_off").value = "23:59"; $("f_intraday").value = "false";
     const c = coinOf($("f_underlying").value) || {};
     $("formMsg").textContent = `Filled ${p.name.replace(/\s*\(.*\)$/, "")} on Delta Exchange: perpetual futures, 1 lot = ${lotCoinsOf(c)} ${String(c.key || "").replace(/USD$/, "")} (₹${p.lot_size} per $1 move at ₹${USD_INR}/$), round the clock, every day (the crypto day is the IST calendar day; set a square-off time only for intraday). Orders go through your Delta API key.`;
+  } else if (p.stock) {
+    // Stock futures: futures only (no stock options yet), NSE hours, monthly contracts.
+    $("f_trade_type").value = "FUTURES";
+    if ($("f_last_entry").value > "15:30") { $("f_session_start").value = "09:20"; $("f_last_entry").value = "15:00"; $("f_square_off").value = "15:15"; }
+    $("formMsg").textContent = `Filled ${p.name}: NSE stock futures (near month), signals on the share price, 1 lot = ${p.lot_size} shares (check Dhan's current lot size). Futures only.`;
   } else if (p.commodity) {
     // MCX futures: quantity in lots, evening session.
     $("f_trade_type").value = "FUTURES"; $("f_qty_mode").value = "LOTS";
@@ -5224,20 +5241,21 @@ async function openLabDetailPublic(id) {
 }
 /* ---------- variation runs ---------- */
 const VAR_KINDS = [["settings", "Small steps on each indicator setting (lengths ±1/±2/±10%, levels ±2/±5)"], ["assets", "Other assets"], ["timeframes", "Other decision timeframes"], ["stops", "Stop loss & target settings"], ["trailing", "Profit trailing (trailing stops)"], ["indicators", "Other indicator combinations"], ["tweaks", "Random tweaks (one or two settings, session, entry style)"]];
+const VAR_STOCK = ["RELIANCE", "HDFCBANK", "ICICIBANK", "INFY", "TCS", "SBIN", "BHARTIARTL", "AXISBANK", "LT", "KOTAKBANK"];
 const VAR_INDEX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX"], VAR_MCX = ["GOLD", "GOLDM", "SILVER", "SILVERM", "SILVERMIC", "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "COPPER", "ZINC", "ZINCMINI", "ALUMINIUM", "ALUMINI", "LEAD", "LEADMINI", "NICKEL"];
 /** Form to ask the lab to test a strategy many more ways. src: { labId } or { strategyId }, plus asset and daily (null = unknown). */
 function variationForm(box, src) {
   // Every asset for every strategy: indices and MCX commodities alike.
   const VAR_CRYPTO = Object.keys(PRESETS).filter((k) => PRESETS[k].crypto);
-  const assets = [...VAR_INDEX, ...VAR_MCX, ...VAR_CRYPTO].filter((k) => PRESETS[k]);
-  const isIdx = VAR_INDEX.includes(src.asset);
+  const assets = [...VAR_INDEX, ...VAR_STOCK, ...VAR_MCX, ...VAR_CRYPTO].filter((k) => PRESETS[k]);
+  const isIdx = VAR_INDEX.includes(src.asset), isStk = VAR_STOCK.includes(src.asset);
   box.innerHTML = `<div class="ued" style="margin-top:12px"><strong>${src.manual ? "Manual test" : "Run variations"} of ${esc(src.title)}</strong>
     <p class="hint" style="margin:0">The lab tests this strategy many more ways on the past year, ranks the results the same way as the nightly run, and shows them to you under “Variation runs”. Its settings stay private; you see results and trades. Runs one at a time after the lab's other work; it can take 10–60 minutes.</p>
     <div class="f"><span>How</span><div class="assetpick"><label><input type="radio" name="vf_mode" value="mix" checked> Let the lab mix changes (random combinations)</label><label><input type="radio" name="vf_mode" value="exact"> Manual test: exactly what I tick below</label></div></div>
     <div class="f"><span>Try</span><div class="assetpick">${VAR_KINDS.map(([k, l]) => `<label class="vk vk-${k}"><input type="checkbox" data-k="${k}" checked> ${esc(l)}</label>`).join("")}</div></div>
     <div class="f vf-tfs" hidden><span>On these decision timeframes (minutes)</span><div class="assetpick">${[5, 10, 15, 25, 30, 45, 60, 75, 125].map((t) => `<label><input type="checkbox" data-t="${t}"> ${t} min</label>`).join("")}</div>
       <span class="hint">A once-a-day strategy is then decided at the close of every candle of that timeframe, with its daily conditions still read on daily candles (the same way the tougher test checks other timeframes). Timeframes that don't fit the rules are skipped.</span></div>
-    <div class="f"><span>On these assets (for “Other assets”)</span><div class="assetpick">${assets.map((k) => `<label><input type="checkbox" data-a="${k}" ${(isIdx ? VAR_INDEX.includes(k) : true) ? "checked" : ""}> ${esc(PRESETS[k].name)}</label>`).join("")}</div>
+    <div class="f"><span>On these assets (for “Other assets”)</span><div class="assetpick">${assets.map((k) => `<label><input type="checkbox" data-a="${k}" ${(isIdx ? VAR_INDEX.includes(k) : isStk ? VAR_STOCK.includes(k) : true) ? "checked" : ""}> ${esc(PRESETS[k].name)}</label>`).join("")}</div>
       <span class="hint">Intraday strategies on MCX are tested on 5-minute candles from the contracts Dhan still lists (a few months to a year, growing every night), so those results cover a shorter period. A strategy moved to MCX trades the MCX session (09:00–23:30).</span></div>
     <div class="grid"><label class="f"><span>How many versions</span><select id="vf_n"><option value="50">50 (quicker)</option><option value="100" selected>100</option><option value="150">150</option>${isAdmin() ? '<option value="300">300</option>' : ""}</select></label></div>
     <div class="formbar"><button class="btn primary" id="vf_go" type="button">Start variation run</button><button class="btn" id="vf_no" type="button">Cancel</button></div></div>`;

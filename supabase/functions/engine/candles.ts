@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { actionsFor, adjustCols, isStock, loadStockActions } from "./stocks.ts";
 
 /* ---------- candle storage ---------- */
 /**
@@ -25,7 +26,17 @@ export async function saveCandles(sb: SupabaseClient, row: CandleSet) {
   if (e2) throw new Error(e2.message);
 }
 /** Candle sets of an asset: given kinds, or "long" = daily, recent 5/15-minute, funding and every yearly chunk. */
-export async function readCandles(sb: SupabaseClient, asset: string, kinds: string[] | "long"): Promise<CandleSet[]> {
+export async function readCandles(sb: SupabaseClient, asset: string, kinds: string[] | "long", raw = false): Promise<CandleSet[]> {
+  const sets = await readStored(sb, asset, kinds);
+  // Stocks: the files keep Dhan's raw prices; splits / bonuses are adjusted on reading (so a later split also fixes
+  // years stored long before it).
+  if (raw || !isStock(asset)) return sets;
+  await loadStockActions(sb);
+  const acts = actionsFor(asset);
+  for (const x of sets) if (x.kind === "D" || x.kind === "I5" || x.kind.startsWith("I5Y:")) adjustCols(x.bars, acts, x.kind === "D" ? "d" : "i");
+  return sets;
+}
+async function readStored(sb: SupabaseClient, asset: string, kinds: string[] | "long"): Promise<CandleSet[]> {
   let q = sb.from("lab_candles").select("kind, from_day, to_day, stored, updated_at").eq("asset", asset);
   q = kinds === "long" ? q.or("kind.eq.D,kind.eq.I5,kind.eq.F,kind.like.I5Y*") : q.in("kind", kinds);
   const { data: meta, error } = await q;

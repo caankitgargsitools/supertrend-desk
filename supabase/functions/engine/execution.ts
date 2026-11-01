@@ -13,6 +13,7 @@
 //     position is protected even if the desk is down; it follows the trailing stop and is cancelled before any exit;
 //   • every few minutes the broker's net positions are compared with the desk, contract by contract.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { STOCK_KEYS } from "./stocks.ts";
 
 export type Creds = { client: string; token: string };
 export type Side = "BUY" | "SELL";
@@ -194,7 +195,7 @@ export async function dhanLtp(c: Creds, seg: string, sec: string): Promise<numbe
 /* ---------------------------------------------------------------- contracts (security ids, lot sizes, ticks) */
 
 const FNO_UNDERLYINGS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX"];
-/** Downloads Dhan's F&O instrument lists (NSE and BSE) and keeps the index futures and options of the next 4 months. */
+/** Downloads Dhan's F&O instrument lists (NSE and BSE) and keeps the index futures and options, and the desk's stock futures, of the next 4 months. */
 export async function syncFno(sb: SupabaseClient, c: Creds): Promise<number> {
   const until = new Date(Date.now() + 125 * 86400000).toISOString().slice(0, 10);
   const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
@@ -207,13 +208,17 @@ export async function syncFno(sb: SupabaseClient, c: Creds): Promise<number> {
     const head = lines[0].split(",");
     const col = (k: string) => head.indexOf(k);
     const iSec = col("SECURITY_ID"), iIns = col("INSTRUMENT"), iUnd = col("UNDERLYING_SYMBOL"), iExp = col("SM_EXPIRY_DATE"),
-      iStr = col("STRIKE_PRICE"), iOpt = col("OPTION_TYPE"), iLot = col("LOT_SIZE"), iTick = col("TICK_SIZE"), iDisp = col("DISPLAY_NAME");
+      iStr = col("STRIKE_PRICE"), iOpt = col("OPTION_TYPE"), iLot = col("LOT_SIZE"), iTick = col("TICK_SIZE"), iDisp = col("DISPLAY_NAME"), iSym = col("SYMBOL_NAME");
     if ([iSec, iIns, iUnd, iExp].some((i) => i < 0)) throw new Error(`Dhan's ${seg} instrument list has an unexpected format.`);
     const rows: Record<string, unknown>[] = [];
     for (const line of lines.slice(1)) {
       const a = line.split(",");
-      const ins = a[iIns], und = a[iUnd], exp = (a[iExp] ?? "").slice(0, 10);
-      if ((ins !== "FUTIDX" && ins !== "OPTIDX") || !FNO_UNDERLYINGS.includes(und) || !(exp >= today && exp <= until)) continue;
+      const ins = a[iIns], exp = (a[iExp] ?? "").slice(0, 10);
+      // Stock futures: the underlying from the trading symbol ("RELIANCE-Nov2026-FUT") when the column is empty.
+      const und = a[iUnd] || (ins === "FUTSTK" && iSym >= 0 ? String(a[iSym] ?? "").split("-")[0] : "");
+      const stk = ins === "FUTSTK" && seg === "NSE_FNO" && STOCK_KEYS.includes(und); // stock futures (no stock options)
+      if (!stk && ((ins !== "FUTIDX" && ins !== "OPTIDX") || !FNO_UNDERLYINGS.includes(und))) continue;
+      if (!(exp >= today && exp <= until)) continue;
       rows.push({ sec_id: a[iSec], seg, underlying: und, instrument: ins, expiry: exp, strike: ins === "OPTIDX" && iStr >= 0 ? Number(a[iStr]) : null,
         opt_type: ins === "OPTIDX" && iOpt >= 0 ? a[iOpt] : null, lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) / 100 || null : null, // Dhan lists the tick in paise
         display: iDisp >= 0 ? a[iDisp] : null, synced_at: now });
@@ -256,7 +261,7 @@ export async function resolveLeg(sb: SupabaseClient, c: Creds, s: Record<string,
     if (!k) throw new Error(`No ${symbol} ${strike} ${type} option expiring ${exp} in Dhan's list.`);
     return { sec: String(k.sec_id), seg, lot: Number(k.lot) || Number(s.lot_size) || 1, tick: Number(k.tick) || 0.05, label: String(k.display ?? `${symbol} ${strike} ${type}`), option: true };
   }
-  const { data } = await sb.from("fno_contracts").select("sec_id, lot, tick, display, expiry").eq("seg", seg).eq("underlying", symbol).eq("instrument", "FUTIDX")
+  const { data } = await sb.from("fno_contracts").select("sec_id, lot, tick, display, expiry").eq("seg", seg).eq("underlying", symbol).eq("instrument", STOCK_KEYS.includes(symbol) ? "FUTSTK" : "FUTIDX")
     .gte("expiry", onDate).order("expiry").limit(1);
   const k = data?.[0];
   if (!k) throw new Error(`No ${symbol} futures contract in Dhan's list.`);

@@ -14,6 +14,7 @@ import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, type Signals,
 import { atr as atrSeries } from "./indicators.ts";
 import { hasLevels, normaliseRisk, type RiskHit, riskInit, riskScan, type RiskState } from "./risk.ts";
 import { lotsFor, marginPerLot, normaliseSizing } from "./sizing.ts";
+import { STOCKS } from "./stocks.ts";
 
 const epochAt = (day: string, min: number) => Date.parse(`${day}T00:00:00+05:30`) / 1000 + min * 60;
 
@@ -33,6 +34,7 @@ export type ChargeRates = {
  *  1% Fin Nifty; 2% Midcap Select, Nifty Next 50, Bankex.
  *  MCX: GOLD 0.01%, SILVER 0.015%, CRUDEOIL / COPPER 0.02%, NATURALGAS / ZINC / LEAD / ALUMINIUM 0.03%, NICKEL 0.04%;
  *  mini and micro contracts (thinner books) 0.01–0.02% more than their big contract.
+ *  Stock futures (stocks.ts): 0.03% for the six busiest (Reliance, HDFC Bank, ICICI Bank, Infosys, TCS, SBI), 0.04% the rest.
  */
 export const SLIPPAGE: Record<string, { fut: number; opt: number }> = {
   NIFTY: { fut: 0.0001, opt: 0.005 }, BANKNIFTY: { fut: 0.00015, opt: 0.005 }, SENSEX: { fut: 0.00015, opt: 0.005 },
@@ -42,6 +44,7 @@ export const SLIPPAGE: Record<string, { fut: number; opt: number }> = {
   CRUDEOIL: { fut: 0.0002, opt: 0.01 }, CRUDEOILM: { fut: 0.0003, opt: 0.01 }, NATURALGAS: { fut: 0.0003, opt: 0.015 }, NATGASMINI: { fut: 0.0004, opt: 0.015 },
   COPPER: { fut: 0.0002, opt: 0.01 }, ZINC: { fut: 0.0003, opt: 0.01 }, ZINCMINI: { fut: 0.0004, opt: 0.01 }, LEAD: { fut: 0.0003, opt: 0.01 }, LEADMINI: { fut: 0.0004, opt: 0.01 },
   ALUMINIUM: { fut: 0.0003, opt: 0.01 }, ALUMINI: { fut: 0.0004, opt: 0.01 }, NICKEL: { fut: 0.0004, opt: 0.01 },
+  ...Object.fromEntries(STOCKS.map((x) => [x.key, { fut: x.slip, opt: 0.02 }])),
 };
 export const slippageFor = (underlying: string) => SLIPPAGE[String(underlying)] ?? (CRYPTO[String(underlying)] ? { fut: CRYPTO[String(underlying)].slip_pct / 100, opt: 0.01 } : { fut: 0.0002, opt: 0.01 });
 /** A fill moved against the trade by the slippage: buys a little higher, sells a little lower. */
@@ -734,7 +737,7 @@ export async function priceBatch(
         throw e;
       }
     } else {
-      contract = isCrypto(String(s.data_segment)) ? `${s.underlying} perpetual (Delta)` : isCommodity(String(s.data_segment)) ? `${s.underlying} futures (near month)` : `${s.underlying} index (futures proxy)`;
+      contract = isCrypto(String(s.data_segment)) ? `${s.underlying} perpetual (Delta)` : isCommodity(String(s.data_segment)) ? `${s.underlying} futures (near month)` : s.data_segment === "NSE_EQ" ? `${s.underlying} share price (stock futures proxy)` : `${s.underlying} index (futures proxy)`;
       inPx = t.spotIn;
       outPx = t.spotOut;
     }
@@ -807,7 +810,7 @@ export function summarize(s: Record<string, any>, p: BtParams, planned: number, 
     profit_factor: acc.grossLoss > 0 ? +(acc.grossWin / acc.grossLoss).toFixed(2) : null,
     avg_net: n ? Math.trunc(net / n) : 0,
     skipped: acc.skipped, notes: acc.notes ?? [],
-    priced_with: structOf(s) ? `Dhan expired-options data (5-minute), every leg of the ${structName(structOf(s)!)}` : s.trade_type === "OPTIONS" ? "Dhan expired-options data (5-minute)" : isCrypto(String(s.data_segment)) ? "Delta Exchange perpetual prices (Binance spot before the coin listed on Delta India)" : isCommodity(String(s.data_segment)) ? "Near-month futures prices" : "Index prices as a futures proxy",
+    priced_with: structOf(s) ? `Dhan expired-options data (5-minute), every leg of the ${structName(structOf(s)!)}` : s.trade_type === "OPTIONS" ? "Dhan expired-options data (5-minute)" : isCrypto(String(s.data_segment)) ? "Delta Exchange perpetual prices (Binance spot before the coin listed on Delta India)" : isCommodity(String(s.data_segment)) ? "Near-month futures prices" : s.data_segment === "NSE_EQ" ? "Share prices (adjusted for splits and bonuses) as a stock futures proxy" : "Index prices as a futures proxy",
     dhan_calls: acc.calls, last_day_done: acc.lastDone, partial,
     lots: acc.lots && acc.lots.n ? { min: acc.lots.min, max: acc.lots.max, avg: +(acc.lots.sum / acc.lots.n).toFixed(1) } : null,
     slippage: acc.slip != null ? Math.trunc(acc.slip) : null,
