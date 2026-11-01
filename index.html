@@ -2806,7 +2806,7 @@ async function fetchBars(from, to, tf) {
   return data;
 }
 /** Trades to mark for a condition or timed strategy: its latest finished backtest, else the Strategy Lab test it came from. */
-async function loadStratTrades(s) {
+async function loadChartTrades(s) {
   cx.trades = null; cx.tradesId = null; cx.tradesSrc = null; cx.tradesFor = s.id;
   if (s.locked) return;
   try {
@@ -2844,7 +2844,7 @@ async function loadChart() {
     }
     cxExtra = extra;
     // Trades for the "Show trades" switch: the strategy's latest backtest (or its Strategy Lab test).
-    if (cx.showTr && cx.strat && !cx.sim && cx.tradesFor !== cx.strat.id) { await loadStratTrades(cx.strat); if (my !== cxReq) return; }
+    if (cx.showTr && cx.strat && !cx.sim && cx.tradesFor !== cx.strat.id) { await loadChartTrades(cx.strat); if (my !== cxReq) return; }
     // Breakout strategies: 5-minute candles show exactly when (and whether) an order filled inside a bigger candle.
     const sim = simStrategy();
     if (sim && sim.entry_trigger === "BREAKOUT" && Number(cx.tf) > 5) {
@@ -3106,11 +3106,13 @@ function renderBtHistory(rows) {
 
 async function watchBacktest(id) {
   stopBtPoll();
+  const forStrat = selected; // another strategy opened meanwhile: this poll stops and draws nothing
   const tick = async () => {
     let row;
+    if (selected !== forStrat) return;
     try { row = must(await db.from("algo_backtests").select("id, created_at, status, progress, error, params, summary, trades, resumable").eq("id", Number(id)).maybeSingle()); }
     catch (e) { $("btResult").innerHTML = ""; const b = document.createElement("div"); b.className = "banner err"; b.textContent = errorText(e); $("btResult").append(b); return; }
-    if (!row) return;
+    if (!row || selected !== forStrat) return;
     renderBacktest(row);
     if (row.status === "waiting" || row.status === "queued" || row.status === "running") btPoll = setTimeout(tick, 4000);
     else { $("bt_run").disabled = false; loadDetail().catch(() => {}); }
@@ -3439,7 +3441,12 @@ $("b_live").addEventListener("click", () => {
 $("b_flat").addEventListener("click", () => {
   const s = cur();
   askConfirm(`<strong>Exit the open position now?</strong><br>${s.live ? `A real exit order will be sent to ${isCrypto(s.data_segment) ? "Delta Exchange" : "Dhan"}.` : "Paper mode: the exit is only logged."}`,
-    "Exit now", async () => run($("b_flat"), async () => { await engine("flatten", 6000); toast("Exit processed. Check the log."); }), true);
+    "Exit now", async () => run($("b_flat"), async () => {
+      await engine("flatten", 6000);
+      // The exit is queued to the engine: say what actually happened, not just that it was asked.
+      const now = cur();
+      toast(!now || now.position === "FLAT" ? "Exited: the position is flat." : now.live ? "The exit is still being worked at the broker. Check Orders in a minute." : "The position isn't flat yet. Check the log in a minute.");
+    }), true);
 });
 const archiveCur = () => {
   const s = cur(); if (!s) return;
@@ -3460,7 +3467,7 @@ $("b_restore").addEventListener("click", (e) => run(e.currentTarget, async () =>
 $("b_purge").addEventListener("click", () => {
   const s = cur();
   askConfirm(`<strong>Delete “${esc(s.name)}” permanently?</strong><br>Its settings, signal log and backtests are removed and can't be recovered.`, "Delete permanently", async () => run(null, async () => {
-    must(await db.from("algo_strategies").delete().eq("id", s.id));
+    must(await db.from("algo_strategies").delete().eq("id", s.id).eq("archived", true)); // only ever an archived one
     selected = null; chartFor = null; await loadAll(); toast("Strategy deleted.");
   }), true);
 });
@@ -3575,6 +3582,11 @@ $("stratForm").addEventListener("submit", (e) => {
   let v; try { v = readForm(); } catch (err) { $("formMsg").textContent = err.message; toast(err.message); return; }
   const s = cur();
   if (s.position !== "FLAT" && (v.strategy_kind !== s.strategy_kind || v.trade_type !== s.trade_type || JSON.stringify(v.structure || null) !== JSON.stringify(s.structure || null))) { $("formMsg").textContent = "Exit the open position before changing the strategy type, instrument or option structure."; return; }
+  // The exit order is built from these, so they stay as they are while a position is open (a changed contract or product
+  // would send the exit to the wrong place and leave the real position open).
+  const POS_LOCKED = ["underlying", "data_security_id", "data_segment", "exchange", "dhan_symbol", "futures_symbol", "product_type", "qty_mode", "lot_size", "leg_template_fut", "leg_template_opt"];
+  const moved = s.position !== "FLAT" ? POS_LOCKED.filter((k) => k in v && String(v[k] ?? "") !== String(s[k] ?? "")) : [];
+  if (moved.length) { $("formMsg").textContent = `Exit the open position before changing ${moved.join(", ").replace(/_/g, " ")}.`; return; }
   const patch = { ...v };
   if (v.strategy_kind !== s.strategy_kind) Object.assign(patch, { last_candle_ts: null, last_entry_day: null });
   // Any change to the signal or order rules cancels an armed breakout order; the next candle close re-arms it.
@@ -3957,7 +3969,8 @@ function renderCap(st, trades) {
   </div>
   ${f.available != null && Number(st.capital) > Number(f.available) + Number(f.utilized || 0) + Number(f.collateral || 0) && live ? `<div class="banner warn" style="margin-top:10px">Your trading capital (${rupees(st.capital)}) is more than the funds in your Dhan account (${rupees(Number(f.available) + Number(f.utilized || 0))}). Sizing works from the capital you set here, so orders could be rejected for margin. Add funds or lower the capital.</div>` : ""}`;
   const names = new Map(state.strategies.map((x) => [x.id, x.name]));
-  const byStrat = new Map(); for (const t of trades) byStrat.set(t.strategy_id, (byStrat.get(t.strategy_id) || 0) + Number(t.net));
+  // Every trade of each strategy (the list below shows only the latest 200).
+  const byStrat = new Map(); for (const [id, a] of (pnl || new Map())) byStrat.set(id, live ? a.live : a.paper);
   const rows = myStrats().filter((x) => !x.archived && (!!x.live === live));
   $("cap_body").innerHTML = rows.length ? "" : `<tr><td colspan="7" class="hint">No ${live ? "live" : "paper"} strategies.</td></tr>`;
   for (const x of rows) {
@@ -4197,7 +4210,9 @@ async function loadLabRun(stale) {
       for (const r of got) if (r.superseded_by && !current.has(r.fingerprint)) { r.retestFailed = true; r.passed = false; }
     }
   }
-  lab.rows = all.map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
+  // Pages read while the lab works can overlap (rows added or re-scored meanwhile): each result once.
+  const uniq = [...new Map(all.map((r) => [r.id, r])).values()];
+  lab.rows = uniq.map((r) => ({ ...r, robust: r.basic_passed ? { ...(r.robust || {}), status: r.robust_status === "done" ? "done" : (r.robust_status || "waiting") } : r.robust }));
   lab.checking = await db.from("lab_results").select("id", { count: "exact", head: true }).eq("basic_passed", true).or("robust_status.is.null,robust_status.neq.done").is("superseded_by", null).then((x) => x.count || 0).catch(() => 0);
   lab.long = await db.rpc("lab_long_map").then((x) => x.data || {}).catch(() => ({}));
   if (stale()) return;
@@ -5695,9 +5710,12 @@ function predStatusHTML(w, set) {
 }
 async function renderPred() {
   const mode = $("pred_mode").value, h = Number($("pred_h").value) || 1, tfF = $("pred_tf").value;
-  let q = db.from("pred_stats").select("asset, tf, mode, " + PRED_COLS).eq("h", h).limit(20000);
-  if (mode !== "all") q = q.eq("mode", mode);
-  if (tfF) q = q.eq("tf", Number(tfF));
+  const qb = () => { let q = db.from("pred_stats").select("asset, tf, mode, " + PRED_COLS).eq("h", h).order("asset").order("tf").order("month").order("mode").order("updated_at");
+    if (mode !== "all") q = q.eq("mode", mode);
+    if (tfF) q = q.eq("tf", Number(tfF));
+    return q; };
+  // every row (more than the 1,000 one request returns), in a fixed order
+  const q = fetchAll(qb, 100000, null).then((data) => ({ data, error: null }), (error) => ({ data: null, error }));
   const [{ data: w }, { data: set }, st] = await Promise.all([
     db.from("pred_worker").select("*").eq("id", 1).maybeSingle(), db.from("pred_settings").select("enabled, model, tfs, horizon, replay_from, key_created_at").eq("id", 1).maybeSingle(), q]);
   if (st.error) throw st.error;
@@ -5757,8 +5775,8 @@ async function renderPredFt() {
 }
 async function renderPredDetail(asset, tfS) {
   const tf = Number(tfS), mode = $("pred_mode").value, hSel = Number($("pred_h").value) || 1;
-  let q = db.from("pred_stats").select("h, month, mode, " + PRED_COLS).eq("asset", asset).eq("tf", tf).limit(5000);
-  if (mode !== "all") q = q.eq("mode", mode);
+  const q = fetchAll(() => { let x = db.from("pred_stats").select("h, month, mode, " + PRED_COLS).eq("asset", asset).eq("tf", tf).order("h").order("month").order("mode").order("updated_at");
+    return mode !== "all" ? x.eq("mode", mode) : x; }, 20000, null).then((data) => ({ data, error: null }), (error) => ({ data: null, error }));
   const [st, { data: lat }] = await Promise.all([q, db.from("pred_latest").select("*").eq("asset", asset).eq("tf", tf).maybeSingle()]);
   if (st.error) throw st.error;
   const rs = st.data || [];
@@ -5874,7 +5892,7 @@ $("newFlip2").addEventListener("click", (e) => run(e.currentTarget, () => create
 
 /** Closed-trade totals per strategy (live and paper), for the strategies table. */
 async function loadPnl() {
-  const rows = must(await db.from("algo_trades").select("strategy_id, mode, net, exit_at").order("exit_at", { ascending: false }).limit(20000));
+  const rows = await fetchAll(() => db.from("algo_trades").select("id, strategy_id, mode, net, exit_at").order("exit_at", { ascending: false }).order("id", { ascending: false }));
   const m = new Map();
   for (const t of rows) {
     const k = t.strategy_id; if (!m.has(k)) m.set(k, { live: 0, paper: 0, n: 0, wins: 0, last: null });
@@ -5887,6 +5905,20 @@ async function loadPnl() {
 
 
 /* ---------- trade lists: every closed trade (strategies page → Trades) and one strategy's trades (its Trades tab) ---------- */
+/**
+ * Every row of a query: the database hands out at most 1,000 rows per request, so a bigger .limit() was silently cut
+ * to 1,000. Pages of 1,000 in a fixed order (build() must order by something unique at the end, usually id), and rows
+ * seen twice (a row added while paging) are dropped by idCol.
+ */
+async function fetchAll(build, max = 50000, idCol = "id") {
+  const out = [], seen = new Set();
+  for (let from = 0; from < max; from += 1000) {
+    const part = must(await build().range(from, from + 999));
+    for (const r of part) { const k = idCol ? r[idCol] : null; if (k != null) { if (seen.has(k)) continue; seen.add(k); } out.push(r); }
+    if (part.length < 1000) break;
+  }
+  return out;
+}
 const TRADE_COLS = "id, strategy_id, mode, entry_day, exit_at, side, contract, lots, units, entry_px, exit_px, gross, costs, net, exit_why";
 /** What closed a trade, from the reason the desk wrote. */
 function closedBy(why) {
@@ -5956,10 +5988,11 @@ async function loadAllTrades(force = false) {
   if (force || !deskTrades.length || Date.now() - deskTradesAt > 60000) {
     const out = [];
     for (let from = 0; from < 20000; from += 1000) {
-      const part = must(await db.from("algo_trades").select(TRADE_COLS).eq("user_id", me.user_id).order("exit_at", { ascending: false }).range(from, from + 999));
+      const part = must(await db.from("algo_trades").select(TRADE_COLS).eq("user_id", me.user_id).order("exit_at", { ascending: false }).order("id", { ascending: false }).range(from, from + 999));
       out.push(...part); if (part.length < 1000) break;
     }
-    deskTrades = out; deskTradesAt = Date.now();
+    // A trade closing while the pages load can shift them: each trade once.
+    deskTrades = [...new Map(out.map((t) => [t.id, t])).values()]; deskTradesAt = Date.now();
   }
   fillTradeFilters(); renderAllTrades(); loadAudit().catch(() => {});
 }
@@ -6070,7 +6103,7 @@ $("tf_csv").addEventListener("click", () => {
   const rows = filteredTrades(), q = (v) => { let x = String(v ?? ""); if (typeof v === "string" && /^[=+\-@\t\r]/.test(x) && !/^-?\d+(\.\d+)?$/.test(x)) x = "'" + x; return `"${x.replace(/"/g, '""')}"`; };
   const lines = [["Closed (IST)", "Opened", "Strategy", "Asset", "Mode", "Side", "Contract", "Lots", "Entry", "Exit", "Gross", "Charges", "Net", "Closed by", "Reason"].map(q).join(",")];
   for (const t of rows) { const s = stratOf(t.strategy_id); lines.push([istText(t.exit_at), t.entry_day || "", s ? s.name : "", assetOfStrat(s), t.mode, t.side, t.contract, t.lots, t.entry_px, t.exit_px, Math.trunc(Number(t.gross) || 0), Math.trunc(Number(t.costs) || 0), Math.trunc(Number(t.net) || 0), closedBy(t.exit_why), t.exit_why].map(q).join(",")); }
-  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\n")], { type: "text/csv" })); a.download = `trades-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\n")], { type: "text/csv" })); a.download = `trades-${new Date(Date.now() + 19800000).toISOString().slice(0, 10)}.csv`; // IST date a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 });
 
 /* one strategy's trades (its Trades tab), paper and live apart */
@@ -6080,7 +6113,7 @@ async function loadStratTrades() {
   if (!trMode) trMode = s.live ? "LIVE" : "PAPER";
   document.querySelectorAll("#tr_mode [data-m]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.m === trMode)));
   const id = s.id;
-  const rows = must(await db.from("algo_trades").select(TRADE_COLS).eq("strategy_id", id).eq("mode", trMode).order("exit_at", { ascending: false }).limit(5000));
+  const rows = await fetchAll(() => db.from("algo_trades").select(TRADE_COLS).eq("strategy_id", id).eq("mode", trMode).order("exit_at", { ascending: false }).order("id", { ascending: false }));
   if (selected !== id) return;
   const open = s.position !== "FLAT" && (trMode === "LIVE") === !!s.live ? [s] : [];
   $("tr_stats").innerHTML = statsHtml(tradeTotals(rows));
@@ -6297,8 +6330,12 @@ function ordFrom() {
 async function loadOrders() {
   clearTimeout(ordTimer);
   const mine = new Set(myStrats().map((x) => x.id)), from = ordFrom();
-  const sigs = must(await db.from("algo_signals").select("id, strategy_id, created_at, event, mode, status, payload, response, close, fills").gte("created_at", from).neq("event", "INFO").order("created_at", { ascending: false }).limit(3000));
-  ordRows = sigs.filter((g) => mine.has(g.strategy_id));
+  // Only this user's own strategies, chosen on the server (an admin can see everyone's signals, which used to fill the
+  // first 1,000 rows and push out their own orders).
+  const ids = [...mine], sigs = [];
+  for (let i = 0; i < ids.length; i += 100) sigs.push(...await fetchAll(() => db.from("algo_signals").select("id, strategy_id, created_at, event, mode, status, payload, response, close, fills")
+    .in("strategy_id", ids.slice(i, i + 100)).gte("created_at", from).neq("event", "INFO").order("created_at", { ascending: false }).order("id", { ascending: false }), 10000));
+  ordRows = sigs.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
   const legs = must(await db.from("live_orders").select("id, signal_id, strategy_id, seq, purpose, side, qty, label, state, limit_px, trigger_px, steps, avg_px, filled_qty, broker_order_id, note, created_at, done_at, broker").eq("user_id", me.user_id).gte("created_at", from).order("seq"));
   ordLegs = new Map(); for (const l of legs) { const k = l.signal_id ?? `s${l.strategy_id}`; if (!ordLegs.has(k)) ordLegs.set(k, []); ordLegs.get(k).push(l); }
   // Stop orders resting at the broker belong to no signal: shown as their own rows.
@@ -6407,12 +6444,13 @@ async function renderLive() {
   const ids = live.map((s) => s.id);
   const [marg, trades] = await Promise.all([
     db.from("lab_margins").select("asset, detail").then((x) => Object.fromEntries((x.data || []).map((m) => [m.asset, m.detail || {}]))).catch(() => ({})),
-    (async () => { const out = []; for (let i = 0; i < ids.length; i += 50) out.push(...must(await db.from("algo_trades").select("id, strategy_id, entry_day, exit_at, side, contract, lots, entry_px, exit_px, gross, costs, net, exit_why").eq("mode", "LIVE").in("strategy_id", ids.slice(i, i + 50)).order("exit_at", { ascending: true }).limit(10000))); return out; })(),
+    (async () => { const out = []; for (let i = 0; i < ids.length; i += 50) out.push(...await fetchAll(() => db.from("algo_trades").select("id, strategy_id, entry_day, exit_at, side, contract, lots, entry_px, exit_px, gross, costs, net, exit_why").eq("mode", "LIVE").in("strategy_id", ids.slice(i, i + 50)).order("exit_at", { ascending: true }).order("id", { ascending: true }))); return out; })(),
   ]);
   const now = Date.now(); let totCap = 0, totNet = 0, capDays = 0, allTrades = [], totOpen = 0, missing = 0, totReq = 0, totDep = 0;
   body.innerHTML = "";
   for (const s of live) {
-    const ts = trades.filter((t) => t.strategy_id === s.id), st = tradeStats(ts), cap = liveCapital(s, marg);
+    // This live stint only (a strategy back on paper and live again starts afresh), so the yearly return isn't overstated.
+    const ts = trades.filter((t) => t.strategy_id === s.id && (!s.live_since || Date.parse(t.exit_at) >= Date.parse(s.live_since))), st = tradeStats(ts), cap = liveCapital(s, marg);
     const since = s.live_since || (ts[0] && (ts[0].entry_day || ts[0].exit_at)) || s.updated_at || s.created_at;
     const days = Math.max(1, Math.round((now - Date.parse(since)) / 86400000));
     const open = s.position !== "FLAT" && s.pos_upnl != null ? Number(s.pos_upnl) : null;
@@ -6524,7 +6562,7 @@ async function cmpLoad(x) {
     const s = state.strategies.find((y) => String(y.id) === String(x.id));
     if (!s) { it.missing = "This strategy is no longer on your desk."; return it; }
     it.s = s; it.name = s.name; it.asset = s.underlying;
-    const tr = must(await db.from("algo_trades").select("exit_at, net, mode").eq("strategy_id", s.id).order("exit_at", { ascending: true }).limit(5000));
+    const tr = await fetchAll(() => db.from("algo_trades").select("id, exit_at, net, mode").eq("strategy_id", s.id).order("exit_at", { ascending: true }).order("id", { ascending: true }));
     it.desk = tr.map((t) => ({ t: cmpTime(t.exit_at), net: Math.trunc(Number(t.net) || 0), mode: t.mode })).filter((t) => t.t);
     if (s.lab_id) it.lab = await db.from("lab_results").select(CMP_LAB_COLS).eq("id", s.lab_id).maybeSingle().then((r) => r.data).catch(() => null);
   } else {
@@ -7487,7 +7525,7 @@ function renderLockedView(s) {
   // Users see results, signals and trades only. Rules and settings are for the admin (and users allowed to build).
   const noRules = locked || !(isAdmin() || (me && me.can_build));
   $("t_set").hidden = noRules; $("t_bt").hidden = noRules;
-  if (noRules && currentTab !== "log") showTab("log");
+  if (noRules && !["log", "tr"].includes(currentTab)) showTab("log");
   document.querySelector("details.chartmore").hidden = !isAdmin() && (locked || !(me && me.can_build));
   $("b_publish").hidden = !(isAdmin() && !s.locked && !s.is_master && !s.archived);
   // Variation runs: condition strategies (own, Strategy Lab picks, or marketplace ones, whose rules stay private).
@@ -7745,7 +7783,7 @@ function renderShukranaAdmin() {
           <td class="n"><b class="${bal < 0 ? "neg-num" : bal > 0 ? "pos-num" : ""}">${bal < 0 ? `${rupees(-bal)} due` : bal > 0 ? `${rupees(bal)} ahead` : "Settled"}</b></td>
           <td><button class="btn small" type="button" data-open="${r.user_id}">${skAd.open === r.user_id ? "Close" : "Record / rate"}</button></td></tr>
           ${skAd.open === r.user_id ? `<tr class="skform"><td colspan="7"><form data-acc="${r.user_id}" class="grid" novalidate>
-            <label class="f"><span>Shukrana accepted ₹ (negative to correct an entry)</span><input name="amt" type="number" step="1" value="${bal < 0 ? Math.trunc(-bal) : ""}"></label>
+            <label class="f"><span>Shukrana accepted ₹ (negative to correct an entry)</span><input name="amt" type="number" step="1" value="${bal < 0 ? Math.ceil(-bal) : ""}"></label>
             <label class="f"><span>Date</span><input name="on" type="date" value="${istDate(0)}"></label>
             <label class="f wide"><span>Note (optional)</span><input name="note" autocomplete="off"></label>
             <div class="formbar"><button class="btn primary" type="submit">Record Shukrana accepted</button></div></form>
@@ -7850,6 +7888,7 @@ function editUser(u) {
   $("uw_go").addEventListener("click", (e) => run(e.currentTarget, async () => {
     const a = Number($("uw_amt").value); if (!a) throw new Error("Enter an amount.");
     must(await db.rpc("admin_wallet", { p_user: u.user_id, p_amount: a, p_kind: $("uw_kind").value, p_note: $("uw_note").value.trim() || null }));
+    $("uw_amt").value = ""; $("uw_note").value = ""; // a second click must not add the same amount again
     toast("Wallet updated."); await loadAdmin();
   }));
   const fn = adminFn;

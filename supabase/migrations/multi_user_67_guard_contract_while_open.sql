@@ -1,0 +1,6 @@
+-- Website bug review 1 Nov 2026: with a position open, saving settings could change the contract / product / order
+-- templates the exit is built from (exit sent to the wrong contract, real position left open). The page now refuses
+-- it, and guard_strategy refuses it for every direct app edit (admins included) while position <> 'FLAT':
+--   underlying, data_security_id, data_segment, exchange, dhan_symbol, futures_symbol, product_type, qty_mode, lot_size,
+--   leg_template_fut, leg_template_opt, trade_type, structure
+-- (the engine and the desk's own SECURITY DEFINER functions are not affected). Tested in a rolled-back block as admin.
