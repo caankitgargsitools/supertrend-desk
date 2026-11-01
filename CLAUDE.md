@@ -327,6 +327,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
    (skip trades it strongly disagrees with), (e) forecast volatility / range for stops and lot sizing. Small cost:
    (f) bigger model sizes (server ~₹2,000/month or an upgrade), (g) fine-tune round 2 on a free Kaggle/Colab GPU
    (rented ~₹50–150/h if needed), then monthly walk-forward retraining. Recommended start: a, d, e.
+8. **How many lots each strategy trades** (Papa, 1 Nov 2026: "ask me tomorrow in detail"). Today: per strategy in
+   Strategies → strategy → Strategy settings → Trade → Lots, and Position size → "How many lots" (Always the lots above /
+   Automatic from my capital: % of capital, max lots, drawdown budget); marketplace copies: "Size the trades by" box;
+   Capital page: total capital and the most in use at once. Lab-saved strategies start at 1 fixed lot. Questions:
+   (a) fixed lots or automatic-from-capital as the default, and for which strategies; (b) total capital per account and
+   the deployment cap %; (c) per-strategy share of capital and max lots; (d) the earlier proposal — risk-based sizing
+   from each strategy's backtest drawdown, and no two strategies on the same asset at once (GOLD 1 kg dominated the
+   paper loss); (e) different rules for paper vs live, and for clients.
 
 ## Open items
 - **Held futures across their expiry (found 1 Nov 2026, awaiting Papa's choice):** a positional futures strategy keeps
