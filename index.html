@@ -6587,6 +6587,9 @@ function cmpLines(box, series, { from, to, h = 300, area = false, unit = "" } = 
     if (yrs > 6 && d.getUTCMonth() !== 0) continue;
     xt.push([t, yrs > 6 ? String(d.getUTCFullYear()) : d.toLocaleString("en-IN", { month: "short", timeZone: "UTC" }) + " " + String(d.getUTCFullYear()).slice(2)]);
   }
+  // Date labels at least ~60 px apart (every 2nd, 3rd … tick), so they never run into each other on a phone.
+  const tickPx = xt.length > 1 ? X(xt[1][0]) - X(xt[0][0]) : Infinity, every = Math.max(1, Math.ceil((phone ? 58 : 64) / tickPx));
+  if (every > 1) for (let i = xt.length - 1; i >= 0; i--) if (i % every) xt.splice(i, 1);
   const path = (pts) => pts.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("");
   // Direct labels at the right end, pushed apart so they never overlap.
   const ends = series.filter((s) => s.pts.length).map((s) => ({ s, y: Y(s.pts[s.pts.length - 1][1]), v: s.pts[s.pts.length - 1][1] })).sort((a, b) => a.y - b.y);
@@ -7065,6 +7068,9 @@ function comboDetail(x) {
     <div class="sh" style="margin-top:12px"><h3>Falls from the peak</h3><span class="hint">Together (dark) against each alone: where the dark area is shallower than the coloured ones, the combination is smoothing the falls.</span></div><div id="co_dd" class="cmpchart"></div>
     <div class="sh" style="margin-top:12px"><h3>Profit per year</h3></div><div id="co_yr" class="cmpchart"></div></div></td>`;
   tr.after(d);
+  // The table can be wider than the screen (it scrolls sideways): the charts take the visible width and stay in view.
+  const sc = tr.closest(".scroll"), cb = d.querySelector(".cobox");
+  if (sc && cb) Object.assign(cb.style, { width: `${sc.clientWidth}px`, position: "sticky", left: "0", boxSizing: "border-box" });
   const curve = (exT, exN) => { const pts = [[x.from, 0]]; let c = 0; for (let i = 0; i < exT.length; i++) if (exT[i] >= x.from && exT[i] <= x.to) pts.push([exT[i], (c += exN[i])]); return pts; };
   const fall = (pts) => { let pk = 0; return pts.map(([t, v]) => { pk = Math.max(pk, v); return [t, v - pk]; }); };
   const all = ms.flatMap((m) => [...m.exT].map((t, i) => [t, m.exN[i]])).sort((a, b) => a[0] - b[0]);
