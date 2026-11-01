@@ -17,3 +17,4 @@ tests/sim/stocks.mjs
 tests/sim/candles.mjs
 tests/sim/dhanS.mjs
 tests/ui/*.png
+tests/ui/node_modules
