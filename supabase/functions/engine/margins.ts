@@ -7,6 +7,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { Dhan } from "./dhan.ts";
 import { ist } from "./logic.ts";
 import { nearContract } from "./instruments.ts";
+import { fnoUnderlying } from "./stocks.ts";
 
 export type MarginAsset = { key: string; seg: string; sec: string; exchange: string; lot: number; commodity: boolean };
 export type MarginRate = { fut: number | null; futI: number | null; sell: number | null; sellI: number | null };
@@ -34,7 +35,7 @@ async function fnoList(creds: { client: string; token: string }, seg: string, wa
     const line = text.slice(pos, end); pos = end + 1;
     if (!line.includes("IDX") && !line.includes("FUTSTK")) continue; // FUTIDX / OPTIDX, and stock futures
     const a = line.replace(/\r$/, "").split(",");
-    const und = a[iUnd] || (a[iIns] === "FUTSTK" && iSym >= 0 ? String(a[iSym] ?? "").split("-")[0] : "");
+    const und = fnoUnderlying(a[iIns], a[iUnd], iSym >= 0 ? a[iSym] : undefined);
     if ((a[iIns] !== "FUTIDX" && a[iIns] !== "OPTIDX" && a[iIns] !== "FUTSTK") || !wanted.has(und)) continue;
     out.push({ sec: a[iSec], inst: a[iIns], und, exp: (a[iExp] ?? "").slice(0, 10), strike: Number(a[iStk] ?? 0), opt: a[iOpt] ?? "", lot: Number(a[iLot] ?? 0) });
   }

@@ -13,7 +13,7 @@
 //     position is protected even if the desk is down; it follows the trailing stop and is cancelled before any exit;
 //   • every few minutes the broker's net positions are compared with the desk, contract by contract.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { STOCK_KEYS } from "./stocks.ts";
+import { fnoUnderlying, isStock } from "./stocks.ts";
 
 export type Creds = { client: string; token: string };
 export type Side = "BUY" | "SELL";
@@ -215,8 +215,8 @@ export async function syncFno(sb: SupabaseClient, c: Creds): Promise<number> {
       const a = line.split(",");
       const ins = a[iIns], exp = (a[iExp] ?? "").slice(0, 10);
       // Stock futures: the underlying from the trading symbol ("RELIANCE-Nov2026-FUT") when the column is empty.
-      const und = a[iUnd] || (ins === "FUTSTK" && iSym >= 0 ? String(a[iSym] ?? "").split("-")[0] : "");
-      const stk = ins === "FUTSTK" && seg === "NSE_FNO" && STOCK_KEYS.includes(und); // stock futures (no stock options)
+      const und = fnoUnderlying(ins, a[iUnd], iSym >= 0 ? a[iSym] : undefined);
+      const stk = ins === "FUTSTK" && seg === "NSE_FNO" && isStock(und); // stock futures (no stock options)
       if (!stk && ((ins !== "FUTIDX" && ins !== "OPTIDX") || !FNO_UNDERLYINGS.includes(und))) continue;
       if (!(exp >= today && exp <= until)) continue;
       rows.push({ sec_id: a[iSec], seg, underlying: und, instrument: ins, expiry: exp, strike: ins === "OPTIDX" && iStr >= 0 ? Number(a[iStr]) : null,
@@ -261,7 +261,7 @@ export async function resolveLeg(sb: SupabaseClient, c: Creds, s: Record<string,
     if (!k) throw new Error(`No ${symbol} ${strike} ${type} option expiring ${exp} in Dhan's list.`);
     return { sec: String(k.sec_id), seg, lot: Number(k.lot) || Number(s.lot_size) || 1, tick: Number(k.tick) || 0.05, label: String(k.display ?? `${symbol} ${strike} ${type}`), option: true };
   }
-  const { data } = await sb.from("fno_contracts").select("sec_id, lot, tick, display, expiry").eq("seg", seg).eq("underlying", symbol).eq("instrument", STOCK_KEYS.includes(symbol) ? "FUTSTK" : "FUTIDX")
+  const { data } = await sb.from("fno_contracts").select("sec_id, lot, tick, display, expiry").eq("seg", seg).eq("underlying", symbol).eq("instrument", isStock(symbol) ? "FUTSTK" : "FUTIDX")
     .gte("expiry", onDate).order("expiry").limit(1);
   const k = data?.[0];
   if (!k) throw new Error(`No ${symbol} futures contract in Dhan's list.`);

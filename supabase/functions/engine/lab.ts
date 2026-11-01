@@ -24,9 +24,11 @@ import { CRYPTO, cryptoDaily, cryptoFunding, cryptoIntraday, cryptoLot, loadCryp
 export type LabAsset = {
   key: string; name: string; seg: string; sec: string; instr: string; exchange: string; lot: number; commodity: boolean;
   step?: number; wd?: number; flag?: "WEEK" | "MONTH"; crypto?: boolean; stock?: boolean;
+  /** Listed options to price (indices only). */
+  options?: boolean;
 };
 const IDX = (key: string, name: string, sec: string, exchange: string, step: number, wd: number, lot: number, flag: "WEEK" | "MONTH"): LabAsset =>
-  ({ key, name, seg: "IDX_I", sec, instr: "INDEX", exchange, lot, commodity: false, step, wd, flag });
+  ({ key, name, seg: "IDX_I", sec, instr: "INDEX", exchange, lot, commodity: false, step, wd, flag, options: true });
 const MCX = (key: string, name: string, lot: number): LabAsset => ({ key, name, seg: "MCX_COMM", sec: key, instr: "FUTCOM", exchange: "MCX", lot, commodity: true });
 export const LAB_ASSETS: Record<string, LabAsset> = Object.fromEntries([
   IDX("NIFTY", "Nifty 50", "13", "NSE", 50, 2, 65, "WEEK"),
@@ -52,11 +54,10 @@ export const LAB_ASSETS: Record<string, LabAsset> = Object.fromEntries([
  * P&L of one contract for a $1 move (coins per contract × rupees per dollar). Called at the start of every request.
  */
 export async function loadCryptoAssets(sb: SupabaseClient) {
-  // Stock split / bonus record first, so a crypto list failure can't leave live stock candles unadjusted.
-  await loadStockActions(sb, true).catch(() => {});
-  await loadCrypto(sb);
-  // Stock futures' lot sizes from Dhan's F&O list (NSE revises them twice a year), and their split / bonus record.
-  try { for (const [k, lot] of Object.entries(await stockLots(sb))) if (LAB_ASSETS[k]) LAB_ASSETS[k].lot = lot; } catch (e) { console.error("stock lots", e); }
+  // Stock split / bonus record (kept 60 s) and stock futures' lot sizes from Dhan's F&O list (NSE revises them twice a
+  // year), alongside the coins; a failure of one doesn't stop the others.
+  const [, lots] = await Promise.all([loadStockActions(sb, 60000).catch(() => {}), stockLots(sb).catch((e) => { console.error("stock lots", e); return {}; }), loadCrypto(sb)]);
+  for (const [k, lot] of Object.entries(lots as Record<string, number>)) if (LAB_ASSETS[k]) LAB_ASSETS[k].lot = lot;
   for (const [k, a] of Object.entries(LAB_ASSETS)) if (a.crypto && !CRYPTO[k]) delete LAB_ASSETS[k];
   for (const c of Object.values(CRYPTO)) {
     LAB_ASSETS[c.key] = { key: c.key, name: c.name, seg: "DELTA", sec: c.key, instr: "PERP", exchange: "DELTA", lot: cryptoLot(c), commodity: false, crypto: true };
@@ -784,7 +785,7 @@ const toCol = (rows: { t: number; o: number; h: number; l: number; c: number; v?
   t: rows.map((r) => r.t), o: rows.map((r) => r.o), h: rows.map((r) => r.h), l: rows.map((r) => r.l), c: rows.map((r) => r.c),
   ...(withV ? { v: rows.map((r) => r.v ?? 0) } : {}),
 });
-const fromCol = (c: Col) => c.t.map((t, i) => ({ t, o: c.o[i], h: c.h[i], l: c.l[i], c: c.c[i], v: c.v ? c.v[i] : 0 }));
+export const fromCol = (c: Col) => c.t.map((t, i) => ({ t, o: c.o[i], h: c.h[i], l: c.l[i], c: c.c[i], v: c.v ? c.v[i] : 0 }));
 export const WARM_DAYS = 150, YEAR_DAYS = 365;
 /**
  * The vault: the most recent months are held back from everything that picks or tunes strategies (generation, the
@@ -1363,7 +1364,7 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
         // (one strategy at a time, oldest first, only while no run is going); the run itself is finished here.
         // (Positional once-a-day trades run across expiries, and commodities and crypto have no listed index options.)
         const { data: won } = await sb.from("lab_results").select("id, asset, mode").eq("run_id", run.id).eq("stage", "screened").eq("passed", true).limit(1000);
-        const ids = (won ?? []).filter((b) => !LAB_ASSETS[b.asset]?.commodity && !LAB_ASSETS[b.asset]?.crypto && !LAB_ASSETS[b.asset]?.stock && b.mode === "INTRADAY").map((b) => b.id);
+        const ids = (won ?? []).filter((b) => LAB_ASSETS[b.asset]?.options && b.mode === "INTRADAY").map((b) => b.id);
         for (let i = 0; i < ids.length; i += 200) await sb.from("lab_results").update({ stage: "opt_queue" }).in("id", ids.slice(i, i + 200));
         const { count: passed } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("run_id", run.id).eq("passed", true);
         await prune(sb);
@@ -1495,8 +1496,8 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
       nMade++;
     }
   });
-  // New strategies, shared between assets (an index gets twice a commodity's share: it has intraday and option variants).
-  const w = assets.map((k) => LAB_ASSETS[k].commodity || LAB_ASSETS[k].stock ? 1 : 2), wsum = w.reduce((a, b) => a + b, 0);
+  // New strategies, shared between assets: indices (option variants too) and coins get twice a commodity's or stock's share.
+  const w = assets.map((k) => LAB_ASSETS[k].options || LAB_ASSETS[k].crypto ? 2 : 1), wsum = w.reduce((a, b) => a + b, 0);
   const nNew = Math.max(0, n - nMade);
   assets.forEach((k, i) => {
     const want = nNew ? Math.max(1, Math.round((nNew * w[i]) / wsum)) : 0;

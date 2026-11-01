@@ -7,14 +7,14 @@ import { Dhan } from "./dhan.ts";
 import { type ChargeRates, newAcc, planBacktest, priceBatch, summarize, tradeCharges, validateParams, type Acc, type Plan } from "./backtest.ts";
 import { lotsFor, marginPerLot, normaliseSizing } from "./sizing.ts";
 import {
-  addDays, aggregate, type DayBar, dayMinutes, fillTemplate, isCommodity, isComplete, isCrypto, ist, nextExpiry, nextMonthlyExpiry, partialDay,
+  addDays, aggregate, type DayBar, dayMinutes, fillTemplate, isCommodity, isComplete, isCrypto, isStockSeg, ist, nextExpiry, nextMonthlyExpiry, partialDay,
   pickBaseInterval, sessionFor, setHolidays, signalSeries, strikeFor, supertrend, timeToMin, tradingSession,
 } from "./logic.ts";
 import { dataSecurity, syncMcx } from "./instruments.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
 import { effectiveStop, hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
-import { LAB_ASSETS, labNext, labOptStep, labReverdict, labStart, labStep, loadCryptoAssets, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
+import { fromCol, LAB_ASSETS, labNext, labOptStep, labReverdict, labStart, labStep, loadCryptoAssets, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
 import { runCombos } from "./combos.ts";
 import { contractsFor, CRYPTO, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaCancel, deltaOrderChecked, deltaOrderState, deltaPositions, deltaStop, deltaStopMove, niceLot } from "./crypto.ts";
 import {
@@ -29,7 +29,6 @@ import { auditStrategy } from "./audit.ts";
 import { ownDaily, ownIntraday } from "./owncandles.ts";
 import { KILL_EARLY, KILL_FULL, killVerdict } from "./kill.ts";
 import { ideasStep } from "./ideas.ts";
-const fromCols = (b: any) => (b.t as number[]).map((t, i) => ({ t, o: b.o[i], c: b.c[i] }));
 import { actionsFor, adjustPosition, daysOf, loadStockActions, splitFactor, STOCK_KEYS, stockLots } from "./stocks.ts";
 import { readCandles } from "./candles.ts";
 import { githubOidcOk, predFeed, predKeyOk, predPull, predPush } from "./prediction.ts";
@@ -653,7 +652,7 @@ function fillOf(st: Strategy, leg: "Entry" | "Exit", px: number | null | undefin
   const lots = st.qty_mode === "LOTS" ? Number(st.pos_qty) : Math.round(Number(st.pos_qty) / Number(st.lot_size));
   const cr = isCrypto(String(st.data_segment));
   return { leg, side: buy ? "BUY" : "SELL", ref: brokerRef(st), qty: st.exchange === "MCX" || cr ? lots : (st.qty_mode === "LOTS" ? Number(st.pos_qty) * Number(st.lot_size) : Number(st.pos_qty)),
-    px: px != null && Number(px) > 0 ? +Number(px).toFixed(4) : null, basis: opt ? "premium" : cr ? "Delta perpetual" : isCommodity(String(st.data_segment)) ? "futures" : st.data_segment === "NSE_EQ" ? "share price" : "index" };
+    px: px != null && Number(px) > 0 ? +Number(px).toFixed(4) : null, basis: opt ? "premium" : cr ? "Delta perpetual" : isCommodity(String(st.data_segment)) ? "futures" : isStockSeg(String(st.data_segment)) ? "share price" : "index" };
 }
 async function saveFills(fills: Fill[]) {
   if (lastSignalId && fills.length) await sb.from("algo_signals").update({ fills }).eq("id", lastSignalId);
@@ -1476,7 +1475,7 @@ async function pricesTick(rows: Strategy[]) {
     if (s0.position === "FLAT" || s0.trade_type === "OPTIONS" || isMulti(s0)) continue;
     const p = px.get(key); if (!(Number(p) > 0)) continue;
     // A stock future on its split / bonus ex-date is adjusted before its stop is looked at.
-    const s = s0.data_segment === "NSE_EQ" ? await stockExDate(s0, p!).catch((e) => { console.error("ex-date", e); return s0; }) : s0;
+    const s = await stockExDate(s0, p!).catch((e) => { console.error("ex-date", e); return s0; });
     const pr = (s.pos_risk ?? {}) as PosRisk;
     const inPx = Number(s.pos_entry_px ?? pr.entry ?? 0), dir = s.position === "LONG" ? 1 : -1;
     const upnl = inPx > 0 ? Math.trunc((p! - inPx) * dir * unitsOf(s)) : null;
@@ -1497,13 +1496,10 @@ async function pricesTick(rows: Strategy[]) {
 // and adjusts every strategy on that stock once (ca_day): quantity, prices, stops, the broker stop order. This runs
 // before any stop is checked, so the jump can never look like a stop being hit.
 const stockDayMemo = new Map<string, number | null>(); // "STOCK|day" -> factor (null: checked, nothing today)
-let stockLotMemo: { at: number; lots: Record<string, number> } | null = null;
-async function stockLotNow(key: string): Promise<number | null> {
-  if (!stockLotMemo || Date.now() - stockLotMemo.at > 600000) stockLotMemo = { at: Date.now(), lots: await stockLots(sb).catch(() => ({})) };
-  return stockLotMemo.lots[key] ?? null;
-}
+/** A stock future's current lot in Dhan's list (the same 60-second copy the request's asset list uses). */
+const stockLotNow = async (key: string, fresh = false): Promise<number | null> => (await stockLots(sb, fresh).catch(() => ({} as Record<string, number>)))[key] ?? null;
 const istDay = (iso: string | null | undefined) => iso ? ist(Date.parse(iso) / 1000).date : null;
-async function stockActionToday(s: Strategy, px: number, today: string): Promise<number | null | undefined> {
+async function stockActionToday(s: Strategy, px: number, today: string, set0?: Settings | null): Promise<number | null | undefined> {
   const key = String(s.underlying), mk = `${key}|${today}`;
   const known = actionsFor(key).find((a) => a.day === today);
   if (known) return known.factor;
@@ -1513,13 +1509,12 @@ async function stockActionToday(s: Strategy, px: number, today: string): Promise
     : (istDay(s.last_run_at) && istDay(s.last_run_at)! < today ? Number(s.last_close) : 0);
   let f = own > 0 ? splitFactor(px / own) : null;
   // Dhan's raw candles of the days before (also tells whether Dhan has already adjusted its history).
-  let rawD: number | null = null, rawI: number | null = null, asked = false;
-  const set = s.owner_id ? await accountFor(sb, s.owner_id, "DHAN", new Map()).catch(() => null) : null;
-  if (set?.dhan_access_token && (f || !(own > 0))) {
-    asked = true;
-    const raw = dhanFor(set); raw.adjust = false;
+  let rawD: number | null = null, rawI: number | null = null;
+  const set = set0 ?? (s.owner_id ? await accountFor(sb, s.owner_id, "DHAN", new Map()).catch(() => null) : null);
+  const raw = set?.dhan_access_token ? dhanFor(set) : null;
+  if (raw) raw.adjust = false;
+  if (raw && (f || !(own > 0))) {
     try { rawD = (await raw.daily(String(s.data_security_id), "NSE_EQ", "EQUITY", addDays(today, -10), today)).filter((d) => d.day < today).at(-1)?.c ?? null; } catch { rawD = null; }
-    try { rawI = (await raw.intraday(String(s.data_security_id), "NSE_EQ", "EQUITY", 5, `${addDays(today, -6)} 09:00:00`, `${addDays(today, -1)} 23:59:00`)).at(-1)?.c ?? null; } catch { rawI = null; }
     if (!f && rawD) f = splitFactor(px / rawD);
   }
   // Nothing found: remembered for the stock only when Dhan's raw close was compared (a stock-wide answer); a strategy
@@ -1531,7 +1526,7 @@ async function stockActionToday(s: Strategy, px: number, today: string): Promise
     const oldLot = Number(s.lot_size) || 0, want = Math.round(oldLot / f);
     const near = (x: number | null) => !!x && want > 0 && Math.abs(x / want - 1) < 0.02; // the exchange rounds the new lot
     let lot = await stockLotNow(key);
-    if (!near(lot) && set?.dhan_access_token) { await syncFno(sb, credsOf(set)).catch(() => {}); stockLotMemo = null; lot = await stockLotNow(key); }
+    if (!near(lot) && set?.dhan_access_token) { await syncFno(sb, credsOf(set)).catch(() => {}); lot = await stockLotNow(key, true); }
     if (!near(lot)) {
       await alert(s, `${key}: price gapped ${Math.round((1 - f) * 100)}% at the open`, `That matches a bonus (${Math.round(1 / f * 100) / 100}× shares), but Dhan's F&O list still shows a lot of ${lot ?? "?"} (a bonus would make it ${want}), so the desk treats it as a real price move. Check the stock's news.`, `cagap-${key}-${today}`);
       return null;
@@ -1539,24 +1534,22 @@ async function stockActionToday(s: Strategy, px: number, today: string): Promise
   }
   // Whether Dhan's own candles still show the jump; when Dhan didn't answer, assume they do (not adjusted yet) — the
   // nightly download re-judges it from the raw candles.
+  if (raw) try { rawI = (await raw.intraday(String(s.data_security_id), "NSE_EQ", "EQUITY", 5, `${addDays(today, -6)} 09:00:00`, `${addDays(today, -1)} 23:59:00`)).at(-1)?.c ?? null; } catch { rawI = null; }
   const jump = (ref: number | null) => ref == null || splitFactor(px / ref) === f;
   await sb.from("stock_actions").upsert({ asset: key, day: today, factor: f, in_daily: jump(rawD), in_intraday: jump(rawI), seen_at: nowIso() }, { onConflict: "asset,day" });
-  await loadStockActions(sb, true);
+  await loadStockActions(sb, 0);
   stockDayMemo.set(mk, f);
   return f;
 }
 /** Adjusts one stock strategy for today's split / bonus (once; ca_day). Returns the strategy as it stands afterwards. */
-const exChecked = new Map<string, string>(); // strategy id -> IST day its ex-date check settled (nothing / adjusted)
-// What today's adjustment wrote, per strategy: the price loop keeps its rows for up to 5 seconds, and a row read before
-// the adjustment (ca_day not today) must not be checked against the old stop.
-const exUpd = new Map<string, { day: string; upd: Record<string, unknown> }>();
-async function stockExDate(s0: Strategy, px: number): Promise<Strategy> {
-  if (s0.data_segment !== "NSE_EQ" || s0.trade_type === "OPTIONS" || isMulti(s0) || !(px > 0)) return s0;
+// Per strategy: the IST day its ex-date check settled, and what that day's adjustment wrote (the price loop keeps its
+// rows for up to 5 seconds, and a row read before the adjustment — ca_day not today — must not meet the old stop).
+const exChecked = new Map<string, { day: string; upd?: Record<string, unknown> }>();
+async function stockExDate(s0: Strategy, px: number, set?: Settings | null): Promise<Strategy> {
+  if (!isStockSeg(String(s0.data_segment)) || s0.trade_type === "OPTIONS" || isMulti(s0) || !(px > 0)) return s0;
   const today = todayIst();
-  if (exChecked.get(String(s0.id)) === today) {
-    const u = exUpd.get(String(s0.id));
-    return u && u.day === today && String(s0.ca_day ?? "").slice(0, 10) !== today ? { ...s0, ...u.upd } as Strategy : s0;
-  }
+  const seen = exChecked.get(String(s0.id));
+  if (seen?.day === today) return seen.upd && String(s0.ca_day ?? "").slice(0, 10) !== today ? { ...s0, ...seen.upd } as Strategy : s0;
   // The per-second loop passes short rows: read the whole row once (position, broker legs, lot, last prices).
   let s = s0;
   if (!("underlying" in s0) || !("pos_broker" in s0) || !("ca_day" in s0)) {
@@ -1564,17 +1557,17 @@ async function stockExDate(s0: Strategy, px: number): Promise<Strategy> {
     if (!data) return s0;
     s = { ...s0, ...data } as Strategy;
   }
-  if (s.ca_day && String(s.ca_day).slice(0, 10) >= today) { exChecked.set(String(s.id), today); return s; }
-  const f = await stockActionToday(s, px, today);
+  if (s.ca_day && String(s.ca_day).slice(0, 10) >= today) { exChecked.set(String(s.id), { day: today }); return s; }
+  const f = await stockActionToday(s, px, today, set);
   if (f === undefined) return s; // couldn't decide yet (Dhan didn't answer): asked again on the next price
-  exChecked.set(String(s.id), today);
+  exChecked.set(String(s.id), { day: today });
   if (!f) return s;
   // Only state from before the ex-date is adjusted (a position opened today is already in the new prices).
   if (s.position !== "FLAT" && String(s.pos_entry_date ?? "") >= today) { await sb.from("algo_strategies").update({ ca_day: today }).eq("id", s.id); return { ...s, ca_day: today }; }
   const upd = { ...adjustPosition(s as any, f, await stockLotNow(String(s.underlying)), px), ca_day: today, ...(s.position !== "FLAT" ? { pos_ltp_at: nowIso() } : {}) };
   const { data: done } = await sb.from("algo_strategies").update(upd).eq("id", s.id).eq("position", s.position).or(`ca_day.is.null,ca_day.lt.${today}`).select("id");
   if (!done?.length) { const { data } = await sb.from("algo_strategies").select("*").eq("id", s.id).maybeSingle(); return data ? { ...s, ...data } as Strategy : s; }
-  exUpd.set(String(s.id), { day: today, upd });
+  exChecked.set(String(s.id), { day: today, upd });
   const pb = s.pos_broker as PosBroker | null;
   if (s.live && pb?.stopId && pb.broker === "DHAN") {
     // The exchange normally cancels resting orders of the stock before an ex-date; if this one is still there it goes too,
@@ -1596,7 +1589,7 @@ async function stockExDate(s0: Strategy, px: number): Promise<Strategy> {
 }
 /** Flat stock strategies take the lot size in Dhan's current list (NSE revisions; after a split the new lot). */
 async function stockLotSync(s: Strategy): Promise<Strategy> {
-  if (s.data_segment !== "NSE_EQ" || s.position !== "FLAT") return s;
+  if (!isStockSeg(String(s.data_segment)) || s.position !== "FLAT") return s;
   if (actionsFor(String(s.underlying)).some((a) => a.day === todayIst())) return s; // ex-date: the adjustment set the lot
   const lot = await stockLotNow(String(s.underlying));
   if (!lot || lot === Number(s.lot_size)) return s;
@@ -2433,13 +2426,13 @@ Deno.serve(async (req) => {
   // shows as a jump of a half, a fifth …; none means Dhan's candles are already adjusted).
   if (action === "stock_gaps" || action.startsWith("stock_gaps:")) { // "stock_gaps:KOTAKBANK" for one stock
     const out: Record<string, unknown> = {};
-    await loadStockActions(sb, true);
+    await loadStockActions(sb, 0);
     for (const k of STOCK_KEYS.filter((x) => !action.includes(":") || x === action.split(":")[1])) {
       const sets = await readCandles(sb, k, "long", true).catch(() => []);
       const row: Record<string, unknown> = {};
       for (const x of sets) {
         if (!(x.kind === "D" || x.kind === "I5" || x.kind.startsWith("I5Y:"))) continue;
-        const days = x.kind === "D" ? (x.bars.t as number[]).map((t, i) => ({ day: ist(t).date, o: x.bars.o[i], c: x.bars.c[i] })) : daysOf(fromCols(x.bars));
+        const days = daysOf(fromCol(x.bars)); // a daily candle is its own day
         const gaps = days.slice(1).map((d, i) => ({ day: d.day, r: +(d.o / days[i].c).toFixed(3) })).sort((a, b) => Math.abs(Math.log(b.r)) - Math.abs(Math.log(a.r))).slice(0, 2);
         row[x.kind] = { first: days[0] && [days[0].day, days[0].c], last: days.at(-1) && [days.at(-1)!.day, days.at(-1)!.c], gaps };
       }
@@ -2645,10 +2638,10 @@ Deno.serve(async (req) => {
       // New trades need the account in good standing; exits always go through.
       // The kill rule stops new trades of a strategy doing far worse than its backtest (exits still run).
       s = { ...s, _block: s.kill_at ? `the kill rule stopped new trades (${String(s.kill_note ?? "").slice(0, 160)})` : await entryGate(sb, s, gates).catch(() => null) };
-      if (tick && s.data_segment === "NSE_EQ") {
+      if (tick && isStockSeg(String(s.data_segment))) {
         // Stock futures: a split / bonus ex-date first (before any stop is checked), then the lot size in Dhan's list.
         const l = await dhanFor(set).ltp("NSE_EQ", String(s.data_security_id)).catch(() => null);
-        if (l) s = await stockExDate(s, l).catch((e) => { console.error("ex-date", e); return s; });
+        if (l) s = await stockExDate(s, l, set).catch((e) => { console.error("ex-date", e); return s; });
         s = await stockLotSync(s).catch(() => s);
       }
       if (tick) s = await liveRisk(s, set);

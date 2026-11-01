@@ -9,9 +9,11 @@
 //   margin_pct margin per lot as % of contract value, for futures and option writing (exchange SPAN + exposure)
 //   max_lots   upper cap
 // Current equity = starting capital + realised P&L, so size grows after profits and shrinks after losses.
+import { isStockSeg } from "./logic.ts";
+
 export type Sizing = { mode: "FIXED" | "AUTO"; alloc_pct: number; dd_pct: number; dd_per_lot: number | null; dd_mult: number; margin_pct: number; max_lots: number };
 
-export function defaultMarginPct(seg: string): number { return seg === "MCX_COMM" || seg === "DELTA" ? 10 : seg === "NSE_EQ" ? 20 : 12; }
+export function defaultMarginPct(seg: string): number { return seg === "MCX_COMM" || seg === "DELTA" ? 10 : isStockSeg(seg) ? 20 : 12; }
 
 export function normaliseSizing(x: unknown, seg: string): Sizing | null {
   if (!x || typeof x !== "object") return null;

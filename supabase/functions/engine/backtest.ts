@@ -7,7 +7,7 @@ import { legsFor, legSign, legText, type SLeg, structMargin, structName, structO
 import { CRYPTO, cryptoDaily, cryptoFunding } from "./crypto.ts";
 import { Dhan, DhanBusyError, type OptBar } from "./dhan.ts";
 import {
-  addDays, aggregate, type Bar, type DayBar, dayMinutes, isCommodity, isCrypto, isLastWeekdayOfMonth, ist, minToTime, partialDay, type Raw,
+  addDays, aggregate, type Bar, type DayBar, dayMinutes, isCommodity, isCrypto, isLastWeekdayOfMonth, isStockSeg, ist, minToTime, partialDay, type Raw,
   sessionFor, signalSeries, strikeFor, supertrend, timeToMin, weekdayOf, weeklyExpiryWeekday,
 } from "./logic.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, type Signals, validateRules, warmBarsFor } from "./rules.ts";
@@ -737,7 +737,7 @@ export async function priceBatch(
         throw e;
       }
     } else {
-      contract = isCrypto(String(s.data_segment)) ? `${s.underlying} perpetual (Delta)` : isCommodity(String(s.data_segment)) ? `${s.underlying} futures (near month)` : s.data_segment === "NSE_EQ" ? `${s.underlying} share price (stock futures proxy)` : `${s.underlying} index (futures proxy)`;
+      contract = isCrypto(String(s.data_segment)) ? `${s.underlying} perpetual (Delta)` : isCommodity(String(s.data_segment)) ? `${s.underlying} futures (near month)` : isStockSeg(String(s.data_segment)) ? `${s.underlying} share price (stock futures proxy)` : `${s.underlying} index (futures proxy)`;
       inPx = t.spotIn;
       outPx = t.spotOut;
     }
@@ -810,7 +810,7 @@ export function summarize(s: Record<string, any>, p: BtParams, planned: number, 
     profit_factor: acc.grossLoss > 0 ? +(acc.grossWin / acc.grossLoss).toFixed(2) : null,
     avg_net: n ? Math.trunc(net / n) : 0,
     skipped: acc.skipped, notes: acc.notes ?? [],
-    priced_with: structOf(s) ? `Dhan expired-options data (5-minute), every leg of the ${structName(structOf(s)!)}` : s.trade_type === "OPTIONS" ? "Dhan expired-options data (5-minute)" : isCrypto(String(s.data_segment)) ? "Delta Exchange perpetual prices (Binance spot before the coin listed on Delta India)" : isCommodity(String(s.data_segment)) ? "Near-month futures prices" : s.data_segment === "NSE_EQ" ? "Share prices (adjusted for splits and bonuses) as a stock futures proxy" : "Index prices as a futures proxy",
+    priced_with: structOf(s) ? `Dhan expired-options data (5-minute), every leg of the ${structName(structOf(s)!)}` : s.trade_type === "OPTIONS" ? "Dhan expired-options data (5-minute)" : isCrypto(String(s.data_segment)) ? "Delta Exchange perpetual prices (Binance spot before the coin listed on Delta India)" : isCommodity(String(s.data_segment)) ? "Near-month futures prices" : isStockSeg(String(s.data_segment)) ? "Share prices (adjusted for splits and bonuses) as a stock futures proxy" : "Index prices as a futures proxy",
     dhan_calls: acc.calls, last_day_done: acc.lastDone, partial,
     lots: acc.lots && acc.lots.n ? { min: acc.lots.min, max: acc.lots.max, avg: +(acc.lots.sum / acc.lots.n).toFixed(1) } : null,
     slippage: acc.slip != null ? Math.trunc(acc.slip) : null,

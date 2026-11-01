@@ -7,6 +7,7 @@
 // for overnight jumps that match a split / bonus ratio and stores them (stock_actions); every candle read for a stock
 // (lab files and the desk's live candles) divides the prices before the jump by that factor.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { ist } from "./logic.ts";
 
 export type Stock = { key: string; name: string; sec: string; lot: number; slip: number };
 /** Dhan NSE_EQ security ids and lot sizes checked against Dhan's instrument list on 1 Nov 2026. */
@@ -26,12 +27,15 @@ export const STOCK_KEYS = STOCKS.map((s) => s.key);
 export const isStock = (key: string) => STOCK_KEYS.includes(String(key));
 const BY_SEC = new Map(STOCKS.map((s) => [s.sec, s.key]));
 /** The stock for an NSE_EQ security id (the desk's data_security_id). */
+/** The underlying of a row in Dhan's F&O list: its column, or for a stock future the trading symbol's first part
+ *  ("RELIANCE-Nov2026-FUT") when that column is empty. */
+export const fnoUnderlying = (ins: string, und: string | undefined, sym: string | undefined) =>
+  und || (ins === "FUTSTK" ? String(sym ?? "").split("-")[0] : "");
 export const stockOfSec = (seg: string, sec: string) => seg === "NSE_EQ" ? BY_SEC.get(String(sec)) ?? null : null;
 
 /* ---------- splits and bonuses ---------- */
 /** new price ÷ old price for the usual splits (1:2, 1:5, 1:10 …) and bonuses (1:1 = ½, 1:2 = ⅔, 1:3 = ¾). */
 export const SPLIT_RATIOS = [1 / 2, 1 / 3, 1 / 4, 1 / 5, 1 / 10, 2 / 3, 3 / 4, 2 / 5];
-const TOL = 0.025;
 export type Action = { day: string; factor: number; d: boolean; i: boolean };
 
 /**
@@ -44,10 +48,8 @@ export function findSplits(days: { day: string; o: number; c: number }[]): { day
   for (let k = 1; k < days.length; k++) {
     const p = days[k - 1].c, o = days[k].o, c = days[k].c;
     if (!(p > 0 && o > 0 && c > 0)) continue;
-    const ro = o / p, rc = c / p;
-    if (ro > 0.8) continue;
-    const r = SPLIT_RATIOS.find((x) => Math.abs(ro / x - 1) < TOL * 2 && Math.abs(rc / x - 1) < 0.12);
-    if (r) out.push({ day: days[k].day, factor: r });
+    const r = splitFactor(o / p);
+    if (r && Math.abs(c / p / r - 1) < 0.12) out.push({ day: days[k].day, factor: r });
   }
   return out;
 }
@@ -55,7 +57,7 @@ export function findSplits(days: { day: string; o: number; c: number }[]): { day
 export function daysOf(rows: { t: number; o: number; c: number }[]): { day: string; o: number; c: number }[] {
   const m = new Map<string, { day: string; o: number; c: number }>();
   for (const r of rows) {
-    const day = new Date((r.t + 19800) * 1000).toISOString().slice(0, 10), x = m.get(day);
+    const day = ist(r.t).date, x = m.get(day);
     if (!x) m.set(day, { day, o: r.o, c: r.c }); else x.c = r.c;
   }
   return [...m.values()].sort((a, b) => a.day.localeCompare(b.day));
@@ -66,44 +68,63 @@ export function factorBefore(actions: Action[], day: string, kind: "d" | "i"): n
   for (const a of actions) if (a[kind] && day < a.day) f *= a.factor;
   return f;
 }
-/** Adjusts candle columns in place (t in seconds or day strings in d; o/h/l/c prices; v volume scaled the other way). */
+/**
+ * The multiplier for a candle at time t (seconds): each action of this kind turns into an epoch cut-off once (IST
+ * midnight of its day), so 100k candles are compared as numbers instead of each being turned into a date string.
+ */
+function factorAt(actions: Action[], kind: "d" | "i"): ((t: number) => number) | null {
+  const cuts = actions.filter((a) => a[kind]).map((a) => ({ t: Date.parse(`${a.day}T00:00:00+05:30`) / 1000, f: a.factor }));
+  if (!cuts.length) return null;
+  return (t) => { let f = 1; for (const c of cuts) if (t < c.t) f *= c.f; return f; };
+}
+const adj = (x: number, f: number) => +(x * f).toFixed(2);
+/** Adjusts candle columns in place (t in seconds; o/h/l/c prices; v volume scaled the other way). */
 export function adjustCols(bars: any, actions: Action[], kind: "d" | "i") {
-  if (!bars || !actions.some((a) => a[kind])) return bars;
-  const n = (bars.c ?? []).length;
-  for (let j = 0; j < n; j++) {
-    const day = bars.d ? String(bars.d[j]) : new Date((Number(bars.t[j]) + 19800) * 1000).toISOString().slice(0, 10);
-    const f = factorBefore(actions, day, kind);
+  const fAt = bars ? factorAt(actions, kind) : null;
+  if (!fAt) return bars;
+  for (let j = 0; j < (bars.c ?? []).length; j++) {
+    const f = fAt(Number(bars.t[j]));
     if (f === 1) continue;
-    for (const k of ["o", "h", "l", "c"]) if (bars[k]) bars[k][j] = +(bars[k][j] * f).toFixed(2);
+    for (const k of ["o", "h", "l", "c"]) if (bars[k]) bars[k][j] = adj(bars[k][j], f);
     if (bars.v) bars.v[j] = Math.round(bars.v[j] / f);
   }
   return bars;
 }
-/** The same for rows ({t, o, h, l, c, v?} with t in seconds, or {day, …} for daily bars). */
+/** The same for rows ({t, o, h, l, c, v?} with t in seconds; daily rows by their day) — adjusted in place. */
 export function adjustRows<T extends Record<string, any>>(rows: T[], actions: Action[], kind: "d" | "i"): T[] {
-  if (!actions.some((a) => a[kind])) return rows;
-  return rows.map((r) => {
-    const day = r.day ? String(r.day) : new Date((Number(r.t) + 19800) * 1000).toISOString().slice(0, 10);
-    const f = factorBefore(actions, day, kind);
-    return f === 1 ? r : { ...r, o: +(r.o * f).toFixed(2), h: +(r.h * f).toFixed(2), l: +(r.l * f).toFixed(2), c: +(r.c * f).toFixed(2), ...(r.v != null ? { v: Math.round(r.v / f) } : {}) };
-  });
+  const fAt = factorAt(actions, kind);
+  if (!fAt) return rows;
+  for (const r of rows as Record<string, any>[]) {
+    const f = r.day ? factorBefore(actions, String(r.day), kind) : fAt(Number(r.t));
+    if (f === 1) continue;
+    r.o = adj(r.o, f); r.h = adj(r.h, f); r.l = adj(r.l, f); r.c = adj(r.c, f);
+    if (r.v != null) r.v = Math.round(r.v / f);
+  }
+  return rows;
 }
 
 /* ---------- stored actions (stock_actions), loaded once per request ---------- */
 let ACTIONS: Map<string, Action[]> | null = null;
 export function setStockActions(rows: { asset: string; day: string; factor: number; in_daily: boolean; in_intraday: boolean }[]) {
-  ACTIONS = new Map();
+  ACTIONS = new Map(); actionsAt = 0; // set from outside the database read: the next timed load reads again
   for (const r of rows) {
     const a = ACTIONS.get(r.asset) ?? [];
     a.push({ day: String(r.day).slice(0, 10), factor: Number(r.factor), d: !!r.in_daily, i: !!r.in_intraday });
     ACTIONS.set(r.asset, a);
   }
 }
-export async function loadStockActions(sb: SupabaseClient, force = false) {
-  if (ACTIONS && !force) return;
+let actionsAt = 0;
+/**
+ * Loads stock_actions when the copy in memory is older than maxAge ms (true = always, false = only if never loaded).
+ * Requests use 60 s; after writing a new action, 0. Writes made by this process also update the copy directly.
+ */
+export async function loadStockActions(sb: SupabaseClient, maxAge: number | boolean = false) {
+  const age = maxAge === true ? 0 : maxAge === false ? Infinity : maxAge;
+  if (ACTIONS && Date.now() - actionsAt < age) return;
   const { data, error } = await sb.from("stock_actions").select("asset, day, factor, in_daily, in_intraday");
   if (error) { console.error("stock_actions", error.message); ACTIONS = ACTIONS ?? new Map(); return; }
   setStockActions(data ?? []);
+  actionsAt = Date.now();
 }
 export const actionsFor = (key: string): Action[] => ACTIONS?.get(key) ?? [];
 
@@ -131,12 +152,18 @@ export async function saveStockActions(sb: SupabaseClient, key: string, daily: {
   return rows.length;
 }
 
-/** Current lot sizes from Dhan's F&O list (the nearest stock future), so a lot-size revision is picked up. */
-export async function stockLots(sb: SupabaseClient): Promise<Record<string, number>> {
-  const today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+/**
+ * Current lot sizes from Dhan's F&O list (the nearest stock future), so a lot-size revision is picked up. Kept for 60 s
+ * (one read serves the request's lab asset list and the ex-date checks); fresh = read again (after syncFno).
+ */
+let lotsMemo: { at: number; lots: Record<string, number> } | null = null;
+export async function stockLots(sb: SupabaseClient, fresh = false): Promise<Record<string, number>> {
+  if (!fresh && lotsMemo && Date.now() - lotsMemo.at < 60000) return lotsMemo.lots;
+  const today = ist(Date.now() / 1000).date;
   const { data } = await sb.from("fno_contracts").select("underlying, lot, expiry").eq("instrument", "FUTSTK").in("underlying", STOCK_KEYS).gte("expiry", today).order("expiry");
   const out: Record<string, number> = {};
   for (const r of data ?? []) if (!(r.underlying in out) && Number(r.lot) > 0) out[r.underlying] = Number(r.lot);
+  lotsMemo = { at: Date.now(), lots: out };
   return out;
 }
 

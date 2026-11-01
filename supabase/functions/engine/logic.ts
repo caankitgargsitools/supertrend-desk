@@ -25,6 +25,8 @@ export function timeToMin(t: string): number {
 /** Trading session in IST minutes. NSE/BSE: 09:15–15:30. MCX: 09:00–23:30 while US daylight saving is on, else 23:55. Crypto: all day. */
 export type Session = { open: number; close: number };
 export function isCommodity(seg: string): boolean { return seg === "MCX_COMM"; }
+/** Stock futures: signals on the NSE share price (stocks.ts). */
+export function isStockSeg(seg: string): boolean { return seg === "NSE_EQ"; }
 /** Crypto perpetuals on Delta Exchange: trade every day of the week. */
 export function isCrypto(seg: string): boolean { return seg === "DELTA"; }
 /** Trading minutes in a day (for warm-up estimates). */

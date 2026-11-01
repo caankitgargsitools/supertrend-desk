@@ -366,9 +366,8 @@ tr.openrow td { background: var(--bg); }
 .msel-btn::after { content: ""; position: absolute; right: 12px; top: 50%; width: 6px; height: 6px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: translateY(-70%) rotate(45deg); }
 .msel-pop { position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; width: min(600px, calc(100vw - 32px)); max-height: 62vh; overflow: auto;
   background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r); box-shadow: 0 10px 30px -10px rgba(0,0,0,.35); padding: 8px 12px 10px; }
-.msel-pop label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; cursor: pointer; }
+.msel-pop label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; cursor: pointer; white-space: nowrap; }
 .msel-pop input[type="checkbox"] { accent-color: var(--blue); width: auto; min-width: 0; padding: 0; margin: 0; flex: 0 0 auto; }
-.msel-pop label { white-space: nowrap; }
 .msel-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 2px 0 6px; }
 .msel-grp { border-top: 1px solid var(--line); padding: 7px 0 5px; }
 .msel-grp > label { font-weight: 700; font-size: 13.5px; }
@@ -1642,7 +1641,6 @@ async function loadCryptoPresets() {
   const keep = $("f_underlying").value; fillUnderlyingSelect($("f_underlying"), true); if (keep) $("f_underlying").value = keep;
   buildCxControls(); paintCx(); fillLabAssetSelect();
 }
-/** The lab's Asset list: every index, MCX commodity and crypto coin, grouped. Refilled once the coins have loaded. */
 /* The lab's asset picker: several assets at once, or whole types (all stocks, all crypto …). lab.assets = the ticked
    assets ([] = all); lab.asset = "ALL" or their keys joined by commas (what the server's lab_feed takes). Remembered in
    this browser. */
@@ -1683,9 +1681,9 @@ function fillLabAssetSelect() {
     ASSET_TYPES.map(([t, name]) => { const ks = labAssetsOf(t); if (!ks.length) return "";
       return `<div class="msel-grp"><label><input type="checkbox" data-type="${t}"> ${esc(name)} <small>(${ks.length})</small></label>
         <div class="msel-items">${ks.map((k) => `<label><input type="checkbox" data-a="${esc(k)}"> ${esc(labAssetName(k))}</label>`).join("")}</div></div>`; }).join("");
-  if (!lab.assets) { let saved = []; try { saved = JSON.parse(localStorage.getItem("labAssets") || "[]"); } catch { saved = []; } lab.assets = Array.isArray(saved) ? saved : []; lab.asset = lab.assets.length ? lab.assets.join(",") : "ALL"; }
-  const b = $("lab_asset_btn"); if (b) { b.textContent = labAssetLabel(); b.title = lab.assets.length ? lab.assets.map(labAssetName).join(", ") : "All assets"; }
-  paintLabAssetPop();
+  let saved = lab.assets;
+  if (!saved) { try { saved = JSON.parse(localStorage.getItem("labAssets") || "[]"); } catch { saved = []; } if (!Array.isArray(saved)) saved = []; }
+  labAssetSet(saved, false);
 }
 function paintLabAssetPop() {
   const pop = $("lab_asset_pop"); if (!pop) return;
@@ -5306,7 +5304,7 @@ async function openLabDetailPublic(id) {
 }
 /* ---------- variation runs ---------- */
 const VAR_KINDS = [["settings", "Small steps on each indicator setting (lengths ±1/±2/±10%, levels ±2/±5)"], ["assets", "Other assets"], ["timeframes", "Other decision timeframes"], ["stops", "Stop loss & target settings"], ["trailing", "Profit trailing (trailing stops)"], ["indicators", "Other indicator combinations"], ["tweaks", "Random tweaks (one or two settings, session, entry style)"]];
-const VAR_STOCK = ["RELIANCE", "HDFCBANK", "ICICIBANK", "INFY", "TCS", "SBIN", "BHARTIARTL", "AXISBANK", "LT", "KOTAKBANK"];
+const VAR_STOCK = Object.keys(PRESETS).filter((k) => PRESETS[k].stock);
 const VAR_INDEX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX"], VAR_MCX = ["GOLD", "GOLDM", "SILVER", "SILVERM", "SILVERMIC", "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "COPPER", "ZINC", "ZINCMINI", "ALUMINIUM", "ALUMINI", "LEAD", "LEADMINI", "NICKEL"];
 /** Form to ask the lab to test a strategy many more ways. src: { labId } or { strategyId }, plus asset and daily (null = unknown). */
 function variationForm(box, src) {
