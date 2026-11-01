@@ -1504,9 +1504,11 @@ async function stockActionToday(s: Strategy, px: number, today: string, set0?: S
   const known = actionsFor(key).find((a) => a.day === today);
   if (known) return known.factor;
   if (stockDayMemo.has(mk)) return stockDayMemo.get(mk)!;
-  // The strategy's own last price from an earlier day (as seen live, never re-adjusted by anyone).
-  const own = s.position !== "FLAT" ? (istDay(s.pos_ltp_at) && istDay(s.pos_ltp_at)! < today ? Number(s.pos_ltp) : 0)
-    : (istDay(s.last_run_at) && istDay(s.last_run_at)! < today ? Number(s.last_close) : 0);
+  // The strategy's own last price from an earlier day (as seen live, never re-adjusted by anyone). A price already from
+  // today means today's check ran before it was written (both loops check before they write), so Dhan isn't asked again.
+  const refAt = s.position !== "FLAT" ? s.pos_ltp_at : s.last_run_at, refDay = istDay(refAt);
+  if (refDay === today) return null;
+  const own = refDay && refDay < today ? Number(s.position !== "FLAT" ? s.pos_ltp : s.last_close) : 0;
   let f = own > 0 ? splitFactor(px / own) : null;
   // Dhan's raw candles of the days before (also tells whether Dhan has already adjusted its history).
   let rawD: number | null = null, rawI: number | null = null;

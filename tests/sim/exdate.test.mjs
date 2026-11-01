@@ -120,6 +120,13 @@ await t("…and the same gap with Dhan's lot gone from 10,000 to 13,333: adjuste
   await E.stockExDate({ ...db.algo_strategies[0] }, 300);
   assert.equal(db.algo_strategies[0].pos_qty, 13333); assert.equal(db.algo_strategies[0].lot_size, 13333); assert.equal(db.algo_strategies[0].pos_risk.stop, 285);
 });
+await t("a strategy already priced today isn't checked against Dhan's candles again (no extra Dhan calls)", async () => {
+  clock += 86400000; db.stock_actions = []; // a later day, no split / bonus
+  const n0 = dhan.log.filter((l) => /charts/.test(l)).length;
+  db.algo_strategies = [{ ...longRow(), id: "k10", pos_ltp: 400, pos_ltp_at: new Date().toISOString(), pos_entry_px: 400, lot_size: 10000, pos_qty: 10000 }];
+  await E.stockExDate({ ...db.algo_strategies[0] }, 401);
+  assert.equal(dhan.log.filter((l) => /charts/.test(l)).length, n0); assert.equal(db.algo_strategies[0].pos_qty, 10000);
+});
 await t("flat stock strategies take Dhan's current lot size", async () => {
   clock += 86400000; // a day without an ex-date (on one, the adjustment sets the lot and this sync waits)
   db.algo_strategies = [{ ...base, id: "k7", position: "FLAT", lot_size: 2000 }];
