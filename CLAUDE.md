@@ -319,6 +319,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 6. Earlier, still unanswered: mark the 10 old backtests stuck "running" since 9–10 Oct as stopped; was the Supabase
    compute upgrade done; keep the Strategy Lab generator on (it was found enabled though notes said paused); the
    unfinished question "Also, I want to understand…".
+7. **Prediction Lab next steps** (status 1 Nov 2026, ~200k replay forecasts: direction 50–51% on every timeframe;
+   corrected up to 52.5% on daily; close error 8–56% worse than "price stays the same"; range ≈ the recent average
+   swing, ~5–7% better only on daily h5/h10; fine-tune round 1 gave no gain). Papa: "don't do anything now". Proposed, free first:
+   (a) confident-only signal (all 5 paths agree + corrected ≥ 55%), (b) context inputs (India VIX for indices, BTC for
+   coins, dollar index for bullion), (c) look-back up to 2,048 candles, (d) Chaturbhuj as a filter on lab strategies
+   (skip trades it strongly disagrees with), (e) forecast volatility / range for stops and lot sizing. Small cost:
+   (f) bigger model sizes (server ~₹2,000/month or an upgrade), (g) fine-tune round 2 on a free Kaggle/Colab GPU
+   (rented ~₹50–150/h if needed), then monthly walk-forward retraining. Recommended start: a, d, e.
 
 ## Open items
 - **Held futures across their expiry (found 1 Nov 2026, awaiting Papa's choice):** a positional futures strategy keeps
