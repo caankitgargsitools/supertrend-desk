@@ -306,6 +306,20 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 - Seen in the outage: an ENTRY signal logged twice when the position update was slow (one position booked) — make
   entry logging idempotent per candle.
 
+## Pending decisions for Papa (asked 1 Nov 2026; he will reply — ask again if still open)
+1. **Held futures across expiry** (see Open items): exit the day before expiry and re-enter in the next month (roll),
+   or just exit? Must be settled before any positional futures strategy goes live.
+2. **Database permissions**: tighten the table grants (anon / authenticated have ALL; RLS is the only barrier) — revoke
+   and grant back what the app needs, testing every page.
+3. **Clients going live**: `set_live` lets a client go live by themselves; require Papa's approval (a supervised test)
+   per client?
+4. **Test-notification button**: limit `notify_test` to once a minute per user?
+5. **Anshul's two paper strategies** (ap.anshulgarg@gmail.com, no Dhan account, stuck since 30 Oct): ask him to connect
+   Dhan, or pause / archive them?
+6. Earlier, still unanswered: mark the 10 old backtests stuck "running" since 9–10 Oct as stopped; was the Supabase
+   compute upgrade done; keep the Strategy Lab generator on (it was found enabled though notes said paused); the
+   unfinished question "Also, I want to understand…".
+
 ## Open items
 - **Held futures across their expiry (found 1 Nov 2026, awaiting Papa's choice):** a positional futures strategy keeps
   its position past the contract's expiry in the desk's books, but the exchange settles it (index futures in cash,
