@@ -1,0 +1,3 @@
+-- System health "Scheduled jobs" showed amber "failed in the last 24 h: desk-health" (1 Nov 2026): the hourly check read
+-- its own cron run, still 'running' while it ran, as not succeeded. Only finished non-successes count now:
+--   ... and d.status not in ('succeeded', 'running', 'starting');
