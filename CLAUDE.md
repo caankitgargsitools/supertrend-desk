@@ -205,6 +205,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   under a year), average, upper bound (sum), margin if all are in a trade — as % of capital + that mode's P&L.
   Suggested "Never use more than" = 100 − 1.5 × max(together, worst single), floored to 5, 10–90% ("Use N%" fills the box;
   Save keeps it). Tested in `tests/ui/ui_lots_wizard.mjs`. `floatHeads` skips tables inside closed `<details>`.
+- **Strategies table views** (2 Nov 2026, Papa: "a very precise view"): `#lp_view` Simple (default; `listColsSimple`: Asset
+  with the Lab # and timeframe under it, Long / short, Lots (held; "N next" when flat), Running P&L, Booked P&L, Status)
+  or Detailed (the full table as before). Remembered in localStorage `lpView`; desktop only (phones keep the cards).
+  Test: `tests/ui/ui_list_simple.mjs` (args: theme width).
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

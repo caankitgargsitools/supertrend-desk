@@ -93,6 +93,7 @@ for (const i of [1, 2, 3]) await p.click(LROW(i));
 const t1 = await p.evaluate(() => ({ n: cmpList.length, tray: !document.getElementById("cmpTray").hidden, chips: document.querySelectorAll("#cmpTray .cmpchip").length, on: document.querySelectorAll("#lab_body .cmpBtn.on, #lab_cards .cmpBtn.on").length, detail: !document.getElementById("lab_detail").hidden, badge: document.getElementById("nav_cmp_n").textContent }));
 if (t1.n !== 3 || !t1.tray || t1.chips !== 3 || t1.on !== 3 || t1.detail || t1.badge !== "3") fail("lab add", t1);
 await p.evaluate(() => showPage("list")); await p.waitForTimeout(500);
+if (!phone) { await p.evaluate(() => { lpView = "full"; renderList(); }); }
 await p.click(phone ? "#lp_cards .lpc:nth-child(1) .cmpBtn" : "#lp_body tr:nth-child(1) .cmpBtn");
 await p.evaluate(() => showPage("lab")); await p.waitForTimeout(900);
 await p.evaluate(() => { const t0 = lab.rows[0]; lab.rows = [7004].map((id) => ({ ...t0, id, label: "Lab strategy " + id, fingerprint: "f" + id, family: "fm" + id, twin_of: null })); lab.per = 0; renderLabTable(); });

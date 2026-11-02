@@ -115,6 +115,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .wrap { padding-inline: 10px; padding-block: 10px 32px; gap: 12px; }
   .card { padding: 12px; }
   .mob-only { display: inline-flex; margin-bottom: 8px; }
+  #lp_view { display: none !important; }
   #lf_box:not(.open) { display: none; }
   .lpm { display: block; } .lp-desk, #lp_foot { display: none; }
   .longhint:not(.open) { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
@@ -1432,6 +1433,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
         <p class="hint" id="lv_note" style="margin:8px 0 0"></p>
       </div>
       <div id="lp_all_box">
+      <div class="seg" id="lp_view" role="group" aria-label="Table view" style="margin-bottom:10px"><button type="button" data-v="simple" aria-pressed="true">Simple</button><button type="button" data-v="full" aria-pressed="false">Detailed</button></div>
       <button class="btn small mob-only" id="lf_toggle" type="button" aria-expanded="false">Filters</button>
       <div class="filters" id="lf_box">
         <label class="f grow"><span>Search</span><input id="lf_q" type="search" placeholder="Name, asset, owner…" autocomplete="off"></label>
@@ -6400,7 +6402,20 @@ document.querySelectorAll("#tr_mode [data-m]").forEach((b) => b.addEventListener
 const lsort = { key: "name", dir: 1 };
 function ownerName(id) { if (me && id === me.user_id) return "Me"; const u = adminUsers.find((x) => x.user_id === id); return u ? (u.full_name || u.email) : "–"; }
 function srcOf(s) { return s.is_master ? "MASTER" : s.locked ? "BOUGHT" : "OWN"; }
+let lpView = (() => { try { return localStorage.getItem("lpView") || "simple"; } catch { return "simple"; } })();
+/** Strategies table, simple view (Papa, 2 Nov 2026): asset, long / short, lots, running P&L, booked P&L, status. */
+function listColsSimple() {
+  return [
+    ["sasset", "Asset", (s) => `${assetLabel(s.underlying)} ${s.name}`, "sasset"],
+    ["side", "Long / short", (s) => s.position === "FLAT" ? "~" : s.position, "side"],
+    ["lots", "Lots", (s) => s.position !== "FLAT" ? Number(s.pos_lots) || 0 : null, "lots"],
+    ["upnl", "Running P&L", (s) => s.position !== "FLAT" && s.pos_upnl != null ? Number(s.pos_upnl) : null, "upnl"],
+    ["booked", "Booked P&L", (s) => { const a = pnl.get(s.id) || {}; return s.live ? (a.live || 0) : (a.paper || 0); }, "booked"],
+    ["state", "Status", (s) => `${s.archived ? "Archived" : s.active ? "Active" : "Paused"} ${s.live ? "Live" : "Paper"}`, "state"],
+  ];
+}
 function listCols() {
+  if (lpView === "simple") return listColsSimple();
   const c = [
     ["name", "Strategy", (s) => s.name],
     ["owner", "Owner", (s) => ownerName(s.owner_id), "admin"],
@@ -7654,7 +7669,7 @@ function renderList() {
   const allIds = listRows().map((s) => s.id);
   for (const id of [...lsel]) if (!state.strategies.some((s) => s.id === id)) lsel.delete(id);
   const allOn = allIds.length > 0 && allIds.every((id) => lsel.has(id));
-  $("lp_head").innerHTML = `<tr><th class="ck"><input type="checkbox" id="lp_all" aria-label="Select all strategies shown" ${allOn ? "checked" : ""} ${allIds.length ? "" : "disabled"}></th>` + cols.map(([k, label, , t]) => `<th class="sort${["num", "int", "pct", "money", "upnl", "booked"].includes(t) ? " n" : ""}" data-k="${k}" aria-sort="${lsort.key === k ? (lsort.dir > 0 ? "ascending" : "descending") : "none"}" tabindex="0">${esc(label)}</th>`).join("") + "</tr>";
+  $("lp_head").innerHTML = `<tr><th class="ck"><input type="checkbox" id="lp_all" aria-label="Select all strategies shown" ${allOn ? "checked" : ""} ${allIds.length ? "" : "disabled"}></th>` + cols.map(([k, label, , t]) => `<th class="sort${["num", "int", "pct", "money", "upnl", "booked", "lots"].includes(t) ? " n" : ""}" data-k="${k}" aria-sort="${lsort.key === k ? (lsort.dir > 0 ? "ascending" : "descending") : "none"}" tabindex="0">${esc(label)}</th>`).join("") + "</tr>";
   $("lp_all").addEventListener("change", (e) => { for (const id of allIds) e.target.checked ? lsel.add(id) : lsel.delete(id); renderList(); });
   $("lp_head").querySelectorAll("th.sort").forEach((th) => {
     const go = () => { lsort.dir = lsort.key === th.dataset.k ? -lsort.dir : 1; lsort.key = th.dataset.k; renderList(); };
@@ -7683,6 +7698,13 @@ function renderList() {
     for (const [k, , f, t] of cols) {
       const td = document.createElement("td"); const v = f(s);
       if (k === "name") { td.className = "nm"; td.textContent = v; td.title = s.name; td.insertAdjacentHTML("beforeend", " " + cmpBtnHTML("desk", s.id, s.name)); if (s.lab_status === "failed") { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Failed lab test"; e.title = s.lab_note || "Its lab result did not pass the tougher test"; td.append(e); } if (s.last_error) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Error"; td.append(e); } if (s.kill_at) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Kill rule"; e.title = s.kill_note || "New trades stopped: far worse than its backtest"; td.append(e); } if (s.exec_state === "working") { const e = document.createElement("span"); e.className = "chip yellow"; e.style.marginLeft = "6px"; e.textContent = "Order working"; e.title = "A live order is being worked at the broker (checked every 15 seconds)"; td.append(e); } }
+      else if (t === "sasset") {
+        const tf = hideRules(s) ? "" : cxStratTf(s) === "D" ? "Daily" : `${cxStratTf(s)} min`;
+        td.className = "nm"; td.title = s.name;
+        td.innerHTML = `<b>${esc(assetLabel(s.underlying))}</b>${s.last_error ? ' <span class="chip red">Error</span>' : ""}${s.kill_at ? ' <span class="chip red">Kill rule</span>' : ""}${s.exec_state === "working" ? ' <span class="chip yellow">Order working</span>' : ""}<div class="hint sm">${esc(s.name.split(" · ")[0])}${tf ? ` · ${esc(tf)}` : ""}</div>`;
+      }
+      else if (t === "side") { td.innerHTML = s.position === "LONG" ? '<span class="chip green">Long</span>' : s.position === "SHORT" ? '<span class="chip red">Short</span>' : '<span class="hint">Flat</span>'; }
+      else if (t === "lots") { td.className = "n"; td.innerHTML = s.position !== "FLAT" ? `<b>${esc(String(s.pos_lots ?? "–"))}</b>` : `<span class="hint" title="Lots the next entry will use">${esc(s.sizing && s.sizing.mode === "AUTO" ? "auto" : String(s.lots ?? "–"))} next</span>`; }
       else if (t === "num") { td.className = "n " + (v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""); td.textContent = rupees(v); }
       else if (t === "int") { td.className = "n"; td.textContent = String(v); }
       else if (t === "wrap") { td.className = "wr"; td.textContent = v; }
@@ -7781,6 +7803,9 @@ function listTotals(cols, rows) {
     state: `${rows.filter((s) => s.active && !s.archived).length} active<br>${rows.filter((s) => s.live && !s.archived).length} live · ${rows.filter((s) => !s.live && !s.archived).length} paper`,
     pos: nOpen ? `${nOpen} open<div class="hint sm">${lots} lot${lots === 1 ? "" : "s"}</div>` : '<span class="hint">All flat</span>',
     upnl: null,
+    sasset: `Total<div class="hint sm">${rows.length} strateg${rows.length === 1 ? "y" : "ies"} · ${new Set(rows.map((s) => s.underlying)).size} assets</div>`,
+    side: nOpen ? `${open.filter((s) => s.position === "LONG").length} long · ${open.filter((s) => s.position === "SHORT").length} short` : '<span class="hint">All flat</span>',
+    lots: String(lots),
     booked: `<span class="${cls(shownBooked)}">${rupees(shownBooked)}</span><div class="hint sm">live ${rupees(tl)} · paper ${rupees(tpp)}</div>`,
     trades: String(nTr),
     win: nTr ? `${(nWin / nTr * 100).toFixed(0)}%<div class="hint sm">${nWin} of ${nTr}</div>` : "–",
@@ -7789,9 +7814,15 @@ function listTotals(cols, rows) {
     lasttrade: (() => { const w = whens((s) => p(s).last); return w.length ? `${esc(istText(w[w.length - 1]))}<div class="hint sm">latest</div>` : "–"; })(),
     run: (() => { const w = whens((s) => !s.archived && s.active ? s.last_run_at : null); return w.length ? `${esc(istText(w[0]))}<div class="hint sm">oldest of the active ones</div>` : "–"; })(),
   };
-  const num = ["upnl", "booked", "trades", "win", "mreq", "mdep"];
+  const num = ["upnl", "booked", "trades", "win", "mreq", "mdep", "lots"];
   return `<tr><td class="ck"></td>${cols.map(([k]) => k === "upnl" ? `<td class="n" id="lp_tot_upnl">${listRunTotalHtml(rows)}</td>` : `<td class="${num.includes(k) ? "n" : ""}">${cell[k] ?? ""}</td>`).join("")}</tr>`;
 }
+function paintLpView() { $("lp_view").querySelectorAll("[data-v]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === lpView))); }
+$("lp_view").querySelectorAll("[data-v]").forEach((b) => b.addEventListener("click", () => {
+  lpView = b.dataset.v; try { localStorage.setItem("lpView", lpView); } catch {}
+  paintLpView(); renderList();
+}));
+paintLpView();
 ["lf_q", "lf_src", "lf_act", "lf_mode", "lf_asset", "lf_inst", "lf_owner", "lf_arch"].forEach((id) => $(id).addEventListener(id === "lf_q" ? "input" : "change", renderList));
 
 /* ---------- a bought strategy: plain capital / lots window, no rules ---------- */
