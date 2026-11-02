@@ -69,3 +69,15 @@ export function lotsFor(sz: Sizing, equity: number, marginLot: number, usedByOth
   lots = Math.max(0, Math.min(lots, sz.max_lots));
   return { lots, margin: lots * marginLot, why: `${parts.join("; ")} ⇒ ${lots} lot${lots === 1 ? "" : "s"}` };
 }
+
+/**
+ * Fixed lots against the account's "never use more than" limit (Papa, 2 Nov 2026): null when the entry fits, else the
+ * reason it is skipped. No check without a capital (0 = not set) or a known margin per lot.
+ */
+export function fixedLotsFit(lots: number, marginLot: number, equity: number, usedByOthers: number, deployPct: number, capitalSet: boolean): string | null {
+  if (!capitalSet || !(marginLot > 0) || !(lots > 0)) return null;
+  const limit = Math.max(0, equity) * deployPct / 100, room = limit - usedByOthers, need = marginLot * lots;
+  if (need <= room) return null;
+  const r = (x: number) => `₹${Math.trunc(Math.max(0, x)).toLocaleString("en-IN")}`;
+  return `${lots} lot${lots === 1 ? "" : "s"} need ${r(need)} margin but only ${r(room)} is left inside your ${deployPct}% limit (capital ${r(equity)}, other open positions ${r(usedByOthers)})`;
+}

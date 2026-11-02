@@ -1211,7 +1211,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
             <label class="f adv"><span>Count profits &amp; losses from</span><input id="cap_since" type="date"></label>
           </div>
           <div id="cap_dd" class="dd-box"></div>
-          <p class="hint">Strategies set to “Automatic” lots size every trade from this capital plus the profit or loss made so far, so they trade more after profits and less after losses. The limit keeps all strategies together from using more than this share at once.</p>
+          <p class="hint">Strategies set to “Automatic” lots size every trade from this capital plus the profit or loss made so far, so they trade more after profits and less after losses. The limit keeps all strategies together (fixed and automatic lots) from using more than this share at once: a new entry that would go above it is skipped, and the strategy's log says why. Exits always go.</p>
           <div class="formbar"><button class="btn primary" type="submit">Save</button><span class="hint" id="cap_msg"></span><label class="advtoggle" style="margin-left:auto"><input type="checkbox" data-adv> Show advanced settings</label></div>
         </form>
       </section>

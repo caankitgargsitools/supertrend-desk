@@ -5,7 +5,7 @@ import webpush from "npm:web-push@3.6.7";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { Dhan } from "./dhan.ts";
 import { type ChargeRates, newAcc, planBacktest, priceBatch, summarize, tradeCharges, validateParams, type Acc, type Plan } from "./backtest.ts";
-import { lotsFor, marginPerLot, normaliseSizing } from "./sizing.ts";
+import { fixedLotsFit, lotsFor, marginPerLot, normaliseSizing } from "./sizing.ts";
 import {
   addDays, aggregate, type DayBar, dayMinutes, fillTemplate, isCommodity, isComplete, isCrypto, isStockSeg, ist, nextExpiry, nextMonthlyExpiry, partialDay,
   pickBaseInterval, sessionFor, setHolidays, signalSeries, strikeFor, supertrend, timeToMin, tradingSession,
@@ -390,6 +390,11 @@ async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknow
     const last = notes.length - 1;
     if (last >= 0) notes[last] = notes[last].replace(/ x \d+$/, ` x ${e.state.pos_qty}`);
     notes.push(`Size: ${res.why}`);
+  } else if (Number(set.capital ?? 0) > 0 && mLot > 0) {
+    // Fixed lots: still kept inside the account's "never use more than" limit (other open positions of this mode).
+    const cs = await capitalState(set, !!s.live, s.id);
+    const no = fixedLotsFit(lots, mLot, cs.equity, cs.used, Number(set.deploy_pct ?? 100), true);
+    if (no) { notes.push(`Entry skipped: ${no}.`); return false; }
   }
   Object.assign(newState, { pos_entry_px: entryPx, pos_entry_prem: premium, pos_lots: lots, pos_margin: Math.trunc(mLot * lots) });
   return true;
