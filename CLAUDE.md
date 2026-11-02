@@ -209,6 +209,16 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   with the Lab # and timeframe under it, Long / short, Lots (held; "N next" when flat), Running P&L, Booked P&L, Status)
   or Detailed (the full table as before). Remembered in localStorage `lpView`; desktop only (phones keep the cards).
   Test: `tests/ui/ui_list_simple.mjs` (args: theme width).
+- **Spread watcher** (2 Nov 2026, Papa, after the arbitrage research: colocated nanosecond arbitrage is out of reach;
+  measure what our speed can use first; migration 69, engine `spreads.ts`, action `spreads`, cron `spread-watch` every
+  minute; watch only, no orders, 30 days from `spread_state.started_at` to `until`, rows in `spread_ticks` never deleted).
+  Best bid / ask (Dhan `quoteMany` = /marketfeed/quote, sharing the one-a-second quote pacing): nb = the 10 stocks NSE vs
+  BSE every minute in market hours (intraday charges `nbCostPct` ≈ 0.041% at ₹10 lakh); cf = every F&O stock's share vs
+  near / next future every 15 min (cost `CF_COST_PCT` 0.25%, yearly = net × 365 ÷ days); cx = Delta India vs CoinDCX
+  futures BTC/ETH/SOL every minute 24x7 (`CX_COST_PCT` 0.236%, both funding rates). Security ids from Dhan's NSE_FNO
+  (UNDERLYING_SECURITY_ID) and BSE_EQ lists, once a trading day from 08:30 (that round quotes nothing). Admin page
+  "Spread watcher" (`spreadPane`, `renderSpread`, SQL `spread_summary`). Tests: `tests/sim/spreads.test.mjs`,
+  `tests/ui/ui_spread.mjs` (args: theme width).
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

@@ -5,6 +5,7 @@ import webpush from "npm:web-push@3.6.7";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { Dhan } from "./dhan.ts";
 import { type ChargeRates, newAcc, planBacktest, priceBatch, summarize, tradeCharges, validateParams, type Acc, type Plan } from "./backtest.ts";
+import { runSpreads } from "./spreads.ts";
 import { fixedLotsFit, lotsFor, marginPerLot, normaliseSizing } from "./sizing.ts";
 import {
   addDays, aggregate, type DayBar, dayMinutes, fillTemplate, isCommodity, isComplete, isCrypto, isStockSeg, ist, nextExpiry, nextMonthlyExpiry, partialDay,
@@ -2439,6 +2440,7 @@ Deno.serve(async (req) => {
   }
   if (action === "pred_feed") return Response.json({ action, ...(await predFeed(sb, credsOf(await adminAccount(sb)))) });
   if (action === "combos") return Response.json({ action, ...(await runCombos(sb)) });
+  if (action === "spreads") return Response.json({ action, ...(await runSpreads(sb, credsOf(await adminAccount(sb)))) });
   // Read-only check of the stocks' stored candles: the biggest overnight moves in Dhan's raw prices (a split / bonus
   // shows as a jump of a half, a fifth …; none means Dhan's candles are already adjusted).
   if (action === "stock_gaps" || action.startsWith("stock_gaps:")) { // "stock_gaps:KOTAKBANK" for one stock

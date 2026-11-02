@@ -69,7 +69,7 @@ export class Dhan {
       if (attempt > 0 && Date.now() + 22000 > this.deadline) break; // out of time for another try
       // Dhan's data APIs allow about 5 requests a second per account: requests are spaced 210 ms apart per token.
       const tk = this.token || "-";
-      const quote = path === "/marketfeed/ltp";
+      const quote = path.startsWith("/marketfeed/"); // ltp and full quote share the one-a-second limit
       const at = Math.max(Date.now(), (lastByToken.get(tk) ?? 0) + 210, quote ? (lastQuoteByToken.get(tk) ?? 0) + 1050 : 0);
       lastByToken.set(tk, at);
       if (quote) lastQuoteByToken.set(tk, at);
@@ -243,6 +243,14 @@ export class Dhan {
     return new Promise((ok, fail) => b!.items.push({ seg, sec, ok, fail }));
   }
 
+  /** Full quotes (best bid / ask in depth.buy[0] / depth.sell[0]) of up to 1,000 instruments in one request, keyed "SEG|sec". */
+  async quoteMany(bySeg: Record<string, string[]>): Promise<Map<string, any>> {
+    const body = Object.fromEntries(Object.entries(bySeg).filter(([, v]) => v.length).map(([seg, secs]) => [seg, [...new Set(secs)].map(Number)]));
+    const j = await this.send("/marketfeed/quote", body);
+    const out = new Map<string, any>();
+    for (const [seg, m] of Object.entries(j?.data ?? {})) for (const [sec, q] of Object.entries(m as Record<string, unknown>)) out.set(`${seg}|${sec}`, q);
+    return out;
+  }
   /** Last prices of many instruments in one request (the quote API allows one request a second). */
   async ltpMany(bySeg: Record<string, string[]>, once = false): Promise<Map<string, number>> {
     const body = Object.fromEntries(Object.entries(bySeg).map(([seg, secs]) => [seg, [...new Set(secs)].map(Number)]));

@@ -844,6 +844,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
     <button class="btn small" id="openLab" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/><path d="M7.5 15h9"/></svg><span>Strategy Lab</span></button>
     <button class="btn small" id="nav_cmp" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Compare</span><b class="navbadge" id="nav_cmp_n" hidden></b></button>
     <button class="btn small" id="nav_combo" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/></svg><span>Combinations</span></button>
+    <button class="btn small" id="nav_spread" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h11M4 7l3-3M4 7l3 3M20 17H9M20 17l-3-3M20 17l-3 3"/></svg><span>Spread watcher</span></button>
     <button class="btn small" id="nav_ideas" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg><span>Ideas Lab</span></button>
     <button class="btn small" id="nav_pred" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l4-4 3 3 5-6"/><path d="M15 10l2-2 4 0" stroke-dasharray="2 2"/><circle cx="19" cy="6" r="2"/></svg><span>Prediction Lab</span></button>
     <button class="btn small" id="nav_market" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16l-1.5 11a2 2 0 0 1-2 1.7H7.5a2 2 0 0 1-2-1.7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg><span>Marketplace</span></button>
@@ -1477,6 +1478,14 @@ details.xp > summary:hover { background: var(--blue-soft); }
       <p class="hint" style="margin:6px 0 0">Every service of the portal is checked every hour (and you get a summary every morning at 08:11, plus an alert as soon as something stops working). <b class="hl-ok">Green</b> = working, <b class="hl-warn">amber</b> = working but worth a look, <b class="hl-fail">red</b> = not working, grey = switched off on purpose. A red dot on this page's link in the menu means something is red now.</p>
       <div id="hl_sum" style="margin-top:12px"></div>
       <div id="hl_body" style="margin-top:8px"></div>
+    </section>
+
+    <section class="card" id="spreadPane" hidden>
+      <div class="head"><div><span class="label">Research · watch only</span><h2>Spread watcher</h2></div>
+        <div class="actions"><button class="btn small" id="sp_refresh" type="button">Refresh</button></div></div>
+      <p class="hint" style="margin:6px 0 0">For 30 days the desk records price gaps it could act on at its own speed, and whether each would have paid <b>after every charge</b>. Best buy and sell quotes are used, never last prices. Nothing is traded. A once-a-minute look misses gaps that last milliseconds; those belong to colocated firms and are out of our reach anyway.</p>
+      <div id="sp_state" style="margin-top:12px"></div>
+      <div id="sp_body" style="margin-top:8px"></div>
     </section>
 
     <section class="card" id="comboPane" hidden>
@@ -5877,7 +5886,7 @@ const isAdmin = () => !!me && me.role === "admin";
 const myStrats = () => state.strategies.filter((x) => me && x.owner_id === me.user_id && !x.is_master);
 function instName(s) { return s.trade_type === "OPTIONS" ? (s.option_side === "SELL" ? "Option writing" : "Option buying") : "Futures"; }
 function assetLabel(k) { return (PRESETS[k] && PRESETS[k].name) || k || "–"; }
-const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane", "ideasPane", "predPane", "cmpPane", "comboPane", "healthPane"];
+const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane", "ideasPane", "predPane", "cmpPane", "comboPane", "healthPane", "spreadPane"];
 function hideNewPanes() { NEW_PANES.forEach((id) => $(id).hidden = true); }
 function markNav(id) { document.querySelectorAll("#nav .btn").forEach((b) => b.id === id ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")); }
 /** One page at a time: list, strat, market, wallet, admin, conn, cap, lab, terms. */
@@ -5888,7 +5897,7 @@ function showPage(name) {
   page = name;
   hideNewPanes();
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true;
-  const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab", ideas: "nav_ideas", pred: "nav_pred", cmp: "nav_cmp", combo: "nav_combo", health: "nav_health" }[name];
+  const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab", ideas: "nav_ideas", pred: "nav_pred", cmp: "nav_cmp", combo: "nav_combo", health: "nav_health", spread: "nav_spread" }[name];
   if (name !== "ideas") stopIdeasPoll();
   if (name !== "pred") stopPredPoll();
   markNav(navId);
@@ -5902,6 +5911,7 @@ function showPage(name) {
   else if (name === "pred") { $("predPane").hidden = false; withLoading($("predPane"), renderPred()).catch((e) => toast(errorText(e))); startPredPoll(); }
   else if (name === "pass") { $("passPane").hidden = false; $("np_msg").textContent = ""; }
   else if (name === "health") { $("healthPane").hidden = false; withLoading($("healthPane"), renderHealth()).catch((e) => toast(errorText(e))); }
+  else if (name === "spread") { $("spreadPane").hidden = false; withLoading($("spreadPane"), renderSpread()).catch((e) => toast(errorText(e))); }
   else if (name === "combo") { $("comboPane").hidden = false; withLoading($("comboPane"), renderCombo()).catch((e) => toast(errorText(e))); }
   else if (name === "cmp") { $("cmpPane").hidden = false; cmpCache.clear(); withLoading($("cmpPane"), renderCmp()).catch((e) => toast(errorText(e))); }
   else if (name === "cap") openCap();
@@ -7414,6 +7424,47 @@ function comboDetail(x) {
   d.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => { showPage("lab"); setTimeout(() => openLabDetail(Number(b.dataset.open)).catch((e) => toast(errorText(e))), 700); }));
 }
 $("nav_combo").addEventListener("click", () => showPage("combo"));
+
+/* ---------- Spread watcher (admins; engine spreads.ts, migration 69) ---------- */
+const SP_SIZE = 1000000; // ₹10 lakh a trade for the "could have earned" figures
+async function renderSpread() {
+  const d = must(await db.rpc("spread_summary", { p_days: 30 })) || {};
+  const st = d.state || {}, keys = d.keys || [];
+  const pc = (v, dp = 3) => v == null ? "–" : `${Number(v) > 0 ? "+" : ""}${Number(v).toFixed(dp)}%`;
+  const cls = (v) => Number(v) > 0 ? "pos-num" : Number(v) < 0 ? "neg-num" : "";
+  const days = st.started_at ? Math.max(0, (Date.now() - Date.parse(st.started_at)) / 86400000) : 0;
+  const over = st.until && Date.now() > Date.parse(st.until);
+  const err = st.last_error ? (() => { try { return Object.entries(JSON.parse(st.last_error)).map(([k, v]) => `${k}: ${v}`).join(" · "); } catch { return st.last_error; } })() : "";
+  $("sp_state").innerHTML = `<div class="stats">
+    <div class="stat"><span class="label">Watching</span><span class="v">${over ? "Finished" : `Day ${Math.floor(days) + 1} of 30`}</span><span class="hint">since ${esc(istText(st.started_at))} · until ${esc(istText(st.until))}</span></div>
+    <div class="stat"><span class="label">Last round</span><span class="v">${st.last_run ? esc(istText(st.last_run)) : "–"}</span><span class="hint">${Number(st.runs || 0).toLocaleString("en-IN")} rounds · every minute</span></div>
+    <div class="stat"><span class="label">Covered</span><span class="v">${st.nb || 0} + ${st.cf || 0}</span><span class="hint">stocks on NSE/BSE + F&amp;O stocks (lists of ${esc(st.ids_day || "–")}) · 3 coins</span></div>
+  </div>${err ? `<div class="banner warn" style="margin-top:10px">Last round: ${esc(err)}</div>` : ""}`;
+  const by = (k) => keys.filter((x) => x.kind === k);
+  const pctOf = (x) => x.n ? `${(x.n_pos / x.n * 100).toFixed(1)}%` : "–";
+  const earned = (x) => rupees(Number(x.sum_pos || 0) / 100 * SP_SIZE);
+  const crossTable = (rows, venue) => rows.length ? `<div class="scroll"><table><thead><tr><th>${venue}</th><th class="n">Looks</th><th class="n">Paid after charges</th><th class="n">Average gap</th><th class="n">Average after charges</th><th class="n">Best after charges</th><th class="n">Could have earned</th><th class="n">Now</th></tr></thead><tbody>${rows.map((x) => `<tr><td><b>${esc(x.key)}</b></td><td class="n mono">${x.n}</td><td class="n mono">${x.n_pos} <span class="hint">(${pctOf(x)})</span></td><td class="n mono">${pc(x.avg_gap)}</td><td class="n mono ${cls(x.avg_net)}">${pc(x.avg_net)}</td><td class="n mono ${cls(x.best_net)}">${pc(x.best_net)}</td><td class="n mono">${earned(x)}</td><td class="n mono"><span class="${cls(x.last_net)}">${pc(x.last_gap)}</span><div class="hint sm">${esc(x.last_x && x.last_x.buy_at ? `buy ${x.last_x.buy_at} ${fmtNum(x.last_buy)} → sell ${x.last_x.sell_at} ${fmtNum(x.last_sell)}` : "")}${x.last_x && (x.last_x.fund_delta_pct != null || x.last_x.fund_dcx_pct != null) ? ` · funding Delta ${x.last_x.fund_delta_pct ?? "–"}% · CoinDCX ${x.last_x.fund_dcx_pct ?? "–"}%` : ""}</div></td></tr>`).join("")}</tbody></table></div>` : '<p class="hint">No looks recorded yet.</p>';
+  const cf = by("cf").sort((a, b) => Number(b.avg_yearly ?? -99) - Number(a.avg_yearly ?? -99));
+  const cfShown = spread.allCf ? cf : cf.slice(0, 25);
+  const cfAvg = cf.length ? cf.filter((x) => x.key.endsWith(":near")).reduce((a, x, _, arr) => a + Number(x.avg_yearly || 0) / arr.length, 0) : null;
+  $("sp_body").innerHTML = `
+    <h3 style="font-size:15px;margin:14px 0 4px">1 · Same share on NSE and BSE</h3>
+    <p class="hint" style="margin:0 0 8px">Buy where it is cheaper (best ask), sell where it is dearer (best bid), every minute in market hours. Charges ≈ ${spreadCost.nb}% of a ₹10 lakh trade (intraday, both legs; STT is most of it). Only works if Dhan treats the two legs as one intraday trade; otherwise the sale must come from shares you hold (delivery STT 0.1% each side) or risks a short-delivery auction. “Could have earned” = ₹10 lakh traded in every minute that paid.</p>
+    ${crossTable(by("nb"), "Stock")}
+    <h3 style="font-size:15px;margin:18px 0 4px">2 · Share vs its future (cash and carry)</h3>
+    <p class="hint" style="margin:0 0 8px">Buy the share at its ask, sell the future at its bid, hold to expiry: the gap is locked in whichever way the market moves. Every 15 minutes, every F&amp;O stock, near and next month. Charges ≈ 0.25% per cycle (delivery STT both ends, futures STT, stamp, exchange, GST). Yearly = after charges × 365 ÷ days to expiry. For comparison, arbitrage mutual funds gave about 7–8% a year in 2025 and are taxed as equity; doing it ourselves is business income at your slab.${cfAvg != null ? ` Near-month average so far: <b>${cfAvg.toFixed(2)}% a year</b>.` : ""}</p>
+    ${cf.length ? `<div class="scroll"><table><thead><tr><th>Stock · month</th><th class="n">Looks</th><th class="n">Average gap</th><th class="n">Average yearly after charges</th><th class="n">Now: gap</th><th class="n">Now: days</th><th class="n">Now: yearly after charges</th><th class="n">Lot</th></tr></thead><tbody>${cfShown.map((x) => `<tr><td><b>${esc(x.key.split(":")[0])}</b> <span class="hint">${esc(x.key.endsWith(":near") ? "near" : "next")} · ${esc((x.last_x && x.last_x.exp) || "")}</span></td><td class="n mono">${x.n}</td><td class="n mono">${pc(x.avg_gap)}</td><td class="n mono ${cls(x.avg_yearly)}">${x.avg_yearly == null ? "–" : `${Number(x.avg_yearly).toFixed(2)}%`}</td><td class="n mono">${pc(x.last_gap)}</td><td class="n mono">${x.last_x ? esc(String(x.last_x.days)) : "–"}</td><td class="n mono ${cls(x.last_x && x.last_x.yearly)}">${x.last_x && x.last_x.yearly != null ? `${Number(x.last_x.yearly).toFixed(2)}%` : "–"}</td><td class="n mono">${x.last_x ? esc(String(x.last_x.lot || "–")) : "–"}</td></tr>`).join("")}</tbody></table></div>${cf.length > 25 ? `<button class="btn small" id="sp_allcf" type="button" style="margin-top:8px">${spread.allCf ? "Show the top 25" : `Show all ${cf.length}`}</button>` : ""}` : '<p class="hint">No looks recorded yet (every 15 minutes in market hours, from the first trading day).</p>'}
+    <h3 style="font-size:15px;margin:18px 0 4px">3 · Crypto: Delta India vs CoinDCX futures</h3>
+    <p class="hint" style="margin:0 0 8px">Buy the coin's perpetual future on the cheaper exchange and sell it on the dearer one, every minute, day and night. Fees ≈ ${spreadCost.cx}% (taker fee + GST to open and close on both exchanges); gains are taxed at 30%. CoinDCX is in USDT and Delta in USD: a gap of a few hundredths of a percent can be the USDT rate, not a real chance. Funding: each exchange's latest rate, as it publishes it.</p>
+    ${crossTable(by("cx"), "Coin")}
+    <p class="hint" style="margin:14px 0 0">Results here say whether a gap appeared at our speed, not that it could have been filled: a real order moves the price, and the other side may be gone by the time the second order lands.</p>`;
+  const b = $("sp_allcf"); if (b) b.onclick = () => { spread.allCf = !spread.allCf; renderSpread().catch((e) => toast(errorText(e))); };
+}
+const spread = { allCf: false };
+const spreadCost = { nb: "0.041", cx: "0.236" };
+$("nav_spread").addEventListener("click", () => showPage("spread"));
+$("sp_refresh").addEventListener("click", (e) => run(e.currentTarget, () => renderSpread()));
+
 $("co_group").addEventListener("change", (e) => { combo.key = e.target.value; combo.res = null; withLoading($("comboPane"), renderCombo()).catch((er) => toast(errorText(er))); });
 $("co_size").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { combo.size = Number(b.dataset.n); combo.res = null; withLoading($("comboPane"), renderCombo()).catch((er) => toast(errorText(er))); }));
 $("co_opp").addEventListener("change", (e) => { combo.minOpp = Number(e.target.value); combo.showN = 100; if (combo.res) comboTable(); });
@@ -8330,7 +8381,7 @@ $("terms_go").addEventListener("click", (e) => run(e.currentTarget, async () => 
 function applyRole() {
   document.querySelectorAll("[data-admin]").forEach((el) => el.hidden = !isAdmin());
   $("openLab").hidden = !(isAdmin() || (me && me.can_build));
-  $("nav_ideas").hidden = !isAdmin(); $("nav_combo").hidden = !isAdmin(); $("nav_health").hidden = !isAdmin();
+  $("nav_ideas").hidden = !isAdmin(); $("nav_combo").hidden = !isAdmin(); $("nav_health").hidden = !isAdmin(); $("nav_spread").hidden = !isAdmin();
   if (isAdmin()) healthDot().catch(() => {});
   $("nav_pred").hidden = !isAdmin();
   ["lab_settings_btn", "lab_run"].forEach((id) => $(id).hidden = !isAdmin());
