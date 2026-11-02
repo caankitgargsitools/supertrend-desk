@@ -335,6 +335,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
    the deployment cap %; (c) per-strategy share of capital and max lots; (d) the earlier proposal — risk-based sizing
    from each strategy's backtest drawdown, and no two strategies on the same asset at once (GOLD 1 kg dominated the
    paper loss); (e) different rules for paper vs live, and for clients.
+9. **Cloud-session start-up hook** (`.claude/settings.json` + `.claude/hooks/session-start.sh`: npm install in tests/sim,
+   link tests/ui/node_modules to the global node_modules) — blocked as self-modification on 1 Nov; needs Papa's permission.
+10. **From the GitHub review (2 Nov 2026; Papa: "add all three to the pending list")**, each awaiting his go:
+   (a) tick-level prices and stops from Dhan's WebSocket feed (official dhan-oss/DhanHQ-py as the reference) on a small
+   always-on server (~₹500–1,500/month); (b) a one-time independent cross-check of our backtester with vectorbt on the
+   same data (free); (c) 10–20 well-known strategy ideas from open-source repos (e.g. opening-range breakout, CPR-VWAP)
+   through the Ideas Lab's tests (free). Not recommended: replacing our engine (Nautilus/LEAN/backtrader), crypto bots
+   (freqtrade/jesse), Qlib, LLM-agent traders; OpenAlgo (AGPL) only later, as a separate service, if clients need other brokers.
 
 ## Open items
 - **Held futures across their expiry (found 1 Nov 2026, awaiting Papa's choice):** a positional futures strategy keeps
