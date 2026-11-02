@@ -71,13 +71,15 @@ export function lotsFor(sz: Sizing, equity: number, marginLot: number, usedByOth
 }
 
 /**
- * Fixed lots against the account's "never use more than" limit (Papa, 2 Nov 2026): null when the entry fits, else the
- * reason it is skipped. No check without a capital (0 = not set) or a known margin per lot.
+ * Fixed lots against the account's "never use more than" limit (Papa, 2 Nov 2026): as many of the strategy's lots as fit
+ * in the room left (40 wanted, room for 36 → 36); 0 = skip. No check (all lots) without a capital (0 = not set) or a
+ * known margin per lot. why is set only when the lots were cut.
  */
-export function fixedLotsFit(lots: number, marginLot: number, equity: number, usedByOthers: number, deployPct: number, capitalSet: boolean): string | null {
-  if (!capitalSet || !(marginLot > 0) || !(lots > 0)) return null;
-  const limit = Math.max(0, equity) * deployPct / 100, room = limit - usedByOthers, need = marginLot * lots;
-  if (need <= room) return null;
+export function fixedLotsFit(lots: number, marginLot: number, equity: number, usedByOthers: number, deployPct: number, capitalSet: boolean): { lots: number; why: string | null } {
+  if (!capitalSet || !(marginLot > 0) || !(lots > 0)) return { lots, why: null };
+  const limit = Math.max(0, equity) * deployPct / 100, room = limit - usedByOthers;
+  const fit = Math.max(0, Math.min(lots, Math.floor(room / marginLot + 1e-9)));
+  if (fit === lots) return { lots, why: null };
   const r = (x: number) => `₹${Math.trunc(Math.max(0, x)).toLocaleString("en-IN")}`;
-  return `${lots} lot${lots === 1 ? "" : "s"} need ${r(need)} margin but only ${r(room)} is left inside your ${deployPct}% limit (capital ${r(equity)}, other open positions ${r(usedByOthers)})`;
+  return { lots: fit, why: `${lots} lot${lots === 1 ? "" : "s"} need ${r(marginLot * lots)} margin but only ${r(room)} is left inside your ${deployPct}% limit (capital ${r(equity)}, other open positions ${r(usedByOthers)})` };
 }

@@ -195,9 +195,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   change; 0-lot or unsized ones are left as they are. The engine exits with the quantity held (`pos_qty`) and enters
   (also after a reversal) with the saved lots, so a change applies from the next entry. Test: `tests/ui/ui_lots_wizard.mjs`
   (args: theme width).
-  Fixed lots obey the limit too (2 Nov 2026, Papa): `sizeEntry` → `fixedLotsFit` (sizing.ts) skips a fixed-lot entry whose
-  margin would take this mode's open positions above "Never use more than" × (capital + P&L); only when a capital is set
-  and the margin per lot is known; an exit in the same signal still goes. Test: `tests/sim/sizing.test.mjs`.
+  Fixed lots obey the limit too (2 Nov 2026, Papa): `sizeEntry` → `fixedLotsFit` (sizing.ts) cuts a fixed-lot entry to the lots
+  that fit under "Never use more than" × (capital + P&L) minus this mode's other open positions (40 wanted, room for 36 →
+  36; Papa, 2 Nov), skips only below 1 lot; only when a capital is set and the margin per lot is known; an exit in the
+  same signal still goes. Test: `tests/sim/sizing.test.mjs`.
 - **Drawdown check** (2 Nov 2026, Papa; Capital page `#cap_dd`, `capDd`): for the mode's active strategies (Live / Paper
   tab), each one's trades from `cmpLoad` (lab backtest × the lots it trades now, else its own desk trades) → worst fall
   alone (all its years), all together on one curve (common period from the latest first trade; all history if that is

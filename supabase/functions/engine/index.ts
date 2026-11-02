@@ -393,8 +393,18 @@ async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknow
   } else if (Number(set.capital ?? 0) > 0 && mLot > 0) {
     // Fixed lots: still kept inside the account's "never use more than" limit (other open positions of this mode).
     const cs = await capitalState(set, !!s.live, s.id);
-    const no = fixedLotsFit(lots, mLot, cs.equity, cs.used, Number(set.deploy_pct ?? 100), true);
-    if (no) { notes.push(`Entry skipped: ${no}.`); return false; }
+    const fit = fixedLotsFit(lots, mLot, cs.equity, cs.used, Number(set.deploy_pct ?? 100), true);
+    if (fit.lots < 1) { notes.push(`Entry skipped: ${fit.why}.`); return false; }
+    if (fit.lots < lots) {
+      // Trade what fits (e.g. 36 of 40 lots) instead of skipping.
+      lots = fit.lots;
+      const e = entryLeg(s, newState.position, entryPx, legs.length - nLegs + 1, lots);
+      legs.splice(legs.length - nLegs, nLegs, ...asArr(e.leg));
+      Object.assign(newState, e.state, multi && mpx ? { pos_legs: (e.state.pos_legs as MLeg[]).map((l, i) => ({ ...l, px: +mpx![i].toFixed(2) })) } : {});
+      const last = notes.length - 1;
+      if (last >= 0) notes[last] = notes[last].replace(/ x \d+$/, ` x ${e.state.pos_qty}`);
+      notes.push(`Size: ${fit.why} ⇒ ${lots} lot${lots === 1 ? "" : "s"}`);
+    }
   }
   Object.assign(newState, { pos_entry_px: entryPx, pos_entry_prem: premium, pos_lots: lots, pos_margin: Math.trunc(mLot * lots) });
   return true;
