@@ -16,5 +16,6 @@ tests/sim/combos.mjs
 tests/sim/stocks.mjs
 tests/sim/candles.mjs
 tests/sim/dhanS.mjs
+tests/sim/sizing.mjs
 tests/ui/*.png
 tests/ui/node_modules
