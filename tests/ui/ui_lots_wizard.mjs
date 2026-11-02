@@ -1,0 +1,84 @@
+import { chromium } from "playwright";
+// Lots wizard on the Capital page (2 Nov 2026): four ways to share capital, live totals, Apply saves fixed lots.
+// Args: theme (dark|light) width.
+const theme = process.argv[2] || "dark", width = Number(process.argv[3] || 1440);
+const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const ctx = await b.newContext({ viewport: { width, height: 900 }, colorScheme: theme });
+const p = await ctx.newPage();
+const errs = [];
+p.on("pageerror", (e) => { errs.push(e.message); console.log("PAGEERR", e.message); });
+const A = "22222222-2222-2222-2222-222222222222", now = new Date().toISOString();
+const base = { data_instrument: "FUTCOM", timeframe_min: 1440, strategy_kind: "RULES", trade_type: "FUTURES", direction: "BOTH", lots: 1, qty_mode: "LOTS", product_type: "M", exchange: "MCX",
+  option_side: "BUY", leg_template_opt: "{}", leg_template_fut: "{}", position: "FLAT", archived: false, created_at: now, owner_id: A, active: true, live: false, intraday: false };
+const S = (id, u, seg, lot, dd, extra = {}) => ({ ...base, id, name: `Lab #${id} · Futures · ${u} daily · test rule`, underlying: u, data_segment: seg, data_security_id: u, futures_symbol: u, lot_size: lot,
+  sizing: { mode: "FIXED", dd_per_lot: dd }, ...extra });
+const strategies = [
+  S("g1", "GOLD", "MCX_COMM", 100, 1597170, { position: "SHORT", pos_lots: 1, pos_qty: 1 }),
+  S("g2", "GOLD", "MCX_COMM", 100, 571957),
+  S("gm", "GOLDM", "MCX_COMM", 10, 34438),
+  S("cu", "COPPER", "MCX_COMM", 2500, 184130),
+  S("sol", "SOLUSD", "DELTA", 4400, 44550, { exchange: "DELTA" }),
+  S("mid", "MIDCPNIFTY", "IDX_I", 120, 38248, { exchange: "NSE" }),
+  S("nodd", "ZINC", "MCX_COMM", 5000, null, { sizing: { mode: "AUTO", alloc_pct: 20, max_lots: 3 } }),
+];
+const rates = [["GOLD", 138485, .0925], ["GOLDM", 137010, .0925], ["COPPER", 1383.05, .09203], ["SOLUSD", 94.98, .1], ["MIDCPNIFTY", 13184.5, .11993], ["ZINC", 415.9, .08944]]
+  .map(([asset, price, fut_pct]) => ({ asset, price, fut_pct, fut_pct_i: fut_pct, sell_pct: null, sell_pct_i: null, checked_at: now }));
+const me = { user_id: A, email: "ca.ankitgarg@gmail.com", role: "admin", status: "active", can_build: true, terms_accepted: true, billing: {}, entries: { ok: true } };
+const res = {
+  "rpc/whoami": me, "rpc/broker_status": { broker: "DHAN", has_token: true, token_tail: "abcd", has_url: true, url_host: "x", has_secret: true },
+  "rpc/my_capital": { capital: 10000000, since: null, deploy_pct: 60, live_net: 0, paper_net: 0, live_used: 0, paper_used: 0, funds: {} },
+  "algo_strategies": strategies, "lab_margins": rates, "algo_trades": [],
+};
+const writes = [];
+await p.route(/supabase\.co/, (r) => {
+  const u = r.request().url().replace(/^.*supabase\.co/, ""), meth = r.request().method();
+  if (meth !== "GET" && meth !== "HEAD" && !/\/auth\//.test(u)) writes.push({ meth, u: decodeURIComponent(u), body: r.request().postData() });
+  if (/\/auth\/v1\/user/.test(u)) return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: A, email: me.email }) });
+  if (meth === "PATCH") return r.fulfill({ status: 204, body: "" });
+  const m = u.match(/\/rest\/v1\/(rpc\/[a-z_]+|[a-z_]+)/), key = m && m[1];
+  let body = key in res ? res[key] : [];
+  if (/application\/vnd\.pgrst\.object/.test(r.request().headers()["accept"] || "") && Array.isArray(body)) body = body[0] ?? null;
+  r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+});
+await p.addInitScript(([uid, email]) => {
+  const exp = Math.floor(Date.now() / 1000) + 3600;
+  localStorage.setItem("sb-umryzxusbdttbcshkajt-auth-token", JSON.stringify({ access_token: "x.eyJleHAiOjk5OTk5OTk5OTl9.y", token_type: "bearer", expires_in: 3600, expires_at: exp, refresh_token: "r", user: { id: uid, email, aud: "authenticated", role: "authenticated" } }));
+}, [A, me.email]);
+await p.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+await p.goto("http://localhost:8765/index.html"); await p.waitForTimeout(1500);
+const fail = (m, x) => { console.log("FAIL", m, JSON.stringify(x ?? "")); process.exit(1); };
+await p.evaluate(() => openCap()); await p.waitForTimeout(800);
+await p.click('#cap_mode [data-m="PAPER"]'); await p.waitForTimeout(800);
+const lotsOf = () => p.evaluate(() => Object.fromEntries(lw.plan.map((r) => [r.s.id, r.lots])));
+// Risk (default): 2% of ₹1 Cr = ₹2L ÷ (fall × 1.5).
+let L = await lotsOf();
+const want = { g1: 0, g2: 0, gm: 3, cu: 0, sol: 2, mid: 3, nodd: null };
+for (const k in want) if (L[k] !== want[k]) fail("risk lots " + k, L);
+if (!/0 lots/.test(await p.textContent("#lw_notes"))) fail("zero-lot note");
+if (!/no worst fall/.test(await p.textContent("#lw_notes"))) fail("no-dd note");
+// Equal: ₹1 Cr ÷ 7 each.
+await p.click('[data-lwm="equal"]'); L = await lotsOf();
+const eq = 1e7 / 7; if (L.gm !== Math.floor(eq / (137010 * 10 * .0925))) fail("equal gm", L);
+// Lots per asset: Gold 2.
+await p.click('[data-lwm="asset"]'); await p.fill('[data-lwasset="GOLD"]', "2"); await p.dispatchEvent('[data-lwasset="GOLD"]', "change"); L = await lotsOf();
+if (L.g1 !== 2 || L.g2 !== 2 || L.cu !== 1) fail("asset lots", L);
+// Percentage: shares filled evenly, total 100%.
+await p.click('[data-lwm="pct"]');
+const foot = await p.textContent("#lw_tbl tfoot"); if (!/100\.0%|99\.9%/.test(foot)) fail("pct total", foot);
+// Untick a type.
+await p.click('[data-lwtype="Crypto"]'); L = await lotsOf(); if (L.sol !== null) fail("crypto off", L);
+await p.click('[data-lwtype="Crypto"]');
+// Back to lots per asset and apply.
+await p.click('[data-lwm="asset"]'); await p.waitForTimeout(100);
+await p.screenshot({ path: `lw_${theme}_${width}.png`, fullPage: true });
+const sw = await p.evaluate(() => document.documentElement.scrollWidth); if (sw > width + 1) fail("page scrolls sideways", sw);
+const btnTxt = await p.textContent("#lw_apply"); if (!/3 changes/.test(btnTxt)) fail("apply count", btnTxt);
+await p.click("#lw_apply"); await p.waitForSelector("#cf_yes");
+if (!/next entry/.test(await p.textContent("#confirmBox"))) fail("open-position wording");
+await p.click("#cf_yes"); await p.waitForTimeout(1200);
+const patches = writes.filter((w) => w.meth === "PATCH" && /algo_strategies/.test(w.u));
+if (patches.length !== 3) fail("patches", patches);
+for (const w of patches) { const x = JSON.parse(w.body), id = w.u.match(/id=eq\.(\w+)/)[1]; if (x.sizing.mode !== "FIXED" || x.lots !== ({ g1: 2, g2: 2, nodd: 1 })[id]) fail("patch body " + id, x); }
+if (errs.length) fail("page errors", errs);
+console.log("ok lots wizard", theme, width);
+await b.close();

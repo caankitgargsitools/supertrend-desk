@@ -187,6 +187,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   with = + - @ are prefixed; notification links open only this site. Still open (Papa to decide): table grants to anon
   are ALL (RLS is the only barrier) — revoke and grant back what the app needs; `set_live` lets a client go live without
   the supervised test; `notify_test` has no rate limit.
+- **Lots wizard** (2 Nov 2026, Papa; Capital page card `#lw_card`, `lw` / `lwPlan` / `lwRender` / `lwChanges`): sizes the
+  current mode's (Live / Paper) strategies four ways — equal capital each, a % each, lots per asset, or equal risk
+  (default: capital × % ÷ (backtest worst fall per lot `sizing.dd_per_lot` × safety multiple)). Margin per lot =
+  `lab_margins.price` × lot size × Dhan's rate (`dhanRateFor`); options / structures are left out. Capital prefilled
+  with capital + that mode's P&L. "Apply these lots" saves `lots` and `sizing.mode = 'FIXED'` for ticked strategies that
+  change; 0-lot or unsized ones are left as they are. The engine exits with the quantity held (`pos_qty`) and enters
+  (also after a reversal) with the saved lots, so a change applies from the next entry. Test: `tests/ui/ui_lots_wizard.mjs`
+  (args: theme width).
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
@@ -327,7 +335,7 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
    (skip trades it strongly disagrees with), (e) forecast volatility / range for stops and lot sizing. Small cost:
    (f) bigger model sizes (server ~₹2,000/month or an upgrade), (g) fine-tune round 2 on a free Kaggle/Colab GPU
    (rented ~₹50–150/h if needed), then monthly walk-forward retraining. Recommended start: a, d, e.
-8. **How many lots each strategy trades** (Papa, 1 Nov 2026: "ask me tomorrow in detail"). Today: per strategy in
+8. **How many lots each strategy trades** (Papa, 1 Nov 2026: "ask me tomorrow in detail"; 2 Nov: lots wizard built on the Capital page, Papa testing it — rest of these questions after his test). Today: per strategy in
    Strategies → strategy → Strategy settings → Trade → Lots, and Position size → "How many lots" (Always the lots above /
    Automatic from my capital: % of capital, max lots, drawdown budget); marketplace copies: "Size the trades by" box;
    Capital page: total capital and the most in use at once. Lab-saved strategies start at 1 fixed lot. Questions:
