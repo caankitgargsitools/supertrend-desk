@@ -20,6 +20,7 @@ const strategies = [
   S("sol", "SOLUSD", "DELTA", 4400, 44550, { exchange: "DELTA" }),
   S("mid", "MIDCPNIFTY", "IDX_I", 120, 38248, { exchange: "NSE" }),
   S("nodd", "ZINC", "MCX_COMM", 5000, null, { sizing: { mode: "AUTO", alloc_pct: 20, max_lots: 3 } }),
+  S("x", "GOLD", "MCX_COMM", 100, null, { archived: true, active: false }),
 ];
 const rates = [["GOLD", 138485, .0925], ["GOLDM", 137010, .0925], ["COPPER", 1383.05, .09203], ["SOLUSD", 94.98, .1], ["MIDCPNIFTY", 13184.5, .11993], ["ZINC", 415.9, .08944]]
   .map(([asset, price, fut_pct]) => ({ asset, price, fut_pct, fut_pct_i: fut_pct, sell_pct: null, sell_pct_i: null, checked_at: now }));
@@ -55,6 +56,12 @@ await p.waitForSelector("#cap_dd_use", { timeout: 8000 }).catch(() => fail("no d
 const dd = await p.textContent("#cap_dd");
 if (!/31\.5%/.test(dd) || !/4\.5%/.test(dd) || !/Use 50%/.test(dd)) fail("drawdown figures", dd.slice(0, 600));
 await p.click("#cap_dd_use"); if (await p.inputValue("#cap_deploy") !== "50") fail("use suggestion");
+// The capital tile says it includes archived strategies' trades (all the mocked trades belong to archived "x").
+if (!/includes −₹3,50,000 from archived/.test(await p.textContent("#cap_stats"))) fail("archived note", await p.textContent("#cap_stats"));
+// The wizard's limit above the saved one (60%) warns.
+await p.fill("#lw_capPct", "85"); await p.dispatchEvent("#lw_capPct", "input");
+if (!/above your saved limit of 60%/.test(await p.textContent("#lw_notes"))) fail("limit warning", await p.textContent("#lw_notes"));
+await p.fill("#lw_capPct", "60"); await p.dispatchEvent("#lw_capPct", "input");
 const lotsOf = () => p.evaluate(() => Object.fromEntries(lw.plan.map((r) => [r.s.id, r.lots])));
 // Risk (default): 2% of ₹1 Cr = ₹2L ÷ (fall × 1.5).
 let L = await lotsOf();

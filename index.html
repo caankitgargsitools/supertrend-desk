@@ -4042,17 +4042,19 @@ async function loadCap() {
     db.from("algo_trades").select("id, strategy_id, mode, exit_at, contract, lots, entry_px, exit_px, costs, net, fee, verified, exit_why").eq("mode", cap.mode).eq("user_id", me.user_id).order("exit_at", { ascending: false }).limit(200).then(must),
   ]);
   if (!$("cap_capital").matches(":focus")) { $("cap_capital").value = String(Math.trunc(st.capital ?? 0)); $("cap_since").value = st.since || ""; $("cap_deploy").value = String(st.deploy_pct ?? 60); }
-  if (!lw.capSet) { $("lw_cap").value = String(Math.trunc(Number(st.capital ?? 0) + Number(cap.mode === "LIVE" ? st.live_net : st.paper_net) || 0)); $("lw_capPct").value = String(st.deploy_pct ?? 60); }
+  if (lw.savedPct !== st.deploy_pct) { lw.savedPct = st.deploy_pct; $("lw_capPct").value = String(st.deploy_pct ?? 60); }
+  if (!lw.capSet) { $("lw_cap").value = String(Math.trunc(Number(st.capital ?? 0) + Number(cap.mode === "LIVE" ? st.live_net : st.paper_net) || 0)); }
   renderCap(st, trades); lwRender(); capDd(st).catch((e) => { $("cap_dd").innerHTML = `<p class="hint">Drawdown check: ${esc(errorText(e))}</p>`; });
 }
 function renderCap(st, trades) {
   const live = cap.mode === "LIVE";
   const net = Number(live ? st.live_net : st.paper_net), equity = Number(st.capital) + net, used = Number(live ? st.live_used : st.paper_used);
   const capAmt = equity * Number(st.deploy_pct) / 100, f = st.funds || {};
+  const archNet = st.since ? 0 : state.strategies.filter((x) => x.archived && me && x.owner_id === me.user_id).reduce((a, x) => { const p = pnl && pnl.get(x.id); return a + (p ? (live ? p.live : p.paper) : 0); }, 0);
   const tile = (label, v, cls, sub) => `<div class="stat"><span class="label">${esc(label)}</span><span class="v ${cls || ""}">${esc(v)}</span>${sub ? `<span class="hint">${esc(sub)}</span>` : ""}</div>`;
   $("cap_stats").innerHTML = `<div class="stats">
     ${tile("My capital", rupees(st.capital), "", "")}
-    ${tile(`Profit / loss so far (${live ? "live" : "paper"})`, rupees(net), net > 0 ? "up" : net < 0 ? "down" : "", `capital now ${rupees(equity)}`)}
+    ${tile(`Profit / loss so far (${live ? "live" : "paper"})`, rupees(net), net > 0 ? "up" : net < 0 ? "down" : "", `capital now ${rupees(equity)}${archNet ? ` · includes ${rupees(archNet)} from archived strategies (the Strategies page counts only the strategies on its list)` : ""}${st.since ? ` · closed trades since ${st.since}` : ""}`)}
     ${tile("In use right now", rupees(used), "", equity > 0 ? `${(used / equity * 100).toFixed(1)}% · limit ${st.deploy_pct}%` : "")}
     ${tile("Dhan account balance", f.available != null ? rupees(f.available) : "–", "", st.funds_error ? st.funds_error : f.available != null ? `updated ${istText(st.funds_at)}` : "press Refresh Dhan funds")}
   </div>
@@ -4187,7 +4189,10 @@ function lwRender() {
   const used = sized.reduce((a, r) => a + r.used, 0), fall = sized.reduce((a, r) => a + (r.fall || 0), 0), lots = sized.reduce((a, r) => a + r.lots, 0);
   const zero = sized.filter((r) => !r.lots).length, over = used > limit;
   $("lw_modeTxt").textContent = live ? "live" : "paper";
-  $("lw_capWords").textContent = capAmt ? `${rupeesShort(capAmt)} · margin may use up to ${rupeesShort(limit)} at once. Prefilled with your capital plus ${live ? "live" : "paper"} profit / loss.` : "Enter the capital.";
+  const savedPct = Number(cap.status && cap.status.deploy_pct) || 60;
+  $("lw_capWords").innerHTML = capAmt ? esc(`${rupeesShort(capAmt)} · margin may use up to ${rupeesShort(limit)} at once. Prefilled with your capital plus ${live ? "live" : "paper"} profit / loss and your saved limit (${savedPct}%).`)
+    + (capPct > savedPct ? ` <b style="color:var(--red)">Above your saved limit of ${savedPct}%.</b>` : "") : "Enter the capital.";
+  $("lw_capPct").style.borderColor = capPct > savedPct ? "var(--red)" : "";
   $("lw_riskBox").hidden = lw.method !== "risk";
   document.querySelectorAll("#lw_methods [data-lwm]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lwm === lw.method)));
   const tile = (k, v, sub, c) => `<div class="stat" style="--c:var(${c || "--line"})"><span class="label">${esc(k)}</span><span class="v">${esc(v)}</span><span class="hint">${esc(sub)}</span></div>`;
@@ -4222,6 +4227,9 @@ function lwRender() {
   const top = Math.max(1, ...byA.values());
   $("lw_assets").innerHTML = [...byA].sort((a, b) => b[1] - a[1]).map(([u, v]) => `<div class="lw-a"><span>${esc(lwName(u))}</span><span class="b"><i class="${capAmt && v / capAmt > .25 ? "hot" : ""}" style="width:${v / top * 100}%"></i></span><span class="v">${rupeesShort(v)}${capAmt ? ` · ${Math.round(v / capAmt * 100)}%` : ""}</span></div>`).join("") || '<p class="hint">Nothing ticked.</p>';
   const notes = [];
+  const saved = Number(cap.status && cap.status.deploy_pct) || 60;
+  if (capPct > saved) notes.push(["err", `${capPct}% here is above your saved limit of ${saved}% (“Never use more than” at the top of this page). Strategies on automatic lots stop new entries above ${saved}%, so plan with ${saved}% or raise the saved limit first.`]);
+  else if (used > capAmt * saved / 100) notes.push(["err", `Margin needed (${rupeesShort(used)}) is above your saved limit of ${saved}% (${rupeesShort(capAmt * saved / 100)}).`]);
   if (over) notes.push(["err", `Margin needed (${rupeesShort(used)}) is above your ${capPct}% limit (${rupeesShort(limit)}). Lower the lots or the share, or raise the limit.`]);
   for (const [u, v] of byA) if (capAmt && v / capAmt > .25) notes.push(["warn", `${lwName(u)} alone would block ${Math.round(v / capAmt * 100)}% of the capital when all its strategies are in a trade.`]);
   if (zero) notes.push(["warn", `${zero} strateg${zero === 1 ? "y gets" : "ies get"} 0 lots (${[...new Set(sized.filter((r) => !r.lots).map((r) => lwName(r.s.underlying)))].join(", ")}). Apply leaves ${zero === 1 ? "it" : "them"} as they are now; pause ${zero === 1 ? "it" : "them"} yourself, or move to a smaller contract (e.g. Gold Mini).`]);
