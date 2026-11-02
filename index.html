@@ -821,6 +821,14 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .lw-a .b { height: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 99px; overflow: hidden; } .lw-a .b i { display: block; height: 100%; background: var(--blue); }
 .lw-a .b i.hot { background: var(--red); } .lw-a .v { font-family: var(--font-data); text-align: right; color: var(--muted); }
 @media (max-width: 520px) { .lw-a { grid-template-columns: 80px 1fr 96px; } }
+
+/* Drawdown check beside the "Never use more than" limit (Capital page). */
+.dd-box { border: 1px solid var(--line); border-radius: var(--r); padding: 12px; margin-top: 12px; }
+.dd-box:empty { display: none; }
+.dd-box h4 { margin: 0 0 2px; font-size: 14px; }
+.dd-sug { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--green-soft); }
+.dd-sug b.big { font: 700 22px var(--font-data); color: var(--green); }
+#cap_dd details { margin-top: 10px; } #cap_dd summary { cursor: pointer; font-weight: 600; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -1202,6 +1210,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
             <label class="f"><span>Never use more than (% of capital at once)</span><input id="cap_deploy" type="number" min="1" max="100" step="1"></label>
             <label class="f adv"><span>Count profits &amp; losses from</span><input id="cap_since" type="date"></label>
           </div>
+          <div id="cap_dd" class="dd-box"></div>
           <p class="hint">Strategies set to “Automatic” lots size every trade from this capital plus the profit or loss made so far, so they trade more after profits and less after losses. The limit keeps all strategies together from using more than this share at once.</p>
           <div class="formbar"><button class="btn primary" type="submit">Save</button><span class="hint" id="cap_msg"></span><label class="advtoggle" style="margin-left:auto"><input type="checkbox" data-adv> Show advanced settings</label></div>
         </form>
@@ -4023,6 +4032,7 @@ function openCap() {
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true; $("capPane").hidden = false;
   document.querySelectorAll("#stratList .strat, #archList .strat").forEach((b) => b.setAttribute("aria-current", "false"));
   $("openCap").classList.add("primary");
+  cmpCache.clear();
   withLoading($("capPane"), loadCap()).catch((e) => toast(errorText(e)));
 }
 function closeCap() { if (!cap.open) return; cap.open = false; $("capPane").hidden = true; $("openCap").classList.remove("primary"); }
@@ -4033,7 +4043,7 @@ async function loadCap() {
   ]);
   if (!$("cap_capital").matches(":focus")) { $("cap_capital").value = String(Math.trunc(st.capital ?? 0)); $("cap_since").value = st.since || ""; $("cap_deploy").value = String(st.deploy_pct ?? 60); }
   if (!lw.capSet) { $("lw_cap").value = String(Math.trunc(Number(st.capital ?? 0) + Number(cap.mode === "LIVE" ? st.live_net : st.paper_net) || 0)); $("lw_capPct").value = String(st.deploy_pct ?? 60); }
-  renderCap(st, trades); lwRender();
+  renderCap(st, trades); lwRender(); capDd(st).catch((e) => { $("cap_dd").innerHTML = `<p class="hint">Drawdown check: ${esc(errorText(e))}</p>`; });
 }
 function renderCap(st, trades) {
   const live = cap.mode === "LIVE";
@@ -4083,6 +4093,56 @@ function renderCap(st, trades) {
     tr.children[8].textContent = t.exit_why || "";
     tb.append(tr);
   }
+}
+/* ---------- Drawdown check (Capital page): how far the running strategies have fallen, alone and together ---------- */
+let capDdSeq = 0;
+async function capDd(st) {
+  const seq = ++capDdSeq, live = cap.mode === "LIVE", box = $("cap_dd");
+  const strats = myStrats().filter((x) => !x.archived && x.active && (!!x.live === live));
+  const equity = Number(st.capital || 0) + Number(live ? st.live_net : st.paper_net) || 0;
+  if (!strats.length) { box.innerHTML = `<h4>Drawdown check</h4><p class="hint" style="margin:0">No active ${live ? "live" : "paper"} strategies to check.</p>`; return; }
+  box.innerHTML = `<h4>Drawdown check</h4><p class="hint" style="margin:0"><span class="spin" aria-hidden="true"></span> Reading the trade history of ${strats.length} ${live ? "live" : "paper"} strateg${strats.length === 1 ? "y" : "ies"}…</p>`;
+  const items = [];
+  for (let i = 0; i < strats.length; i += 6) items.push(...await Promise.all(strats.slice(i, i + 6).map((s) => cmpLoad({ k: "desk", id: s.id }).catch(() => ({ s, trades: [] })))));
+  if (seq !== capDdSeq) return;
+  // Lab backtests are for 1 lot: scale them to the lots the strategy trades now. Desk trades already carry their lots.
+  const rows = items.map((it, k) => {
+    const s = strats[k], lots = Math.max(1, Number(s.lots) || 1), lab = /^Lab #/.test(it.src || "");
+    const tr = (it.trades || []).map((t) => ({ t: t.t, net: lab ? t.net * lots : t.net }));
+    return { s, lots, auto: !!(s.sizing && s.sizing.mode === "AUTO"), lab, src: it.src || "no trades yet", tr, all: tr.length ? cmpStats(tr) : null, margin: lwMargin(s) };
+  });
+  const have = rows.filter((r) => r.tr.length >= 2);
+  // Together: every strategy's trades on one curve, over the years they all have (from the latest first trade).
+  let from = have.length ? Math.max(...have.map((r) => r.tr[0].t)) : 0, to = have.length ? Math.max(...have.map((r) => r.tr.at(-1).t)) : 0;
+  const shortCommon = to - from < 365 * 86400000;
+  if (shortCommon && have.length) from = Math.min(...have.map((r) => r.tr[0].t));
+  for (const r of have) r.common = cmpStats(r.tr.filter((t) => t.t >= from));
+  const merged = have.flatMap((r) => r.tr.filter((t) => t.t >= from)).sort((a, b) => a.t - b.t);
+  const tog = merged.length ? cmpStats(merged) : null;
+  const pc = (v) => equity > 0 ? v / equity * 100 : null, pTxt = (v) => v == null ? "–" : `${v.toFixed(1)}%`;
+  const togPct = tog ? pc(tog.dd) : null;
+  const singles = have.map((r) => pc(r.all.dd)).filter((v) => v != null);
+  const avgPct = singles.length ? singles.reduce((a, v) => a + v, 0) / singles.length : null;
+  const sumPct = singles.length ? singles.reduce((a, v) => a + v, 0) : null, maxSingle = singles.length ? Math.max(...singles) : null;
+  const marginAll = rows.reduce((a, r) => a + (r.margin || 0) * r.lots, 0);
+  // Keep free at least 1.5 × the worst fall (together, or the worst single strategy over all its years if larger).
+  const basis = togPct == null ? null : Math.max(togPct, maxSingle || 0);
+  const sug = basis == null ? null : Math.max(10, Math.min(90, Math.floor((100 - basis * 1.5) / 5) * 5));
+  const yr = (t) => cmpIst(t).slice(0, 10);
+  const tile = (k, v, sub, c) => `<div class="stat" style="--c:var(${c || "--line"})"><span class="label">${esc(k)}</span><span class="v">${esc(v)}</span><span class="hint">${esc(sub)}</span></div>`;
+  box.innerHTML = `<h4>Drawdown check · ${live ? "live" : "paper"} strategies</h4>
+    <p class="hint" style="margin:0">How far your ${have.length} active ${live ? "live" : "paper"} strateg${have.length === 1 ? "y has" : "ies have"} fallen from a peak, at the lots each trades now, as a share of your capital now (${rupees(equity)}). From each strategy's Strategy Lab backtest, or its own desk trades when it has no backtest.</p>
+    <div class="stats" style="margin-top:10px">
+      ${tile("Worst fall, all together", togPct == null ? (tog ? rupeesShort(tog.dd) : "–") : pTxt(togPct), tog ? `${rupeesShort(tog.dd)} · ${yr(from)} → ${yr(to)}${shortCommon ? " (all history)" : ""}` : "no trades yet", "--red")}
+      ${tile("Average strategy's worst fall", pTxt(avgPct), "each one alone, over all its years", "--yellow")}
+      ${tile("Worst single strategy", pTxt(maxSingle), have.length ? have.reduce((a, r) => r.all.dd > a.all.dd ? r : a).s.name.split(" · ")[0] : "–")}
+      ${tile("If every worst fall came at once", pTxt(sumPct), "very unlikely; the upper bound", "--line")}
+      ${tile("Margin if all are in a trade", pTxt(pc(marginAll)), rupeesShort(marginAll), "--blue")}
+    </div>
+    ${sug != null ? `<div class="dd-sug"><span>Suggested limit for “Never use more than”:</span><b class="big">${sug}%</b><span class="hint" style="flex:1 1 260px;margin:0">Keeps free about 1.5 × the worst fall (${pTxt(basis)}${maxSingle > togPct ? ", the worst single strategy" : ", all together"}) so a bad patch doesn't eat into the margin. ${pc(marginAll) != null && pc(marginAll) > sug ? `All strategies in a trade at once need ${pTxt(pc(marginAll))}: above this, so some entries would wait for room.` : ""}</span><button class="btn" type="button" id="cap_dd_use">Use ${sug}%</button></div>` : ""}
+    <details><summary>Each strategy</summary><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Strategy</th><th class="n">Lots</th><th class="n">Worst fall (all its years)</th><th class="n">% of capital</th><th class="n">Worst fall ${yr(from).slice(0, 4)}→</th><th>From</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.s.name.split(" · ")[0])} <span class="hint">${esc(r.s.underlying)}</span></td><td class="n mono">${r.lots}${r.auto ? " (auto)" : ""}</td><td class="n mono">${r.all ? rupeesShort(r.all.dd) : "–"}</td><td class="n mono">${r.all ? pTxt(pc(r.all.dd)) : "–"}</td><td class="n mono">${r.common ? rupeesShort(r.common.dd) : "–"}</td><td class="hint">${esc(r.src)}${r.tr.length ? ` · ${yr(r.tr[0].t).slice(0, 4)}–${yr(r.tr.at(-1).t).slice(0, 4)}` : ""}</td></tr>`).join("")}</tbody></table></div>
+    <p class="hint" style="margin:6px 0 0">Backtest falls are history, not a limit: a real fall can be deeper. Strategies on automatic lots are counted at their saved lots. Change the lots with the wizard below and this check follows.</p></details>`;
+  const b = $("cap_dd_use"); if (b) b.onclick = () => { $("cap_deploy").value = String(sug); $("cap_msg").textContent = `Limit set to ${sug}% — press Save to keep it.`; $("cap_deploy").focus(); };
 }
 /* ---------- Lots wizard (Capital page) ---------- */
 const lw = { method: "risk", typesOff: new Set(), off: new Set(), pct: {}, assetLots: {}, capSet: false, plan: [] };
@@ -7379,7 +7439,7 @@ function floatHeads() {
   const top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--barH")) || 0;
   let pick = null, pickTop = -Infinity;
   for (const t of document.querySelectorAll("main table, section table")) {
-    if (!t.tHead || !t.tBodies[0] || t.tBodies[0].rows.length < 4 || t.closest(".labfhead, #gfhead, #lab_grid") || !t.offsetParent) continue;
+    if (!t.tHead || !t.tBodies[0] || t.tBodies[0].rows.length < 4 || t.closest(".labfhead, #gfhead, #lab_grid, details:not([open])") || !t.offsetParent) continue;
     const r = t.getBoundingClientRect(), hh = t.tHead.getBoundingClientRect().height;
     if (r.top < top && r.bottom > top + hh + 24 && r.top > pickTop) { pick = t; pickTop = r.top; }
   }

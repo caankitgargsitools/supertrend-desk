@@ -195,6 +195,12 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   change; 0-lot or unsized ones are left as they are. The engine exits with the quantity held (`pos_qty`) and enters
   (also after a reversal) with the saved lots, so a change applies from the next entry. Test: `tests/ui/ui_lots_wizard.mjs`
   (args: theme width).
+- **Drawdown check** (2 Nov 2026, Papa; Capital page `#cap_dd`, `capDd`): for the mode's active strategies (Live / Paper
+  tab), each one's trades from `cmpLoad` (lab backtest × the lots it trades now, else its own desk trades) → worst fall
+  alone (all its years), all together on one curve (common period from the latest first trade; all history if that is
+  under a year), average, upper bound (sum), margin if all are in a trade — as % of capital + that mode's P&L.
+  Suggested "Never use more than" = 100 − 1.5 × max(together, worst single), floored to 5, 10–90% ("Use N%" fills the box;
+  Save keeps it). Tested in `tests/ui/ui_lots_wizard.mjs`. `floatHeads` skips tables inside closed `<details>`.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

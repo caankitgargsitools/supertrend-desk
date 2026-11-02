@@ -27,7 +27,8 @@ const me = { user_id: A, email: "ca.ankitgarg@gmail.com", role: "admin", status:
 const res = {
   "rpc/whoami": me, "rpc/broker_status": { broker: "DHAN", has_token: true, token_tail: "abcd", has_url: true, url_host: "x", has_secret: true },
   "rpc/my_capital": { capital: 10000000, since: null, deploy_pct: 60, live_net: 0, paper_net: 0, live_used: 0, paper_used: 0, funds: {} },
-  "algo_strategies": strategies, "lab_margins": rates, "algo_trades": [],
+  "algo_strategies": strategies, "lab_margins": rates,
+  "algo_trades": [100000, -300000, 50000, -200000].map((net, i) => ({ id: i + 1, strategy_id: "x", mode: "PAPER", net, exit_at: `202${i}-03-01T10:00:00Z`, contract: "X", lots: 1 })),
 };
 const writes = [];
 await p.route(/supabase\.co/, (r) => {
@@ -49,6 +50,11 @@ await p.goto("http://localhost:8765/index.html"); await p.waitForTimeout(1500);
 const fail = (m, x) => { console.log("FAIL", m, JSON.stringify(x ?? "")); process.exit(1); };
 await p.evaluate(() => openCap()); await p.waitForTimeout(800);
 await p.click('#cap_mode [data-m="PAPER"]'); await p.waitForTimeout(800);
+// Drawdown check: each strategy (desk trades, same list) falls ₹4.5L = 4.5%; all 7 together ₹31.5L = 31.5% → limit 50%.
+await p.waitForSelector("#cap_dd_use", { timeout: 8000 }).catch(() => fail("no drawdown suggestion", null));
+const dd = await p.textContent("#cap_dd");
+if (!/31\.5%/.test(dd) || !/4\.5%/.test(dd) || !/Use 50%/.test(dd)) fail("drawdown figures", dd.slice(0, 600));
+await p.click("#cap_dd_use"); if (await p.inputValue("#cap_deploy") !== "50") fail("use suggestion");
 const lotsOf = () => p.evaluate(() => Object.fromEntries(lw.plan.map((r) => [r.s.id, r.lots])));
 // Risk (default): 2% of ₹1 Cr = ₹2L ÷ (fall × 1.5).
 let L = await lotsOf();
