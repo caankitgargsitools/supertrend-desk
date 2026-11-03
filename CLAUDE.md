@@ -245,6 +245,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   this browser (localStorage `lastPage`, per user) on every page change; start-up reads it and, when a saved page will be reopened, keeps the loading card up
   instead of the Strategies list (no flash; Papa, 3 Nov), then `restorePage` reopens it after the data loads (admin pages only for admins; a strategy that no longer exists → the
   list; links with ?s= / ?lab= … still win). Test: `tests/ui/ui_refresh.mjs` (args: theme width).
+- **One set of figures, always fresh** (3 Nov 2026, Papa: figures differed between pages and the app showed stale data):
+  `bookOf(mode)` (every closed trade of the mode, after charges, hidden out, archived / deleted strategies included —
+  `myTrades` from `loadPnl`, the signed-in user only) and `runOf(mode)` (open positions' running P&L and margin from the
+  live prices) feed Capital (server figure only when "count from" is set), Desk, the Strategies totals ("these rows" plus
+  "account …incl. archived") and the Trades tab (archived strategies ticked by default). `refreshAll` reloads strategies,
+  positions, P&L, capital and the open page's own data (`deskSoft`, `loadCap`, Live / Trades / Orders tabs) every 30 s while
+  the app is on screen (market open or not) and on coming back (visibilitychange, pageshow, focus, online; at most every
+  10 s). Unsaved strategy settings are kept (`formDirty`). Test: `tests/ui/ui_sync.mjs`.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

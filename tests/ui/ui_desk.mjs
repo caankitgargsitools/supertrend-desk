@@ -33,7 +33,7 @@ const res = {
   "rpc/my_capital": { capital: 10000000, since: null, deploy_pct: 60, live_net: 0, paper_net: 0, live_used: 0, paper_used: 0, funds: {} },
   "rpc/desk_series": { first: new Date(Date.now() - 2 * 864e5).toISOString(), step_s: 3600, rows: Array.from({ length: 48 }, (_, i) => ({ t: new Date(Date.now() - (48 - i) * 3600e3).toISOString(), m: 2600000 + i * 1000, u: 300000 + i * 2000, r: 30000 + i * 100, n: 3 })) },
   "algo_strategies": strategies, "lab_margins": rates,
-  "algo_trades": [40000, -12000, 5500].map((net, i) => ({ id: i + 1, strategy_id: ["g1", "sol", "cu"][i], side: "SHORT", mode: "PAPER", net, exit_at: new Date(Date.now() - (i + 1) * 86400000).toISOString(), exit_why: "Trailing stop (gap)", lots: 1 })),
+  "algo_trades": [40000, -12000, 5500].map((net, i) => ({ id: i + 1, strategy_id: ["g1", "sol", "cu"][i], user_id: A, side: "SHORT", mode: "PAPER", net, exit_at: new Date(Date.now() - (i + 1) * 86400000).toISOString(), exit_why: "Trailing stop (gap)", lots: 1 })),
 };
 const writes = [];
 await p.route(/supabase\.co/, (r) => {

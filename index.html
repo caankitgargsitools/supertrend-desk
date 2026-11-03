@@ -1502,7 +1502,7 @@ body.dk-fs-on { overflow: hidden; }
           <label class="f"><span>Closed by</span><select id="tf_why"><option value="">Any</option></select></label>
           <label class="f"><span>Instrument</span><select id="tf_inst"><option value="">All</option><option>Futures</option><option>Options</option><option>Crypto</option><option>Commodity</option></select></label>
           <label class="f grow"><span>Search</span><input id="tf_q" type="search" placeholder="Contract, reason…" autocomplete="off"></label>
-          <label class="showtr"><input type="checkbox" id="tf_arch"> Archived strategies</label>
+          <label class="showtr"><input type="checkbox" id="tf_arch" checked> Archived strategies</label>
           <button class="btn small" id="tf_clear" type="button">Clear filters</button>
           <button class="btn small" id="tf_csv" type="button">Download CSV</button>
         </div>
@@ -4206,13 +4206,13 @@ async function loadCap() {
 }
 function renderCap(st, trades) {
   const live = cap.mode === "LIVE";
-  const net = Number(live ? st.live_net : st.paper_net), equity = Number(st.capital) + net, used = Number(live ? st.live_used : st.paper_used);
+  const bk = bookOf(live ? "LIVE" : "PAPER"), net = st.since ? Number(live ? st.live_net : st.paper_net) : bk.net, equity = Number(st.capital) + net, used = runOf(live ? "LIVE" : "PAPER").margin;
   const capAmt = equity * Number(st.deploy_pct) / 100, f = st.funds || {};
-  const archNet = st.since ? 0 : state.strategies.filter((x) => x.archived && me && x.owner_id === me.user_id).reduce((a, x) => { const p = pnl && pnl.get(x.id); return a + (p ? (live ? p.live : p.paper) : 0); }, 0);
+  const archNet = st.since ? 0 : bk.arch;
   const tile = (label, v, cls, sub) => `<div class="stat"><span class="label">${esc(label)}</span><span class="v ${cls || ""}">${esc(v)}</span>${sub ? `<span class="hint">${esc(sub)}</span>` : ""}</div>`;
   $("cap_stats").innerHTML = `<div class="stats">
     ${tile("My capital", rupees(st.capital), "", "")}
-    ${tile(`Profit / loss so far (${live ? "live" : "paper"})`, rupees(net), net > 0 ? "up" : net < 0 ? "down" : "", `capital now ${rupees(equity)}${archNet ? ` · includes ${rupees(archNet)} from archived strategies (the Strategies page counts only the strategies on its list)` : ""}${st.since ? ` · closed trades since ${st.since}` : ""}`)}
+    ${tile(`Profit / loss so far (${live ? "live" : "paper"})`, rupees(net), net > 0 ? "up" : net < 0 ? "down" : "", `capital now ${rupees(equity)}${archNet ? ` · includes ${rupees(archNet)} from archived strategies (the same figure as on the Desk; the Strategies list shows it as “account” under its total)` : ""}${st.since ? ` · closed trades since ${st.since}` : ""}`)}
     ${tile("In use right now", rupees(used), "", equity > 0 ? `${(used / equity * 100).toFixed(1)}% · limit ${st.deploy_pct}%` : "")}
     ${tile("Dhan account balance", f.available != null ? rupees(f.available) : "–", "", st.funds_error ? st.funds_error : f.available != null ? `updated ${istText(st.funds_at)}` : "press Refresh Dhan funds")}
   </div>
@@ -6351,8 +6351,26 @@ $("passForm").addEventListener("submit", (e) => {
 $("newFlip2").addEventListener("click", (e) => run(e.currentTarget, () => createStrategy("FLIP")));
 
 /** Closed-trade totals per strategy (live and paper), for the strategies table. */
+/* ---------- one set of figures for every page (Papa, 3 Nov: "the same thing on different pages has to be synchronous") ----------
+   Booked P&L = every closed trade of the mode, after charges, hidden ones out, archived and deleted strategies included
+   (the account's real record: Capital, Desk, Strategies, Trades all use this). Running P&L and margin in use = the open
+   positions of the mode's strategies on the desk, from the live prices the app receives every second. */
+let myTrades = [];
+function bookOf(mode) {
+  let net = 0, n = 0, wins = 0, arch = 0, archN = 0;
+  for (const t of myTrades) if (t.mode === mode) {
+    net += t.net; n++; if (t.net > 0) wins++;
+    const s = (state.strategies || []).find((x) => x.id === t.sid); if (!s || s.archived) { arch += t.net; archN++; }
+  }
+  return { net, n, wins, arch, archN };
+}
+function runOf(mode) {
+  const open = myStrats().filter((x) => !x.archived && x.position !== "FLAT" && (!!x.live === (mode === "LIVE")));
+  return { open, upnl: open.reduce((a, x) => a + (Number(x.pos_upnl) || 0), 0), margin: open.reduce((a, x) => a + (Number(x.pos_margin) || 0), 0) };
+}
 async function loadPnl() {
-  const rows = await fetchAll(() => db.from("algo_trades").select("id, strategy_id, mode, net, exit_at").order("exit_at", { ascending: false }).order("id", { ascending: false }));
+  const rows = await fetchAll(() => db.from("algo_trades").select("id, strategy_id, user_id, mode, net, exit_at").order("exit_at", { ascending: false }).order("id", { ascending: false }));
+  myTrades = rows.filter((t) => me && t.user_id === me.user_id).map((t) => ({ sid: t.strategy_id, mode: t.mode, net: Number(t.net) || 0 }));
   const m = new Map();
   for (const t of rows) {
     const k = t.strategy_id; if (!m.has(k)) m.set(k, { live: 0, paper: 0, n: 0, wins: 0, last: null });
@@ -6556,7 +6574,7 @@ function renderAllTrades() {
 $("tf_q").addEventListener("input", renderAllTrades);
 $("tf_period").addEventListener("change", () => { const p = $("tf_period").value; if (p !== "custom") { const [a, b] = periodDates(p); $("tf_from").value = a; $("tf_to").value = b; } renderAllTrades(); });
 ["tf_from", "tf_to"].forEach((id) => $(id).addEventListener("change", () => { $("tf_period").value = "custom"; renderAllTrades(); }));
-$("tf_clear").addEventListener("click", () => { ["tf_mode", "tf_asset", "tf_strat", "tf_side", "tf_res", "tf_why", "tf_inst", "tf_from", "tf_to", "tf_q"].forEach((id) => $(id).value = ""); $("tf_period").value = "all"; $("tf_arch").checked = false; renderAllTrades(); });
+$("tf_clear").addEventListener("click", () => { ["tf_mode", "tf_asset", "tf_strat", "tf_side", "tf_res", "tf_why", "tf_inst", "tf_from", "tf_to", "tf_q"].forEach((id) => $(id).value = ""); $("tf_period").value = "all"; $("tf_arch").checked = true; renderAllTrades(); });
 $("tf_toggle").addEventListener("click", () => { const box = $("tf_box"), on = !box.classList.contains("open"); box.classList.toggle("open", on); $("tf_toggle").setAttribute("aria-expanded", String(on)); $("tf_toggle").textContent = on ? "Hide filters" : "Filters"; });
 $("tf_csv").addEventListener("click", () => {
   // Text cells starting with = + - @ would run as formulas in Excel: a leading ' keeps them text (numbers stay numbers).
@@ -6761,7 +6779,30 @@ async function pollMarks() {
   const live = open.some((s) => marketOpenFor(s.data_segment));
   marksTimer = setTimeout(pollMarks, open.length && live ? 3000 : 60000);
 }
-document.addEventListener("visibilitychange", () => { if (!document.hidden) pollMarks(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { pollMarks(); refreshSoon(); } });
+/* ---------- fresh data whenever the app is looked at (Papa, 3 Nov) ----------
+   Coming back to the tab or the phone app, the page shown again, focus or the network back: everything on screen is
+   reloaded (strategies, positions, booked P&L, capital, and the open page's own data), at most once every 10 seconds,
+   and every 30 seconds while the app stays open. The thin bar at the top shows while it loads; unsaved settings are kept. */
+let lastRefresh = 0, refreshBusy = false;
+async function refreshAll() {
+  if (refreshBusy || !me || !deskUser || pending || btPoll) return;
+  refreshBusy = true;
+  try {
+    await loadAll();
+    await loadCapStatus().catch(() => null);
+    if (page === "cap" && cap.open) await loadCap();
+    else if (page === "desk") await deskSoft();
+    else if (page === "list" && lpTab === "live") await renderLive();
+    else if (page === "list" && lpTab === "trades") await loadAllTrades(true);
+    else if (page === "list" && lpTab === "orders") await loadOrders();
+    lastRefresh = Date.now();
+  } catch { /* the next refresh tries again */ } finally { refreshBusy = false; }
+}
+const refreshSoon = () => { if (Date.now() - lastRefresh > 10000) refreshAll(); };
+addEventListener("pageshow", (e) => { if (e.persisted) refreshSoon(); });
+addEventListener("focus", refreshSoon);
+addEventListener("online", refreshSoon);
 
 /* ---------- capital and margin of a strategy (today's margin for one lot from Dhan's margin calculator; crypto: Delta at 10×) ---------- */
 function perLotToday(s, marg = todayMarg) {
@@ -7649,6 +7690,11 @@ const dkSgn = (x) => (x > 0 ? "+" : "") + rupees(x);
 const dkLabId = (s) => String(s.name || "").split(" · ")[0];
 function deskStrats() { return myStrats().filter((x) => !x.archived && (!!x.live === (desk.mode === "LIVE"))); }
 function dkOpen() { return deskStrats().filter((x) => x.position !== "FLAT"); }
+async function deskSoft() {
+  desk.trades = await fetchAll(() => db.from("algo_trades").select("id, strategy_id, side, lots, units, entry_day, entry_px, net, exit_at, exit_why").eq("user_id", me.user_id).eq("mode", desk.mode).order("exit_at", { ascending: false }).order("id", { ascending: false }));
+  if (page !== "desk") return;
+  deskPaint(); deskTimeline(); deskSankey(); deskLayout(); deskCvpLoad().catch(() => {});
+}
 function deskStop() { if ($("dk_cv") && $("dk_cv").closest(".dk-flow").classList.contains("full")) { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); deskFull(false); } if (desk.raf) cancelAnimationFrame(desk.raf); desk.raf = 0; clearInterval(desk.clock); desk.clock = 0; }
 async function renderDesk() {
   if (!desk.mode) desk.mode = myStrats().some((x) => !x.archived && x.live && x.active) ? "LIVE" : "PAPER";
@@ -7673,8 +7719,7 @@ function deskClock() {
 function deskPaint() {
   const live = desk.mode === "LIVE", all = deskStrats(), open = dkOpen(), st = cap.status || {};
   const names = new Map(state.strategies.map((x) => [x.id, x]));
-  const run = open.reduce((a, s) => a + (Number(s.pos_upnl) || 0), 0), margin = open.reduce((a, s) => a + (Number(s.pos_margin) || 0), 0);
-  const booked = desk.trades.reduce((a, t) => a + (Number(t.net) || 0), 0), n = desk.trades.length, wins = desk.trades.filter((t) => Number(t.net) > 0).length;
+  const ro = runOf(desk.mode), run = ro.upnl, margin = ro.margin, bk = bookOf(desk.mode), booked = bk.net, n = bk.n, wins = bk.wins;
   const capital = Number(st.capital) || 0, equity = capital + Number(live ? st.live_net : st.paper_net || 0), limit = Number(st.deploy_pct) || 60;
   $("dk_sub").textContent = `${live ? "LIVE" : "PAPER"} · ${all.length} STRATEGIES · ${all.filter((x) => x.active).length} ACTIVE`;
   $("dk_acct").textContent = live ? "Live account" : "Paper account";
@@ -8005,7 +8050,7 @@ function deskCvpBuild() {
   for (const r of dkCvp.data.rows || []) { const t = Date.parse(r.t); if (t >= from && t <= to) pts.push({ t, m: Number(r.m) || 0, u: Number(r.u) || 0, r: Number(r.r) || 0 }); }
   // The live end: what the desk shows right now.
   if (to >= Date.now() - step * 2) {
-    const live = dkOpen(); pts.push({ t: Date.now(), m: live.reduce((a, s) => a + (Number(s.pos_margin) || 0), 0), u: live.reduce((a, s) => a + (Number(s.pos_upnl) || 0), 0), r: desk.trades.reduce((a, t) => a + (Number(t.net) || 0), 0), now: true });
+    const live = dkOpen(); pts.push({ t: Date.now(), m: live.reduce((a, s) => a + (Number(s.pos_margin) || 0), 0), u: live.reduce((a, s) => a + (Number(s.pos_upnl) || 0), 0), r: bookOf(desk.mode).net, now: true });
   }
   dkCvp.pts = pts.sort((a, b) => a.t - b.t);
 }
@@ -8454,7 +8499,7 @@ function renderListCards(cols, rows) {
   const req = open.reduce((a, s) => a + (marginRequired(s).v || 0), 0), dep = open.reduce((a, s) => a + (marginDeployed(s) || 0), 0);
   const cls = (v) => v > 0 ? "pos-num" : v < 0 ? "neg-num" : "";
   $("lp_sum").innerHTML = `<div class="t"><span class="k">Running P&amp;L</span><span class="v" id="lp_sum_upnl">${listRunTotalHtml(rows)}</span></div>
-    <div class="t"><span class="k">Booked P&amp;L</span><span class="v ${cls(booked)}">${rupees(booked)}</span><span class="s">${rows.reduce((a, s) => a + (p(s).n || 0), 0)} closed trades</span></div>
+    <div class="t"><span class="k">Booked P&amp;L</span><span class="v ${cls(booked)}">${rupees(booked)}</span><span class="s">${rows.reduce((a, s) => a + (p(s).n || 0), 0)} closed trades${(() => { const P = bookOf("PAPER"), L = bookOf("LIVE"); return P.arch || L.arch ? ` · account ${rupees(P.net + L.net)} incl. archived` : ""; })()}</span></div>
     <div class="t"><span class="k">In a trade</span><span class="v">${nOpen} <small style="font-size:13px;font-weight:600;color:var(--muted)">of ${open.length}</small></span><span class="s">${open.filter((s) => s.active).length} active · ${open.filter((s) => s.live).length} live</span></div>
     <div class="t"><span class="k">Margin deployed</span><span class="v">${rupeesShort(dep)}</span><span class="s">needs ${rupeesShort(req)} for all</span></div>`;
   box.innerHTML = rows.length ? "" : '<p class="hint">No strategies match.</p>';
@@ -8512,7 +8557,7 @@ function listTotals(cols, rows) {
     sasset: `Total<div class="hint sm">${rows.length} strateg${rows.length === 1 ? "y" : "ies"} · ${new Set(rows.map((s) => s.underlying)).size} assets</div>`,
     side: nOpen ? `${open.filter((s) => s.position === "LONG").length} long · ${open.filter((s) => s.position === "SHORT").length} short` : '<span class="hint">All flat</span>',
     lots: String(lots),
-    booked: `<span class="${cls(shownBooked)}">${rupees(shownBooked)}</span><div class="hint sm">live ${rupees(tl)} · paper ${rupees(tpp)}</div>`,
+    booked: `<span class="${cls(shownBooked)}">${rupees(shownBooked)}</span><div class="hint sm">these rows · live ${rupees(tl)} · paper ${rupees(tpp)}</div>${(() => { const P = bookOf("PAPER"), L = bookOf("LIVE"); return P.arch || L.arch ? `<div class="hint sm" title="Every closed trade, archived strategies included: the figure on Capital and Desk">account: paper ${rupees(P.net)}${L.n ? ` · live ${rupees(L.net)}` : ""}</div>` : ""; })()}`,
     trades: String(nTr),
     win: nTr ? `${(nWin / nTr * 100).toFixed(0)}%<div class="hint sm">${nWin} of ${nTr}</div>` : "–",
     size: capSet ? `${rupees(capSet)}<div class="hint sm">capital set</div>` : "–",
@@ -9114,9 +9159,10 @@ async function enterDesk(session) {
     $("stratList").innerHTML = '<p class="hint">Strategies will appear once the server answers.</p>';
   }
   clearInterval(timer);
-  timer = setInterval(async () => { if (document.hidden || !marketOpen() || pending || btPoll) return; try { await loadAll(); } catch {} }, 60000);
+  timer = setInterval(() => { if (!document.hidden) refreshAll(); }, 30000); // every 30 s while the app is on screen, market open or not
   pollMarks();
   loadNotifyCard().catch(() => {});
+  lastRefresh = Date.now();
   if (resume) { if (!restorePage(resume)) showPage("list"); }
   else if (!location.search && saved && saved.page === "list") restorePage(saved);
   openDeepLink(location.href);

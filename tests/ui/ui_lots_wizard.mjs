@@ -29,7 +29,7 @@ const res = {
   "rpc/whoami": me, "rpc/broker_status": { broker: "DHAN", has_token: true, token_tail: "abcd", has_url: true, url_host: "x", has_secret: true },
   "rpc/my_capital": { capital: 10000000, since: null, deploy_pct: 60, live_net: 0, paper_net: 0, live_used: 0, paper_used: 0, funds: {} },
   "algo_strategies": strategies, "lab_margins": rates,
-  "algo_trades": [100000, -300000, 50000, -200000].map((net, i) => ({ id: i + 1, strategy_id: "x", mode: "PAPER", net, exit_at: `202${i}-03-01T10:00:00Z`, contract: "X", lots: 1 })),
+  "algo_trades": [100000, -300000, 50000, -200000].map((net, i) => ({ id: i + 1, strategy_id: "x", user_id: A, mode: "PAPER", net, exit_at: `202${i}-03-01T10:00:00Z`, contract: "X", lots: 1 })),
 };
 const writes = [];
 await p.route(/supabase\.co/, (r) => {
