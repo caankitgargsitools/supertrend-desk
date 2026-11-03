@@ -31,6 +31,7 @@ const me = { user_id: A, email: "ca.ankitgarg@gmail.com", role: "admin", status:
 const res = {
   "rpc/whoami": me, "rpc/broker_status": { broker: "DHAN", has_token: true, token_tail: "abcd", has_url: true, url_host: "x", has_secret: true },
   "rpc/my_capital": { capital: 10000000, since: null, deploy_pct: 60, live_net: 0, paper_net: 0, live_used: 0, paper_used: 0, funds: {} },
+  "rpc/desk_series": { first: new Date(Date.now() - 2 * 864e5).toISOString(), step_s: 3600, rows: Array.from({ length: 48 }, (_, i) => ({ t: new Date(Date.now() - (48 - i) * 3600e3).toISOString(), m: 2600000 + i * 1000, u: 300000 + i * 2000, r: 30000 + i * 100, n: 3 })) },
   "algo_strategies": strategies, "lab_margins": rates,
   "algo_trades": [40000, -12000, 5500].map((net, i) => ({ id: i + 1, strategy_id: ["g1", "sol", "cu"][i], side: "SHORT", mode: "PAPER", net, exit_at: new Date(Date.now() - (i + 1) * 86400000).toISOString(), exit_why: "Trailing stop (gap)", lots: 1 })),
 };
@@ -72,6 +73,21 @@ await p.waitForTimeout(200);
 if (!(await p.evaluate(() => desk.movers.some((x) => !x.up)))) fail("red dots");
 await p.waitForTimeout(3500);
 const after2 = await p.evaluate(() => desk.pool.length); if (!(after2 < after)) fail("pool thinner", [after, after2]);
+// Capital deployed vs profit: estimated part from trades, recorded part from snapshots, live end; tabs, hover, zoom.
+await p.waitForTimeout(400);
+const cv = await p.evaluate(() => ({ n: dkCvp.pts.length, est: dkCvp.pts.filter((x) => x.est).length, rec: dkCvp.pts.filter((x) => !x.est && !x.now).length, now: dkCvp.pts.some((x) => x.now) }));
+if (!(cv.est > 0 && cv.rec === 48 && cv.now)) fail("capital vs profit series", cv);
+if (!/Capital deployed/.test(await p.textContent("#dk_cvp_read"))) fail("read-out");
+await p.click('#dk_cvp_tab [data-v="real"]'); if (await p.evaluate(() => dkCvp.tab) !== "real") fail("realised tab");
+const box = await p.locator("#dk_cvp").boundingBox();
+await p.mouse.move(box.x + box.width * .5, box.y + box.height * .5); await p.waitForTimeout(100);
+if (!/estimated|\d{2}:\d{2}/.test(await p.textContent("#dk_cvp_read"))) fail("hover read-out", await p.textContent("#dk_cvp_read"));
+await p.mouse.move(box.x + box.width * .45, box.y + 60); await p.mouse.down(); await p.mouse.move(box.x + box.width * .8, box.y + 60, { steps: 5 }); await p.mouse.up(); await p.waitForTimeout(400);
+if (!(await p.evaluate(() => dkCvp.zoom))) fail("drag to zoom");
+if (await p.locator("#dk_cvp_reset").isHidden()) fail("reset zoom shown");
+await p.click("#dk_cvp_reset"); await p.waitForTimeout(300); if (await p.evaluate(() => dkCvp.zoom)) fail("reset zoom");
+await p.click("#dk_cvp_big"); if (!(await p.evaluate(() => document.getElementById("dk_cvp_box").classList.contains("big")))) fail("expand");
+await p.click('#dk_cvp_rng [data-v="ALL"]'); await p.waitForTimeout(300);
 // A shut market: no trickle or agent streams for that asset, others carry on.
 await p.evaluate(() => { desk.closedAt = Date.now() + 1e9; desk.closed = new Map([["g1", true], ["g3", true], ["mid2", true], ["sol2", false]]); desk.amb = []; });
 await p.waitForTimeout(800);

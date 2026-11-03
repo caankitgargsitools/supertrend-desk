@@ -874,6 +874,18 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .dk-flow { padding: 0; overflow: hidden; }
 #dk_cv { width: 100%; height: 520px; display: block; }
+.dk-cvp-ctl { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.dk-seg { display: inline-flex; border: 1px solid var(--dk-line); border-radius: 4px; overflow: hidden; }
+.dk-seg button { font: 600 10.5px var(--font-data); letter-spacing: .05em; color: var(--dk-muted); background: var(--dk-panel2); border: 0; padding: 4px 8px; cursor: pointer; }
+.dk-seg button + button { border-left: 1px solid var(--dk-line); }
+.dk-seg button[aria-pressed="true"] { color: var(--dk-ink); background: var(--dk-amber); }
+.dk-date { font: 600 10.5px var(--font-data); color: var(--dk-muted); display: inline-flex; gap: 4px; align-items: center; }
+.dk-date input { background: var(--dk-panel2); color: var(--dk-text); border: 1px solid var(--dk-line); border-radius: 4px; padding: 2px 4px; font: 500 11px var(--font-data); color-scheme: dark; }
+.dk-cvp-read { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 2px 0 8px; font: 500 11px var(--font-data); color: var(--dk-muted); }
+.dk-cvp-read b { font: 600 15px var(--font-data); color: var(--dk-text); margin-left: 6px; }
+#dk_cvp { width: 100%; height: 280px; display: block; cursor: crosshair; touch-action: pan-y; }
+.dk-cvp.big #dk_cvp { height: 560px; }
+@media (max-width: 760px) { #dk_cvp { height: 240px; } .dk-cvp.big #dk_cvp { height: 440px; } }
 @media (max-width: 760px) { #dk_cv { height: 500px; } }
 .dk-flowfoot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--dk-line); font: 500 11px var(--font-data); color: var(--dk-muted); }
 .dk-btn { font: 600 11px var(--font-data); letter-spacing: .06em; color: var(--dk-text); background: var(--dk-panel2); border: 1px solid var(--dk-line); border-radius: 4px; padding: 4px 9px; cursor: pointer; }
@@ -1579,6 +1591,19 @@ details.xp > summary:hover { background: var(--blue-soft); }
           <div class="dk-ph"><span class="dk-lbl"><b>●</b> Strategies</span><span class="dk-lbl">colour = running P&amp;L</span></div>
           <div class="dk-tiles" id="dk_tiles"></div>
         </div>
+      </div>
+      <div class="dk-panel dk-cvp" id="dk_cvp_box">
+        <div class="dk-ph"><span class="dk-lbl"><b>●</b> Capital deployed vs profit</span>
+          <span class="dk-cvp-ctl">
+            <span class="dk-seg" id="dk_cvp_tab" role="group" aria-label="Profit shown"><button type="button" data-v="real" aria-pressed="false">Realised</button><button type="button" data-v="run" aria-pressed="false">Running</button><button type="button" data-v="total" aria-pressed="true">Total</button></span>
+            <span class="dk-seg" id="dk_cvp_rng" role="group" aria-label="Period"><button type="button" data-v="1D" aria-pressed="false">1D</button><button type="button" data-v="1W" aria-pressed="false">1W</button><button type="button" data-v="1M" aria-pressed="true">1M</button><button type="button" data-v="3M" aria-pressed="false">3M</button><button type="button" data-v="1Y" aria-pressed="false">1Y</button><button type="button" data-v="ALL" aria-pressed="false">All</button></span>
+            <label class="dk-date">From <input type="date" id="dk_cvp_from"></label><label class="dk-date">To <input type="date" id="dk_cvp_to"></label>
+            <button class="dk-btn" id="dk_cvp_reset" type="button" hidden>Reset zoom</button>
+            <button class="dk-btn" id="dk_cvp_big" type="button" aria-pressed="false">Expand</button>
+          </span></div>
+        <div class="dk-cvp-read" id="dk_cvp_read"></div>
+        <canvas id="dk_cvp" aria-label="Capital deployed (shaded, right scale) and profit (line, left scale) over time"></canvas>
+        <p class="dk-lbl dk-sm" id="dk_cvp_note" style="margin:6px 0 0;text-transform:none;letter-spacing:0"></p>
       </div>
       <div class="dk-low">
         <div class="dk-panel"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Timeline · last 3 weeks</span><span class="dk-lbl">bar = open position · dot = closed trade</span></div><div class="dk-svgbox"><svg id="dk_tl" width="100%" height="300" role="img" aria-label="Timeline of open positions and closed trades by asset"></svg></div></div>
@@ -7622,12 +7647,13 @@ async function renderDesk() {
   if (!desk.mode) desk.mode = myStrats().some((x) => !x.archived && x.live && x.active) ? "LIVE" : "PAPER";
   $("dk_mode").querySelectorAll("[data-m]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.m === desk.mode)));
   if (!cap.status) await loadCapStatus().catch(() => null);
-  desk.trades = await fetchAll(() => db.from("algo_trades").select("id, strategy_id, side, lots, net, exit_at, exit_why").eq("user_id", me.user_id).eq("mode", desk.mode).order("exit_at", { ascending: false }).order("id", { ascending: false }));
+  desk.trades = await fetchAll(() => db.from("algo_trades").select("id, strategy_id, side, lots, units, entry_day, entry_px, net, exit_at, exit_why").eq("user_id", me.user_id).eq("mode", desk.mode).order("exit_at", { ascending: false }).order("id", { ascending: false }));
   desk.feed = []; desk.ticks = 0; desk.movers = []; desk.amb = []; desk.flashes = []; desk.pool = [];
   deskPaint(); deskLayout(); deskFill(); deskTimeline(); deskSankey();
   deskStop();
   if (!document.hidden) desk.raf = requestAnimationFrame(deskDraw);
   deskClock(); desk.clock = setInterval(deskClock, 1000);
+  deskCvpLoad().catch((e) => { $("dk_cvp_note").textContent = errorText(e); });
 }
 function deskClock() {
   if (page !== "desk") return;
@@ -7931,6 +7957,133 @@ function deskSankey() {
   for (const k of ["PROFIT", "LOSS"]) if (rv[k]) g += `<rect x="${X[2]}" y="${rN[k].y}" width="${nodeW}" height="${rN[k].hh}" fill="${rN[k].c}"/><text x="${X[2] + nodeW + 6}" y="${rN[k].y + rN[k].hh / 2 + 3}" fill="${DK_COL.text}" font-size="10.5">${k === "PROFIT" ? "In profit" : "In loss"}</text><text x="${X[2] + nodeW + 6}" y="${rN[k].y + rN[k].hh / 2 + 16}" fill="${DK_COL.muted}" font-size="10">${rupeesShort(rv[k])}</text>`;
   svg.innerHTML = g;
 }
+/* ---------- Desk: capital deployed vs realised / running / total profit (Papa, 3 Nov 2026) ----------
+   From desk_snapshots (every 5 minutes, kept for good) via desk_series; before the first snapshot the capital deployed is
+   estimated from closed trades (entry price × units × today's margin rate) and realised profit from their exits. */
+const dkCvp = { tab: "total", range: "1M", from: null, to: null, zoom: null, data: null, pts: [], span: null, hover: null, drag: null, big: false, at: 0 };
+function deskCvpSpan() {
+  const now = Date.now();
+  if (dkCvp.zoom) return dkCvp.zoom;
+  if (dkCvp.from) return { from: dkCvp.from, to: Math.min(now, dkCvp.to || now) };
+  const d = { "1D": 1, "1W": 7, "1M": 30, "3M": 91, "1Y": 365 }[dkCvp.range];
+  if (d) return { from: now - d * 864e5, to: now };
+  const first = Math.min(now - 864e5, ...desk.trades.map((t) => Date.parse((t.entry_day || String(t.exit_at).slice(0, 10)) + "T03:45:00Z")).filter(Number.isFinite));
+  return { from: first, to: now };
+}
+async function deskCvpLoad() {
+  if (page !== "desk") return;
+  deskCvpPaintCtl();
+  const sp = deskCvpSpan();
+  const r = must(await db.rpc("desk_series", { p_mode: desk.mode, p_from: new Date(sp.from).toISOString(), p_to: new Date(sp.to).toISOString(), p_points: 600 }));
+  dkCvp.data = r || {}; dkCvp.span = sp; dkCvp.at = Date.now();
+  deskCvpBuild(); deskCvpDraw();
+}
+function deskCvpBuild() {
+  const { from, to } = dkCvp.span, first = dkCvp.data.first ? Date.parse(dkCvp.data.first) : Infinity;
+  const names = new Map(state.strategies.map((x) => [x.id, x]));
+  const trs = desk.trades.map((t) => {
+    const x = names.get(t.strategy_id), und = x && x.underlying, rate = (cap.rates && cap.rates[und] && Number(cap.rates[und].fut_pct)) || .1;
+    const end = Date.parse(t.exit_at), start = t.entry_day ? Date.parse(t.entry_day + "T03:45:00Z") : end - 864e5;
+    return { start, end, net: Number(t.net) || 0, m: Math.abs(Number(t.entry_px) * Number(t.units)) * rate || 0 };
+  }).filter((t) => Number.isFinite(t.end)).sort((a, b) => a.end - b.end);
+  const open = dkOpen().map((s) => ({ start: s.pos_entry_date ? Date.parse(s.pos_entry_date + "T03:45:00Z") : Date.now(), m: Number(s.pos_margin) || 0 }));
+  const step = Math.max(300e3, (to - from) / 600), pts = [];
+  // Before the snapshots began: estimated from the trades (no running P&L on record).
+  for (let t = from, k = 0, real = 0; t < Math.min(to, first); t += step) {
+    while (k < trs.length && trs[k].end <= t) real += trs[k++].net;
+    let m = 0; for (const x of trs) if (x.start <= t && x.end > t) m += x.m;
+    for (const o of open) if (o.start <= t) m += o.m;
+    pts.push({ t, m, u: null, r: real, est: true });
+  }
+  for (const r of dkCvp.data.rows || []) { const t = Date.parse(r.t); if (t >= from && t <= to) pts.push({ t, m: Number(r.m) || 0, u: Number(r.u) || 0, r: Number(r.r) || 0 }); }
+  // The live end: what the desk shows right now.
+  if (to >= Date.now() - step * 2) {
+    const live = dkOpen(); pts.push({ t: Date.now(), m: live.reduce((a, s) => a + (Number(s.pos_margin) || 0), 0), u: live.reduce((a, s) => a + (Number(s.pos_upnl) || 0), 0), r: desk.trades.reduce((a, t) => a + (Number(t.net) || 0), 0), now: true });
+  }
+  dkCvp.pts = pts.sort((a, b) => a.t - b.t);
+}
+const dkCvpVal = (p) => dkCvp.tab === "real" ? p.r : dkCvp.tab === "run" ? p.u : p.u == null ? p.r : p.r + p.u;
+function deskCvpDraw() {
+  const cv = $("dk_cvp"); if (!cv || page !== "desk") return;
+  const r = cv.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1); if (!r.width) return;
+  cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  const ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = r.width, H = r.height, narrow = W < 560, L = narrow ? 52 : 70, R = narrow ? 50 : 70, T = 12, B = 24, pw = W - L - R, ph = H - T - B;
+  ctx.clearRect(0, 0, W, H);
+  const pts = dkCvp.pts, sp = dkCvp.span; if (!sp) return;
+  const tx = (t) => L + (t - sp.from) / Math.max(1, sp.to - sp.from) * pw;
+  const vals = pts.map(dkCvpVal).filter((v) => v != null);
+  let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals); if (hi - lo < 1) { hi += 1; lo -= 1; } const padv = (hi - lo) * .08; lo -= padv; hi += padv;
+  const mHi = Math.max(1, ...pts.map((p) => p.m)) * 1.08;
+  const ty = (v) => T + (hi - v) / (hi - lo) * ph, tm = (v) => T + ph - v / mHi * ph;
+  // grid and axes
+  ctx.font = `500 ${narrow ? 9 : 10}px monospace`; ctx.fillStyle = DK_COL.muted; ctx.strokeStyle = DK_COL.line; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) { const y = T + ph * i / 4; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
+    ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.fillText(rupeesShort(hi - (hi - lo) * i / 4), L - 6, y);
+    ctx.textAlign = "left"; ctx.fillStyle = "rgba(90,168,255,.85)"; ctx.fillText(rupeesShort(mHi * (1 - i / 4)), L + pw + 6, y); ctx.fillStyle = DK_COL.muted; }
+  const span = sp.to - sp.from, nx = narrow ? 4 : 7;
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (let i = 0; i <= nx; i++) { const t = sp.from + span * i / nx, d = new Date(t + 19800000).toISOString();
+    ctx.fillText(span <= 2 * 864e5 ? d.slice(11, 16) : span <= 120 * 864e5 ? d.slice(8, 10) + "/" + d.slice(5, 7) : d.slice(5, 7) + "/" + d.slice(2, 4), tx(t), T + ph + 6); }
+  if (!pts.length) { ctx.textAlign = "center"; ctx.fillText("Nothing recorded in this period yet.", L + pw / 2, T + ph / 2); return; }
+  // capital deployed: shaded area on the right scale (dashed outline where estimated)
+  ctx.beginPath(); ctx.moveTo(tx(pts[0].t), tm(0)); for (const p of pts) ctx.lineTo(tx(p.t), tm(p.m)); ctx.lineTo(tx(pts.at(-1).t), tm(0)); ctx.closePath();
+  const ga = ctx.createLinearGradient(0, T, 0, T + ph); ga.addColorStop(0, "rgba(90,168,255,.28)"); ga.addColorStop(1, "rgba(90,168,255,.04)"); ctx.fillStyle = ga; ctx.fill();
+  for (const est of [true, false]) { ctx.setLineDash(est ? [4, 4] : []); ctx.strokeStyle = "rgba(90,168,255,.8)"; ctx.lineWidth = 1.2; ctx.beginPath(); let on = false;
+    pts.forEach((p, i) => { const q = pts[i + 1]; if (!!p.est !== est) { on = false; return; } const x = tx(p.t), y = tm(p.m); if (!on) { ctx.moveTo(x, y); on = true; } else ctx.lineTo(x, y); if (q && !!q.est !== est) ctx.lineTo(tx(q.t), tm(q.m)); }); ctx.stroke(); }
+  ctx.setLineDash([]);
+  // zero line
+  ctx.strokeStyle = "rgba(219,229,241,.25)"; ctx.beginPath(); ctx.moveTo(L, ty(0)); ctx.lineTo(L + pw, ty(0)); ctx.stroke();
+  // profit line: green above zero, red below
+  const line = () => { ctx.beginPath(); let on = false; for (const p of pts) { const v = dkCvpVal(p); if (v == null) { on = false; continue; } const x = tx(p.t), y = ty(v); if (!on) { ctx.moveTo(x, y); on = true; } else ctx.lineTo(x, y); } };
+  for (const [c, y0, y1] of [[DK_COL.up, T, ty(0)], [DK_COL.down, ty(0), T + ph]]) { ctx.save(); ctx.beginPath(); ctx.rect(L, y0, pw, Math.max(0, y1 - y0)); ctx.clip(); line(); ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.stroke(); ctx.restore(); }
+  // drag-to-zoom band
+  if (dkCvp.drag && Math.abs(dkCvp.drag.x1 - dkCvp.drag.x0) > 3) { ctx.fillStyle = "rgba(243,178,60,.12)"; ctx.fillRect(Math.min(dkCvp.drag.x0, dkCvp.drag.x1), T, Math.abs(dkCvp.drag.x1 - dkCvp.drag.x0), ph); }
+  // hover: nearest point, crosshair and a read-out
+  const last = pts.at(-1), hp = dkCvp.hover != null ? pts.reduce((a, p) => Math.abs(tx(p.t) - dkCvp.hover) < Math.abs(tx(a.t) - dkCvp.hover) ? p : a) : null;
+  const show = hp || last, v = dkCvpVal(show), lbl = { real: "Realised", run: "Running", total: "Total" }[dkCvp.tab];
+  $("dk_cvp_read").innerHTML = `<span>${esc(hp ? istText(new Date(hp.t).toISOString()) : "Now")}${show.est ? " · estimated" : ""}</span><span>Capital deployed<b style="color:#5aa8ff">${esc(rupeesShort(show.m))}</b></span><span>${lbl} profit<b class="${(v || 0) >= 0 ? "dk-up" : "dk-down"}">${v == null ? "not recorded" : esc(dkSgn(v))}</b></span><span>Profit ÷ deployed<b>${v != null && show.m > 0 ? `${(v / show.m * 100).toFixed(1)}%` : "–"}</b></span>`;
+  if (hp) { const x = tx(hp.t); ctx.strokeStyle = "rgba(243,178,60,.6)"; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke(); ctx.setLineDash([]);
+    if (v != null) { ctx.fillStyle = v >= 0 ? DK_COL.up : DK_COL.down; ctx.beginPath(); ctx.arc(x, ty(v), 3.5, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = "#5aa8ff"; ctx.beginPath(); ctx.arc(x, tm(hp.m), 3, 0, Math.PI * 2); ctx.fill(); }
+  const first = dkCvp.data && dkCvp.data.first;
+  $("dk_cvp_note").textContent = `Shaded = capital deployed (margin of open positions, right scale); line = ${lbl.toLowerCase()} profit after charges (left scale). Recorded every 5 minutes${first ? ` since ${istText(first)}` : " from now on"}; before that the capital deployed is estimated from closed trades (dashed) and running profit wasn't recorded. Drag across the chart to zoom in; pick dates to see any past period.`;
+}
+function deskCvpPaintCtl() {
+  $("dk_cvp_tab").querySelectorAll("[data-v]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === dkCvp.tab)));
+  $("dk_cvp_rng").querySelectorAll("[data-v]").forEach((b) => b.setAttribute("aria-pressed", String(!dkCvp.from && !dkCvp.zoom && b.dataset.v === dkCvp.range)));
+  $("dk_cvp_reset").hidden = !dkCvp.zoom;
+  const sp = deskCvpSpan(), d = (t) => new Date(t + 19800000).toISOString().slice(0, 10);
+  if (document.activeElement !== $("dk_cvp_from")) $("dk_cvp_from").value = d(sp.from);
+  if (document.activeElement !== $("dk_cvp_to")) $("dk_cvp_to").value = d(sp.to);
+}
+const deskCvpReload = () => { deskCvpPaintCtl(); deskCvpLoad().catch((e) => toast(errorText(e))); };
+$("dk_cvp_tab").addEventListener("click", (e) => { const b = e.target.closest("[data-v]"); if (!b) return; dkCvp.tab = b.dataset.v; deskCvpPaintCtl(); deskCvpDraw(); });
+$("dk_cvp_rng").addEventListener("click", (e) => { const b = e.target.closest("[data-v]"); if (!b) return; dkCvp.range = b.dataset.v; dkCvp.from = dkCvp.to = null; dkCvp.zoom = null; deskCvpReload(); });
+["dk_cvp_from", "dk_cvp_to"].forEach((id) => $(id).addEventListener("change", () => {
+  const f = Date.parse($("dk_cvp_from").value + "T00:00:00+05:30"), t = Date.parse($("dk_cvp_to").value + "T23:59:59+05:30");
+  if (!(f < t)) return toast("Pick a From date before the To date.");
+  dkCvp.from = f; dkCvp.to = t; dkCvp.zoom = null; deskCvpReload();
+}));
+$("dk_cvp_reset").addEventListener("click", () => { dkCvp.zoom = null; deskCvpReload(); });
+$("dk_cvp_big").addEventListener("click", (e) => { dkCvp.big = !dkCvp.big; $("dk_cvp_box").classList.toggle("big", dkCvp.big); e.currentTarget.textContent = dkCvp.big ? "Smaller" : "Expand"; e.currentTarget.setAttribute("aria-pressed", String(dkCvp.big)); requestAnimationFrame(deskCvpDraw); });
+{
+  const cv = $("dk_cvp"), xOf = (e) => e.clientX - cv.getBoundingClientRect().left;
+  cv.addEventListener("pointermove", (e) => { dkCvp.hover = xOf(e); if (dkCvp.drag) dkCvp.drag.x1 = xOf(e); deskCvpDraw(); });
+  cv.addEventListener("pointerleave", () => { dkCvp.hover = null; if (!dkCvp.drag) deskCvpDraw(); });
+  cv.addEventListener("pointerdown", (e) => { if (e.pointerType === "mouse") { dkCvp.drag = { x0: xOf(e), x1: xOf(e) }; cv.setPointerCapture(e.pointerId); } });
+  cv.addEventListener("pointerup", (e) => {
+    const d = dkCvp.drag; dkCvp.drag = null; if (!d || Math.abs(d.x1 - d.x0) < 12 || !dkCvp.span) { deskCvpDraw(); return; }
+    const W = cv.getBoundingClientRect().width, narrow = W < 560, L = narrow ? 52 : 70, pw = W - L - (narrow ? 50 : 70), sp = dkCvp.span;
+    const at = (x) => sp.from + Math.max(0, Math.min(1, (x - L) / pw)) * (sp.to - sp.from), a = at(Math.min(d.x0, d.x1)), b = at(Math.max(d.x0, d.x1));
+    if (b - a < 15 * 60e3) { deskCvpDraw(); return; }
+    dkCvp.zoom = { from: a, to: b }; deskCvpReload();
+  });
+}
+addEventListener("resize", () => { if (page === "desk") { clearTimeout(deskCvpDraw.t); deskCvpDraw.t = setTimeout(deskCvpDraw, 150); } });
+// Keep the live end current: redraw every 5 s, fetch new snapshots every 5 minutes while the Desk is open.
+setInterval(() => { if (page !== "desk" || document.hidden || !dkCvp.span) return;
+  if (Date.now() - dkCvp.at > 300e3 && !dkCvp.zoom && !dkCvp.from) deskCvpLoad().catch(() => {}); else if (!dkCvp.hover) { deskCvpBuild(); deskCvpDraw(); } }, 5000);
 $("nav_desk").addEventListener("click", () => showPage("desk"));
 $("dk_mode").querySelectorAll("[data-m]").forEach((b) => b.addEventListener("click", () => { desk.mode = b.dataset.m; withLoading($("deskPane"), renderDesk()).catch((e) => toast(errorText(e))); }));
 $("dk_pause").addEventListener("click", () => { desk.paused = !desk.paused; $("dk_pause").textContent = desk.paused ? "Resume" : "Pause"; });
