@@ -7685,13 +7685,12 @@ function deskLayout() {
   // Phone: shorter labels and a cloud that takes about half the width (Papa, 3 Nov).
   desk.X0 = narrow ? 70 : 138; desk.R = narrow ? Math.max(90, Math.min(desk.H * .4, (desk.W - desk.X0) * .5)) : Math.max(80, Math.min(desk.H * .46, (desk.W - desk.X0) * .36));
   desk.CX = narrow ? desk.W - desk.R * .95 : desk.W - desk.R - 24; desk.CY = desk.H / 2;
-  // Decorative agents (Papa, 3 Nov: "just for decor", no data and no decisions behind them). Computer: four along the top
-  // (left of the running P&L box), three along the bottom. Phone: two rows at the bottom (the P&L box keeps the top).
-  const top = narrow ? 72 : 58, bottom = narrow ? 62 : 46;
+  // Decorative agents (Papa, 3 Nov: "just for decor", no data and no decisions behind them): a column on the right-hand side,
+  // below the running P&L box, overlapping the cloud a little.
+  const top = narrow ? 72 : 30, bottom = 30;
   const o = dkOpen().slice().sort((a, b) => (Number(b.pos_upnl) || 0) - (Number(a.pos_upnl) || 0)), laneH = (desk.H - top - bottom) / Math.max(1, o.length);
-  const spanTop = Math.max(260, desk.W - (narrow ? 20 : 240)), spanBot = Math.max(260, desk.W - (narrow ? 20 : 60));
-  desk.agents = DK_AGENTS.map((a, i) => { const row = i < 4 ? 0 : 1, k = row ? i - 4 : i, n = row ? 3 : 4;
-    return { ...a, x: 14 + (row ? spanBot : spanTop) * k / n, y: narrow ? (row ? desk.H - 14 : desk.H - 36) : (row ? desk.H - 16 : 18) }; });
+  const aTop = 92, aBot = desk.H - 22, aStep = (aBot - aTop) / (DK_AGENTS.length - 1);
+  desk.agents = DK_AGENTS.map((a, i) => ({ ...a, x: desk.W - 16, y: aTop + aStep * i }));
   desk.links = desk.agents.map(() => o.map(() => ({ ph: Math.random() * Math.PI * 2, f: .35 + Math.random() * .7, run: Math.random() })));
   desk.lanes = o.map((s, i) => { const y = top + laneH * (i + .5), ey = desk.CY + (y - desk.CY) * .22, ex = desk.CX - desk.R * .45;
     return { s, y, p: [[desk.X0, y], [desk.X0 + (ex - desk.X0) * .45, y], [desk.X0 + (ex - desk.X0) * .6, ey], [ex, ey]] }; });
@@ -7709,19 +7708,21 @@ function deskAgents(ctx, T, narrow) {
   desk.agents.forEach((a, ai) => desk.lanes.forEach((L, li) => {
     const k = desk.links[ai] && desk.links[ai][li]; if (!k) return;
     const on = Math.sin(T * k.f + k.ph); if (on < .55) return; // each link lights up now and then
-    const al = (on - .55) / .45, tx = X0 - 4, ty = L.y, mx = (a.x + tx) / 2 + (a.y < desk.H / 2 ? -20 : 20), my = (a.y + ty) / 2 + (narrow ? -30 : 0);
+    const al = (on - .55) / .45, tx = X0 - 4, ty = L.y, mx = (a.x + tx) / 2, my = (a.y + ty) / 2 + (a.y - desk.H / 2) * .6;
     ctx.strokeStyle = `rgba(${a.c},${(al * .32).toFixed(3)})`; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(mx, my, tx, ty); ctx.stroke();
     if (!paused) k.run = (k.run + .012 * k.f) % 1;
     const t = k.run, u = 1 - t, px = u * u * a.x + 2 * u * t * mx + t * t * tx, py = u * u * a.y + 2 * u * t * my + t * t * ty;
     ctx.fillStyle = `rgba(${a.c},${(al * .9).toFixed(3)})`; ctx.beginPath(); ctx.arc(px, py, 1.3, 0, Math.PI * 2); ctx.fill();
   }));
   ctx.setLineDash([]);
-  ctx.textBaseline = "middle"; ctx.textAlign = "left"; ctx.font = `600 ${narrow ? 8 : 9.5}px monospace`;
+  ctx.textBaseline = "middle"; ctx.textAlign = "right"; ctx.font = `600 ${narrow ? 8 : 9.5}px monospace`;
   for (const a of desk.agents) {
     const p = .6 + .4 * Math.sin(T * 2 + a.x);
     ctx.fillStyle = `rgba(${a.c},.9)`; ctx.shadowColor = `rgb(${a.c})`; ctx.shadowBlur = 10 * p; ctx.beginPath(); ctx.arc(a.x, a.y, 3.6, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
     ctx.strokeStyle = `rgba(${a.c},${(.35 * p).toFixed(3)})`; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(a.x, a.y, 7 + 2 * p, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = "rgba(219,229,241,.85)"; ctx.fillText((narrow ? a.name.replace(/ agent$/, "") : a.name).toUpperCase(), a.x + 12, a.y);
+    const label = (narrow ? a.name.replace(/ agent$/, "") : a.name).toUpperCase(), tw = ctx.measureText(label).width;
+    ctx.fillStyle = "rgba(9,13,20,.6)"; ctx.fillRect(a.x - 14 - tw - 4, a.y - 7, tw + 8, 14);
+    ctx.fillStyle = "rgba(219,229,241,.9)"; ctx.fillText(label, a.x - 14, a.y);
   }
   ctx.restore();
 }
@@ -7750,7 +7751,6 @@ function deskDraw() {
     const g = ctx.createRadialGradient(ox, oy, 0, ox, oy, rad); g.addColorStop(0, `rgba(${c},.13)`); g.addColorStop(1, `rgba(${c},0)`);
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(ox, oy, rad, 0, Math.PI * 2); ctx.fill(); });
   ctx.restore();
-  deskAgents(ctx, T, narrow);
   // streams: a base line, a steady trickle of small dots, labels
   for (const [li, L] of desk.lanes.entries()) {
     const s = L.s, v = Number(s.pos_upnl) || 0, c = v >= 0 ? "46,212,127" : "255,92,108", w = 1 + Math.max(0, Math.min(5, Math.log10(Math.max(10, Number(s.pos_margin) || 10)) - 3.6));
@@ -7801,6 +7801,7 @@ function deskDraw() {
     ctx.beginPath(); ctx.arc(x, d.y, d.size, 0, Math.PI * 2); ctx.fill();
   }
   ctx.globalCompositeOperation = "source-over";
+  deskAgents(ctx, T, narrow); // drawn over the cloud so their names stay readable
   desk.pool = desk.pool.filter((d) => !d.die || d.die < 1);
   const want = Math.round(deskTarget());
   if (desk.pool.length < want - 40) desk.pool.push(deskDot(true));
