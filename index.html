@@ -7683,7 +7683,9 @@ function deskLayout() {
   cv.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
   const narrow = desk.W < 560;
   // Phone: shorter labels and a cloud that takes about half the width (Papa, 3 Nov).
-  desk.X0 = narrow ? 70 : 138; desk.R = narrow ? Math.max(90, Math.min(desk.H * .4, (desk.W - desk.X0) * .5)) : Math.max(80, Math.min(desk.H * .46, (desk.W - desk.X0) * .36));
+  // Phone: the label column is as wide as the longest asset name needs (up to a third of the width); longer names wrap.
+  if (narrow) { const m = cv.getContext("2d"); m.font = "600 9.5px monospace"; const widest = Math.max(40, ...dkOpen().map((s) => m.measureText(dkName(s.underlying)).width)); desk.X0 = Math.round(Math.min(desk.W * .34, widest + 14)); }
+  else desk.X0 = 138; desk.R = narrow ? Math.max(90, Math.min(desk.H * .4, (desk.W - desk.X0) * .5)) : Math.max(80, Math.min(desk.H * .46, (desk.W - desk.X0) * .36));
   desk.CX = narrow ? desk.W - desk.R * .95 : desk.W - desk.R - 24; desk.CY = desk.H / 2;
   // Decorative agents (Papa, 3 Nov: "just for decor", no data and no decisions behind them): a column on the right-hand side,
   // below the running P&L box, overlapping the cloud a little.
@@ -7793,7 +7795,15 @@ function deskDraw() {
     }
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
     ctx.fillStyle = DK_COL.text; ctx.font = `600 ${narrow ? 9.5 : 11}px monospace`;
-    ctx.fillText(`${dkName(s.underlying)}${narrow ? "" : " " + (s.position === "LONG" ? "L" : "S")}`, X0 - 8, L.y - 6);
+    const name = `${dkName(s.underlying)}${narrow ? "" : " " + (s.position === "LONG" ? "L" : "S")}`, room = X0 - 12;
+    let lines = [name];
+    if (ctx.measureText(name).width > room) { // too long for the column: wrap on spaces
+      lines = []; let cur = "";
+      for (const wd of name.split(" ")) { const t = cur ? cur + " " + wd : wd; if (cur && ctx.measureText(t).width > room) { lines.push(cur); cur = wd; } else cur = t; }
+      lines.push(cur);
+    }
+    const lh = narrow ? 10 : 12, y0 = L.y - 6 - (lines.length - 1) * lh;
+    lines.forEach((ln, i) => ctx.fillText(ln, X0 - 8, y0 + i * lh));
     ctx.fillStyle = v >= 0 ? DK_COL.up : DK_COL.down; ctx.font = `500 ${narrow ? 9 : 10.5}px monospace`;
     ctx.fillText(s.pos_upnl == null ? "–" : dkSgn(v), X0 - 8, L.y + 7);
   }

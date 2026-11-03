@@ -15,6 +15,7 @@ const S = (id, u, seg, lot, dd, extra = {}) => ({ ...base, id, name: `Lab #${id}
 const strategies = [
   S("g1", "GOLD", "MCX_COMM", 100, 1597170, { position: "SHORT", pos_lots: 1, pos_qty: 1, pos_upnl: 717400, pos_margin: 1342777, pos_ltp: 140222, pos_entry_date: "2026-10-20" }),
   S("g3", "GOLD", "MCX_COMM", 100, 1597170, { position: "LONG", pos_lots: 1, pos_qty: 1, pos_upnl: -347800, pos_margin: 1337847, pos_ltp: 140222, pos_entry_date: "2026-10-28" }),
+  S("mid2", "MIDCPNIFTY", "IDX_I", 120, 38248, { exchange: "NSE", position: "LONG", pos_lots: 1, pos_qty: 1, pos_upnl: 3726, pos_margin: 191921, pos_ltp: 13366, pos_entry_date: "2026-11-02" }),
   S("sol2", "SOLUSD", "DELTA", 4400, 44550, { exchange: "DELTA", position: "SHORT", pos_lots: 1, pos_qty: 1, pos_upnl: 8628, pos_margin: 41403, pos_ltp: 92.14, pos_entry_date: "2026-10-31" }),
   S("g2", "GOLD", "MCX_COMM", 100, 571957),
   S("gm", "GOLDM", "MCX_COMM", 10, 34438),
@@ -54,8 +55,8 @@ const fail = (m, x) => { console.log("FAIL", m, JSON.stringify(x ?? "")); proces
 
 await p.evaluate(() => showPage("desk")); await p.waitForTimeout(1200);
 const txt = await p.textContent("#deskPane");
-for (const w of ["PAPER", "+₹3,78,228", "+₹33,500", "3 / 9", "1 long · 2 short", "Gold", "Trailing stop"]) if (!txt.includes(w)) fail("missing " + w, txt.slice(0, 400));
-const lanes = await p.evaluate(() => desk.lanes.length); if (lanes !== 3) fail("3 streams", lanes);
+for (const w of ["PAPER", "+₹3,81,954", "+₹33,500", "4 / 10", "2 long · 2 short", "Gold", "Trailing stop"]) if (!txt.includes(w)) fail("missing " + w, txt.slice(0, 400));
+const lanes = await p.evaluate(() => desk.lanes.length); if (lanes !== 4) fail("4 streams", lanes);
 const before = await p.evaluate(() => desk.pool.length);
 // A live price move: Gold short gains ₹30,000 → green dots run into the pool, the total and pool rise.
 await p.evaluate(() => onMark({ strategy_id: "g1", ltp: 139922, upnl: 747400, at: new Date().toISOString() }));
@@ -64,7 +65,7 @@ const m = await p.evaluate(() => ({ movers: desk.movers.length, up: desk.movers.
 if (!m.movers || !m.up || m.ticks !== 1) fail("green dots", m);
 await p.waitForTimeout(3500);
 const after = await p.evaluate(() => desk.pool.length); if (!(after > before)) fail("pool denser", [before, after]);
-if (!(await p.textContent("#dk_run")).includes("4,08,228")) fail("total updated", await p.textContent("#dk_run"));
+if (!(await p.textContent("#dk_run")).includes("4,11,954")) fail("total updated", await p.textContent("#dk_run"));
 // A loss: Solana short, price up → red dots, pool thins.
 await p.evaluate(() => onMark({ strategy_id: "sol2", ltp: 99, upnl: -21000, at: new Date().toISOString() }));
 await p.waitForTimeout(200);
@@ -72,12 +73,15 @@ if (!(await p.evaluate(() => desk.movers.some((x) => !x.up)))) fail("red dots");
 await p.waitForTimeout(3500);
 const after2 = await p.evaluate(() => desk.pool.length); if (!(after2 < after)) fail("pool thinner", [after, after2]);
 // A shut market: no trickle or agent streams for that asset, others carry on.
-await p.evaluate(() => { desk.closedAt = Date.now() + 1e9; desk.closed = new Map([["g1", true], ["g3", true], ["sol2", false]]); desk.amb = []; });
+await p.evaluate(() => { desk.closedAt = Date.now() + 1e9; desk.closed = new Map([["g1", true], ["g3", true], ["mid2", true], ["sol2", false]]); desk.amb = []; });
 await p.waitForTimeout(800);
 const amb = await p.evaluate(() => desk.amb.map((a) => desk.lanes[a.lane].s.id));
 if (amb.some((id) => id !== "sol2") || !amb.length) fail("closed markets send no stream", amb);
 await p.screenshot({ path: `desk_closed_${theme}_${width}.png` });
 await p.evaluate(() => { desk.closedAt = 0; });
+// Asset names fit inside the panel (no label starts left of the canvas).
+const fit = await p.evaluate(() => { const c = document.getElementById("dk_cv").getContext("2d"); c.font = "600 9.5px monospace"; return desk.lanes.every((L) => desk.X0 - 8 - Math.min(c.measureText(dkName(L.s.underlying)).width, desk.X0 - 12) >= 0); });
+if (!fit) fail("asset names fit");
 const sw = await p.evaluate(() => document.documentElement.scrollWidth); if (sw > width + 1) fail("page scrolls sideways", sw);
 await p.screenshot({ path: `desk_${theme}_${width}.png`, fullPage: true });
 if (errs.length) fail("page errors", errs);
