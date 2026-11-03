@@ -7708,7 +7708,7 @@ function deskAgents(ctx, T, narrow) {
   desk.agents.forEach((a, ai) => desk.lanes.forEach((L, li) => {
     const k = desk.links[ai] && desk.links[ai][li]; if (!k) return;
     const on = Math.sin(T * k.f + k.ph); if (on < .55) return; // each link lights up now and then
-    const al = (on - .55) / .45, sx = a.x - 10, tx = X0 - 4, ty = L.y, mx = (sx + tx) / 2, my = (a.y + ty) / 2 + (a.y - desk.H / 2) * .6;
+    const al = (on - .55) / .45, sx = a.x - (narrow ? 13 : 15), tx = X0 - 4, ty = L.y, mx = (sx + tx) / 2, my = (a.y + ty) / 2 + (a.y - desk.H / 2) * .6;
     ctx.strokeStyle = `rgba(${a.c},${(al * .32).toFixed(3)})`; ctx.beginPath(); ctx.moveTo(sx, a.y); ctx.quadraticCurveTo(mx, my, tx, ty); ctx.stroke();
     if (!paused) k.run = (k.run + .012 * k.f) % 1;
     const t = k.run, u = 1 - t, px = u * u * sx + 2 * u * t * mx + t * t * tx, py = u * u * a.y + 2 * u * t * my + t * t * ty;
@@ -7718,17 +7718,17 @@ function deskAgents(ctx, T, narrow) {
   // Each agent: a very small computer (screen, glow, stand) with its name below in the agent's own colour.
   ctx.textBaseline = "top"; ctx.textAlign = "center"; ctx.font = `600 ${narrow ? 8 : 9}px monospace`;
   for (const a of desk.agents) {
-    const p = .6 + .4 * Math.sin(T * 2 + a.y), w = 18, h = 12, x = a.x - w / 2, y = a.y - h / 2;
+    const p = .6 + .4 * Math.sin(T * 2 + a.y), w = narrow ? 24 : 28, h = narrow ? 16 : 19, x = a.x - w / 2, y = a.y - h / 2;
     ctx.shadowColor = `rgb(${a.c})`; ctx.shadowBlur = 8 * p;
-    ctx.fillStyle = "rgba(9,13,20,.9)"; ctx.strokeStyle = `rgba(${a.c},.95)`; ctx.lineWidth = 1.2;
-    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, 2); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "rgba(9,13,20,.9)"; ctx.strokeStyle = `rgba(${a.c},.95)`; ctx.lineWidth = 1.5;
+    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, 3); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
     ctx.shadowBlur = 0;
-    ctx.fillStyle = `rgba(${a.c},${(.25 + .35 * p).toFixed(3)})`; ctx.fillRect(x + 2.5, y + 2.5, w - 5, h - 5); // lit screen
-    ctx.fillStyle = `rgba(${a.c},.9)`; ctx.fillRect(x + 4, y + 4.5, (w - 8) * (.4 + .5 * p), 1); ctx.fillRect(x + 4, y + 7, (w - 8) * .55, 1); // text lines on the screen
-    ctx.strokeStyle = `rgba(${a.c},.95)`; ctx.beginPath(); ctx.moveTo(a.x, y + h); ctx.lineTo(a.x, y + h + 3); ctx.moveTo(a.x - 5, y + h + 3.5); ctx.lineTo(a.x + 5, y + h + 3.5); ctx.stroke(); // stand
+    ctx.fillStyle = `rgba(${a.c},${(.25 + .35 * p).toFixed(3)})`; ctx.fillRect(x + 3, y + 3, w - 6, h - 6); // lit screen
+    ctx.fillStyle = `rgba(${a.c},.9)`; ctx.fillRect(x + 5, y + 5, (w - 10) * (.4 + .5 * p), 1.4); ctx.fillRect(x + 5, y + 8.5, (w - 10) * .55, 1.4); ctx.fillRect(x + 5, y + 12, (w - 10) * (.3 + .3 * (1 - p)), 1.4); // text lines on the screen
+    ctx.strokeStyle = `rgba(${a.c},.95)`; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(a.x, y + h); ctx.lineTo(a.x, y + h + 4); ctx.moveTo(a.x - 7, y + h + 4.5); ctx.lineTo(a.x + 7, y + h + 4.5); ctx.stroke(); // stand
     const label = (narrow ? a.name.replace(/ agent$/, "") : a.name).toUpperCase();
-    ctx.lineJoin = "round"; ctx.lineWidth = 3; ctx.strokeStyle = "rgba(9,13,20,.85)"; ctx.strokeText(label, a.x, y + h + 6); // keeps the name readable over the bright cloud
-    ctx.fillStyle = `rgb(${a.c})`; ctx.fillText(label, a.x, y + h + 6);
+    ctx.lineJoin = "round"; ctx.lineWidth = 3; ctx.strokeStyle = "rgba(9,13,20,.85)"; ctx.strokeText(label, a.x, y + h + 8); // keeps the name readable over the bright cloud
+    ctx.fillStyle = `rgb(${a.c})`; ctx.fillText(label, a.x, y + h + 8);
   }
   ctx.restore();
 }
