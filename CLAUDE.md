@@ -219,6 +219,17 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (UNDERLYING_SECURITY_ID) and BSE_EQ lists, once a trading day from 08:30 (that round quotes nothing). Admin page
   "Spread watcher" (`spreadPane`, `renderSpread`, SQL `spread_summary`). Tests: `tests/sim/spreads.test.mjs`,
   `tests/ui/ui_spread.mjs` (args: theme width).
+- **Desk** (3 Nov 2026, Papa, from a Polymarket bot screen he liked; sidebar "Desk" for every user, `deskPane`,
+  `renderDesk`, state `desk`): a control-room page, deliberately dark in both looks (`#deskPane` own `--dk-*` colours),
+  Live / Paper toggle (default Live if any active live strategy). Ticker strip (latest moves and closed trades), IST clock,
+  NSE / MCX / Delta open lights; account card (running P&L from `pos_upnl`, booked = sum of the mode's `algo_trades`
+  incl. archived strategies, win rate, margin in use vs the saved limit, long / short, margin by asset); **profit flow**
+  canvas (Papa's design): one stream per open position into a pool; each live price move (`onMark` → `deskMove`) sends
+  green dots for a gain, red for a loss; the pool's dot count follows the running total (about one per ₹1,500, 120–1,400),
+  red throughout while the total is a loss; strategy tiles coloured by running P&L (tap opens the strategy); 3-week
+  timeline (open positions as bars, closed trades as dots); capital flow (margin: asset → long / short → in profit / in
+  loss); activity list; stats bar. Animation runs only while the page is open and visible (`deskStop`). Test:
+  `tests/ui/ui_desk.mjs` (args: theme width).
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

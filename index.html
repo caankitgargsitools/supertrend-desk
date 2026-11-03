@@ -830,6 +830,72 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dd-sug { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--green-soft); }
 .dd-sug b.big { font: 700 22px var(--font-data); color: var(--green); }
 #cap_dd details { margin-top: 10px; } #cap_dd summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+
+/* Desk (2 Nov 2026, Papa): a control-room page, deliberately dark in both looks. */
+#deskPane { --dk-ink: #090d14; --dk-panel: #0f1520; --dk-panel2: #141c29; --dk-line: #1e2939; --dk-text: #dbe5f1; --dk-muted: #7c8ba0; --dk-dim: #4b586b;
+  --dk-up: #2ed47f; --dk-up-soft: rgba(46,212,127,.14); --dk-down: #ff5c6c; --dk-down-soft: rgba(255,92,108,.14); --dk-amber: #f3b23c; --dk-blue: #5aa8ff;
+  background: var(--dk-ink); color: var(--dk-text); border-radius: 10px; padding: 12px; display: grid; gap: 12px; color-scheme: dark; min-width: 0; }
+#deskPane[hidden] { display: none; }
+#deskPane .dk-lbl { font: 600 11px var(--font-data); letter-spacing: .1em; text-transform: uppercase; color: var(--dk-muted); }
+#deskPane .dk-lbl b { color: var(--dk-amber); font-weight: 600; }
+#deskPane .dk-sm { font-size: 10px; }
+#deskPane .dk-up { color: var(--dk-up); } #deskPane .dk-down { color: var(--dk-down); }
+.dk-panel { background: var(--dk-panel); border: 1px solid var(--dk-line); border-radius: 6px; padding: 12px; min-width: 0; }
+.dk-ph { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.dk-top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; background: var(--dk-panel); border: 1px solid var(--dk-line); border-radius: 6px; padding: 8px 12px; }
+.dk-brand { display: flex; gap: 10px; align-items: center; }
+.dk-logo { width: 30px; height: 30px; border-radius: 5px; background: var(--dk-panel2); border: 1px solid var(--dk-line); display: grid; place-items: center; font: 700 12px var(--font-data); color: var(--dk-amber); }
+.dk-brand h2 { font: 700 18px/1 var(--font-data); letter-spacing: .12em; margin: 0; color: var(--dk-text); }
+.dk-brand small { display: block; color: var(--dk-muted); font: 500 10.5px var(--font-data); letter-spacing: .06em; margin-top: 3px; }
+.dk-ticker { overflow: hidden; white-space: nowrap; mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent); min-width: 0; }
+.dk-run { display: inline-block; padding-left: 100%; animation: dktick 70s linear infinite; font: 500 12px var(--font-data); }
+.dk-run span { margin-right: 28px; }
+.dk-run .dk-tag { color: var(--dk-down); background: var(--dk-down-soft); padding: 1px 6px; border-radius: 3px; margin-right: 8px; font-weight: 600; }
+@keyframes dktick { to { transform: translateX(-100%); } }
+.dk-clock { text-align: right; }
+.dk-t { font: 600 18px/1 var(--font-data); color: var(--dk-amber); font-variant-numeric: tabular-nums; }
+.dk-mk { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+.dk-mk span { font: 600 10px var(--font-data); padding: 1px 6px; border-radius: 3px; background: var(--dk-panel2); color: var(--dk-dim); border: 1px solid var(--dk-line); }
+.dk-mk span.open { color: var(--dk-up); border-color: rgba(46,212,127,.35); }
+.dk-modebar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.dk-main { display: grid; grid-template-columns: 270px minmax(0, 1fr) 290px; gap: 12px; align-items: start; }
+@media (max-width: 1560px) { .dk-main { grid-template-columns: 260px minmax(0, 1fr); } .dk-heat { grid-column: 1 / -1; } .dk-heat .dk-tiles { max-height: none; } }
+@media (max-width: 760px) { .dk-main { grid-template-columns: minmax(0, 1fr); } .dk-top { grid-template-columns: 1fr auto; } .dk-ticker { grid-column: 1 / -1; grid-row: 2; } }
+.dk-big { font: 600 32px/1.05 var(--font-data); margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
+.dk-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-top: 12px; }
+.dk-v { font: 600 15px var(--font-data); font-variant-numeric: tabular-nums; color: var(--dk-text); }
+.dk-badge { font: 600 10px var(--font-data); padding: 2px 6px; border-radius: 3px; background: var(--dk-up-soft); color: var(--dk-up); letter-spacing: .06em; }
+.dk-badge.warn { background: rgba(243,178,60,.15); color: var(--dk-amber); } .dk-badge.bad { background: var(--dk-down-soft); color: var(--dk-down); }
+.dk-bar { height: 7px; border-radius: 2px; background: var(--dk-panel2); overflow: hidden; display: flex; margin-top: 5px; }
+.dk-bar i { display: block; height: 100%; }
+.dk-barrow { margin-top: 12px; }
+.dk-lr { display: flex; justify-content: space-between; gap: 8px; font: 500 11px var(--font-data); color: var(--dk-muted); }
+.dk-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font: 500 10.5px var(--font-data); color: var(--dk-muted); }
+.dk-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.dk-flow { padding: 0; overflow: hidden; }
+#dk_cv { width: 100%; height: 520px; display: block; }
+@media (max-width: 760px) { #dk_cv { height: 420px; } }
+.dk-flowfoot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--dk-line); font: 500 11px var(--font-data); color: var(--dk-muted); }
+.dk-btn { font: 600 11px var(--font-data); letter-spacing: .06em; color: var(--dk-text); background: var(--dk-panel2); border: 1px solid var(--dk-line); border-radius: 4px; padding: 4px 9px; cursor: pointer; }
+.dk-btn:focus-visible, .dk-tile:focus-visible { outline: 2px solid var(--dk-amber); outline-offset: 2px; }
+.dk-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; max-height: 560px; overflow: auto; }
+.dk-tile { border-radius: 4px; padding: 7px 8px; min-height: 62px; border: 1px solid var(--dk-line); background: var(--dk-panel2); display: grid; align-content: space-between; cursor: pointer; color: var(--dk-text); text-align: left; font: inherit; }
+.dk-tile .a { font: 700 12.5px/1.15 var(--font-ui); }
+.dk-tile .s { font: 600 9.5px var(--font-data); color: var(--dk-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dk-tile .p { font: 600 12px var(--font-data); white-space: nowrap; }
+.dk-tile.flat { opacity: .55; }
+.dk-tile.flash { box-shadow: 0 0 0 1px var(--dk-amber) inset; }
+.dk-low { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; }
+@media (max-width: 1000px) { .dk-low { grid-template-columns: minmax(0, 1fr); } }
+.dk-svgbox { overflow-x: auto; }
+#deskPane svg text { font-family: var(--font-data); }
+.dk-feed { display: grid; gap: 4px; max-height: 260px; overflow: auto; }
+.dk-feed div { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 8px; font: 500 11.5px var(--font-data); padding: 4px 6px; border-radius: 3px; background: var(--dk-panel2); }
+.dk-feed div .w { color: var(--dk-muted); }
+.dk-foot { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; background: var(--dk-line); border: 1px solid var(--dk-line); border-radius: 6px; overflow: hidden; }
+.dk-foot > div { background: var(--dk-panel); padding: 8px 10px; min-width: 0; }
+@media (max-width: 760px) { .dk-foot { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (prefers-reduced-motion: reduce) { .dk-run { animation-duration: 200s; } }
 </style>
 </head>
 <body>
@@ -841,6 +907,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
   <button class="btn small" id="menuBtn" type="button" aria-expanded="false" aria-controls="nav">☰ Menu</button>
   <nav class="nav" id="nav" aria-label="Pages" hidden>
     <button class="btn small" id="nav_strats" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-5 4 4 8-8"/><path d="M15 8h5v5"/></svg><span>Strategies</span></button>
+    <button class="btn small" id="nav_desk" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><circle cx="17" cy="12" r="4"/><path d="M3 6c6 0 7 6 10 6M3 12h10M3 18c6 0 7-6 10-6"/></svg><span>Desk</span></button>
     <button class="btn small" id="openLab" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/><path d="M7.5 15h9"/></svg><span>Strategy Lab</span></button>
     <button class="btn small" id="nav_cmp" type="button"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Compare</span><b class="navbadge" id="nav_cmp_n" hidden></b></button>
     <button class="btn small" id="nav_combo" type="button" hidden><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/></svg><span>Combinations</span></button>
@@ -1478,6 +1545,54 @@ details.xp > summary:hover { background: var(--blue-soft); }
       <p class="hint" style="margin:6px 0 0">Every service of the portal is checked every hour (and you get a summary every morning at 08:11, plus an alert as soon as something stops working). <b class="hl-ok">Green</b> = working, <b class="hl-warn">amber</b> = working but worth a look, <b class="hl-fail">red</b> = not working, grey = switched off on purpose. A red dot on this page's link in the menu means something is red now.</p>
       <div id="hl_sum" style="margin-top:12px"></div>
       <div id="hl_body" style="margin-top:8px"></div>
+    </section>
+
+    <section id="deskPane" hidden>
+      <header class="dk-top">
+        <div class="dk-brand"><div class="dk-logo">AG</div><div><h2>DESK</h2><small id="dk_sub"></small></div></div>
+        <div class="dk-ticker" aria-label="Live feed"><div class="dk-run" id="dk_ticker"></div></div>
+        <div class="dk-clock"><div class="dk-t" id="dk_clock">--:--:--</div><div class="dk-mk" id="dk_mk"></div></div>
+      </header>
+      <div class="dk-modebar"><div class="seg" id="dk_mode" role="group" aria-label="Mode"><button type="button" data-m="LIVE" aria-pressed="false">Live</button><button type="button" data-m="PAPER" aria-pressed="true">Paper</button></div><span class="dk-lbl" id="dk_note"></span></div>
+      <div class="dk-main">
+        <div class="dk-panel">
+          <div class="dk-ph"><span class="dk-lbl"><b>●</b> <span id="dk_acct">Account</span></span><span class="dk-badge" id="dk_risk">SAFE</span></div>
+          <div class="dk-lbl">Running P&amp;L · open positions</div>
+          <div class="dk-big" id="dk_run">₹0</div>
+          <div class="dk-lbl dk-sm" id="dk_runsub"></div>
+          <div class="dk-kv">
+            <div><div class="dk-lbl">Booked P&amp;L</div><div class="dk-v" id="dk_book">–</div></div>
+            <div><div class="dk-lbl">Win rate</div><div class="dk-v" id="dk_win">–</div></div>
+            <div><div class="dk-lbl">In a trade</div><div class="dk-v" id="dk_open">–</div></div>
+            <div><div class="dk-lbl">Closed trades</div><div class="dk-v" id="dk_n">–</div></div>
+          </div>
+          <div class="dk-barrow"><div class="dk-lr"><span>Margin in use</span><span id="dk_margin"></span></div><div class="dk-bar" id="dk_mbar"></div></div>
+          <div class="dk-barrow"><div class="dk-lr"><span>Long · short</span><span id="dk_ls"></span></div><div class="dk-bar" id="dk_lsbar"></div></div>
+          <div class="dk-barrow"><div class="dk-lr"><span>Margin by asset</span></div><div class="dk-bar" id="dk_abar" style="height:10px"></div><div class="dk-legend" id="dk_aleg"></div></div>
+        </div>
+        <div class="dk-panel dk-flow">
+          <div class="dk-ph" style="padding:12px 12px 0"><span class="dk-lbl"><b>●</b> Profit flow · each open position streams into the pool</span><span class="dk-lbl" id="dk_flowcount"></span></div>
+          <canvas id="dk_cv" aria-label="Each open position sends green dots into the pool when it gains and red dots when it loses; the pool is denser the bigger the running profit"></canvas>
+          <div class="dk-flowfoot"><span><span class="dk-up">● gain</span> &nbsp;<span class="dk-down">● loss</span> &nbsp;· live prices, every second while markets are open</span><button class="dk-btn" id="dk_pause" type="button">Pause</button></div>
+        </div>
+        <div class="dk-panel dk-heat">
+          <div class="dk-ph"><span class="dk-lbl"><b>●</b> Strategies</span><span class="dk-lbl">colour = running P&amp;L</span></div>
+          <div class="dk-tiles" id="dk_tiles"></div>
+        </div>
+      </div>
+      <div class="dk-low">
+        <div class="dk-panel"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Timeline · last 3 weeks</span><span class="dk-lbl">bar = open position · dot = closed trade</span></div><div class="dk-svgbox"><svg id="dk_tl" width="100%" height="300" role="img" aria-label="Timeline of open positions and closed trades by asset"></svg></div></div>
+        <div class="dk-panel"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Capital flow · margin in use</span><span class="dk-lbl">asset → side → result</span></div><div class="dk-svgbox"><svg id="dk_sk" width="100%" height="300" role="img" aria-label="Margin in use flowing from assets to long or short, then to in profit or in loss"></svg></div></div>
+      </div>
+      <div class="dk-panel"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Activity</span><span class="dk-lbl">newest first</span></div><div class="dk-feed" id="dk_feed"></div></div>
+      <footer class="dk-foot">
+        <div><div class="dk-lbl">Avg closed trade</div><div class="dk-v" id="dk_favg">–</div></div>
+        <div><div class="dk-lbl">Best open</div><div class="dk-v dk-up" id="dk_fbest">–</div></div>
+        <div><div class="dk-lbl">Worst open</div><div class="dk-v dk-down" id="dk_fworst">–</div></div>
+        <div><div class="dk-lbl">Capital</div><div class="dk-v" id="dk_fcap">–</div></div>
+        <div><div class="dk-lbl">Limit</div><div class="dk-v" id="dk_flim">–</div></div>
+        <div><div class="dk-lbl">Price moves today</div><div class="dk-v" id="dk_fticks">0</div></div>
+      </footer>
     </section>
 
     <section class="card" id="spreadPane" hidden>
@@ -5886,7 +6001,7 @@ const isAdmin = () => !!me && me.role === "admin";
 const myStrats = () => state.strategies.filter((x) => me && x.owner_id === me.user_id && !x.is_master);
 function instName(s) { return s.trade_type === "OPTIONS" ? (s.option_side === "SELL" ? "Option writing" : "Option buying") : "Futures"; }
 function assetLabel(k) { return (PRESETS[k] && PRESETS[k].name) || k || "–"; }
-const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane", "ideasPane", "predPane", "cmpPane", "comboPane", "healthPane", "spreadPane"];
+const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane", "ideasPane", "predPane", "cmpPane", "comboPane", "healthPane", "spreadPane", "deskPane"];
 function hideNewPanes() { NEW_PANES.forEach((id) => $(id).hidden = true); }
 function markNav(id) { document.querySelectorAll("#nav .btn").forEach((b) => b.id === id ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")); }
 /** One page at a time: list, strat, market, wallet, admin, conn, cap, lab, terms. */
@@ -5897,9 +6012,10 @@ function showPage(name) {
   page = name;
   hideNewPanes();
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true;
-  const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab", ideas: "nav_ideas", pred: "nav_pred", cmp: "nav_cmp", combo: "nav_combo", health: "nav_health", spread: "nav_spread" }[name];
+  const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab", ideas: "nav_ideas", pred: "nav_pred", cmp: "nav_cmp", combo: "nav_combo", health: "nav_health", spread: "nav_spread", desk: "nav_desk" }[name];
   if (name !== "ideas") stopIdeasPoll();
   if (name !== "pred") stopPredPoll();
+  if (name !== "desk") deskStop();
   markNav(navId);
   if (name === "list") { $("listPane").hidden = false; renderList(); }
   else if (name === "market") { $("marketPane").hidden = false; withLoading($("marketPane"), loadMarket()).catch((e) => toast(errorText(e))); }
@@ -5911,6 +6027,7 @@ function showPage(name) {
   else if (name === "pred") { $("predPane").hidden = false; withLoading($("predPane"), renderPred()).catch((e) => toast(errorText(e))); startPredPoll(); }
   else if (name === "pass") { $("passPane").hidden = false; $("np_msg").textContent = ""; }
   else if (name === "health") { $("healthPane").hidden = false; withLoading($("healthPane"), renderHealth()).catch((e) => toast(errorText(e))); }
+  else if (name === "desk") { $("deskPane").hidden = false; withLoading($("deskPane"), renderDesk()).catch((e) => toast(errorText(e))); }
   else if (name === "spread") { $("spreadPane").hidden = false; withLoading($("spreadPane"), renderSpread()).catch((e) => toast(errorText(e))); }
   else if (name === "combo") { $("comboPane").hidden = false; withLoading($("comboPane"), renderCombo()).catch((e) => toast(errorText(e))); }
   else if (name === "cmp") { $("cmpPane").hidden = false; cmpCache.clear(); withLoading($("cmpPane"), renderCmp()).catch((e) => toast(errorText(e))); }
@@ -6554,7 +6671,9 @@ function onMark(m) {
   if (!s || s.position === "FLAT") return;
   marksPrev = marksPrev || new Map();
   if (!marksPrev.has(s.id)) marksPrev.set(s.id, s.pos_upnl == null ? null : Number(s.pos_upnl));
+  const prevUpnl = s.pos_upnl == null ? null : Number(s.pos_upnl);
   s.pos_ltp = m.ltp; s.pos_upnl = m.upnl; s.pos_ltp_at = m.at; marksLast = Date.now();
+  if (page === "desk" && prevUpnl != null && m.upnl != null && Number(m.upnl) !== prevUpnl) deskMove(s, Number(m.upnl) - prevUpnl);
   // Several positions update in the same second: the screen is repainted once for all of them.
   if (!marksRaf) marksRaf = requestAnimationFrame(() => { marksRaf = 0; const prev = marksPrev; marksPrev = null; if (!document.hidden) paintMarks(prev); });
 }
@@ -7463,6 +7582,225 @@ async function renderSpread() {
 const spread = { allCf: false };
 const spreadCost = { nb: "0.041", cx: "0.236" };
 $("nav_spread").addEventListener("click", () => showPage("spread"));
+/* ---------- Desk (control room; 2 Nov 2026, Papa) ----------
+   Running P&L, a profit-flow pool fed by live price moves (green = a position gained, red = it lost; the pool is
+   denser the bigger the running profit), strategy tiles, a 3-week timeline, capital flow and activity. */
+const desk = { mode: null, trades: [], feed: [], ticks: 0, raf: 0, paused: false, lanes: [], movers: [], pool: [], flashes: [], W: 0, H: 0, R: 0, CX: 0, CY: 0, X0: 0, key: "", clock: 0 };
+const DK_COL = { up: "#2ed47f", down: "#ff5c6c", amber: "#f3b23c", blue: "#5aa8ff", muted: "#7c8ba0", dim: "#4b586b", line: "#1e2939", text: "#dbe5f1", ink: "#090d14" };
+const DK_ASSET = ["#5aa8ff", "#f3b23c", "#b48cff", "#2ed4c6", "#ff8a4c", "#9fd356", "#ff6fae", "#7f9bb8", "#e3c76a", "#4cc2ff"];
+const dkName = (u) => assetLabel(u).replace(/\s*\(.*\)\s*$/, "");
+const dkSgn = (x) => (x > 0 ? "+" : "") + rupees(x);
+const dkLabId = (s) => String(s.name || "").split(" · ")[0];
+function deskStrats() { return myStrats().filter((x) => !x.archived && (!!x.live === (desk.mode === "LIVE"))); }
+function dkOpen() { return deskStrats().filter((x) => x.position !== "FLAT"); }
+function deskStop() { if (desk.raf) cancelAnimationFrame(desk.raf); desk.raf = 0; clearInterval(desk.clock); desk.clock = 0; }
+async function renderDesk() {
+  if (!desk.mode) desk.mode = myStrats().some((x) => !x.archived && x.live && x.active) ? "LIVE" : "PAPER";
+  $("dk_mode").querySelectorAll("[data-m]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.m === desk.mode)));
+  if (!cap.status) await loadCapStatus().catch(() => null);
+  desk.trades = await fetchAll(() => db.from("algo_trades").select("id, strategy_id, side, lots, net, exit_at, exit_why").eq("user_id", me.user_id).eq("mode", desk.mode).order("exit_at", { ascending: false }).order("id", { ascending: false }));
+  desk.feed = []; desk.ticks = 0; desk.movers = []; desk.flashes = []; desk.pool = [];
+  deskPaint(); deskLayout(); deskFill(); deskTimeline(); deskSankey();
+  deskStop();
+  if (!document.hidden) desk.raf = requestAnimationFrame(deskDraw);
+  deskClock(); desk.clock = setInterval(deskClock, 1000);
+}
+function deskClock() {
+  if (page !== "desk") return;
+  const d = new Date(Date.now() + 19800000), p = (x) => String(x).padStart(2, "0");
+  $("dk_clock").textContent = `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} IST`;
+  const mk = [["NSE", marketOpenFor("NSE_EQ")], ["MCX", marketOpenFor("MCX_COMM")], ["DELTA", true]];
+  $("dk_mk").innerHTML = mk.map(([n, o]) => `<span class="${o ? "open" : ""}">${n} ${o ? "OPEN" : "SHUT"}</span>`).join("");
+}
+/** Numbers, tiles, feed, ticker: everything that is plain HTML. */
+function deskPaint() {
+  const live = desk.mode === "LIVE", all = deskStrats(), open = dkOpen(), st = cap.status || {};
+  const names = new Map(state.strategies.map((x) => [x.id, x]));
+  const run = open.reduce((a, s) => a + (Number(s.pos_upnl) || 0), 0), margin = open.reduce((a, s) => a + (Number(s.pos_margin) || 0), 0);
+  const booked = desk.trades.reduce((a, t) => a + (Number(t.net) || 0), 0), n = desk.trades.length, wins = desk.trades.filter((t) => Number(t.net) > 0).length;
+  const capital = Number(st.capital) || 0, equity = capital + Number(live ? st.live_net : st.paper_net || 0), limit = Number(st.deploy_pct) || 60;
+  $("dk_sub").textContent = `${live ? "LIVE" : "PAPER"} · ${all.length} STRATEGIES · ${all.filter((x) => x.active).length} ACTIVE`;
+  $("dk_acct").textContent = live ? "Live account" : "Paper account";
+  $("dk_note").textContent = live && !all.length ? "No live strategies yet: switch to Paper to see your paper desk." : "";
+  $("dk_run").textContent = dkSgn(run); $("dk_run").className = "dk-big " + (run >= 0 ? "dk-up" : "dk-down");
+  $("dk_runsub").textContent = `${open.length} open position${open.length === 1 ? "" : "s"} · ${open.filter((s) => Number(s.pos_upnl) > 0).length} in profit`;
+  $("dk_book").textContent = dkSgn(booked); $("dk_book").className = "dk-v " + (booked >= 0 ? "dk-up" : "dk-down");
+  $("dk_win").textContent = n ? `${Math.round(wins / n * 100)}%` : "–";
+  $("dk_open").textContent = `${open.length} / ${all.length}`; $("dk_n").textContent = String(n);
+  const mp = equity > 0 ? margin / equity * 100 : null;
+  $("dk_margin").textContent = `${rupeesShort(margin)}${mp != null ? ` · ${mp.toFixed(1)}% of ${limit}%` : ""}`;
+  $("dk_mbar").innerHTML = `<i style="width:${mp != null ? Math.min(100, mp / limit * 100) : 0}%;background:${mp != null && mp > limit ? DK_COL.down : DK_COL.blue}"></i>`;
+  const L = open.filter((s) => s.position === "LONG").length, S = open.length - L;
+  $("dk_ls").textContent = `${L} long · ${S} short`;
+  $("dk_lsbar").innerHTML = open.length ? `<i style="width:${L / open.length * 100}%;background:${DK_COL.up}"></i><i style="width:${S / open.length * 100}%;background:${DK_COL.down}"></i>` : "";
+  const by = {}; for (const s of open) by[s.underlying] = (by[s.underlying] || 0) + (Number(s.pos_margin) || 0);
+  const ent = Object.entries(by).sort((a, b) => b[1] - a[1]);
+  $("dk_abar").innerHTML = margin ? ent.map(([u, v], i) => `<i style="width:${v / margin * 100}%;background:${DK_ASSET[i % DK_ASSET.length]}" title="${esc(dkName(u))} ${rupeesShort(v)}"></i>`).join("") : "";
+  $("dk_aleg").innerHTML = margin ? ent.map(([u, v], i) => `<span><i style="background:${DK_ASSET[i % DK_ASSET.length]}"></i>${esc(dkName(u))} ${Math.round(v / margin * 100)}%</span>`).join("") : '<span>Nothing open</span>';
+  const fall = equity > 0 ? Math.max(0, -run) / equity * 100 : 0, rb = $("dk_risk");
+  rb.textContent = fall > 5 ? "HIGH RISK" : fall > 2 ? "WATCH" : "SAFE"; rb.className = "dk-badge" + (fall > 5 ? " bad" : fall > 2 ? " warn" : "");
+  if (open.length) {
+    const best = open.reduce((a, s) => Number(s.pos_upnl) > Number(a.pos_upnl) ? s : a), worst = open.reduce((a, s) => Number(s.pos_upnl) < Number(a.pos_upnl) ? s : a);
+    $("dk_fbest").textContent = `${dkName(best.underlying)} ${dkSgn(Number(best.pos_upnl) || 0)}`; $("dk_fworst").textContent = `${dkName(worst.underlying)} ${dkSgn(Number(worst.pos_upnl) || 0)}`;
+  } else { $("dk_fbest").textContent = "–"; $("dk_fworst").textContent = "–"; }
+  $("dk_favg").textContent = n ? dkSgn(booked / n) : "–";
+  $("dk_fcap").textContent = capital ? rupeesShort(capital) : "not set"; $("dk_flim").textContent = capital ? `${limit}% · ${rupeesShort(equity * limit / 100)}` : `${limit}%`;
+  $("dk_fticks").textContent = String(desk.ticks);
+  $("dk_flowcount").textContent = `${open.length} stream${open.length === 1 ? "" : "s"}`;
+  // tiles
+  const maxAbs = Math.max(1, ...open.map((s) => Math.abs(Number(s.pos_upnl) || 0)));
+  $("dk_tiles").innerHTML = all.slice().sort((a, b) => (b.position !== "FLAT") - (a.position !== "FLAT") || (Number(b.pos_upnl) || 0) - (Number(a.pos_upnl) || 0)).map((s) => {
+    if (s.position === "FLAT") return `<button type="button" class="dk-tile flat" data-dk="${s.id}"><span class="a">${esc(dkName(s.underlying))}</span><span class="s">${esc(dkLabId(s))} · FLAT${s.active ? "" : " · PAUSED"}</span><span class="p" style="color:var(--dk-muted)">next ${esc(s.sizing && s.sizing.mode === "AUTO" ? "auto" : String(s.lots))} lots</span></button>`;
+    const v = Number(s.pos_upnl) || 0, k = Math.min(1, Math.sqrt(Math.abs(v) / maxAbs)), c = v >= 0 ? "46,212,127" : "255,92,108";
+    return `<button type="button" class="dk-tile" data-dk="${s.id}" style="background:rgba(${c},${(.1 + k * .5).toFixed(2)});border-color:rgba(${c},${(.25 + k * .5).toFixed(2)})"><span class="a">${esc(dkName(s.underlying))}</span><span class="s">${esc(dkLabId(s))} · ${s.position} ${esc(String(s.pos_lots ?? ""))}</span><span class="p">${s.pos_upnl == null ? "–" : esc(dkSgn(v))}</span></button>`;
+  }).join("") || '<p class="dk-lbl">No strategies in this mode.</p>';
+  // feed and ticker
+  const closed = desk.trades.slice(0, 40).map((t) => { const x = names.get(t.strategy_id);
+    return { time: istText(t.exit_at), what: `${x ? dkName(x.underlying) : "–"} ${String(t.side || "").toLowerCase()} closed · ${String(t.exit_why || "").replace(/\s*\(.*$/, "").slice(0, 40)}`, v: Number(t.net) || 0 }; });
+  const rows = [...desk.feed, ...closed].slice(0, 50);
+  $("dk_feed").innerHTML = rows.length ? rows.map((f) => `<div><span class="w">${esc(f.time)}</span><span>${esc(f.what)}</span><span class="${f.v >= 0 ? "dk-up" : "dk-down"}">${esc(dkSgn(f.v))}</span></div>`).join("") : '<p class="dk-lbl">No activity yet.</p>';
+  if (!deskPaint.tickerAt || Date.now() - deskPaint.tickerAt > 20000) {
+    deskPaint.tickerAt = Date.now();
+    $("dk_ticker").innerHTML = '<span class="dk-tag">LIVE FEED</span>' + rows.slice(0, 14).map((f) => `<span>${esc(f.what)} <b class="${f.v >= 0 ? "dk-up" : "dk-down"}">${esc(dkSgn(f.v))}</b></span>`).join("");
+  }
+}
+/** A live price move of one open position (from the per-second marks): a dot along its stream. */
+function deskMove(s, delta) {
+  if (!delta || !(!!s.live === (desk.mode === "LIVE"))) return;
+  desk.ticks++;
+  const d = new Date(Date.now() + 19800000), p = (x) => String(x).padStart(2, "0");
+  desk.feed.unshift({ time: `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`, what: `${dkName(s.underlying)} ${s.position.toLowerCase()} · ${dkLabId(s)} · price ${fmtNum(s.pos_ltp)}`, v: delta });
+  desk.feed.length = Math.min(desk.feed.length, 30);
+  let lane = desk.lanes.findIndex((L) => L.s.id === s.id);
+  if (lane < 0) { deskLayout(); lane = desk.lanes.findIndex((L) => L.s.id === s.id); }
+  if (lane >= 0) { const n = Math.max(1, Math.min(5, Math.round(Math.abs(delta) / 2500))); for (let i = 0; i < n; i++) desk.movers.push({ lane, t: -i * .05, sp: .007 + Math.random() * .004, v: delta / n, up: delta > 0 }); }
+  if (!deskMove.q) deskMove.q = setTimeout(() => { deskMove.q = 0; if (page === "desk") deskPaint(); }, 400);
+}
+function deskLayout() {
+  const cv = $("dk_cv"), r = cv.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (!r.width) return;
+  desk.W = r.width; desk.H = r.height; cv.width = Math.round(desk.W * dpr); cv.height = Math.round(desk.H * dpr);
+  cv.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
+  const narrow = desk.W < 560;
+  desk.X0 = narrow ? 104 : 168; desk.R = Math.max(70, Math.min(desk.H * .4, (desk.W - desk.X0) * .3));
+  desk.CX = desk.W - desk.R - (narrow ? 14 : 34); desk.CY = desk.H / 2;
+  const o = dkOpen().slice().sort((a, b) => (Number(b.pos_upnl) || 0) - (Number(a.pos_upnl) || 0)), top = 26, laneH = (desk.H - top * 2) / Math.max(1, o.length);
+  desk.lanes = o.map((s, i) => { const y = top + laneH * (i + .5), ey = desk.CY + (y - desk.CY) * .32, ex = desk.CX - desk.R * .92;
+    return { s, y, p: [[desk.X0, y], [desk.X0 + (ex - desk.X0) * .45, y], [desk.X0 + (ex - desk.X0) * .6, ey], [ex, ey]] }; });
+  desk.movers = desk.movers.filter((m) => m.lane < desk.lanes.length);
+}
+const deskRun = () => dkOpen().reduce((a, s) => a + (Number(s.pos_upnl) || 0), 0);
+/** About one dot per ₹1,500 of running profit (120–1,400). */
+const deskTarget = () => Math.max(120, Math.min(1400, 300 + deskRun() / 1500));
+function deskDot(edge) { const R = desk.R, r = R * (Math.random() < .6 ? .5 * Math.pow(Math.random(), .8) : .35 + .65 * Math.random());
+  return { r, a: Math.random() * Math.PI * 2, w: (Math.random() - .5) * .004 * (1.4 - r / R), size: .9 + Math.random() * 1.7, born: edge ? 0 : 1, die: 0, warm: Math.random() < .55 }; }
+function deskFill() { const n = Math.round(deskTarget()); while (desk.pool.length < n) desk.pool.push(deskDot(false)); }
+function deskBez(L, t) { const u = 1 - t, [a, b, c, d] = L.p; return [u * u * u * a[0] + 3 * u * u * t * b[0] + 3 * u * t * t * c[0] + t * t * t * d[0], u * u * u * a[1] + 3 * u * u * t * b[1] + 3 * u * t * t * c[1] + t * t * t * d[1]]; }
+function deskDraw() {
+  desk.raf = 0;
+  if (page !== "desk" || document.hidden) return;
+  const ctx = $("dk_cv").getContext("2d"), { W, H, R, CX, CY, X0 } = desk, paused = desk.paused, narrow = W < 560;
+  ctx.clearRect(0, 0, W, H);
+  const tot = deskRun(), good = tot >= 0;
+  const g = ctx.createRadialGradient(CX, CY, R * .05, CX, CY, R * 1.15);
+  g.addColorStop(0, good ? "rgba(46,212,127,.20)" : "rgba(255,92,108,.20)"); g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(CX, CY, R * 1.15, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = DK_COL.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(CX, CY, R, 0, Math.PI * 2); ctx.stroke();
+  for (const L of desk.lanes) {
+    const s = L.s, v = Number(s.pos_upnl) || 0, c = v >= 0 ? "46,212,127" : "255,92,108", w = 1 + Math.max(0, Math.min(5, Math.log10(Math.max(10, Number(s.pos_margin) || 10)) - 3.5));
+    ctx.strokeStyle = `rgba(${c},.22)`; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(...L.p[0]); ctx.bezierCurveTo(...L.p[1], ...L.p[2], ...L.p[3]); ctx.stroke();
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.fillStyle = DK_COL.text; ctx.font = `600 ${narrow ? 10.5 : 11.5}px ${getComputedStyle(document.body).getPropertyValue("--font-data") || "monospace"}`;
+    ctx.fillText(`${dkName(s.underlying)}${narrow ? "" : " " + (s.position === "LONG" ? "L" : "S")}`, X0 - 8, L.y - 6);
+    ctx.fillStyle = v >= 0 ? DK_COL.up : DK_COL.down; ctx.font = `500 ${narrow ? 10 : 11}px monospace`;
+    ctx.fillText(s.pos_upnl == null ? "–" : dkSgn(v), X0 - 8, L.y + 7);
+    ctx.fillStyle = `rgba(${c},.9)`; ctx.beginPath(); ctx.arc(X0, L.y, 3, 0, Math.PI * 2); ctx.fill();
+  }
+  if (!desk.lanes.length) { ctx.fillStyle = DK_COL.muted; ctx.textAlign = "left"; ctx.font = "500 12px monospace"; ctx.fillText("No open positions: the streams appear when a strategy enters a trade.", 16, 24); }
+  for (const m of desk.movers) {
+    if (!paused) m.t += m.sp;
+    if (m.t < 0 || !desk.lanes[m.lane]) continue;
+    const [x, y] = deskBez(desk.lanes[m.lane], Math.min(1, m.t));
+    ctx.fillStyle = m.up ? DK_COL.up : DK_COL.down; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.arc(x, y, 2.6, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+  }
+  for (const m of desk.movers.filter((m) => m.t >= 1)) {
+    const k = Math.max(1, Math.round(Math.abs(m.v) / 1500));
+    if (m.up) for (let i = 0; i < k; i++) desk.pool.push(deskDot(true));
+    else { let n = 0; for (const d of desk.pool) if (!d.die && n < k) { d.die = 1; n++; } }
+    desk.flashes.push({ r: R * .3, a: m.up ? .55 : .65, up: m.up });
+  }
+  desk.movers = desk.movers.filter((m) => m.t < 1);
+  for (const d of desk.pool) {
+    if (!paused) { d.a += d.w; if (d.born < 1) d.born = Math.min(1, d.born + .03); if (d.die) d.die += .05; }
+    const rr = d.born < 1 ? R * (1 - d.born) + d.r * d.born : d.r, x = CX + Math.cos(d.a) * rr, y = CY + Math.sin(d.a) * rr, al = d.die ? Math.max(0, 1 - d.die) : .85;
+    ctx.fillStyle = d.die ? `rgba(255,92,108,${al})` : !good ? (d.warm ? `rgba(255,92,108,${al})` : `rgba(255,150,120,${al * .7})`) : d.warm ? `rgba(46,212,127,${al})` : `rgba(90,168,255,${al * .65})`;
+    ctx.beginPath(); ctx.arc(x, y, d.size, 0, Math.PI * 2); ctx.fill();
+  }
+  desk.pool = desk.pool.filter((d) => !d.die || d.die < 1);
+  const want = Math.round(deskTarget());
+  if (desk.pool.length < want - 40) desk.pool.push(deskDot(true));
+  if (desk.pool.length > want + 40) { const d = desk.pool.find((x) => !x.die); if (d) d.die = 1; }
+  for (const f of desk.flashes) { ctx.strokeStyle = f.up ? `rgba(46,212,127,${f.a})` : `rgba(255,92,108,${f.a})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(CX, CY, f.r, 0, Math.PI * 2); ctx.stroke(); if (!paused) { f.r += R * .025; f.a -= .02; } }
+  desk.flashes = desk.flashes.filter((f) => f.a > 0 && f.r < R * 1.2);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "rgba(9,13,20,.5)"; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(CX - 92, CY - 30, 184, 60, 6); else ctx.rect(CX - 92, CY - 30, 184, 60); ctx.fill();
+  ctx.fillStyle = good ? DK_COL.up : DK_COL.down; ctx.font = `600 ${narrow ? 18 : 22}px monospace`; ctx.fillText(dkSgn(tot), CX, CY - 6);
+  ctx.fillStyle = DK_COL.muted; ctx.font = "500 10px monospace"; ctx.fillText(`RUNNING P&L · ${desk.pool.length} DOTS`, CX, CY + 16);
+  desk.raf = requestAnimationFrame(deskDraw);
+}
+function deskTimeline() {
+  const svg = $("dk_tl"), w = Math.max(560, svg.clientWidth || 600), h = 300, left = 104, right = 12, top = 18, bottom = 24;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  const names = new Map(state.strategies.map((x) => [x.id, x])), end = Date.now(), start = end - 21 * 86400000;
+  const tr = desk.trades.filter((t) => Date.parse(t.exit_at) >= start && names.has(t.strategy_id));
+  const open = dkOpen();
+  const assets = [...new Set([...open.map((s) => s.underlying), ...tr.map((t) => names.get(t.strategy_id).underlying)])].slice(0, 14);
+  if (!assets.length) { svg.innerHTML = `<text x="12" y="24" fill="${DK_COL.muted}" font-size="12">No trades in the last 3 weeks.</text>`; return; }
+  const rowH = (h - top - bottom) / assets.length, x = (t) => left + (t - start) / (end - start) * (w - left - right);
+  let g = "";
+  for (let d = 0; d <= 21; d += 3) { const t = start + d * 86400000, xx = x(t), lab = new Date(t + 19800000).toISOString().slice(5, 10).split("-").reverse().join("/");
+    g += `<line x1="${xx}" x2="${xx}" y1="${top}" y2="${h - bottom}" stroke="${DK_COL.line}"/><text x="${xx}" y="${h - 8}" fill="${DK_COL.muted}" font-size="10" text-anchor="middle">${lab}</text>`; }
+  assets.forEach((u, i) => {
+    const y = top + i * rowH + rowH / 2;
+    g += `<text x="${left - 8}" y="${y + 3}" fill="${DK_COL.text}" font-size="10.5" text-anchor="end">${esc(dkName(u))}</text><line x1="${left}" x2="${w - right}" y1="${y}" y2="${y}" stroke="${DK_COL.line}" stroke-dasharray="2 4"/>`;
+    open.filter((s) => s.underlying === u).forEach((s, j) => { const since = Date.parse((s.pos_entry_date || istDate(0)) + "T03:30:00Z"), x0 = x(Math.max(start, since)), c = (Number(s.pos_upnl) || 0) >= 0 ? DK_COL.up : DK_COL.down;
+      g += `<rect x="${x0}" y="${y - 6 + j * 5}" width="${Math.max(3, x(end) - x0)}" height="5" rx="2" fill="${c}" opacity=".85"><title>${esc(dkLabId(s))} ${s.position} since ${esc(s.pos_entry_date || "")} · ${esc(dkSgn(Number(s.pos_upnl) || 0))}</title></rect>`; });
+    tr.filter((t) => names.get(t.strategy_id).underlying === u).forEach((t) => { const v = Number(t.net) || 0, r = 3 + Math.min(7, Math.sqrt(Math.abs(v)) / 60), c = v >= 0 ? DK_COL.up : DK_COL.down;
+      g += `<circle cx="${x(Date.parse(t.exit_at))}" cy="${y}" r="${r.toFixed(1)}" fill="${c}" fill-opacity=".35" stroke="${c}"><title>${esc(dkLabId(names.get(t.strategy_id)))} ${esc(t.side || "")} closed ${esc(istText(t.exit_at))} · ${esc(dkSgn(v))}</title></circle>`; });
+  });
+  svg.innerHTML = g;
+}
+function deskSankey() {
+  const svg = $("dk_sk"), w = Math.max(480, svg.clientWidth || 520), h = 300, pad = 14, nodeW = 10, gap = 6;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  const o = dkOpen().filter((s) => Number(s.pos_margin) > 0), total = o.reduce((a, s) => a + Number(s.pos_margin), 0);
+  if (!total) { svg.innerHTML = `<text x="12" y="24" fill="${DK_COL.muted}" font-size="12">No margin in use.</text>`; return; }
+  const assets = Object.entries(o.reduce((m, s) => (m[s.underlying] = (m[s.underlying] || 0) + Number(s.pos_margin), m), {})).sort((a, b) => b[1] - a[1]);
+  const sc = (h - 2 * pad - gap * (assets.length - 1)) / total, sc2 = (h - 2 * pad - gap) / total, X = [150, w / 2 - nodeW / 2 + 30, w - 96];
+  let y = pad; const aN = assets.map(([u, v], i) => { const n = { u, v, y, hh: v * sc, c: DK_ASSET[i % DK_ASSET.length] }; y += n.hh + gap; return n; });
+  const side = (s) => s.position === "LONG" ? "LONG" : "SHORT", res = (s) => (Number(s.pos_upnl) || 0) >= 0 ? "PROFIT" : "LOSS";
+  const sv = { LONG: 0, SHORT: 0 }, rv = { PROFIT: 0, LOSS: 0 }; for (const s of o) { sv[side(s)] += Number(s.pos_margin); rv[res(s)] += Number(s.pos_margin); }
+  const sN = { LONG: { y: pad, hh: sv.LONG * sc2, c: DK_COL.up }, SHORT: { y: pad + sv.LONG * sc2 + gap, hh: sv.SHORT * sc2, c: DK_COL.down } };
+  const rN = { PROFIT: { y: pad, hh: rv.PROFIT * sc2, c: DK_COL.up }, LOSS: { y: pad + rv.PROFIT * sc2 + gap, hh: rv.LOSS * sc2, c: DK_COL.down } };
+  const band = (x0, y0, h0, x1, y1, h1, c) => { const m = (x0 + x1) / 2; return `<path d="M${x0},${y0} C${m},${y0} ${m},${y1} ${x1},${y1} L${x1},${y1 + h1} C${m},${y1 + h1} ${m},${y0 + h0} ${x0},${y0 + h0} Z" fill="${c}" fill-opacity=".28"/>`; };
+  let g = ""; const so = { LONG: 0, SHORT: 0 }, ro = { PROFIT: 0, LOSS: 0 };
+  for (const a of aN) { let off = 0; for (const s of o.filter((x) => x.underlying === a.u)) { const k = side(s), m = Number(s.pos_margin); g += band(X[0] + nodeW, a.y + off, m * sc, X[1], sN[k].y + so[k], m * sc2, a.c); off += m * sc; so[k] += m * sc2; } }
+  for (const k of ["LONG", "SHORT"]) { let off = 0; for (const s of o.filter((x) => side(x) === k)) { const r = res(s), m = Number(s.pos_margin) * sc2; g += band(X[1] + nodeW, sN[k].y + off, m, X[2], rN[r].y + ro[r], m, r === "PROFIT" ? DK_COL.up : DK_COL.down); off += m; ro[r] += m; } }
+  for (const a of aN) g += `<rect x="${X[0]}" y="${a.y}" width="${nodeW}" height="${Math.max(1.5, a.hh)}" fill="${a.c}"/><text x="${X[0] - 6}" y="${a.y + a.hh / 2 + 3}" fill="${DK_COL.text}" font-size="10" text-anchor="end">${esc(dkName(a.u))} ${rupeesShort(a.v)}</text>`;
+  for (const k of ["LONG", "SHORT"]) if (sv[k]) g += `<rect x="${X[1]}" y="${sN[k].y}" width="${nodeW}" height="${sN[k].hh}" fill="${sN[k].c}"/><text x="${X[1] + nodeW / 2}" y="${sN[k].y + sN[k].hh / 2 + 3}" fill="${DK_COL.text}" font-size="10.5" text-anchor="middle" style="paint-order:stroke" stroke="${DK_COL.ink}" stroke-width="3">${k === "LONG" ? "Long" : "Short"} ${rupeesShort(sv[k])}</text>`;
+  for (const k of ["PROFIT", "LOSS"]) if (rv[k]) g += `<rect x="${X[2]}" y="${rN[k].y}" width="${nodeW}" height="${rN[k].hh}" fill="${rN[k].c}"/><text x="${X[2] + nodeW + 6}" y="${rN[k].y + rN[k].hh / 2 + 3}" fill="${DK_COL.text}" font-size="10.5">${k === "PROFIT" ? "In profit" : "In loss"}</text><text x="${X[2] + nodeW + 6}" y="${rN[k].y + rN[k].hh / 2 + 16}" fill="${DK_COL.muted}" font-size="10">${rupeesShort(rv[k])}</text>`;
+  svg.innerHTML = g;
+}
+$("nav_desk").addEventListener("click", () => showPage("desk"));
+$("dk_mode").querySelectorAll("[data-m]").forEach((b) => b.addEventListener("click", () => { desk.mode = b.dataset.m; withLoading($("deskPane"), renderDesk()).catch((e) => toast(errorText(e))); }));
+$("dk_pause").addEventListener("click", () => { desk.paused = !desk.paused; $("dk_pause").textContent = desk.paused ? "Resume" : "Pause"; });
+$("dk_tiles").addEventListener("click", (e) => { const t = e.target.closest("[data-dk]"); if (t) openStrat(t.dataset.dk); });
+addEventListener("resize", () => { if (page !== "desk") return; clearTimeout(deskLayout.t); deskLayout.t = setTimeout(() => { deskLayout(); deskTimeline(); deskSankey(); }, 150); });
+document.addEventListener("visibilitychange", () => { if (page === "desk" && !document.hidden && !desk.raf) desk.raf = requestAnimationFrame(deskDraw); });
+// Positions opening or closing (strategy list reloads) re-draw the streams.
+setInterval(() => { if (page !== "desk" || document.hidden) return; const k = dkOpen().map((s) => s.id).join(); if (k !== desk.key) { desk.key = k; deskLayout(); deskTimeline(); deskSankey(); deskPaint(); } }, 5000);
+
 $("sp_refresh").addEventListener("click", (e) => run(e.currentTarget, () => renderSpread()));
 
 $("co_group").addEventListener("change", (e) => { combo.key = e.target.value; combo.res = null; withLoading($("comboPane"), renderCombo()).catch((er) => toast(errorText(er))); });
