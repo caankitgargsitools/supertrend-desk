@@ -228,7 +228,7 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   green dots for a gain, red for a loss; the pool's dot count follows the running total (about one per ₹1,200, 150–1,500),
   red throughout while the total is a loss; drawn as the "plasma storm" (Papa, 3 Nov, idea 2 of 6 in a preview): free dots ride a
   swirling current inside a changing outline (`deskShape`) with light trails, three soft clouds; every stream carries a steady
-  trickle (`desk.amb`), price moves send 2–8 bright dots with trails, at most 3 soft rings at a time; the running P&L box sits in the panel's top-right corner (Papa, 3 Nov); strategy tiles coloured by running P&L (tap opens the strategy); 3-week
+  trickle (`desk.amb`), price moves send 2–8 bright dots with trails, at most 3 soft rings at a time; the running P&L box sits in the panel's top-right corner (Papa, 3 Nov); on phones the cloud is about half the width and the panel 500 px tall; strategy tiles coloured by running P&L (tap opens the strategy); 3-week
   timeline (open positions as bars, closed trades as dots); capital flow (margin: asset → long / short → in profit / in
   loss); activity list; stats bar. Animation runs only while the page is open and visible (`deskStop`). Test:
   `tests/ui/ui_desk.mjs` (args: theme width).

@@ -874,7 +874,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .dk-flow { padding: 0; overflow: hidden; }
 #dk_cv { width: 100%; height: 520px; display: block; }
-@media (max-width: 760px) { #dk_cv { height: 420px; } }
+@media (max-width: 760px) { #dk_cv { height: 500px; } }
 .dk-flowfoot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--dk-line); font: 500 11px var(--font-data); color: var(--dk-muted); }
 .dk-btn { font: 600 11px var(--font-data); letter-spacing: .06em; color: var(--dk-text); background: var(--dk-panel2); border: 1px solid var(--dk-line); border-radius: 4px; padding: 4px 9px; cursor: pointer; }
 .dk-btn:focus-visible, .dk-tile:focus-visible { outline: 2px solid var(--dk-amber); outline-offset: 2px; }
@@ -7682,8 +7682,9 @@ function deskLayout() {
   desk.W = r.width; desk.H = r.height; cv.width = Math.round(desk.W * dpr); cv.height = Math.round(desk.H * dpr);
   cv.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
   const narrow = desk.W < 560;
-  desk.X0 = narrow ? 92 : 138; desk.R = Math.max(80, Math.min(desk.H * .46, (desk.W - desk.X0) * .36));
-  desk.CX = desk.W - desk.R - (narrow ? 8 : 24); desk.CY = desk.H / 2;
+  // Phone: shorter labels and a cloud that takes about half the width (Papa, 3 Nov).
+  desk.X0 = narrow ? 70 : 138; desk.R = narrow ? Math.max(90, Math.min(desk.H * .4, (desk.W - desk.X0) * .5)) : Math.max(80, Math.min(desk.H * .46, (desk.W - desk.X0) * .36));
+  desk.CX = narrow ? desk.W - desk.R * .95 : desk.W - desk.R - 24; desk.CY = desk.H / 2;
   const o = dkOpen().slice().sort((a, b) => (Number(b.pos_upnl) || 0) - (Number(a.pos_upnl) || 0)), top = 26, laneH = (desk.H - top * 2) / Math.max(1, o.length);
   desk.lanes = o.map((s, i) => { const y = top + laneH * (i + .5), ey = desk.CY + (y - desk.CY) * .22, ex = desk.CX - desk.R * .45;
     return { s, y, p: [[desk.X0, y], [desk.X0 + (ex - desk.X0) * .45, y], [desk.X0 + (ex - desk.X0) * .6, ey], [ex, ey]] }; });
@@ -7720,9 +7721,9 @@ function deskDraw() {
     ctx.strokeStyle = `rgba(${c},.2)`; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(...L.p[0]); ctx.bezierCurveTo(...L.p[1], ...L.p[2], ...L.p[3]); ctx.stroke();
     if (!paused && Math.random() < .22 + w * .04) desk.amb.push({ lane: li, t: 0, sp: .008 + Math.random() * .008, up: v >= 0, s: .7 + Math.random() * .9 });
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
-    ctx.fillStyle = DK_COL.text; ctx.font = `600 ${narrow ? 10 : 11}px monospace`;
+    ctx.fillStyle = DK_COL.text; ctx.font = `600 ${narrow ? 9.5 : 11}px monospace`;
     ctx.fillText(`${dkName(s.underlying)}${narrow ? "" : " " + (s.position === "LONG" ? "L" : "S")}`, X0 - 8, L.y - 6);
-    ctx.fillStyle = v >= 0 ? DK_COL.up : DK_COL.down; ctx.font = `500 ${narrow ? 9.5 : 10.5}px monospace`;
+    ctx.fillStyle = v >= 0 ? DK_COL.up : DK_COL.down; ctx.font = `500 ${narrow ? 9 : 10.5}px monospace`;
     ctx.fillText(s.pos_upnl == null ? "–" : dkSgn(v), X0 - 8, L.y + 7);
   }
   if (!desk.lanes.length) { ctx.fillStyle = DK_COL.muted; ctx.textAlign = "left"; ctx.font = "500 12px monospace"; ctx.fillText("No open positions: the streams appear when a strategy enters a trade.", 16, 24); }
