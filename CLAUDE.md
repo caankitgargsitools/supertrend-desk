@@ -233,8 +233,8 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   loss); activity list; stats bar. Animation runs only while the page is open and visible (`deskStop`). Test:
   `tests/ui/ui_desk.mjs` (args: theme width).
 - **Same page after a refresh** (3 Nov 2026, Papa): `savePage` stores the page, the open strategy and the Strategies tab in
-  this browser (localStorage `lastPage`, per user) on every page change; start-up reads it before the default list page
-  and `restorePage` reopens it after the data loads (admin pages only for admins; a strategy that no longer exists → the
+  this browser (localStorage `lastPage`, per user) on every page change; start-up reads it and, when a saved page will be reopened, keeps the loading card up
+  instead of the Strategies list (no flash; Papa, 3 Nov), then `restorePage` reopens it after the data loads (admin pages only for admins; a strategy that no longer exists → the
   list; links with ?s= / ?lab= … still win). Test: `tests/ui/ui_refresh.mjs` (args: theme width).
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags

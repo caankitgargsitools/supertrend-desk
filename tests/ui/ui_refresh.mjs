@@ -49,11 +49,17 @@ await p.addInitScript(([uid, email]) => {
 await p.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
 await p.goto("http://localhost:8765/index.html"); await p.waitForTimeout(1500);
 const fail = (m, x) => { console.log("FAIL", m, JSON.stringify(x ?? "")); process.exit(1); };
+// Record whether the Strategies list is ever shown while the page loads (it must not flash before the saved page).
+await p.addInitScript(() => { window.__listShown = false; document.addEventListener("DOMContentLoaded", () => {
+  const el = document.getElementById("listPane"); if (!el) return;
+  new MutationObserver(() => { if (!el.hidden) window.__listShown = true; }).observe(el, { attributes: true, attributeFilter: ["hidden"] }); }); });
 const reload = async () => { await p.reload(); await p.waitForTimeout(1800); return p.evaluate(() => ({ page, selected, lpTab })); };
 await p.evaluate(() => showPage("desk")); await p.waitForTimeout(500);
 let st = await reload(); if (st.page !== "desk") fail("desk after refresh", st);
+if (await p.evaluate(() => window.__listShown)) fail("the Strategies list flashed before the Desk");
 await p.evaluate(() => openCap()); await p.waitForTimeout(500);
 st = await reload(); if (st.page !== "cap") fail("capital after refresh", st);
+if (await p.evaluate(() => window.__listShown)) fail("the Strategies list flashed before Capital");
 await p.evaluate(() => openStrat("gm")); await p.waitForTimeout(500);
 st = await reload(); if (st.page !== "strat" || st.selected !== "gm") fail("strategy after refresh", st);
 await p.evaluate(() => { showPage("list"); setLpTab("trades"); }); await p.waitForTimeout(500);

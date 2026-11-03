@@ -6014,16 +6014,19 @@ function savePage() {
 function readSavedPage() { try { const v = JSON.parse(localStorage.getItem("lastPage") || "null"); return v && typeof v.page === "string" ? v : null; } catch { return null; } }
 const ADMIN_PAGES = new Set(["admin", "ideas", "pred", "combo", "health", "spread", "lab"]);
 function restorePage(v) {
-  if (!v || !me || v.user !== me.user_id || ["terms", "pass", "list"].includes(v.page) && !(v.page === "list" && v.tab && v.tab !== "all")) return;
-  if (ADMIN_PAGES.has(v.page) && !isAdmin()) return;
+  if (!v || !me || v.user !== me.user_id || ["terms", "pass"].includes(v.page)) return false;
+  if (v.page === "list" && !(v.tab && v.tab !== "all")) return false;
+  if (ADMIN_PAGES.has(v.page) && !isAdmin()) return false;
   try {
-    if (v.page === "strat") { if (v.sel && (state.strategies || []).some((x) => x.id === v.sel)) openStrat(v.sel); }
+    if (v.page === "strat") { if (!(v.sel && (state.strategies || []).some((x) => x.id === v.sel))) return false; openStrat(v.sel); }
     else if (v.page === "cap") openCap();
     else if (v.page === "lab") openLab();
     else if (v.page === "conn") openConn();
     else if (v.page === "list") { showPage("list"); setLpTab(v.tab); }
-    else showPage(v.page);
-  } catch { /* the page may not exist any more: stay on the list */ }
+    else if ($(v.page + "Pane") || v.page === "admin" || v.page === "market" || v.page === "wallet") showPage(v.page);
+    else return false;
+    return true;
+  } catch { return false; /* the page may not exist any more: the caller opens the list */ }
 }
 function showPage(name) {
   if (name !== "cap") closeCap();
@@ -8917,9 +8920,12 @@ async function enterDesk(session) {
   applyRole();
   if (isAdmin()) await loadAdminUsers().catch(() => null);
   if (!me.terms_accepted) { $("nav").hidden = true; showPage("terms"); return; }
-  const resume = readSavedPage();
-  $("nav").hidden = false; page = "list";
-  pageRestoring = true; showPage("list"); setTimeout(() => { pageRestoring = false; }, 0);
+  // Coming back to a saved page: keep the loading card up until the data is in, then open that page directly, so the
+  // Strategies list never flashes first (Papa, 3 Nov).
+  const saved = readSavedPage(), resume = !location.search && saved && saved.user === me.user_id && saved.page !== "list" && saved.page !== "terms" && saved.page !== "pass" ? saved : null;
+  $("nav").hidden = false;
+  if (resume) { page = "loading"; $("emptyPane").hidden = false; $("emptyPane").querySelector(".working") && ($("emptyPane").querySelector(".working").lastChild.textContent = "Loading…"); }
+  else { page = "list"; pageRestoring = true; showPage("list"); setTimeout(() => { pageRestoring = false; }, 0); }
   try { await loadCryptoPresets(); } catch (e) { console.error("crypto coins", e); }
   loadDelta().catch(() => null);
   try { await loadAll(); }
@@ -8933,7 +8939,8 @@ async function enterDesk(session) {
   timer = setInterval(async () => { if (document.hidden || !marketOpen() || pending || btPoll) return; try { await loadAll(); } catch {} }, 60000);
   pollMarks();
   loadNotifyCard().catch(() => {});
-  if (!location.search) restorePage(resume);
+  if (resume) { if (!restorePage(resume)) showPage("list"); }
+  else if (!location.search && saved && saved.page === "list") restorePage(saved);
   openDeepLink(location.href);
 }
 /** Links from notifications: ?s=<strategy> opens it, ?lab=1 the Strategy Lab, ?combo=1 Combinations, ?conn=1 Connections. */
