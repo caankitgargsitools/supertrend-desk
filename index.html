@@ -7708,6 +7708,7 @@ function deskAgents(ctx, T, narrow) {
   const X0 = desk.X0, paused = desk.paused;
   ctx.save(); ctx.lineWidth = 1; ctx.setLineDash([3, 5]); ctx.lineDashOffset = -T * 28;
   desk.agents.forEach((a, ai) => desk.lanes.forEach((L, li) => {
+    if (deskClosed(L.s)) return; // no agent streams to an asset whose market is shut
     const k = desk.links[ai] && desk.links[ai][li]; if (!k) return;
     const on = Math.sin(T * k.f + k.ph); if (on < .4) return; // each link lights up now and then
     const al = (on - .4) / .6, sx = a.x - (narrow ? 13 : 15), tx = X0 - 4, ty = L.y, mx = (sx + tx) / 2, my = (a.y + ty) / 2 + (a.y - desk.H / 2) * .6;
@@ -7745,6 +7746,12 @@ function deskDot(edge) {
   return { x: desk.CX + Math.cos(a) * r * .85, y: desk.CY + Math.sin(a) * r * .85, vx: 0, vy: 0, size: .8 + Math.random() * 1.8, born: edge ? 0 : 1, die: 0, warm: Math.random() < .55 };
 }
 function deskFill() { const n = Math.round(deskTarget()); while (desk.pool.length < n) desk.pool.push(deskDot(false)); }
+/** Market shut for this position's asset (NSE / MCX hours and holidays; crypto never shuts), checked every 2 seconds. */
+function deskClosed(s) {
+  const now = Date.now(); if (!desk.closedAt || now - desk.closedAt > 2000) { desk.closedAt = now; desk.closed = new Map(); }
+  if (!desk.closed.has(s.id)) desk.closed.set(s.id, !marketOpenFor(s.data_segment));
+  return desk.closed.get(s.id);
+}
 /** This frame's path of a stream: the last part sways (control point and end move on their own rhythms) — a snake's tail. */
 function deskWiggle(L, T) {
   const [a, b, c, d] = L.p, R = desk.R, k = L.ph, f = L.f;
@@ -7767,10 +7774,16 @@ function deskDraw() {
   // streams: a base line, a steady trickle of small dots, labels
   for (const [li, L] of desk.lanes.entries()) {
     const s = L.s, v = Number(s.pos_upnl) || 0, c = v >= 0 ? "46,212,127" : "255,92,108", w = 1 + Math.max(0, Math.min(5, Math.log10(Math.max(10, Number(s.pos_margin) || 10)) - 3.6));
-    deskWiggle(L, T); const P = L.cur;
-    ctx.strokeStyle = `rgba(${c},.2)`; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(...P[0]); ctx.bezierCurveTo(...P[1], ...P[2], ...P[3]); ctx.stroke();
-    ctx.fillStyle = `rgba(${c},.7)`; ctx.beginPath(); ctx.arc(P[3][0], P[3][1], 1.8, 0, Math.PI * 2); ctx.fill(); // the head of the snake
-    if (!paused && Math.random() < .22 + w * .04) desk.amb.push({ lane: li, t: 0, sp: .008 + Math.random() * .008, up: v >= 0, s: .7 + Math.random() * .9 });
+    deskWiggle(L, T); const P = L.cur, shut = deskClosed(s);
+    if (shut) { // market closed for this asset: no stream into the cloud, a big red dot beside the name (Papa, 3 Nov)
+      const pr = 5.5 + .8 * Math.sin(T * 2.2);
+      ctx.fillStyle = "#ff3b4f"; ctx.shadowColor = "#ff3b4f"; ctx.shadowBlur = 10; ctx.beginPath(); ctx.arc(X0 + 7, L.y, pr, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+      ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillStyle = "rgba(255,92,108,.85)"; ctx.font = `600 ${narrow ? 8 : 9}px monospace`; ctx.fillText("MARKET CLOSED", X0 + 18, L.y);
+    } else {
+      ctx.strokeStyle = `rgba(${c},.2)`; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(...P[0]); ctx.bezierCurveTo(...P[1], ...P[2], ...P[3]); ctx.stroke();
+      ctx.fillStyle = `rgba(${c},.7)`; ctx.beginPath(); ctx.arc(P[3][0], P[3][1], 1.8, 0, Math.PI * 2); ctx.fill(); // the head of the snake
+      if (!paused && Math.random() < .22 + w * .04) desk.amb.push({ lane: li, t: 0, sp: .008 + Math.random() * .008, up: v >= 0, s: .7 + Math.random() * .9 });
+    }
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
     ctx.fillStyle = DK_COL.text; ctx.font = `600 ${narrow ? 9.5 : 11}px monospace`;
     ctx.fillText(`${dkName(s.underlying)}${narrow ? "" : " " + (s.position === "LONG" ? "L" : "S")}`, X0 - 8, L.y - 6);
@@ -7780,7 +7793,7 @@ function deskDraw() {
   if (!desk.lanes.length) { ctx.fillStyle = DK_COL.muted; ctx.textAlign = "left"; ctx.font = "500 12px monospace"; ctx.fillText("No open positions: the streams appear when a strategy enters a trade.", 16, 24); }
   for (const a of desk.amb) { if (!paused) a.t += a.sp; const L = desk.lanes[a.lane]; if (!L) continue; const [x, y] = deskBez(L, Math.min(1, a.t));
     ctx.fillStyle = a.up ? "rgba(46,212,127,.55)" : "rgba(255,92,108,.55)"; ctx.beginPath(); ctx.arc(x, y, a.s, 0, Math.PI * 2); ctx.fill(); }
-  desk.amb = desk.amb.filter((a) => a.t < 1 && desk.lanes[a.lane]);
+  desk.amb = desk.amb.filter((a) => a.t < 1 && desk.lanes[a.lane] && !deskClosed(desk.lanes[a.lane].s));
   // a price move: bright dots with light trails
   for (const m of desk.movers) {
     if (!paused) m.t += m.sp;

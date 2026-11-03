@@ -71,6 +71,13 @@ await p.waitForTimeout(200);
 if (!(await p.evaluate(() => desk.movers.some((x) => !x.up)))) fail("red dots");
 await p.waitForTimeout(3500);
 const after2 = await p.evaluate(() => desk.pool.length); if (!(after2 < after)) fail("pool thinner", [after, after2]);
+// A shut market: no trickle or agent streams for that asset, others carry on.
+await p.evaluate(() => { desk.closedAt = Date.now() + 1e9; desk.closed = new Map([["g1", true], ["g3", true], ["sol2", false]]); desk.amb = []; });
+await p.waitForTimeout(800);
+const amb = await p.evaluate(() => desk.amb.map((a) => desk.lanes[a.lane].s.id));
+if (amb.some((id) => id !== "sol2") || !amb.length) fail("closed markets send no stream", amb);
+await p.screenshot({ path: `desk_closed_${theme}_${width}.png` });
+await p.evaluate(() => { desk.closedAt = 0; });
 const sw = await p.evaluate(() => document.documentElement.scrollWidth); if (sw > width + 1) fail("page scrolls sideways", sw);
 await p.screenshot({ path: `desk_${theme}_${width}.png`, fullPage: true });
 if (errs.length) fail("page errors", errs);
