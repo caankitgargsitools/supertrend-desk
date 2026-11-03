@@ -98,6 +98,15 @@ await p.evaluate(() => { desk.closedAt = 0; });
 // Asset names fit inside the panel (no label starts left of the canvas).
 const fit = await p.evaluate(() => { const c = document.getElementById("dk_cv").getContext("2d"); c.font = "600 9.5px monospace"; return desk.lanes.every((L) => desk.X0 - 8 - Math.min(c.measureText(dkName(L.s.underlying)).width, desk.X0 - 12) >= 0); });
 if (!fit) fail("asset names fit");
+// Full screen: the profit flow fills the screen; Esc and the same button close it.
+await p.click("#dk_fs"); await p.waitForTimeout(400);
+let fs = await p.evaluate(() => ({ full: document.querySelector(".dk-flow").classList.contains("full"), h: desk.H, w: desk.W, vh: innerHeight, vw: innerWidth }));
+if (!fs.full || fs.h < fs.vh * .8 || fs.w < fs.vw * .95) fail("full screen fills the screen", fs);
+await p.screenshot({ path: `desk_full_${theme}_${width}.png` });
+await p.keyboard.press("Escape"); await p.waitForTimeout(300);
+if (await p.evaluate(() => document.querySelector(".dk-flow").classList.contains("full"))) fail("Esc closes full screen");
+await p.click("#dk_fs"); await p.waitForTimeout(200); await p.click("#dk_fs"); await p.waitForTimeout(300);
+if (await p.evaluate(() => document.querySelector(".dk-flow").classList.contains("full"))) fail("the button closes full screen");
 const sw = await p.evaluate(() => document.documentElement.scrollWidth); if (sw > width + 1) fail("page scrolls sideways", sw);
 await p.screenshot({ path: `desk_${theme}_${width}.png`, fullPage: true });
 if (errs.length) fail("page errors", errs);

@@ -908,6 +908,13 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-foot > div { background: var(--dk-panel); padding: 8px 10px; min-width: 0; }
 @media (max-width: 760px) { .dk-foot { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { .dk-run { animation-duration: 200s; } }
+
+/* Profit flow full screen (Papa, 3 Nov): the panel fills the screen; the canvas takes all the room between header and footer. */
+.dk-fs { padding: 4px 6px; line-height: 0; }
+.dk-flow.full { position: fixed; inset: 0; z-index: 1000; border-radius: 0; border: 0; display: flex; flex-direction: column; background: var(--dk-ink);
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+.dk-flow.full #dk_cv { flex: 1 1 auto; height: auto; min-height: 0; }
+body.dk-fs-on { overflow: hidden; }
 </style>
 </head>
 <body>
@@ -1583,7 +1590,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
           <div class="dk-barrow"><div class="dk-lr"><span>Margin by asset</span></div><div class="dk-bar" id="dk_abar" style="height:10px"></div><div class="dk-legend" id="dk_aleg"></div></div>
         </div>
         <div class="dk-panel dk-flow">
-          <div class="dk-ph" style="padding:12px 12px 0"><span class="dk-lbl"><b>●</b> Profit flow · each open position streams into the pool</span><span class="dk-lbl" id="dk_flowcount"></span></div>
+          <div class="dk-ph" style="padding:12px 12px 0"><span class="dk-lbl"><b>●</b> Profit flow · each open position streams into the pool</span><span style="display:inline-flex;gap:10px;align-items:center"><span class="dk-lbl" id="dk_flowcount"></span><button class="dk-btn dk-fs" id="dk_fs" type="button" aria-pressed="false" aria-label="Full screen" title="Full screen"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></span></div>
           <canvas id="dk_cv" aria-label="Each open position sends green dots into the pool when it gains and red dots when it loses; the pool is denser the bigger the running profit"></canvas>
           <div class="dk-flowfoot"><span><span class="dk-up">● gain</span> &nbsp;<span class="dk-down">● loss</span> &nbsp;· live prices, every second while markets are open</span><button class="dk-btn" id="dk_pause" type="button">Pause</button></div>
         </div>
@@ -7642,7 +7649,7 @@ const dkSgn = (x) => (x > 0 ? "+" : "") + rupees(x);
 const dkLabId = (s) => String(s.name || "").split(" · ")[0];
 function deskStrats() { return myStrats().filter((x) => !x.archived && (!!x.live === (desk.mode === "LIVE"))); }
 function dkOpen() { return deskStrats().filter((x) => x.position !== "FLAT"); }
-function deskStop() { if (desk.raf) cancelAnimationFrame(desk.raf); desk.raf = 0; clearInterval(desk.clock); desk.clock = 0; }
+function deskStop() { if ($("dk_cv") && $("dk_cv").closest(".dk-flow").classList.contains("full")) { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); deskFull(false); } if (desk.raf) cancelAnimationFrame(desk.raf); desk.raf = 0; clearInterval(desk.clock); desk.clock = 0; }
 async function renderDesk() {
   if (!desk.mode) desk.mode = myStrats().some((x) => !x.archived && x.live && x.active) ? "LIVE" : "PAPER";
   $("dk_mode").querySelectorAll("[data-m]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.m === desk.mode)));
@@ -7735,7 +7742,7 @@ function deskLayout() {
   // Phone: shorter labels and a cloud that takes about half the width (Papa, 3 Nov).
   // Phone: the label column is as wide as the longest asset name needs (up to a third of the width); longer names wrap.
   if (narrow) { const m = cv.getContext("2d"); m.font = "600 9.5px monospace"; const widest = Math.max(40, ...dkOpen().map((s) => m.measureText(dkName(s.underlying)).width)); desk.X0 = Math.round(Math.min(desk.W * .34, widest + 14)); }
-  else desk.X0 = 138; desk.R = narrow ? Math.max(90, Math.min(desk.H * .4, (desk.W - desk.X0) * .5)) : Math.max(80, Math.min(desk.H * .46, (desk.W - desk.X0) * .36));
+  else { const m = cv.getContext("2d"); m.font = "600 11px monospace"; const widest = Math.max(80, ...dkOpen().map((s) => m.measureText(dkName(s.underlying) + " L").width)); desk.X0 = Math.round(Math.max(138, Math.min(desk.W * .3, widest + 20))); } desk.R = narrow ? Math.max(90, Math.min(desk.H * .4, (desk.W - desk.X0) * .5)) : Math.max(80, Math.min(desk.H * .46, (desk.W - desk.X0) * .36));
   desk.CX = narrow ? desk.W - desk.R * .95 : desk.W - desk.R - 24; desk.CY = desk.H / 2;
   // Decorative agents (Papa, 3 Nov: "just for decor", no data and no decisions behind them): a column on the right-hand side,
   // below the running P&L box, overlapping the cloud a little.
@@ -8084,6 +8091,24 @@ addEventListener("resize", () => { if (page === "desk") { clearTimeout(deskCvpDr
 // Keep the live end current: redraw every 5 s, fetch new snapshots every 5 minutes while the Desk is open.
 setInterval(() => { if (page !== "desk" || document.hidden || !dkCvp.span) return;
   if (Date.now() - dkCvp.at > 300e3 && !dkCvp.zoom && !dkCvp.from) deskCvpLoad().catch(() => {}); else if (!dkCvp.hover) { deskCvpBuild(); deskCvpDraw(); } }, 5000);
+
+/* Full screen for the profit flow: the browser's own full screen where it allows it (computers, Android), else the panel
+   covers the page (iPhone). The same button, Esc or the browser's own exit closes it. */
+function deskFull(on) {
+  const box = $("dk_cv").closest(".dk-flow"), btn = $("dk_fs");
+  box.classList.toggle("full", on); document.body.classList.toggle("dk-fs-on", on);
+  btn.setAttribute("aria-pressed", String(on)); btn.title = on ? "Exit full screen" : "Full screen"; btn.setAttribute("aria-label", btn.title);
+  btn.innerHTML = on ? '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    : '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  requestAnimationFrame(() => { deskLayout(); desk.pool = []; desk.amb = []; deskFill(); });
+}
+$("dk_fs").addEventListener("click", () => {
+  const box = $("dk_cv").closest(".dk-flow"), on = !box.classList.contains("full");
+  if (on) { deskFull(true); try { if (box.requestFullscreen && !document.fullscreenElement) box.requestFullscreen().catch(() => {}); } catch {} }
+  else { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); deskFull(false); }
+});
+document.addEventListener("fullscreenchange", () => { const box = $("dk_cv").closest(".dk-flow"); if (!document.fullscreenElement && box.classList.contains("full")) deskFull(false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("dk_cv").closest(".dk-flow").classList.contains("full")) deskFull(false); });
 $("nav_desk").addEventListener("click", () => showPage("desk"));
 $("dk_mode").querySelectorAll("[data-m]").forEach((b) => b.addEventListener("click", () => { desk.mode = b.dataset.m; withLoading($("deskPane"), renderDesk()).catch((e) => toast(errorText(e))); }));
 $("dk_pause").addEventListener("click", () => { desk.paused = !desk.paused; $("dk_pause").textContent = desk.paused ? "Resume" : "Pause"; });
