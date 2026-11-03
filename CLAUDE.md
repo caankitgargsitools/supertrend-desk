@@ -225,8 +225,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   NSE / MCX / Delta open lights; account card (running P&L from `pos_upnl`, booked = sum of the mode's `algo_trades`
   incl. archived strategies, win rate, margin in use vs the saved limit, long / short, margin by asset); **profit flow**
   canvas (Papa's design): one stream per open position into a pool; each live price move (`onMark` → `deskMove`) sends
-  green dots for a gain, red for a loss; the pool's dot count follows the running total (about one per ₹1,500, 120–1,400),
-  red throughout while the total is a loss; drawn as a drifting nebula (Papa, 3 Nov: not round — `deskShape` outline changing with time, swirl, three soft clouds), stream dots about twice the first speed; strategy tiles coloured by running P&L (tap opens the strategy); 3-week
+  green dots for a gain, red for a loss; the pool's dot count follows the running total (about one per ₹1,200, 150–1,500),
+  red throughout while the total is a loss; drawn as the "plasma storm" (Papa, 3 Nov, idea 2 of 6 in a preview): free dots ride a
+  swirling current inside a changing outline (`deskShape`) with light trails, three soft clouds; every stream carries a steady
+  trickle (`desk.amb`), price moves send 2–8 bright dots with trails, at most 3 soft rings at a time; strategy tiles coloured by running P&L (tap opens the strategy); 3-week
   timeline (open positions as bars, closed trades as dots); capital flow (margin: asset → long / short → in profit / in
   loss); activity list; stats bar. Animation runs only while the page is open and visible (`deskStop`). Test:
   `tests/ui/ui_desk.mjs` (args: theme width).
