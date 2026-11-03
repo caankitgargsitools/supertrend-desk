@@ -4154,7 +4154,7 @@ function dhanRateFor(s) {
   return Number(v) > 0 ? Number(v) : null;
 }
 function openCap() {
-  closeLab(); hideNewPanes(); page = "cap"; markNav("openCap"); cap.open = true;
+  closeLab(); hideNewPanes(); page = "cap"; markNav("openCap"); cap.open = true; savePage();
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true; $("capPane").hidden = false;
   document.querySelectorAll("#stratList .strat, #archList .strat").forEach((b) => b.setAttribute("aria-current", "false"));
   $("openCap").classList.add("primary");
@@ -4459,7 +4459,7 @@ function labChecking(r, m) { const x = robOf(r); return !!(m && m.passed) && r.b
 const ratioTxt = (v) => v == null ? "–" : `${v}×`;
 function labMetricsFor(r) { return lab.view === "FUT" ? r.metrics : lab.view === "BUY" ? r.ob && r.ob.metrics : lab.view === "SPREAD" ? r.osp && r.osp.metrics : r.os && r.os.metrics; }
 function openLab() {
-  closeCap(); hideNewPanes(); stopIdeasPoll(); stopPredPoll(); page = "lab"; markNav("openLab"); document.body.classList.add("wide");
+  closeCap(); hideNewPanes(); stopIdeasPoll(); stopPredPoll(); page = "lab"; markNav("openLab"); document.body.classList.add("wide"); savePage();
   lab.open = true;
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true; $("labPane").hidden = false;
   document.querySelectorAll("#stratList .strat, #archList .strat").forEach((b) => b.setAttribute("aria-current", "false"));
@@ -6005,11 +6005,32 @@ const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPa
 function hideNewPanes() { NEW_PANES.forEach((id) => $(id).hidden = true); }
 function markNav(id) { document.querySelectorAll("#nav .btn").forEach((b) => b.id === id ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")); }
 /** One page at a time: list, strat, market, wallet, admin, conn, cap, lab, terms. */
+/* ---------- stay on the same page after a refresh (Papa, 3 Nov): page, open strategy and Strategies tab, per browser ---------- */
+let pageRestoring = false;
+function savePage() {
+  if (pageRestoring || !me) return;
+  try { localStorage.setItem("lastPage", JSON.stringify({ page, sel: page === "strat" ? selected : null, tab: lpTab, user: me.user_id })); } catch {}
+}
+function readSavedPage() { try { const v = JSON.parse(localStorage.getItem("lastPage") || "null"); return v && typeof v.page === "string" ? v : null; } catch { return null; } }
+const ADMIN_PAGES = new Set(["admin", "ideas", "pred", "combo", "health", "spread", "lab"]);
+function restorePage(v) {
+  if (!v || !me || v.user !== me.user_id || ["terms", "pass", "list"].includes(v.page) && !(v.page === "list" && v.tab && v.tab !== "all")) return;
+  if (ADMIN_PAGES.has(v.page) && !isAdmin()) return;
+  try {
+    if (v.page === "strat") { if (v.sel && (state.strategies || []).some((x) => x.id === v.sel)) openStrat(v.sel); }
+    else if (v.page === "cap") openCap();
+    else if (v.page === "lab") openLab();
+    else if (v.page === "conn") openConn();
+    else if (v.page === "list") { showPage("list"); setLpTab(v.tab); }
+    else showPage(v.page);
+  } catch { /* the page may not exist any more: stay on the list */ }
+}
 function showPage(name) {
   if (name !== "cap") closeCap();
   if (name !== "lab") closeLab();
   if (name !== "strat") { stopBtPoll(); closeConfirm(); }
   page = name;
+  setTimeout(savePage, 0);
   hideNewPanes();
   $("stratPane").hidden = true; $("emptyPane").hidden = true; $("connCard").hidden = true;
   const navId = { list: "nav_strats", strat: "nav_strats", market: "nav_market", wallet: "nav_wallet", admin: "nav_admin", conn: "openSettings", cap: "openCap", lab: "openLab", ideas: "nav_ideas", pred: "nav_pred", cmp: "nav_cmp", combo: "nav_combo", health: "nav_health", spread: "nav_spread", desk: "nav_desk" }[name];
@@ -6039,7 +6060,7 @@ function showPage(name) {
 }
 async function openStrat(id) {
   closeLab(); closeCap(); hideNewPanes(); stopIdeasPoll(); stopPredPoll(); $("connCard").hidden = true; page = "strat"; markNav("nav_strats");
-  selected = id; formDirty = false; closeConfirm(); stopBtPoll(); $("btResult").innerHTML = ""; $("logBody").innerHTML = ""; $("publishBox").hidden = true;
+  selected = id; savePage(); formDirty = false; closeConfirm(); stopBtPoll(); $("btResult").innerHTML = ""; $("logBody").innerHTML = ""; $("publishBox").hidden = true;
   renderStrategy(); window.scrollTo({ top: 0 });
   trMode = null; if (currentTab === "tr") loadStratTrades().catch((e) => toast(errorText(e)));
   try { await withLoading($("stratPane"), loadDetail()); } catch (e) { toast(errorText(e)); }
@@ -6823,7 +6844,7 @@ $("of_toggle").addEventListener("click", () => { const box = $("of_box"), on = !
 let lpTab = "all";
 const lvOpen = new Set();
 function setLpTab(t) {
-  lpTab = t;
+  lpTab = t; savePage();
   document.querySelectorAll("#lp_tabs [data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === t)));
   $("lp_all_box").hidden = t !== "all"; $("lp_live_box").hidden = t !== "live"; $("lp_trades_box").hidden = t !== "trades"; $("lp_orders_box").hidden = t !== "orders";
   clearTimeout(ordTimer); if (t === "orders") withLoading($("lp_orders_box"), loadOrders()).catch((e) => toast(errorText(e)));
@@ -8896,8 +8917,9 @@ async function enterDesk(session) {
   applyRole();
   if (isAdmin()) await loadAdminUsers().catch(() => null);
   if (!me.terms_accepted) { $("nav").hidden = true; showPage("terms"); return; }
+  const resume = readSavedPage();
   $("nav").hidden = false; page = "list";
-  showPage("list");
+  pageRestoring = true; showPage("list"); setTimeout(() => { pageRestoring = false; }, 0);
   try { await loadCryptoPresets(); } catch (e) { console.error("crypto coins", e); }
   loadDelta().catch(() => null);
   try { await loadAll(); }
@@ -8911,6 +8933,7 @@ async function enterDesk(session) {
   timer = setInterval(async () => { if (document.hidden || !marketOpen() || pending || btPoll) return; try { await loadAll(); } catch {} }, 60000);
   pollMarks();
   loadNotifyCard().catch(() => {});
+  if (!location.search) restorePage(resume);
   openDeepLink(location.href);
 }
 /** Links from notifications: ?s=<strategy> opens it, ?lab=1 the Strategy Lab, ?combo=1 Combinations, ?conn=1 Connections. */
