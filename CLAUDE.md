@@ -238,8 +238,8 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   points)` returns them bucketed (~600 points) plus the first snapshot's time. Desk panel `#dk_cvp_box` (`dkCvp`,
   `deskCvpLoad` / `deskCvpBuild` / `deskCvpDraw`): shaded capital deployed (right scale) and a profit line (left scale,
   green above zero, red below) — tabs Realised / Running / Total, periods 1D–1Y / All, From–To dates, drag to zoom (Reset
-  zoom), Expand, hover read-out (deployed, profit, profit ÷ deployed). Before the first snapshot (1 Nov 2026 18:52 for Papa's
-  paper desk… first rows 3 Nov) deployed is estimated from closed trades (entry price × units × today's margin rate, dashed)
+  zoom), Expand, hover read-out (deployed, profit, profit ÷ deployed). Before the first snapshot (first rows 3 Nov 2026, 18:44 IST)
+  deployed is estimated from closed trades (entry price × units × today's margin rate, dashed)
   and running P&L isn't on record; the live end is the current state. Tested in `tests/ui/ui_desk.mjs`.
 - **Same page after a refresh** (3 Nov 2026, Papa): `savePage` stores the page, the open strategy and the Strategies tab in
   this browser (localStorage `lastPage`, per user) on every page change; start-up reads it and, when a saved page will be reopened, keeps the loading card up
