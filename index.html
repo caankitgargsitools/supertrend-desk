@@ -7673,7 +7673,7 @@ function deskMove(s, delta) {
   desk.feed.length = Math.min(desk.feed.length, 30);
   let lane = desk.lanes.findIndex((L) => L.s.id === s.id);
   if (lane < 0) { deskLayout(); lane = desk.lanes.findIndex((L) => L.s.id === s.id); }
-  if (lane >= 0) { const n = Math.max(1, Math.min(5, Math.round(Math.abs(delta) / 2500))); for (let i = 0; i < n; i++) desk.movers.push({ lane, t: -i * .05, sp: .007 + Math.random() * .004, v: delta / n, up: delta > 0 }); }
+  if (lane >= 0) { const n = Math.max(1, Math.min(5, Math.round(Math.abs(delta) / 2500))); for (let i = 0; i < n; i++) desk.movers.push({ lane, t: -i * .05, sp: .014 + Math.random() * .008, v: delta / n, up: delta > 0 }); }
   if (!deskMove.q) deskMove.q = setTimeout(() => { deskMove.q = 0; if (page === "desk") deskPaint(); }, 400);
 }
 function deskLayout() {
@@ -7685,7 +7685,7 @@ function deskLayout() {
   desk.X0 = narrow ? 104 : 168; desk.R = Math.max(70, Math.min(desk.H * .4, (desk.W - desk.X0) * .3));
   desk.CX = desk.W - desk.R - (narrow ? 14 : 34); desk.CY = desk.H / 2;
   const o = dkOpen().slice().sort((a, b) => (Number(b.pos_upnl) || 0) - (Number(a.pos_upnl) || 0)), top = 26, laneH = (desk.H - top * 2) / Math.max(1, o.length);
-  desk.lanes = o.map((s, i) => { const y = top + laneH * (i + .5), ey = desk.CY + (y - desk.CY) * .32, ex = desk.CX - desk.R * .92;
+  desk.lanes = o.map((s, i) => { const y = top + laneH * (i + .5), ey = desk.CY + (y - desk.CY) * .25, ex = desk.CX - desk.R * .55;
     return { s, y, p: [[desk.X0, y], [desk.X0 + (ex - desk.X0) * .45, y], [desk.X0 + (ex - desk.X0) * .6, ey], [ex, ey]] }; });
   desk.movers = desk.movers.filter((m) => m.lane < desk.lanes.length);
 }
@@ -7693,7 +7693,10 @@ const deskRun = () => dkOpen().reduce((a, s) => a + (Number(s.pos_upnl) || 0), 0
 /** About one dot per ₹1,500 of running profit (120–1,400). */
 const deskTarget = () => Math.max(120, Math.min(1400, 300 + deskRun() / 1500));
 function deskDot(edge) { const R = desk.R, r = R * (Math.random() < .6 ? .5 * Math.pow(Math.random(), .8) : .35 + .65 * Math.random());
-  return { r, a: Math.random() * Math.PI * 2, w: (Math.random() - .5) * .004 * (1.4 - r / R), size: .9 + Math.random() * 1.7, born: edge ? 0 : 1, die: 0, warm: Math.random() < .55 }; }
+  return { r, a: Math.random() * Math.PI * 2, w: (Math.random() - .5) * .011 * (1.4 - r / R), size: .9 + Math.random() * 1.7, born: edge ? 0 : 1, die: 0, warm: Math.random() < .55,
+    j: 2 + Math.random() * 7, f: .6 + Math.random() * 1.8, ph: Math.random() * 6.3 }; }
+/** The nebula's outline at angle a and time T: a slowly changing, uneven shape (about 0.6–1.35 of the radius). */
+const deskShape = (a, T) => 1 + .2 * Math.sin(3 * a + T * .7) + .12 * Math.sin(5 * a - T * 1.1 + 1) + .08 * Math.sin(2 * a + T * .45 + 2);
 function deskFill() { const n = Math.round(deskTarget()); while (desk.pool.length < n) desk.pool.push(deskDot(false)); }
 function deskBez(L, t) { const u = 1 - t, [a, b, c, d] = L.p; return [u * u * u * a[0] + 3 * u * u * t * b[0] + 3 * u * t * t * c[0] + t * t * t * d[0], u * u * u * a[1] + 3 * u * u * t * b[1] + 3 * u * t * t * c[1] + t * t * t * d[1]]; }
 function deskDraw() {
@@ -7702,10 +7705,14 @@ function deskDraw() {
   const ctx = $("dk_cv").getContext("2d"), { W, H, R, CX, CY, X0 } = desk, paused = desk.paused, narrow = W < 560;
   ctx.clearRect(0, 0, W, H);
   const tot = deskRun(), good = tot >= 0;
-  const g = ctx.createRadialGradient(CX, CY, R * .05, CX, CY, R * 1.15);
-  g.addColorStop(0, good ? "rgba(46,212,127,.20)" : "rgba(255,92,108,.20)"); g.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(CX, CY, R * 1.15, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = DK_COL.line; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(CX, CY, R, 0, Math.PI * 2); ctx.stroke();
+  // Nebula: the centre drifts, three soft clouds circle it (green / teal / blue in profit, red / orange / violet in loss).
+  const T = performance.now() / 1000, NX = CX + R * .05 * Math.sin(T * .3), NY = CY + R * .06 * Math.cos(T * .23), RB = R * .82;
+  const clouds = good ? ["46,212,127", "46,196,198", "90,168,255"] : ["255,92,108", "255,138,76", "180,140,255"];
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  clouds.forEach((c, i) => { const ang = T * (.18 + i * .07) + i * 2.1, ox = NX + Math.cos(ang) * RB * .35, oy = NY + Math.sin(ang * 1.3) * RB * .3, rad = RB * (.75 + .15 * Math.sin(T * .5 + i));
+    const cg = ctx.createRadialGradient(ox, oy, 0, ox, oy, rad); cg.addColorStop(0, `rgba(${c},.16)`); cg.addColorStop(1, `rgba(${c},0)`);
+    ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(ox, oy, rad, 0, Math.PI * 2); ctx.fill(); });
+  ctx.restore();
   for (const L of desk.lanes) {
     const s = L.s, v = Number(s.pos_upnl) || 0, c = v >= 0 ? "46,212,127" : "255,92,108", w = 1 + Math.max(0, Math.min(5, Math.log10(Math.max(10, Number(s.pos_margin) || 10)) - 3.5));
     ctx.strokeStyle = `rgba(${c},.22)`; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(...L.p[0]); ctx.bezierCurveTo(...L.p[1], ...L.p[2], ...L.p[3]); ctx.stroke();
@@ -7733,7 +7740,8 @@ function deskDraw() {
   desk.movers = desk.movers.filter((m) => m.t < 1);
   for (const d of desk.pool) {
     if (!paused) { d.a += d.w; if (d.born < 1) d.born = Math.min(1, d.born + .03); if (d.die) d.die += .05; }
-    const rr = d.born < 1 ? R * (1 - d.born) + d.r * d.born : d.r, x = CX + Math.cos(d.a) * rr, y = CY + Math.sin(d.a) * rr, al = d.die ? Math.max(0, 1 - d.die) : .85;
+    const base = (d.born < 1 ? R * (1 - d.born) + d.r * d.born : d.r) * .82, sw = d.a + (base / RB) * 1.1 * Math.sin(T * .25), rr = base * deskShape(sw, T) + d.j * Math.sin(T * d.f + d.ph);
+    const x = NX + Math.cos(sw) * rr, y = NY + Math.sin(sw) * rr * .9, al = d.die ? Math.max(0, 1 - d.die) : .85;
     ctx.fillStyle = d.die ? `rgba(255,92,108,${al})` : !good ? (d.warm ? `rgba(255,92,108,${al})` : `rgba(255,150,120,${al * .7})`) : d.warm ? `rgba(46,212,127,${al})` : `rgba(90,168,255,${al * .65})`;
     ctx.beginPath(); ctx.arc(x, y, d.size, 0, Math.PI * 2); ctx.fill();
   }
@@ -7741,12 +7749,15 @@ function deskDraw() {
   const want = Math.round(deskTarget());
   if (desk.pool.length < want - 40) desk.pool.push(deskDot(true));
   if (desk.pool.length > want + 40) { const d = desk.pool.find((x) => !x.die); if (d) d.die = 1; }
-  for (const f of desk.flashes) { ctx.strokeStyle = f.up ? `rgba(46,212,127,${f.a})` : `rgba(255,92,108,${f.a})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(CX, CY, f.r, 0, Math.PI * 2); ctx.stroke(); if (!paused) { f.r += R * .025; f.a -= .02; } }
+  for (const f of desk.flashes) {
+    ctx.strokeStyle = f.up ? `rgba(46,212,127,${f.a})` : `rgba(255,92,108,${f.a})`; ctx.lineWidth = 2; ctx.beginPath();
+    for (let k = 0; k <= 48; k++) { const an = k / 48 * Math.PI * 2, rr = f.r * deskShape(an, T); k ? ctx.lineTo(NX + Math.cos(an) * rr, NY + Math.sin(an) * rr * .9) : ctx.moveTo(NX + Math.cos(an) * rr, NY + Math.sin(an) * rr * .9); }
+    ctx.stroke(); if (!paused) { f.r += R * .03; f.a -= .025; } }
   desk.flashes = desk.flashes.filter((f) => f.a > 0 && f.r < R * 1.2);
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillStyle = "rgba(9,13,20,.5)"; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(CX - 92, CY - 30, 184, 60, 6); else ctx.rect(CX - 92, CY - 30, 184, 60); ctx.fill();
-  ctx.fillStyle = good ? DK_COL.up : DK_COL.down; ctx.font = `600 ${narrow ? 18 : 22}px monospace`; ctx.fillText(dkSgn(tot), CX, CY - 6);
-  ctx.fillStyle = DK_COL.muted; ctx.font = "500 10px monospace"; ctx.fillText(`RUNNING P&L · ${desk.pool.length} DOTS`, CX, CY + 16);
+  ctx.fillStyle = "rgba(9,13,20,.5)"; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(NX - 92, NY - 30, 184, 60, 6); else ctx.rect(NX - 92, NY - 30, 184, 60); ctx.fill();
+  ctx.fillStyle = good ? DK_COL.up : DK_COL.down; ctx.font = `600 ${narrow ? 18 : 22}px monospace`; ctx.fillText(dkSgn(tot), NX, NY - 6);
+  ctx.fillStyle = DK_COL.muted; ctx.font = "500 10px monospace"; ctx.fillText(`RUNNING P&L · ${desk.pool.length} DOTS`, NX, NY + 16);
   desk.raf = requestAnimationFrame(deskDraw);
 }
 function deskTimeline() {
