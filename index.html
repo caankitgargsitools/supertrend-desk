@@ -7585,7 +7585,7 @@ $("nav_spread").addEventListener("click", () => showPage("spread"));
 /* ---------- Desk (control room; 2 Nov 2026, Papa) ----------
    Running P&L, a profit-flow pool fed by live price moves (green = a position gained, red = it lost; the pool is
    denser the bigger the running profit), strategy tiles, a 3-week timeline, capital flow and activity. */
-const desk = { mode: null, trades: [], feed: [], ticks: 0, raf: 0, paused: false, lanes: [], movers: [], amb: [], pool: [], flashes: [], W: 0, H: 0, R: 0, CX: 0, CY: 0, X0: 0, key: "", clock: 0 };
+const desk = { agentGlow: [], mode: null, trades: [], feed: [], ticks: 0, raf: 0, paused: false, lanes: [], movers: [], amb: [], pool: [], flashes: [], W: 0, H: 0, R: 0, CX: 0, CY: 0, X0: 0, key: "", clock: 0 };
 const DK_COL = { up: "#2ed47f", down: "#ff5c6c", amber: "#f3b23c", blue: "#5aa8ff", muted: "#7c8ba0", dim: "#4b586b", line: "#1e2939", text: "#dbe5f1", ink: "#090d14" };
 const DK_ASSET = ["#5aa8ff", "#f3b23c", "#b48cff", "#2ed4c6", "#ff8a4c", "#9fd356", "#ff6fae", "#7f9bb8", "#e3c76a", "#4cc2ff"];
 const dkName = (u) => assetLabel(u).replace(/\s*\(.*\)\s*$/, "");
@@ -7707,11 +7707,13 @@ function deskAgents(ctx, T, narrow) {
   if (!desk.agents || !desk.lanes.length) return;
   const X0 = desk.X0, paused = desk.paused;
   ctx.save(); ctx.lineWidth = 1; ctx.setLineDash([3, 5]); ctx.lineDashOffset = -T * 28;
+  const act = desk.agents.map(() => 0); // how strongly each agent is sending right now (0–1)
   desk.agents.forEach((a, ai) => desk.lanes.forEach((L, li) => {
     if (deskClosed(L.s)) return; // no agent streams to an asset whose market is shut
     const k = desk.links[ai] && desk.links[ai][li]; if (!k) return;
     const on = Math.sin(T * k.f + k.ph); if (on < .4) return; // each link lights up now and then
-    const al = (on - .4) / .6, sx = a.x - (narrow ? 13 : 15), tx = X0 - 4, ty = L.y, mx = (sx + tx) / 2, my = (a.y + ty) / 2 + (a.y - desk.H / 2) * .6;
+    const al = (on - .4) / .6; act[ai] = Math.max(act[ai], al);
+    const sx = a.x - (narrow ? 13 : 15), tx = X0 - 4, ty = L.y, mx = (sx + tx) / 2, my = (a.y + ty) / 2 + (a.y - desk.H / 2) * .6;
     ctx.strokeStyle = `rgba(${a.c},${(.12 + al * .5).toFixed(3)})`; ctx.beginPath(); ctx.moveTo(sx, a.y); ctx.quadraticCurveTo(mx, my, tx, ty); ctx.stroke();
     if (!paused) k.run = (k.run + .012 * k.f) % 1;
     const t = k.run, u = 1 - t, px = u * u * sx + 2 * u * t * mx + t * t * tx, py = u * u * a.y + 2 * u * t * my + t * t * ty;
@@ -7720,19 +7722,24 @@ function deskAgents(ctx, T, narrow) {
   ctx.setLineDash([]);
   // Each agent: a very small computer (screen, glow, stand) with its name below in the agent's own colour.
   ctx.textBaseline = "top"; ctx.textAlign = "center"; ctx.font = `600 ${narrow ? 8 : 9}px monospace`;
-  for (const a of desk.agents) {
+  desk.agents.forEach((a, ai) => {
     const p = .6 + .4 * Math.sin(T * 2 + a.y), w = narrow ? 24 : 28, h = narrow ? 16 : 19, x = a.x - w / 2, y = a.y - h / 2;
-    ctx.shadowColor = `rgb(${a.c})`; ctx.shadowBlur = 8 * p;
+    // Glows while one of its streams is lit (Papa, 3 Nov): a soft halo behind the computer, brighter frame and screen.
+    const g = desk.agentGlow[ai] = (desk.agentGlow[ai] || 0) * .88 + act[ai] * .12; // eased so it brightens and fades smoothly
+    if (g > .02) { const hr = w * (1 + 1.2 * g), halo = ctx.createRadialGradient(a.x, a.y, 2, a.x, a.y, hr);
+      halo.addColorStop(0, `rgba(${a.c},${(.55 * g).toFixed(3)})`); halo.addColorStop(1, `rgba(${a.c},0)`);
+      ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(a.x, a.y, hr, 0, Math.PI * 2); ctx.fill(); }
+    ctx.shadowColor = `rgb(${a.c})`; ctx.shadowBlur = 6 * p + 26 * g;
     ctx.fillStyle = "rgba(9,13,20,.9)"; ctx.strokeStyle = `rgba(${a.c},.95)`; ctx.lineWidth = 1.5;
     ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, 3); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
     ctx.shadowBlur = 0;
-    ctx.fillStyle = `rgba(${a.c},${(.25 + .35 * p).toFixed(3)})`; ctx.fillRect(x + 3, y + 3, w - 6, h - 6); // lit screen
+    ctx.fillStyle = `rgba(${a.c},${Math.min(.95, .2 + .3 * p + .5 * g).toFixed(3)})`; ctx.fillRect(x + 3, y + 3, w - 6, h - 6); // lit screen
     ctx.fillStyle = `rgba(${a.c},.9)`; ctx.fillRect(x + 5, y + 5, (w - 10) * (.4 + .5 * p), 1.4); ctx.fillRect(x + 5, y + 8.5, (w - 10) * .55, 1.4); ctx.fillRect(x + 5, y + 12, (w - 10) * (.3 + .3 * (1 - p)), 1.4); // text lines on the screen
     ctx.strokeStyle = `rgba(${a.c},.95)`; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(a.x, y + h); ctx.lineTo(a.x, y + h + 4); ctx.moveTo(a.x - 7, y + h + 4.5); ctx.lineTo(a.x + 7, y + h + 4.5); ctx.stroke(); // stand
     const label = (narrow ? a.name.replace(/ agent$/, "") : a.name).toUpperCase();
     ctx.lineJoin = "round"; ctx.lineWidth = 3; ctx.strokeStyle = "rgba(9,13,20,.85)"; ctx.strokeText(label, a.x, y + h + 8); // keeps the name readable over the bright cloud
     ctx.fillStyle = `rgb(${a.c})`; ctx.fillText(label, a.x, y + h + 8);
-  }
+  });
   ctx.restore();
 }
 const deskRun = () => dkOpen().reduce((a, s) => a + (Number(s.pos_upnl) || 0), 0);
