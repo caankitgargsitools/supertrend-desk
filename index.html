@@ -7773,10 +7773,12 @@ function deskDraw() {
     for (let k = 0; k <= 48; k++) { const an = k / 48 * Math.PI * 2, rr = f.r * deskShape(an, T); k ? ctx.lineTo(CX + Math.cos(an) * rr, CY + Math.sin(an) * rr * .92) : ctx.moveTo(CX + Math.cos(an) * rr, CY + Math.sin(an) * rr * .92); }
     ctx.stroke(); if (!paused) { f.r += R * .035; f.a -= .02; } }
   desk.flashes = desk.flashes.filter((f) => f.a > 0);
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillStyle = "rgba(9,13,20,.55)"; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(CX - 92, CY - 28, 184, 56, 6); else ctx.rect(CX - 92, CY - 28, 184, 56); ctx.fill();
-  ctx.fillStyle = good ? DK_COL.up : DK_COL.down; ctx.font = `600 ${narrow ? 18 : 22}px monospace`; ctx.fillText(dkSgn(tot), CX, CY - 6);
-  ctx.fillStyle = DK_COL.muted; ctx.font = "500 10px monospace"; ctx.fillText(`RUNNING P&L · ${desk.pool.length} DOTS`, CX, CY + 15);
+  // Running P&L in the panel's top-right corner, clear of the cloud (Papa, 3 Nov).
+  const bw = narrow ? 168 : 196, bh = 52, bx = W - bw - 10, by = 10;
+  ctx.fillStyle = "rgba(9,13,20,.82)"; ctx.strokeStyle = DK_COL.line; ctx.lineWidth = 1; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 6); else ctx.rect(bx, by, bw, bh); ctx.fill(); ctx.stroke();
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  ctx.fillStyle = good ? DK_COL.up : DK_COL.down; ctx.font = `600 ${narrow ? 18 : 22}px monospace`; ctx.fillText(dkSgn(tot), bx + bw - 12, by + 20);
+  ctx.fillStyle = DK_COL.muted; ctx.font = "500 10px monospace"; ctx.fillText(`RUNNING P&L · ${desk.pool.length} DOTS`, bx + bw - 12, by + 40);
   desk.raf = requestAnimationFrame(deskDraw);
 }
 function deskTimeline() {
