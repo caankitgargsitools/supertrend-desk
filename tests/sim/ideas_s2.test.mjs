@@ -1,7 +1,7 @@
 // Ideas lab stage 2 (finalists only): 100 runs of the whole portfolio on shuffled candles and 1,000 sets of random
 // entries; the real result must beat 95% of each.
 import assert from "node:assert";
-import { createClient, db } from "./fakesb.mjs";
+import { createClient, db, LIMITS } from "./fakesb.mjs";
 import { ideasStep, stage2Verdict, weightedRandomEntries } from "./ideas.mjs";
 
 // --- random entries: well-timed trades beat random ones; badly timed don't
@@ -39,6 +39,7 @@ db.lab_candles = [["GOLDM", 30000], ["SILVERM", 40000], ["CRUDEOILM", 5000], ["N
 db.lab_settings = [{ id: 1, ideas_enabled: true, ideas_capital: 3500000, ideas_per_day: 0, paused_until: null }];
 db.lab_runs = []; db.algo_strategies = []; db.market_holidays = []; db.idea_tries = []; db.idea_legs = []; db.margin_rates = [];
 const sb = createClient();
+LIMITS.maxRows = 1000; // as the real database: at most 1,000 rows a request (a finalist has 1,800+ stage-2 rows)
 const real = Date.now; Date.now = () => Date.parse("2026-10-24T12:00:00+05:30");
 let last, steps = 0;
 const t0 = performance.now();
@@ -53,6 +54,7 @@ for (const t of tr) console.log(t.setting_key.padEnd(12), t.verdict.passed ? "PA
 const fin = tr.filter((t) => t.verdict.finalist);
 assert.ok(fin.length >= 1, "strong trends give finalists");
 assert.ok(fin.every((t) => t.status === "done" && t.verdict.stage2 && t.verdict.stage2.noise && t.verdict.stage2.noise.runs === 100 && t.verdict.stage2.random.runs === 1000), "every finalist went through both stage-2 tests");
+assert.ok(fin.every((t) => Number(t.verdict.stage2.random.real) !== 0), "the random-entry test ran on the finalist's own trades (not before them)");
 assert.ok(fin.some((t) => t.verdict.passed && t.verdict.stage2.noise.p <= 0.05 && t.verdict.stage2.random.p <= 0.05), "a real edge beats shuffled prices and random entries");
 assert.ok(db.idea_legs.filter((l) => l.kind === "real").every((l) => l.result == null), "real legs' trades cleared once decided");
 console.log("ok   end to end: finalists → 100 shuffled runs + random entries → final verdict");

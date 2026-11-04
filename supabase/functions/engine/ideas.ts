@@ -1011,6 +1011,12 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
       const t1 = performance.now();
       let result: any;
       try {
+        // The random-entry test uses the try's own trades: never before all its real backtests are done (4 Nov 2026: one
+        // ran first, found no trades and read "random entries did as well: 100%").
+        if (leg.kind === "random") {
+          const { data: realLeft } = await sb.from("idea_legs").select("id").eq("try_id", leg.try_id).eq("kind", "real").neq("status", "done").limit(1);
+          if (realLeft?.length) continue;
+        }
         if (leg.kind === "noise" || leg.kind === "random") {
           if (!triesById.has(leg.try_id)) triesById.set(leg.try_id, (await sb.from("idea_tries").select("id, result").eq("id", leg.try_id).single()).data);
           const tr = triesById.get(leg.try_id);
