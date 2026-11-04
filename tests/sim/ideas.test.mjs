@@ -11,7 +11,8 @@ for (const idea of IDEAS.filter((i) => i.kind === "rules")) {
     assert.equal(cfg.direction, "BOTH"); assert.equal(cfg.intraday, intraday);
   }
 }
-const nTries = IDEAS.reduce((a, i) => a + i.settings.length, 0);
+// The first research list: 7 ideas, 47 settings (the well-known ideas added on 4 Nov 2026 have their own test).
+const nTries = IDEAS.filter((i) => !i.key.startsWith("wk-")).reduce((a, i) => a + i.settings.length, 0);
 assert.equal(nTries, 47, "47 settings registered across the 7 ideas");
 console.log("ok   7 ideas, 47 settings, every rule setting valid");
 
@@ -112,10 +113,10 @@ for (; steps < 400; steps++) { last = await ideasStep(sb, Date.now()); if (last.
 Date.now = real;
 console.log("ideas lab finished in", steps, "steps:", last);
 assert.equal(last.idle, "every idea is done");
-assert.equal(db.idea_tries.length, 47, "the ledger holds every setting");
+assert.equal(db.idea_tries.length, 83, "the ledger holds every setting (47 research + 36 well-known)");
 assert.equal(db.idea_tries.filter((t) => t.status === "later").length, 0, "every idea is built");
 const done = db.idea_tries.filter((t) => t.status === "done");
-assert.equal(done.length, 47, "every setting has its verdict");
+assert.equal(done.length, 83, "every setting has its verdict");
 const tr = done.filter((t) => t.idea === "trend");
 assert.ok(tr.every((t) => t.result.contracts.GOLD === "GOLDM" && (t.verdict.passed ? t.verdict.stage2.noise.runs === 100 : t.verdict.why.length > 0) && t.verdict.luck.tries >= 7), "gold traded with the mini; luck counted from the ledger; a pass only after stage 2");
 assert.ok(tr.some((t) => t.result.trades > 0 && t.result.years_n >= 8), "trend settings traded over the years");

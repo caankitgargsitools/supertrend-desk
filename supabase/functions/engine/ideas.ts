@@ -135,7 +135,95 @@ export const IDEAS: IdeaDef[] = [
       S("night-mon-thu", "Overnight, Monday to Thursday closes only", { t: "night", wd: 1 }),
     ],
   },
+  // Well-known ideas from open-source strategy collections and Indian trading communities (Papa, 4 Nov 2026: "10–20
+  // well-known strategy ideas through the Ideas Lab"), written down before testing, with the lab's usual tests. The
+  // classic daily ones (moving averages, Donchian / Turtle, Supertrend, MACD, RSI, Bollinger reversal) are already in
+  // the generator; these add the intraday index ones and three daily ones it doesn't cover (added below, wellKnownIdeas).
 ];
+/** The well-known ideas (see IDEAS): 5-minute or 15-minute index ideas square off by 15:15; daily ones run on everything. */
+function wellKnownIdeas(): IdeaDef[] {
+  const b = (ind: string, p: Record<string, number>, op: string, v?: number) => C(ind, "base", p, op, v);
+  const d = (ind: string, p: Record<string, number>, op: string, v?: number) => C(ind, "D", p, op, v);
+  const intra = (key: string, label: string, tf: number, long: Cond[], short: Cond[], exitLong: Cond[] = [], exitShort: Cond[] = [], entry: "FLIP" | "JOIN" = "FLIP") =>
+    S(key, label, { tf, intraday: 1, entry, rules: { long: set(long), short: set(short), ...(exitLong.length ? { exitLong: set(exitLong, "ANY") } : {}), ...(exitShort.length ? { exitShort: set(exitShort, "ANY") } : {}) } } as any);
+  const daily = (key: string, label: string, long: Cond[], short: Cond[], exitLong: Cond[] = [], exitShort: Cond[] = [], entry: "FLIP" | "JOIN" = "FLIP") =>
+    S(key, label, { entry, rules: { long: set(long), short: set(short), ...(exitLong.length ? { exitLong: set(exitLong, "ANY") } : {}), ...(exitShort.length ? { exitShort: set(exitShort, "ANY") } : {}), daily: true } } as any);
+  const ALL = [...MCX_KEYS, ...INDEX_KEYS, ...CRYPTO_KEYS];
+  return [
+    { key: "wk-vwap", order: 9, kind: "rules", daily: false, universe: INDEX_KEYS, source: "research",
+      name: "Intraday VWAP trend (index)", why: "One of the most-used intraday rules: be long while the price is above the day's VWAP and short while below; out by 15:15.",
+      settings: [
+        intra("5m", "5-minute candles: price crosses VWAP", 5, [b("VWAP", {}, "price_cross_above")], [b("VWAP", {}, "price_cross_below")]),
+        intra("15m", "15-minute candles: price crosses VWAP", 15, [b("VWAP", {}, "price_cross_above")], [b("VWAP", {}, "price_cross_below")]),
+        intra("5m-adx", "5-minute, only when ADX(14) > 20", 5, [b("VWAP", {}, "price_cross_above"), b("ADX", { len: 14 }, "gt", 20)], [b("VWAP", {}, "price_cross_below"), b("ADX", { len: 14 }, "gt", 20)]),
+        intra("15m-adx", "15-minute, only when ADX(14) > 20", 15, [b("VWAP", {}, "price_cross_above"), b("ADX", { len: 14 }, "gt", 20)], [b("VWAP", {}, "price_cross_below"), b("ADX", { len: 14 }, "gt", 20)]),
+      ] },
+    { key: "wk-stvwap", order: 10, kind: "rules", daily: false, universe: INDEX_KEYS, source: "research",
+      name: "Supertrend + VWAP (index, intraday)", why: "A popular Indian algo recipe: Supertrend gives the direction, the day's VWAP confirms it; long when both agree up, short when both agree down, out by 15:15.",
+      settings: [
+        intra("5m-10-3", "5-minute, Supertrend(10,3)", 5, [b("ST", { atr: 10, factor: 3 }, "up"), b("VWAP", {}, "price_above")], [b("ST", { atr: 10, factor: 3 }, "down"), b("VWAP", {}, "price_below")]),
+        intra("5m-7-3", "5-minute, Supertrend(7,3)", 5, [b("ST", { atr: 7, factor: 3 }, "up"), b("VWAP", {}, "price_above")], [b("ST", { atr: 7, factor: 3 }, "down"), b("VWAP", {}, "price_below")]),
+        intra("15m-10-3", "15-minute, Supertrend(10,3)", 15, [b("ST", { atr: 10, factor: 3 }, "up"), b("VWAP", {}, "price_above")], [b("ST", { atr: 10, factor: 3 }, "down"), b("VWAP", {}, "price_below")]),
+        intra("15m-10-2", "15-minute, Supertrend(10,2)", 15, [b("ST", { atr: 10, factor: 2 }, "up"), b("VWAP", {}, "price_above")], [b("ST", { atr: 10, factor: 2 }, "down"), b("VWAP", {}, "price_below")]),
+      ] },
+    { key: "wk-pdhl", order: 11, kind: "rules", daily: false, universe: INDEX_KEYS, source: "research",
+      name: "Previous day's high / low breakout (index)", why: "A classic: buy a break above yesterday's high, sell a break below yesterday's low; out when the price falls back through the day's VWAP, or by 15:15.",
+      settings: [
+        intra("5m", "5-minute candles", 5, [b("PDHL", {}, "above_pdh")], [b("PDHL", {}, "below_pdl")], [b("VWAP", {}, "price_cross_below")], [b("VWAP", {}, "price_cross_above")]),
+        intra("15m", "15-minute candles", 15, [b("PDHL", {}, "above_pdh")], [b("PDHL", {}, "below_pdl")], [b("VWAP", {}, "price_cross_below")], [b("VWAP", {}, "price_cross_above")]),
+        intra("5m-vwap", "5-minute, only on the side of VWAP", 5, [b("PDHL", {}, "above_pdh"), b("VWAP", {}, "price_above")], [b("PDHL", {}, "below_pdl"), b("VWAP", {}, "price_below")], [b("VWAP", {}, "price_cross_below")], [b("VWAP", {}, "price_cross_above")]),
+        intra("15m-vwap", "15-minute, only on the side of VWAP", 15, [b("PDHL", {}, "above_pdh"), b("VWAP", {}, "price_above")], [b("PDHL", {}, "below_pdl"), b("VWAP", {}, "price_below")], [b("VWAP", {}, "price_cross_below")], [b("VWAP", {}, "price_cross_above")]),
+      ] },
+    { key: "wk-sweep", order: 12, kind: "rules", daily: false, universe: INDEX_KEYS, source: "research",
+      name: "Liquidity sweep of yesterday's high / low (index)", why: "From the 'smart money' playbooks shared on GitHub and YouTube: the price runs past yesterday's high or low (where stops sit) and closes back inside; trade the turn, out at VWAP or by 15:15.",
+      settings: [
+        intra("5m", "5-minute candles", 5, [b("SWEEP", { src: 1 }, "bull_sweep")], [b("SWEEP", { src: 1 }, "bear_sweep")], [b("VWAP", {}, "price_cross_above")], [b("VWAP", {}, "price_cross_below")]),
+        intra("15m", "15-minute candles", 15, [b("SWEEP", { src: 1 }, "bull_sweep")], [b("SWEEP", { src: 1 }, "bear_sweep")], [b("VWAP", {}, "price_cross_above")], [b("VWAP", {}, "price_cross_below")]),
+        intra("5m-20", "5-minute, sweep of the last 20 candles' high / low", 5, [b("SWEEP", { len: 20 }, "bull_sweep")], [b("SWEEP", { len: 20 }, "bear_sweep")], [b("VWAP", {}, "price_cross_above")], [b("VWAP", {}, "price_cross_below")]),
+        intra("15m-20", "15-minute, last 20 candles", 15, [b("SWEEP", { len: 20 }, "bull_sweep")], [b("SWEEP", { len: 20 }, "bear_sweep")], [b("VWAP", {}, "price_cross_above")], [b("VWAP", {}, "price_cross_below")]),
+      ] },
+    { key: "wk-emarsi", order: 13, kind: "rules", daily: false, universe: INDEX_KEYS, source: "research",
+      name: "EMA 9 / 21 cross with RSI (index, intraday)", why: "The most-shared beginner algo: fast EMA crosses the slow one, RSI on the same side of 50; out by 15:15.",
+      settings: [
+        intra("5m", "5-minute candles", 5, [b("EMA", { len: 9, len2: 21 }, "fast_above_slow"), b("RSI", { len: 14 }, "gt", 50)], [b("EMA", { len: 9, len2: 21 }, "fast_below_slow"), b("RSI", { len: 14 }, "lt", 50)]),
+        intra("15m", "15-minute candles", 15, [b("EMA", { len: 9, len2: 21 }, "fast_above_slow"), b("RSI", { len: 14 }, "gt", 50)], [b("EMA", { len: 9, len2: 21 }, "fast_below_slow"), b("RSI", { len: 14 }, "lt", 50)]),
+        intra("5m-vwap", "5-minute, also on the side of VWAP", 5, [b("EMA", { len: 9, len2: 21 }, "fast_above_slow"), b("RSI", { len: 14 }, "gt", 50), b("VWAP", {}, "price_above")], [b("EMA", { len: 9, len2: 21 }, "fast_below_slow"), b("RSI", { len: 14 }, "lt", 50), b("VWAP", {}, "price_below")]),
+        intra("15m-vwap", "15-minute, also on the side of VWAP", 15, [b("EMA", { len: 9, len2: 21 }, "fast_above_slow"), b("RSI", { len: 14 }, "gt", 50), b("VWAP", {}, "price_above")], [b("EMA", { len: 9, len2: 21 }, "fast_below_slow"), b("RSI", { len: 14 }, "lt", 50), b("VWAP", {}, "price_below")]),
+      ] },
+    { key: "wk-hatrend", order: 14, kind: "rules", daily: false, universe: INDEX_KEYS, source: "research",
+      name: "Heikin Ashi trend (index, intraday)", why: "Heikin Ashi candles smooth the noise; ride the colour while the 20-period EMA agrees; out by 15:15.",
+      settings: [
+        intra("5m", "5-minute candles, HA colour", 5, [b("HA", {}, "green")], [b("HA", {}, "red")]),
+        intra("15m", "15-minute candles, HA colour", 15, [b("HA", {}, "green")], [b("HA", {}, "red")]),
+        intra("5m-ema", "5-minute, HA colour with EMA 20 / 50", 5, [b("HA", {}, "green"), b("EMA", { len: 20, len2: 50 }, "fast_above_slow")], [b("HA", {}, "red"), b("EMA", { len: 20, len2: 50 }, "fast_below_slow")]),
+        intra("15m-ema", "15-minute, HA colour with EMA 20 / 50", 15, [b("HA", {}, "green"), b("EMA", { len: 20, len2: 50 }, "fast_above_slow")], [b("HA", {}, "red"), b("EMA", { len: 20, len2: 50 }, "fast_below_slow")]),
+      ] },
+    { key: "wk-adxdi", order: 15, kind: "rules", daily: true, universe: ALL, source: "research",
+      name: "ADX / DI trend (daily, Wilder)", why: "Wilder's own trend system: long when +DI is above −DI and ADX shows a trend, short the other way.",
+      settings: [
+        daily("adx20", "ADX(14) > 20", [d("ADX", { len: 14 }, "plus_above_minus"), d("ADX", { len: 14 }, "gt", 20)], [d("ADX", { len: 14 }, "minus_above_plus"), d("ADX", { len: 14 }, "gt", 20)], [], [], "JOIN"),
+        daily("adx25", "ADX(14) > 25", [d("ADX", { len: 14 }, "plus_above_minus"), d("ADX", { len: 14 }, "gt", 25)], [d("ADX", { len: 14 }, "minus_above_plus"), d("ADX", { len: 14 }, "gt", 25)], [], [], "JOIN"),
+        daily("di-only", "+DI / −DI only", [d("ADX", { len: 14 }, "plus_above_minus")], [d("ADX", { len: 14 }, "minus_above_plus")], [], [], "JOIN"),
+        daily("adx20-long", "ADX(14) > 20, long only", [d("ADX", { len: 14 }, "plus_above_minus"), d("ADX", { len: 14 }, "gt", 20)], [], [], [], "JOIN"),
+      ] },
+    { key: "wk-bbbreak", order: 16, kind: "rules", daily: true, universe: ALL, source: "research",
+      name: "Bollinger band breakout (daily momentum)", why: "The momentum reading of Bollinger bands (the opposite of the reversal idea): buy a close above the upper band, sell one below the lower band; out at the middle band.",
+      settings: [
+        daily("20-2", "Bollinger(20, 2)", [d("BB", { len: 20, mult: 2 }, "close_above_upper")], [d("BB", { len: 20, mult: 2 }, "close_below_lower")], [d("BB", { len: 20, mult: 2 }, "price_below_mid")], [d("BB", { len: 20, mult: 2 }, "price_above_mid")]),
+        daily("20-1.5", "Bollinger(20, 1.5)", [d("BB", { len: 20, mult: 1.5 }, "close_above_upper")], [d("BB", { len: 20, mult: 1.5 }, "close_below_lower")], [d("BB", { len: 20, mult: 1.5 }, "price_below_mid")], [d("BB", { len: 20, mult: 1.5 }, "price_above_mid")]),
+        daily("50-2", "Bollinger(50, 2)", [d("BB", { len: 50, mult: 2 }, "close_above_upper")], [d("BB", { len: 50, mult: 2 }, "close_below_lower")], [d("BB", { len: 50, mult: 2 }, "price_below_mid")], [d("BB", { len: 50, mult: 2 }, "price_above_mid")]),
+        daily("20-2-long", "Bollinger(20, 2), long only", [d("BB", { len: 20, mult: 2 }, "close_above_upper")], [], [d("BB", { len: 20, mult: 2 }, "price_below_mid")]),
+      ] },
+    { key: "wk-52w", order: 17, kind: "rules", daily: true, universe: ALL, source: "research",
+      name: "52-week high breakout (daily)", why: "Prices at a 52-week high tend to keep going (George & Hwang 2004); buy a new 250-day high, out on a shorter low.",
+      settings: [
+        daily("250-100", "New 250-day high, out on a 100-day low, long only", [d("DON", { len: 250 }, "new_high")], [], [d("DON", { len: 100 }, "new_low")]),
+        daily("250-50", "New 250-day high, out on a 50-day low, long only", [d("DON", { len: 250 }, "new_high")], [], [d("DON", { len: 50 }, "new_low")]),
+        daily("250-both", "New 250-day high / low both ways, out on the opposite 100-day breakout", [d("DON", { len: 250 }, "new_high")], [d("DON", { len: 250 }, "new_low")], [d("DON", { len: 100 }, "new_low")], [d("DON", { len: 100 }, "new_high")]),
+        daily("250-t200", "New 250-day high with the price above its 200-day average, out on a 100-day low", [d("DON", { len: 250 }, "new_high"), d("SMA", { len: 200 }, "price_above")], [], [d("DON", { len: 100 }, "new_low")]),
+      ] },
+  ];
+}
 /** The ideas the lab knows: the research list above plus the generated ones (table idea_defs), loaded each instalment. */
 let RUNTIME: IdeaDef[] = [...IDEAS];
 export const ideaByKey = (k: string) => RUNTIME.find((x) => x.key === k);
@@ -149,6 +237,8 @@ export async function loadIdeaDefs(sb: SupabaseClient) {
 /* ---------- strategy configs for rule-based ideas ---------- */
 const C = (ind: string, tf: string, p: Record<string, number>, op: string, v?: number): Cond => ({ ind, tf, p, op, ...(v != null ? { v } : {}) });
 const set = (conds: Cond[], mode: "ALL" | "ANY" = "ALL") => ({ mode, conds });
+IDEAS.push(...wellKnownIdeas());
+RUNTIME = [...IDEAS];
 
 /** A lab strategy config for one asset (futures, both directions, one lot, no stop unless the rules exit). */
 export function ideaConfig(key: string, rules: Rules, o: { tf?: number; intraday?: boolean; entry?: "FLIP" | "JOIN"; note?: string } = {}): LabConfig {
@@ -173,7 +263,7 @@ export function ideaConfig(key: string, rules: Rules, o: { tf?: number; intraday
 
 /** Rules of a rule-based idea's setting. */
 export function ideaRules(idea: string, p: Record<string, any>): { rules: Rules; entry: "FLIP" | "JOIN"; intraday: boolean } {
-  if (p.rules) return { rules: p.rules as Rules, entry: p.entry === "JOIN" ? "JOIN" : "FLIP", intraday: false }; // generated ideas carry their rules
+  if (p.rules) return { rules: p.rules as Rules, entry: p.entry === "JOIN" ? "JOIN" : "FLIP", intraday: !!p.intraday }; // generated and well-known ideas carry their rules
   if (idea === "trend" && p.t === "ema") {
     const c = C("EMA", "D", { len: p.f, len2: p.s }, "fast_above_slow");
     // Always in the market: long while the fast average is above the slow one, short while below (stop and reverse).
@@ -241,7 +331,7 @@ export function legsFor(idea: IdeaDef, s: IdeaSetting, today: string, have: Set<
   for (const key of idea.universe) {
     if (!LAB_ASSETS[key] || !have.has(key)) continue;
     const { rules, entry, intraday } = ideaRules(idea.key, s.p);
-    const config = ideaConfig(key, rules, { entry, intraday, note: `Idea: ${idea.name} · ${s.label}` });
+    const config = ideaConfig(key, rules, { entry, intraday, tf: Number((s.p as any).tf) || undefined, note: `Idea: ${idea.name} · ${s.label}` });
     if (idea.daily) out.push({ asset: key, win_from: null, win_to: today, config });
     else for (let y = 1; y <= 5; y++) {
       const hi = addDays(today, -365 * (y - 1)), lo = addDays(hi, -364);

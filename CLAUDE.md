@@ -432,7 +432,11 @@ the day before expiry** — built. Next, the GitHub items: a one-time
 backtester cross-check with vectorbt (free) — **done 4 Nov 2026** (`tests/xcheck/`: on Binance daily SOL / BTC 2021–2026
 the desk's MACD and EMA-cross trades match vectorbt 203/203 and 49/49, its 3×ATR trailing stop matches an independent
 re-implementation 203/203; charges, slippage, intraday, options and other indicators not covered); 10–20 well-known
-strategy ideas through the Ideas Lab (free) — next. Tick-level
+strategy ideas through the Ideas Lab (free) — **added 4 Nov 2026**: 9 ideas × 4 settings (`wellKnownIdeas` in ideas.ts,
+orders 9–17, source research): intraday index VWAP trend, Supertrend + VWAP, previous day's high / low breakout, liquidity
+sweep of yesterday's high / low, EMA 9/21 + RSI, Heikin Ashi trend (5 / 15-minute, out by 15:15); daily ADX/DI trend,
+Bollinger breakout, 52-week high (all markets). The classic daily ones were already in the generator (220 ideas, 929
+settings, 0 passed). Settings that carry rules may carry `intraday` and `tf`. Test: `tests/sim/wellknown.test.mjs`. Tick-level
 prices from Dhan's WebSocket feed: plan shown 4 Nov (Dhandha server ₹0 extra, or a separate one ~₹350–600/month,
 watch-only for a week first) — Papa: "not now", keep pending.
 Done 4 Nov 2026 (migration 74): `notify_test` limited to once a minute per user; the 10 backtests stuck "running" marked
