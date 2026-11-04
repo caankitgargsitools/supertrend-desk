@@ -404,53 +404,26 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 - Seen in the outage: an ENTRY signal logged twice when the position update was slow (one position booked) — make
   entry logging idempotent per candle.
 
-## Pending decisions for Papa (asked 1 Nov 2026; he will reply — ask again if still open)
-1. **Held futures across expiry** (see Open items): exit the day before expiry and re-enter in the next month (roll),
-   or just exit? Must be settled before any positional futures strategy goes live.
-2. **Database permissions**: tighten the table grants (anon / authenticated have ALL; RLS is the only barrier) — revoke
-   and grant back what the app needs, testing every page.
-3. **Clients going live**: `set_live` lets a client go live by themselves; require Papa's approval (a supervised test)
-   per client?
-4. **Test-notification button**: limit `notify_test` to once a minute per user?
-5. **Anshul's two paper strategies** (ap.anshulgarg@gmail.com, no Dhan account, stuck since 30 Oct): ask him to connect
-   Dhan, or pause / archive them?
-6. Earlier, still unanswered: mark the 10 old backtests stuck "running" since 9–10 Oct as stopped; was the Supabase
-   compute upgrade done; keep the Strategy Lab generator on (it was found enabled though notes said paused); the
-   unfinished question "Also, I want to understand…".
-7. **Prediction Lab next steps** (status 1 Nov 2026, ~200k replay forecasts: direction 50–51% on every timeframe;
-   corrected up to 52.5% on daily; close error 8–56% worse than "price stays the same"; range ≈ the recent average
-   swing, ~5–7% better only on daily h5/h10; fine-tune round 1 gave no gain). Papa: "don't do anything now". Proposed, free first:
-   (a) confident-only signal (all 5 paths agree + corrected ≥ 55%), (b) context inputs (India VIX for indices, BTC for
-   coins, dollar index for bullion), (c) look-back up to 2,048 candles, (d) Chaturbhuj as a filter on lab strategies
-   (skip trades it strongly disagrees with), (e) forecast volatility / range for stops and lot sizing. Small cost:
-   (f) bigger model sizes (server ~₹2,000/month or an upgrade), (g) fine-tune round 2 on a free Kaggle/Colab GPU
-   (rented ~₹50–150/h if needed), then monthly walk-forward retraining. Recommended start: a, d, e.
-8. **How many lots each strategy trades** (Papa, 1 Nov 2026: "ask me tomorrow in detail"; 2 Nov: lots wizard built on the Capital page, Papa testing it — rest of these questions after his test). Today: per strategy in
-   Strategies → strategy → Strategy settings → Trade → Lots, and Position size → "How many lots" (Always the lots above /
-   Automatic from my capital: % of capital, max lots, drawdown budget); marketplace copies: "Size the trades by" box;
-   Capital page: total capital and the most in use at once. Lab-saved strategies start at 1 fixed lot. Questions:
-   (a) fixed lots or automatic-from-capital as the default, and for which strategies; (b) total capital per account and
-   the deployment cap %; (c) per-strategy share of capital and max lots; (d) the earlier proposal — risk-based sizing
-   from each strategy's backtest drawdown, and no two strategies on the same asset at once (GOLD 1 kg dominated the
-   paper loss); (e) different rules for paper vs live, and for clients.
-9. **Cloud-session start-up hook** (`.claude/settings.json` + `.claude/hooks/session-start.sh`: npm install in tests/sim,
-   link tests/ui/node_modules to the global node_modules) — blocked as self-modification on 1 Nov; needs Papa's permission.
-10. **From the GitHub review (2 Nov 2026; Papa: "add all three to the pending list")**, each awaiting his go:
-   (a) tick-level prices and stops from Dhan's WebSocket feed (official dhan-oss/DhanHQ-py as the reference) on a small
-   always-on server (~₹500–1,500/month); (b) a one-time independent cross-check of our backtester with vectorbt on the
-   same data (free); (c) 10–20 well-known strategy ideas from open-source repos (e.g. opening-range breakout, CPR-VWAP)
-   through the Ideas Lab's tests (free). Not recommended: replacing our engine (Nautilus/LEAN/backtrader), crypto bots
-   (freqtrade/jesse), Qlib, LLM-agent traders; OpenAlgo (AGPL) only later, as a separate service, if clients need other brokers.
-
-11. **Broker stops across the night (Phase 1, 4 Nov 2026)**: Dhan stop orders are day orders, so a positional position
-   has no broker stop from the close to the next open (the desk's own per-second stop runs from the first price). Use
-   Dhan's Forever Order (GTT) for positional stops instead? Needs testing in the supervised 1-lot test.
-
-12. **Lots that follow the typical day's move by themselves (Papa, 4 Nov 2026: "will it be dynamic? put it on the
-   pending list; ask me when I ask for the pending list")**: today `lab_margins.day_move` refreshes every morning, but a
-   strategy's lots change only when "Apply these lots" is pressed in the lots wizard. To discuss: a sizing mode
-   ("Same ₹ on a typical day", target per strategy) that the engine applies at each new entry from that day's move, and
-   how often / how much lots may change (every entry vs weekly; a band so small changes are ignored).
+## Pending decisions for Papa (gone through with Papa on 4 Nov 2026; ask again only what is still open)
+Decided 4 Nov 2026 (to build, in this order): (9) a second live strategy on the same asset only **warns** when going live;
+(10/12) lots follow the typical day's move **at each new entry**, changes under ±20% ignored; (1) positional futures
+**roll the day before expiry** (exit, re-enter the same side in the next month); then the GitHub items: a one-time
+backtester cross-check with vectorbt (free), 10–20 well-known strategy ideas through the Ideas Lab (free), and tick-level
+prices from Dhan's WebSocket feed (paid: show Papa the server plan and monthly cost first, build only after his go).
+Done 4 Nov 2026 (migration 74): `notify_test` limited to once a minute per user; the 10 backtests stuck "running" marked
+failed ("stopped: never finished"); Anshul's two paper strategies paused, his error stop cleared, he was notified to
+connect Dhan; cloud-session start-up hook (`.claude/settings.json`, `.claude/hooks/session-start.sh`). Kept as is:
+clients may go live by themselves (Papa: keep `set_live` as it is); the Strategy Lab generator stays on.
+Still open:
+1. **Broker stops across the night**: Dhan stop orders are day orders; use Dhan's Forever Order (GTT) for positional
+   stops? Test in the supervised 1-lot test. (Papa, 4 Nov: discuss later.)
+2. **Database permissions**: tighten table grants (anon / authenticated have ALL; RLS is the only barrier). (Discuss later.)
+3. **Supabase compute upgrade**: not done yet; later.
+4. **Prediction Lab**: Papa chose the confident-only signal (all 5 paths agree + corrected ≥ 55%) as the next step, but
+   keep it pending until he asks. Other ideas from 1 Nov (filter on lab strategies, range for stops / lots, bigger models,
+   fine-tune round 2) stay on the shelf.
+5. **Lot sizing, the rest of the 1 Nov questions**: capital and limit per account, rules for clients.
+6. The unfinished question "Also, I want to understand…" (1 Nov).
 
 ## Open items
 - **Held futures across their expiry (found 1 Nov 2026, awaiting Papa's choice):** a positional futures strategy keeps
