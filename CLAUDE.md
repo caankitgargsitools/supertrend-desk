@@ -446,6 +446,12 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
    has no broker stop from the close to the next open (the desk's own per-second stop runs from the first price). Use
    Dhan's Forever Order (GTT) for positional stops instead? Needs testing in the supervised 1-lot test.
 
+12. **Lots that follow the typical day's move by themselves (Papa, 4 Nov 2026: "will it be dynamic? put it on the
+   pending list; ask me when I ask for the pending list")**: today `lab_margins.day_move` refreshes every morning, but a
+   strategy's lots change only when "Apply these lots" is pressed in the lots wizard. To discuss: a sizing mode
+   ("Same ₹ on a typical day", target per strategy) that the engine applies at each new entry from that day's move, and
+   how often / how much lots may change (every entry vs weekly; a band so small changes are ignored).
+
 ## Open items
 - **Held futures across their expiry (found 1 Nov 2026, awaiting Papa's choice):** a positional futures strategy keeps
   its position past the contract's expiry in the desk's books, but the exchange settles it (index futures in cash,
