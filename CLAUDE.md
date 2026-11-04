@@ -424,8 +424,9 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 Decided 4 Nov 2026: (9) a second live strategy on the same asset only **warns** when going live — built; (10/12) lots
 follow the typical day's move **at each new entry**, changes under ±20% ignored — built; (1) positional futures **roll
 the day before expiry** — built. Next, the GitHub items: a one-time
-backtester cross-check with vectorbt (free), 10–20 well-known strategy ideas through the Ideas Lab (free), and tick-level
-prices from Dhan's WebSocket feed (paid: show Papa the server plan and monthly cost first, build only after his go).
+backtester cross-check with vectorbt (free), 10–20 well-known strategy ideas through the Ideas Lab (free). Tick-level
+prices from Dhan's WebSocket feed: plan shown 4 Nov (Dhandha server ₹0 extra, or a separate one ~₹350–600/month,
+watch-only for a week first) — Papa: "not now", keep pending.
 Done 4 Nov 2026 (migration 74): `notify_test` limited to once a minute per user; the 10 backtests stuck "running" marked
 failed ("stopped: never finished"); Anshul's two paper strategies paused, his error stop cleared, he was notified to
 connect Dhan; cloud-session start-up hook (`.claude/settings.json`, `.claude/hooks/session-start.sh`). Kept as is:
