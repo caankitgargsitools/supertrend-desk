@@ -351,5 +351,27 @@ await t("9 an option expiring today is due to close at 14:30, not before; a stra
   assert.equal(E.expiryExitDue({ ...opt, pos_expiry: "2026-10-27" }), false);
   assert.equal(E.expiryExitDue({ ...opt, risk: { ...opt.risk, expiry_exit_time: "15:00" } }), false);
 });
+// ---------------- Phase 2: error circuit breaker per account (paper and live) ----------------
+await t("breaker: 5 minutes in a row where every run of the account failed → new trades stop, owner told once", async () => {
+  db.algo_strategies = db.algo_strategies.filter((x) => x.owner_id === "u1" && x.position !== "FLAT" ? false : true);
+  add("z1", { owner_id: "u2", live: false, exchange: "MCX", data_segment: "MCX_COMM", underlying: "GOLD" }); // u2 has no Dhan account: every run fails
+  clock = Date.parse("2026-10-20T05:30:00Z"); db.risk_state = [];
+  for (let i = 0; i < 6; i++) { clock += 60000; const r = await tick(); assert.match(String(r.z1), /Connect your Dhan account/); }
+  const b = db.risk_state.find((x) => x.user_id === "u2");
+  assert.equal(b.err_ticks, 6); assert.ok(b.halted_at); assert.match(b.halt_reason, /Connect your Dhan account/);
+  assert.equal(db.notifications.filter((n) => n.user_id === "u2" && /New trades stopped/.test(n.title)).length, 1);
+});
+await t("breaker: a run that works resets the count; the stop stays until it is allowed again", async () => {
+  db.broker_accounts.push({ user_id: "u2", broker: "DHAN", client_id: "C2", access_token: "TOK2", webhook_url: null });
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "z1");
+  add("z2", { owner_id: "u2", live: false, ...longPos({ pos_broker: null, exec_state: "exit_retry", exec_at: new Date(clock - 120000).toISOString() }) });
+  dhan.ltp["13"] = 25010; clock += 60000;
+  const r = await tick();
+  assert.equal(r.z2, "exit retried");
+  const b = db.risk_state.find((x) => x.user_id === "u2");
+  assert.equal(b.err_ticks, 0); assert.ok(b.halted_at, "still stopped until allowed");
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "z2");
+});
+
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);

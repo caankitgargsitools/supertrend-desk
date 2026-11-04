@@ -2677,6 +2677,36 @@ async function reconcile() {
   return out;
 }
 
+/* ---------- error circuit breaker per account (Phase 2, 4 Nov 2026; migration 72) ---------- */
+/** Failed minutes in a row (every strategy run of the account failed) before new trades stop for the account. */
+const BREAKER_TICKS = 5;
+type Breaker = { user_id: string; err_ticks: number; last_error: string | null; halted_at: string | null; halt_reason: string | null };
+const tickMode0 = (action: string, body: { strategy_id?: string }) => (action === "tick" || action === "tick_crypto") && !body.strategy_id;
+async function loadBreakers(rows: Strategy[]): Promise<Map<string, Breaker>> {
+  const ids = [...new Set(rows.map((x) => String(x.owner_id ?? "")).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const { data } = await sb.from("risk_state").select("*").in("user_id", ids);
+  return new Map((data ?? []).map((b) => [String(b.user_id), b as Breaker]));
+}
+/**
+ * After a tick: an account where at least one strategy run worked starts counting again from 0; one where every run
+ * failed (Dhan, token or engine errors) counts one more. At BREAKER_TICKS in a row new trades stop for the whole
+ * account, paper and live (exits, stops and square-off keep running), and the owner is told. Only "Allow new trades
+ * again" (breaker_allow) clears it. Strategies that were only waiting for their candle don't count either way.
+ */
+async function breakerAfterTick(ok: Set<string>, err: Map<string, string>, known: Map<string, Breaker>) {
+  for (const u of new Set([...ok, ...err.keys()])) {
+    const b = known.get(u);
+    if (ok.has(u)) { if (b && b.err_ticks) await sb.from("risk_state").update({ err_ticks: 0, updated_at: nowIso() }).eq("user_id", u); continue; }
+    const msg = String(err.get(u) ?? "").slice(0, 300), n = (b?.err_ticks ?? 0) + 1;
+    const halt = n >= BREAKER_TICKS && !b?.halted_at;
+    await sb.from("risk_state").upsert({ user_id: u, err_ticks: n, last_error: msg, updated_at: nowIso(),
+      ...(halt ? { halted_at: nowIso(), halt_reason: msg } : { halted_at: b?.halted_at ?? null, halt_reason: b?.halt_reason ?? null }) }, { onConflict: "user_id" });
+    if (halt) await sb.rpc("notify_tagged", { p_user: u, p_kind: "error", p_title: "New trades stopped: repeated errors",
+      p_body: `Every strategy run of your account failed ${n} minutes in a row (${msg.slice(0, 160)}). New trades are stopped, paper and live; open positions keep their stops and exits. Fix the cause, then tap "Allow new trades again".`.slice(0, 400),
+      p_url: "/", p_strategy: null, p_tag: `breaker-${u}-${todayIst()}` });
+  }
+}
 /** Tries an exit that failed before (exec_state 'exit_retry') again, once a minute. True when it handled the strategy. */
 async function retryExit(s: Strategy, set: Settings): Promise<boolean> {
   if (s.exec_state !== "exit_retry" || s.position === "FLAT") return false;
@@ -2914,6 +2944,9 @@ Deno.serve(async (req) => {
 
   const accounts = new Map<string, Account | null>();
   const gates = new Map<string, unknown>();
+  // The error circuit breaker of each account in this tick (paper and live; breakerAfterTick).
+  const breakers = tickMode0(action, body) ? await loadBreakers(strategies) : new Map<string, Breaker>();
+  const okUsers = new Set<string>(), errUsers = new Map<string, string>();
   const fundsDone = new Set<string>();
   const liveIds = new Map<string, string[]>();
   const results: Record<string, string> = {};
@@ -2977,11 +3010,11 @@ Deno.serve(async (req) => {
         if (s.live && !(set?.dhan_client_id && set?.dhan_access_token)) throw new Error("Add your Delta Exchange API key and secret (Delta Exchange connection) to trade this strategy live.");
         set = set ?? { user_id: s.owner_id, broker: "DELTA", dhan_client_id: null, dhan_access_token: null, webhook_url: null, webhook_secret: null, capital: null, capital_since: null, deploy_pct: null, funds_at: null };
         if (cryptoTick && outside) {
-          if (await retryExit(s, set)) { results[s.id] = "exit retried"; return; }
+          if (await retryExit(s, set)) { results[s.id] = "exit retried"; okUsers.add(String(s.owner_id)); return; }
           s = await liveRisk(s, set);
           if (s.live) s = await syncStop(s, set).catch(() => s);
           s = await markPrice(s, set).catch(() => s);
-          results[s.id] = "ok (outside the crypto session: stops only)";
+          results[s.id] = "ok (outside the crypto session: stops only)"; okUsers.add(String(s.owner_id));
           return;
         }
       } else if (!set?.dhan_access_token) throw new Error("Connect your Dhan account (client ID and access token) to run this strategy.");
@@ -3001,11 +3034,13 @@ Deno.serve(async (req) => {
         results[s.id] = "orders working"; return;
       }
       // An exit that didn't go is tried again once a minute (exitFailed) before anything else is decided.
-      if (tick && await retryExit(s, set)) { results[s.id] = "exit retried"; return; }
+      if (tick && await retryExit(s, set)) { results[s.id] = "exit retried"; okUsers.add(String(s.owner_id)); return; }
       // New trades need the account in good standing; exits always go through.
       // The kill rule stops new trades of a strategy doing far worse than its backtest (exits still run).
       // A paused strategy is here only while it holds a position: it runs its stops and exits, never a new entry.
-      s = { ...s, _block: !s.active ? "the strategy is paused (its open position keeps its stop and exit rules)" : s.kill_at ? `the kill rule stopped new trades (${String(s.kill_note ?? "").slice(0, 160)})` : await entryGate(sb, s, gates).catch(() => null) };
+      const brk = breakers.get(String(s.owner_id));
+      s = { ...s, _block: !s.active ? "the strategy is paused (its open position keeps its stop and exit rules)" : s.kill_at ? `the kill rule stopped new trades (${String(s.kill_note ?? "").slice(0, 160)})`
+        : brk?.halted_at ? `new trades stopped after ${BREAKER_TICKS} failed minutes in a row (${String(brk.halt_reason ?? "").slice(0, 160)}); "Allow new trades again" restarts them` : await entryGate(sb, s, gates).catch(() => null) };
       if (tick && isStockSeg(String(s.data_segment))) {
         // Stock futures: a split / bonus ex-date first (before any stop is checked), then the lot size in Dhan's list.
         const l = await dhanFor(set).ltp("NSE_EQ", String(s.data_security_id)).catch(() => null);
@@ -3018,7 +3053,7 @@ Deno.serve(async (req) => {
         const update: Record<string, unknown> = { last_run_at: nowIso() };
         await flatten(s, set, update, { c: Number(s.pos_ltp) || undefined }, `Expiry day: ${s.pos_expiry ?? "a leg"} expires today, closed at ${expiryExitTime(s)}`, "SQUARE_OFF");
         await sb.from("algo_strategies").update(update).eq("id", s.id);
-        results[s.id] = "closed on its expiry day"; return;
+        results[s.id] = "closed on its expiry day"; okUsers.add(String(s.owner_id)); return;
       }
       if (tick && s.live) { const s0 = s; s = await actLocked(() => syncStop(s0, set)).catch((e) => { console.error("stop", e); return s0; }); }
       // A manual refresh outside market hours (or in the NSE/BSE pre-open) keeps the session's last price.
@@ -3030,9 +3065,11 @@ Deno.serve(async (req) => {
       else await processFlip(s, set, act);
       if (Dhan.ownUsed.has(`${s.data_segment}|${s.data_security_id}`)) ownAssets.add(String(s.underlying ?? s.data_security_id));
       results[s.id] = `ok ${Date.now() - t1}ms (done ${tickT0 ? Date.now() - tickT0 : 0}ms after the minute)`;
+      if (s.owner_id) okUsers.add(String(s.owner_id));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       results[s.id] = msg;
+      if (s.owner_id) errUsers.set(String(s.owner_id), msg);
       await sb.from("algo_strategies").update({ last_error: msg, last_run_at: new Date().toISOString() }).eq("id", s.id);
     }
   };
@@ -3041,6 +3078,7 @@ Deno.serve(async (req) => {
   const queue = [...strategies];
   await Promise.all(Array.from({ length: Math.min(8, queue.length) }, async () => { for (let r = queue.shift(); r; r = queue.shift()) await runOne(r); }));
   if (tickMode) { Dhan.memo = null; Dhan.ltpSeed = null; tickT0 = null; }
+  if (tickMode0(action, body)) await breakerAfterTick(okUsers, errUsers, breakers).catch((e) => console.error("breaker", e));
   // Strategies ran on own candles (Dhan refused candle requests): the warning at the top of every page, and the
   // owner is notified once when it starts.
   if (ownAssets.size) await ownCandlesAlert([...ownAssets].sort()).catch((e) => console.error("alert", e));

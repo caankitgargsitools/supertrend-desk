@@ -959,6 +959,7 @@ body.dk-fs-on { overflow: hidden; }
 </div>
 
 <div id="engineAlert" class="banner err topalert" role="alert" hidden></div>
+<div id="breakerAlert" class="banner err topalert" role="alert" hidden></div>
 
 <div class="wrap" id="app">
   <aside class="rail">
@@ -2045,10 +2046,24 @@ async function loadEngineAlerts() {
   const assets = (own.detail && own.detail.assets) || [];
   box.innerHTML = `<b>⚠ Engine on fallback candles since ${esc(istText(own.since))} IST.</b> Dhan's candle (charts) API is refusing requests, so ${assets.length ? esc(assets.join(", ")) : "strategies"} ${assets.length === 1 ? "is" : "are"} running on the desk's own candles, built from live prices. They're close to Dhan's but approximate (no volume, a spike inside a second can be missed). <b>Please check with Dhan API support.</b> Last seen ${esc(istText(own.last_at))} IST; this goes away by itself about 10 minutes after Dhan's candles work again.`;
 }
+/**
+ * Error circuit breaker (4 Nov 2026, migration 72): after 5 failed minutes in a row new trades of the account stop,
+ * paper and live (exits and stops keep running), until "Allow new trades again".
+ */
+async function loadBreaker() {
+  const box = $("breakerAlert");
+  if (!me) { box.hidden = true; return; }
+  const { data } = await db.from("risk_state").select("err_ticks, last_error, halted_at, halt_reason").eq("user_id", me.user_id).maybeSingle();
+  box.hidden = !(data && data.halted_at);
+  if (box.hidden) { box.textContent = ""; return; }
+  box.innerHTML = `<b>⚠ New trades stopped since ${esc(istText(data.halted_at))} IST.</b> Every strategy run of your account failed 5 minutes in a row: ${esc(String(data.halt_reason || data.last_error || "").slice(0, 200))}. Open positions keep their stops and exits; no new entries (paper and live) until you allow them again. <button type="button" class="btn small" id="breakerAllow">Allow new trades again</button>`;
+  $("breakerAllow").onclick = (ev) => run(ev.currentTarget, async () => { must(await db.rpc("breaker_allow")); toast("New trades allowed again."); await loadBreaker(); });
+}
 async function loadAll() {
   loadHolidays();
   loadEngineAlerts().catch(() => {});
-  if (!alertTimer) alertTimer = setInterval(() => { if (!document.hidden) loadEngineAlerts().catch(() => {}); }, 60000);
+  loadBreaker().catch(() => {});
+  if (!alertTimer) alertTimer = setInterval(() => { if (!document.hidden) { loadEngineAlerts().catch(() => {}); loadBreaker().catch(() => {}); } }, 60000);
   db.from("lab_margins").select("asset, detail").then((x) => { if (x.data) { todayMarg = Object.fromEntries(x.data.map((m) => [m.asset, m.detail || {}])); if (!$("listPane").hidden) renderList(); } }).catch(() => {});
   const [settings, strategies] = await Promise.all([
     db.rpc("broker_status").then(must),

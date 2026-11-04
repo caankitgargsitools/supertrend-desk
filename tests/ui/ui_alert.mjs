@@ -27,6 +27,7 @@ const me = { user_id: uid, email: role === "admin" ? "ca.ankitgarg@gmail.com" : 
 const res = {
   "engine_alerts": [{ key: "own_candles", since: new Date(Date.now() - 3600000).toISOString(), last_at: now, detail: { assets: ["GOLD", "NIFTY", "SILVERM"] } }, { key: "own_candles_old", since: now, last_at: "2026-01-01T00:00:00Z", detail: {} }],
   "live_marks": [{ strategy_id: "s2", ltp: 99, upnl: 1234, at: now }],
+  "risk_state": [{ err_ticks: 5, last_error: "Dhan /charts/intraday request failed (HTTP 401).", halted_at: now, halt_reason: "Dhan /charts/intraday request failed (HTTP 401)." }],
   "desk_audit": [{ id: 1, batch: "b1", created_at: now, user_id: uid, strategy_id: "s1", mode: "PAPER", name: "Lab #19325 · GOLD daily", from_day: "2026-10-14", to_day: "2026-10-21", matched: 2, missed: 0, extra: 0, issues: 1, desk_pts: -1516, bt_pts: -2380, rupee_gap: 86400, verdict: "gap", note: "",
   trades: [{ side: "LONG", entry_day: "2026-10-19", desk: { exit: "2026-10-20 17:01", entry_px: 148393, exit_px: 146641, pts: -1752, net: -177776, why: "rev" }, bt: { entry: "2026-10-19 09:00", exit: "2026-10-20 09:00", entry_px: 148397, exit_px: 145783, pts: -2614, why: "rev" }, issue: "Price gap: desk -1752.0 pts, backtest -2614.0 pts", rupee_gap: 86200 }] },
  { id: 2, batch: "b1", created_at: now, user_id: uid, mode: "PAPER", name: "Lab #65132 · SILVERM 30m", from_day: "2026-10-12", to_day: "2026-10-21", matched: 7, missed: 0, extra: 0, issues: 0, desk_pts: 11792, bt_pts: 11866, rupee_gap: -373, verdict: "ok", note: "", trades: [] },
@@ -83,5 +84,12 @@ await p.screenshot({ path: "alert_m.png", clip: { x: 0, y: 0, width: 390, height
 res.engine_alerts = [{ key: "own_candles", since: "2026-10-23T04:57:00Z", last_at: new Date(Date.now() - 11 * 60000).toISOString(), detail: { assets: ["GOLD"] } }];
 await p.evaluate(() => loadEngineAlerts()); await p.waitForTimeout(500);
 if (!(await p.evaluate(() => document.getElementById("engineAlert").hidden))) throw new Error("stale warning still shown");
+// Error circuit breaker (4 Nov 2026): the banner, and "Allow new trades again" clears it.
+const brk = await p.evaluate(() => { const b = document.getElementById("breakerAlert"); return { hidden: b.hidden, text: b.textContent }; });
+if (brk.hidden || !/New trades stopped/.test(brk.text) || !/HTTP 401/.test(brk.text)) throw new Error("breaker banner not shown: " + JSON.stringify(brk));
+let allowed = false;
+await p.route(/rpc\/breaker_allow/, (r) => { allowed = true; res.risk_state = []; r.fulfill({ status: 200, contentType: "application/json", body: "null" }); });
+await p.click("#breakerAllow"); await p.waitForTimeout(800);
+if (!allowed || !(await p.evaluate(() => document.getElementById("breakerAlert").hidden))) throw new Error("allow didn't clear the banner");
 console.log("ok", errs.length ? errs : "no page errors");
 await b.close();

@@ -271,6 +271,13 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   expiry day at 14:30 (`expiryExitDue`; `risk.expiry_exit = false` / `risk.expiry_exit_time` per strategy); a held option is
   never priced from another expiry (`Dhan.premium` exact); entries take the next expiry Dhan lists (`Dhan.expiries`).
   UI: "Exit retrying" chip; the Pause confirmation says positions keep their stops.
+- **Error circuit breaker (Phase 2, 4 Nov 2026; Papa took only this part of the account risk layer — no account daily
+  loss limit, no position caps; paper and live alike; migration 72)**: per user in `risk_state`, the minute ticks
+  (market and crypto) count runs where every strategy run of the account failed (`breakerAfterTick`); one that worked
+  resets the count; strategies only waiting for their candle don't count. At `BREAKER_TICKS` (5) new entries stop for the
+  whole account (`_block`; exits, stops, square-off keep running) and the owner is notified once; only "Allow new trades
+  again" (`breaker_allow`, own account or admin) clears it. Red banner `#breakerAlert` (`loadBreaker`, every minute).
+  Tests: `tests/sim/safety.test.mjs` "breaker:", `tests/ui/ui_alert.mjs`.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
