@@ -7889,7 +7889,6 @@ function deskDraw() {
     if (shut) { // market closed for this asset: no stream into the cloud, a big red dot beside the name (Papa, 3 Nov)
       const pr = 5.5 + .8 * Math.sin(T * 2.2);
       ctx.fillStyle = "#ff3b4f"; ctx.shadowColor = "#ff3b4f"; ctx.shadowBlur = 10; ctx.beginPath(); ctx.arc(X0 + 7, L.y, pr, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
-      ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillStyle = "rgba(255,92,108,.85)"; ctx.font = `600 ${narrow ? 8 : 9}px monospace`; ctx.fillText("MARKET CLOSED", X0 + 18, L.y);
     } else {
       ctx.strokeStyle = `rgba(${c},.2)`; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(...P[0]); ctx.bezierCurveTo(...P[1], ...P[2], ...P[3]); ctx.stroke();
       ctx.fillStyle = `rgba(${c},.7)`; ctx.beginPath(); ctx.arc(P[3][0], P[3][1], 1.8, 0, Math.PI * 2); ctx.fill(); // the head of the snake
