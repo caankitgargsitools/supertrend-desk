@@ -304,7 +304,9 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 - **Reads over 1,000 rows** (found 4 Nov 2026): the database answers at most 1,000 rows a request whatever `.limit()`
   asks. `pagedRows` (lab.ts) reads 1,000 at a time; used for the Ideas Lab's stage-2 rows and pending legs and the
   Strategy Lab's checks. Three Ideas Lab finalists (tries 134, 136, 466) had been judged "random-entry test didn't
-  finish" because their random row was cut off (the tests had finished: p 0.27 and 0.30, failing). Fake database
+  finish" because their random row was cut off (the tests had finished: p 0.27 and 0.30, failing; 466's full shuffled
+  runs give p 0.08, failing too). Also fixed: a random-entry leg waits until every real leg of its try is done (136's had
+  run first, real 0 → "100%"); 136 re-queued. Fake database
   `LIMITS.maxRows` mimics the cap; test `tests/sim/pagedrows.test.mjs`.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
