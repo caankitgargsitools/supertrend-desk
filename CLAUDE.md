@@ -292,6 +292,15 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   whole account (`_block`; exits, stops, square-off keep running) and the owner is notified once; only "Allow new trades
   again" (`breaker_allow`, own account or admin) clears it. Red banner `#breakerAlert` (`loadBreaker`, every minute).
   Tests: `tests/sim/safety.test.mjs` "breaker:", `tests/ui/ui_alert.mjs`.
+- **Positional futures roll the day before expiry** (Papa, 4 Nov 2026; closes the open item "held futures across
+  expiry"): `rollDue` — a carried-overnight (not intraday / product I) single-leg futures position (index, stock, MCX; not
+  crypto, not structures) from 15:00 IST (`risk.roll_time`) on the weekday before its contract's expiry (at once if that
+  was missed; `risk.roll = false` opts out). `rollFutures`: event ROLL = the exit leg to the held contract + an entry leg
+  for the same side and lots marked `_after: expiry` (queueDhan resolves it in the contract after); the closed part is
+  booked ("Rolled to the next month before the … expiry"), the position keeps its stops, entry price = the price now,
+  `pos_expiry` = the new contract's expiry (`heldFutExpiry` reads it, else the held sec / the near month on the entry
+  day). A roll exit Dhan refuses goes the exit-retry way (the retry exits). Holidays before the expiry aren't known, so a
+  holiday can make the roll a day later at worst. Tests: `tests/sim/safety.test.mjs` "roll".
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
@@ -412,9 +421,9 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   entry logging idempotent per candle.
 
 ## Pending decisions for Papa (gone through with Papa on 4 Nov 2026; ask again only what is still open)
-Decided 4 Nov 2026 (to build, in this order): (9) a second live strategy on the same asset only **warns** when going live;
-(10/12) lots follow the typical day's move **at each new entry**, changes under ±20% ignored; (1) positional futures
-**roll the day before expiry** (exit, re-enter the same side in the next month); then the GitHub items: a one-time
+Decided 4 Nov 2026: (9) a second live strategy on the same asset only **warns** when going live — built; (10/12) lots
+follow the typical day's move **at each new entry**, changes under ±20% ignored — built; (1) positional futures **roll
+the day before expiry** — built. Next, the GitHub items: a one-time
 backtester cross-check with vectorbt (free), 10–20 well-known strategy ideas through the Ideas Lab (free), and tick-level
 prices from Dhan's WebSocket feed (paid: show Papa the server plan and monthly cost first, build only after his go).
 Done 4 Nov 2026 (migration 74): `notify_test` limited to once a minute per user; the 10 backtests stuck "running" marked
@@ -433,11 +442,6 @@ Still open:
 6. The unfinished question "Also, I want to understand…" (1 Nov).
 
 ## Open items
-- **Held futures across their expiry (found 1 Nov 2026, awaiting Papa's choice):** a positional futures strategy keeps
-  its position past the contract's expiry in the desk's books, but the exchange settles it (index futures in cash,
-  stock futures by delivery of the shares). A later exit resolves to the next month's contract and would open a new
-  opposite position. Options: square off (and re-enter in the next month = roll) on the day before expiry, or block
-  positional futures over expiry. Must be fixed before any positional futures strategy goes live.
 - Supervised 1-lot live test (NATGASMINI, Lab #6038) once Papa adds Dhan funds and whitelists the IP.
 - Risk-based lot sizing per strategy (drawdown-based), and not running two strategies on the same asset at once
   (GOLD 1 kg contract dominated the paper loss) — proposed, awaiting Papa's go-ahead.

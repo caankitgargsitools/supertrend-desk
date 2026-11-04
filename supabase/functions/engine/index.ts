@@ -701,7 +701,7 @@ function plainLog(event: string, description: string): string {
     else if (/^(Stop loss|Target|Trailing)/i.test(n)) keep.push(n.replace(/:.*$/, "") + (order ? `: ${order[1]}` : ""));
     else if (order) keep.push(order[1]);
   }
-  const lead: Record<string, string> = { ENTRY: "Entry signal", EXIT: "Exit signal", REVERSE: "Reversal signal", SQUARE_OFF: "Square-off", INFO: "Update" };
+  const lead: Record<string, string> = { ENTRY: "Entry signal", EXIT: "Exit signal", REVERSE: "Reversal signal", SQUARE_OFF: "Square-off", ROLL: "Roll to the next month", INFO: "Update" };
   return [lead[event] ?? event, ...keep].join(" | ").slice(0, 1000);
 }
 /* ---------- prices on orders: market price when sent (paper), Dhan's fill price (live) ---------- */
@@ -1989,7 +1989,7 @@ const ledgerTag = (s: Strategy) => s.live && !isCrypto(String(s.data_segment)) &
 function exitCount(s: Strategy, event: string, legs: Record<string, unknown>[]): number {
   if (s.position === "FLAT") return 0;
   if (EXIT_EVENTS.has(event)) return legs.length;
-  if (event === "REVERSE") return Math.min(legs.length, asArr(exitLeg(s, 1)).length);
+  if (event === "REVERSE" || event === "ROLL") return Math.min(legs.length, asArr(exitLeg(s, 1)).length);
   return 0;
 }
 async function alert(s: Strategy, title: string, body: string, tag?: string) {
@@ -2085,7 +2085,8 @@ async function queueDhan(s: Strategy, set: Settings, event: string, legs: Record
       // exit would open a new position instead of closing the old one.
       const held = purpose === "exit" ? heldLeg(pb, leg, heldUsed) : null;
       let k: Awaited<ReturnType<typeof resolveLeg>>;
-      try { k = await resolveLeg(sb, c, s, leg, today); }
+      // A roll's new leg goes to the contract after the one expiring (_after = its expiry).
+      try { k = await resolveLeg(sb, c, s, leg, leg._after ? addDays(String(leg._after), 1) : today); }
       catch (e) { if (!held) throw e; k = { sec: held.sec, seg: held.seg, lot: Number(s.lot_size) || 1, tick: pb!.tick || 0.05, label: "", option: false }; }
       if (held && (k.sec !== held.sec || !k.label)) {
         const info = await contractInfo(held.seg, held.sec);
@@ -2737,6 +2738,85 @@ async function breakerAfterTick(ok: Set<string>, err: Map<string, string>, known
       p_url: "/", p_strategy: null, p_tag: `breaker-${u}-${todayIst()}` });
   }
 }
+/* ---------- positional futures across their expiry: roll the day before (Papa, 4 Nov 2026) ---------- */
+/** The futures symbol the contract lists use ("GOLD1!" → GOLD). */
+const futSym = (s: Strategy) => String(s.futures_symbol ?? "").replace(/\d*!$/, "").toUpperCase() || String(s.underlying);
+/** Expiry of the first futures contract after a day (MCX: expiring after it; NSE / BSE: on or after it, as resolveLeg picks). */
+async function futExpiryAfter(s: Strategy, onDate: string, strict = false): Promise<string | null> {
+  if (String(s.exchange).toUpperCase() === "MCX" || isCommodity(String(s.data_segment))) {
+    const { data } = await sb.from("mcx_contracts").select("expiry").eq("underlying", futSym(s)).gt("expiry", onDate).order("expiry").limit(1);
+    return data?.[0]?.expiry ? String(data[0].expiry).slice(0, 10) : null;
+  }
+  const seg = String(s.exchange).toUpperCase() === "BSE" ? "BSE_FNO" : "NSE_FNO";
+  let q = sb.from("fno_contracts").select("expiry").eq("seg", seg).eq("underlying", futSym(s)).eq("instrument", isStockSeg(String(s.data_segment)) ? "FUTSTK" : "FUTIDX");
+  q = strict ? q.gt("expiry", onDate) : q.gte("expiry", onDate);
+  const { data } = await q.order("expiry").limit(1);
+  return data?.[0]?.expiry ? String(data[0].expiry).slice(0, 10) : null;
+}
+/** The expiry of the futures contract a position holds: kept in pos_expiry after a roll, else the near month on its entry day. */
+async function heldFutExpiry(s: Strategy): Promise<string | null> {
+  if (s.pos_expiry) return String(s.pos_expiry).slice(0, 10);
+  const pb = s.pos_broker as PosBroker | null;
+  if (pb?.broker === "DHAN" && pb.legs?.length === 1) {
+    const l = pb.legs[0];
+    const { data } = l.seg === "MCX_COMM" ? await sb.from("mcx_contracts").select("expiry").eq("sec_id", l.sec).maybeSingle()
+      : await sb.from("fno_contracts").select("expiry").eq("seg", l.seg).eq("sec_id", l.sec).maybeSingle();
+    if (data?.expiry) return String(data.expiry).slice(0, 10);
+  }
+  return s.pos_entry_date ? futExpiryAfter(s, String(s.pos_entry_date).slice(0, 10)) : null;
+}
+/** The last weekday before a day (holidays aren't known that far ahead; a holiday makes the roll a day later at worst). */
+function dayBefore(d: string): string {
+  let x = addDays(d, -1);
+  for (let i = 0; i < 4; i++) { const wd = new Date(`${x}T12:00:00+05:30`).getUTCDay(); if (wd !== 0 && wd !== 6) break; x = addDays(x, -1); }
+  return x;
+}
+/** Roll time on the day before expiry (risk.roll_time, default 15:00 IST). */
+const rollTime = (s: Strategy) => /^\d{2}:\d{2}$/.test(String(s.risk?.roll_time ?? "")) ? String(s.risk.roll_time) : "15:00";
+/**
+ * The expiry to roll away from now, or null: a positional (carried overnight) futures position, from the roll time on
+ * the trading day before its contract's expiry (and at once on expiry day if that was missed). risk.roll = false opts out.
+ */
+async function rollDue(s: Strategy): Promise<string | null> {
+  if (s.position === "FLAT" || s.trade_type !== "FUTURES" || isMulti(s) || isCrypto(String(s.data_segment))) return null;
+  if (s.intraday || /^(I|INTRA|INTRADAY|MIS)$/i.test(String(s.product_type ?? "")) || s.risk?.roll === false) return null;
+  if (s.exec_state === "working" || s.exec_state === "exit_retry") return null;
+  const exp = await heldFutExpiry(s);
+  if (!exp) return null;
+  const now = ist(Date.now() / 1000), d = dayBefore(exp);
+  if (now.date > d) return exp;
+  const [h, m] = rollTime(s).split(":").map(Number);
+  return now.date === d && now.min >= h * 60 + m ? exp : null;
+}
+/**
+ * Rolls a futures position: one order closes the expiring contract, the next opens the same side, same lots, in the
+ * contract after it (live: worked as a reversal is, the entry only after the exit fills). The closed part is booked as a
+ * trade ("Rolled to the next month"); the position goes on with its stops, entry price = the price now, and pos_expiry =
+ * the new contract's expiry so it isn't rolled twice.
+ */
+async function rollFutures(s: Strategy, set: Settings, exp: string) {
+  await actLocked(async () => {
+    const update: Record<string, unknown> = { last_run_at: nowIso() };
+    let px: number | null = null;
+    try { px = await dhanFor(set).ltp(String(s.data_segment), String(s.data_security_id)); } catch { px = null; }
+    px = px ?? (Number(s.pos_ltp) || null);
+    const next = await futExpiryAfter(s, exp, true);
+    if (!px || !next) {
+      await alert(s, "Roll not done", `The position's contract expires on ${exp}, but ${!next ? "the next month's contract isn't in the contract list yet" : "there is no price now"}. The desk tries again in a minute; close or roll it in ${s.live ? "Dhan" : "the desk"} if this keeps failing.`, `rollfail-${s.id}-${exp}`);
+      return;
+    }
+    const exitL = asArr(exitLeg(s, 1)), lots = lotsOf(s);
+    const e = entryLeg({ ...s, lots }, s.position as Pos, px, exitL.length + 1, lots);
+    const entryL = asArr(e.leg).map((l) => ({ ...l, _after: exp }));
+    const why = `Rolled to the next month before the ${exp} expiry`;
+    const ok = await sendOrders(s, set, "ROLL", [...exitL, ...entryL], `${why}: ${exitLabel(s)} → ${e.label} (${next} contract)`, { c: px });
+    if (!ok) { await exitFailed(s, update, why, "the roll's exit didn't go"); await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
+    const out = await bookPnl(s, set, update, px, why);
+    await saveFills([fillOf(s, "Exit", out), fillOf({ ...s, ...e.state, position: s.position }, "Entry", px)]);
+    Object.assign(update, { pos_entry_px: px, pos_entry_date: todayIst(), pos_expiry: next, pos_ltp: null, pos_ltp_at: null, pos_upnl: null });
+    await sb.from("algo_strategies").update(update).eq("id", s.id);
+  });
+}
 /** Tries an exit that failed before (exec_state 'exit_retry') again, once a minute. True when it handled the strategy. */
 async function retryExit(s: Strategy, set: Settings): Promise<boolean> {
   if (s.exec_state !== "exit_retry" || s.position === "FLAT") return false;
@@ -3086,6 +3166,11 @@ Deno.serve(async (req) => {
         await flatten(s, set, update, { c: Number(s.pos_ltp) || undefined }, `Expiry day: ${s.pos_expiry ?? "a leg"} expires today, closed at ${expiryExitTime(s)}`, "SQUARE_OFF");
         await sb.from("algo_strategies").update(update).eq("id", s.id);
         results[s.id] = "closed on its expiry day"; okUsers.add(String(s.owner_id)); return;
+      }
+      // Positional futures roll to the next month on the trading day before expiry (Papa, 4 Nov 2026).
+      if (tick && !isCr) {
+        const exp = await rollDue(s).catch(() => null);
+        if (exp) { await rollFutures(s, set, exp); results[s.id] = `rolled before the ${exp} expiry`; okUsers.add(String(s.owner_id)); return; }
       }
       if (tick && s.live) { const s0 = s; s = await actLocked(() => syncStop(s0, set)).catch((e) => { console.error("stop", e); return s0; }); }
       // A manual refresh outside market hours (or in the NSE/BSE pre-open) keeps the session's last price.

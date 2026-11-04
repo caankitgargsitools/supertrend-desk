@@ -1,7 +1,7 @@
 import { build } from "esbuild";
 import fs from "node:fs";
 const src = fs.readFileSync("../../supabase/functions/engine/index.ts", "utf8");
-fs.writeFileSync("../../supabase/functions/engine/__sim.ts", src + "\nexport { secondRisk, liveTest, queueDhan, runOrders, syncStop, checkStop, reconcile, sendDelta, stockExDate, stockLotSync, finishNow, flattenNow, riskExit, retryExit, failRow, expiryExitDue, sizeEntry, markPrice, entryLeg, sb as __sb };\n");
+fs.writeFileSync("../../supabase/functions/engine/__sim.ts", src + "\nexport { secondRisk, liveTest, queueDhan, runOrders, syncStop, checkStop, reconcile, sendDelta, stockExDate, stockLotSync, finishNow, flattenNow, riskExit, retryExit, failRow, expiryExitDue, sizeEntry, markPrice, entryLeg, rollDue, rollFutures, sb as __sb };\n");
 const here = process.cwd();
 await build({ entryPoints: ["../../supabase/functions/engine/__sim.ts"], bundle: true, format: "esm", platform: "node", outfile: "engine.mjs", logLevel: "warning",
   plugins: [{ name: "npm", setup(b) {

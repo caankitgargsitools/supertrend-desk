@@ -391,5 +391,46 @@ await t("move sizing: the entry takes target ÷ one lot's typical day, the new l
   db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "m1");
 });
 
+// ---------------- positional futures roll the day before expiry (4 Nov 2026) ----------------
+await t("roll: due from 15:00 on the trading day before expiry, not before, not for intraday ones", async () => {
+  const S = add("rl1", { live: false, intraday: false, product_type: "M", ...longPos({ pos_broker: null, pos_entry_date: "2026-10-14" }) });
+  clock = Date.parse("2026-10-26T09:00:00Z"); // Monday 14:30 IST; the Oct contract expires Tuesday 27th
+  assert.equal(await E.rollDue(S()), null);
+  clock = Date.parse("2026-10-26T09:35:00Z"); // 15:05 IST
+  assert.equal(await E.rollDue(S()), "2026-10-27");
+  assert.equal(await E.rollDue({ ...S(), intraday: true }), null);
+  assert.equal(await E.rollDue({ ...S(), risk: { ...S().risk, roll: false } }), null);
+});
+await t("roll (paper): the old contract's part booked, same side and lots go on in the next month, not rolled twice", async () => {
+  const S = () => db.algo_strategies.find((x) => x.id === "rl1");
+  dhan.ltp["13"] = 25300;
+  const before = db.algo_trades.filter((x) => x.strategy_id === "rl1").length;
+  await E.rollFutures(S(), set, "2026-10-27");
+  const tr = db.algo_trades.filter((x) => x.strategy_id === "rl1");
+  assert.equal(tr.length, before + 1); assert.match(tr.at(-1).exit_why, /Rolled to the next month before the 2026-10-27 expiry/);
+  assert.equal(S().position, "LONG"); assert.equal(S().pos_qty, 1); assert.equal(S().pos_entry_px, 25300); assert.equal(S().pos_expiry, "2026-11-24");
+  assert.equal(S().pos_risk.stop, 24900, "stops kept");
+  assert.equal(await E.rollDue(S()), null, "not rolled twice");
+  const g = db.algo_signals.filter((x) => x.strategy_id === "rl1" && x.event === "ROLL");
+  assert.equal(g.length, 1); assert.match(g[0].description, /2026-11-24 contract/);
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "rl1");
+});
+await t("roll (live): the exit goes to the expiring contract, the entry to the next month's after the exit fills", async () => {
+  for (const r of db.fno_contracts) r.synced_at = iso(); // the contract list as downloaded today
+  const S = add("rl2", { intraday: false, product_type: "M", ...longPos({ pos_entry_date: "2026-10-14" }) });
+  dhan.positions = [{ exchangeSegment: "NSE_FNO", securityId: "35001", netQty: 75 }];
+  dhan.ltp["13"] = 25300; dhan.ltp["35001"] = 25350; dhan.ltp["35002"] = 25420;
+  await E.rollFutures(S(), set, "2026-10-27");
+  const rows = ordersOf("rl2").filter((r) => r.purpose !== "stop");
+  const ex = rows.find((r) => r.purpose === "exit"), en = rows.find((r) => r.purpose === "entry");
+  assert.equal(ex.sec, "35001"); assert.equal(ex.side, "SELL"); assert.equal(en.sec, "35002"); assert.equal(en.side, "BUY");
+  assert.equal(en.state, "queued", "entry waits for the exit");
+  fill(ex.broker_order_id, 25350); await E.runOrders(1);
+  const en2 = db.live_orders.find((r) => r.id === en.id); assert.equal(en2.state, "working");
+  fill(en2.broker_order_id, 25421); await E.runOrders(1);
+  assert.equal(S().position, "LONG"); assert.equal(S().pos_broker.legs[0].sec, "35002"); assert.equal(S().pos_expiry, "2026-11-24"); assert.equal(S().exec_state, null);
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "rl2");
+});
+
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);

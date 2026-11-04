@@ -3299,8 +3299,8 @@ function showTradesOnChart(r) {
 }
 
 /* signal log */
-const EVENT_NAMES = { ENTRY: "Entry", EXIT: "Exit", REVERSE: "Reverse", SQUARE_OFF: "Square-off", FLATTEN: "Manual exit", INFO: "Info" };
-const EVENT_COLOR = { ENTRY: "green", EXIT: "red", REVERSE: "blue", SQUARE_OFF: "yellow", FLATTEN: "red", INFO: "" };
+const EVENT_NAMES = { ENTRY: "Entry", EXIT: "Exit", REVERSE: "Reverse", SQUARE_OFF: "Square-off", FLATTEN: "Manual exit", ROLL: "Roll to next month", INFO: "Info" };
+const EVENT_COLOR = { ENTRY: "green", EXIT: "red", REVERSE: "blue", SQUARE_OFF: "yellow", FLATTEN: "red", ROLL: "blue", INFO: "" };
 function renderLog(rows) {
   const tb = $("logBody"); tb.innerHTML = "";
   if (!rows.length) { tb.innerHTML = '<tr><td colspan="6" class="hint">No signals yet. When the strategy triggers, each order appears here with the exact message sent to Dhan.</td></tr>'; return; }
@@ -6918,7 +6918,7 @@ const capitalOf = (s) => s.sizing && s.sizing.mode === "CAPITAL" && Number(s.cap
 
 /* ---------- orders: every order the desk generated, with the broker's state for live ones ---------- */
 let ordRows = [], ordLegs = new Map(), ordTimer = null;
-const ORD_EVENT = { ENTRY: "Entry", EXIT: "Exit", REVERSE: "Reverse", SQUARE_OFF: "Square-off", FLATTEN: "Manual exit", STOP_LOSS: "Stop loss", TARGET: "Target", TRAIL_STOP: "Trailing stop" };
+const ORD_EVENT = { ENTRY: "Entry", EXIT: "Exit", REVERSE: "Reverse", SQUARE_OFF: "Square-off", FLATTEN: "Manual exit", ROLL: "Roll to next month", STOP_LOSS: "Stop loss", TARGET: "Target", TRAIL_STOP: "Trailing stop" };
 const ORD_STATE = { queued: ["Waiting for the leg before", ""], working: ["Working at broker", "blue"], resting: ["Stop resting at broker", "blue"], filled: ["Filled", "green"], failed: ["Rejected / failed", "red"], cancelled: ["Cancelled / not sent", "yellow"], gave_up: ["Not filled (price ran away)", "red"] };
 function ordFrom() {
   const p = $("of_period").value, day = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
