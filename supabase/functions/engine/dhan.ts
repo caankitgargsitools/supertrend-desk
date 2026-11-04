@@ -187,7 +187,11 @@ export class Dhan {
     return j?.data?.oc ?? {};
   }
 
-  /** Live premium of one option; falls back to the next listed expiry if the computed date isn't one (holiday weeks). */
+  /**
+   * Live premium of one option of exactly this expiry (null when it isn't priced). A held position is never priced from
+   * another expiry's option (4 Nov 2026: that put a different contract's price on the ledger and the stops); entries
+   * pick a listed expiry first (expiries()).
+   */
   async premium(sec: string, seg: string, expiry: string, strike: number, type: "CE" | "PE"): Promise<number | null> {
     const find = (oc: Record<string, any>) => {
       for (const [k, v] of Object.entries(oc)) {
@@ -195,16 +199,13 @@ export class Dhan {
       }
       return null;
     };
-    let px: number | null = null;
-    try { px = find(await this.optionChain(sec, seg, expiry)); } catch { px = null; }
-    if (px !== null) return px;
-    try {
-      const j = await this.post("/optionchain/expirylist", { UnderlyingScrip: Number(sec), UnderlyingSeg: seg });
-      const list: string[] = (j?.data ?? []).map(String).sort();
-      const e = list.find((x) => x >= expiry);
-      if (e && e !== expiry) return find(await this.optionChain(sec, seg, e));
-    } catch { /* no premium available */ }
-    return null;
+    try { return find(await this.optionChain(sec, seg, expiry)); } catch { return null; }
+  }
+
+  /** The option expiries Dhan lists for an underlying, earliest first. */
+  async expiries(sec: string, seg: string): Promise<string[]> {
+    const j = await this.post("/optionchain/expirylist", { UnderlyingScrip: Number(sec), UnderlyingSeg: seg });
+    return ((j?.data ?? []) as unknown[]).map(String).sort();
   }
 
   /** Last traded price for one instrument (Data API; 1 request per second). */

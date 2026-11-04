@@ -14,7 +14,7 @@ const base = { data_instrument: "FUTCOM", timeframe_min: 1440, strategy_kind: "R
 const S = (id, u, seg, lot, dd, extra = {}) => ({ ...base, id, name: `Lab #${id} · Futures · ${u} daily · test rule`, underlying: u, data_segment: seg, data_security_id: u, futures_symbol: u, lot_size: lot,
   sizing: { mode: "FIXED", dd_per_lot: dd }, ...extra });
 const strategies = [
-  S("g1", "GOLD", "MCX_COMM", 100, 1597170, { position: "SHORT", pos_lots: 1, pos_qty: 1 }),
+  S("g1", "GOLD", "MCX_COMM", 100, 1597170, { position: "SHORT", pos_lots: 1, pos_qty: 1, exec_state: "exit_retry" }),
   S("g2", "GOLD", "MCX_COMM", 100, 571957),
   S("gm", "GOLDM", "MCX_COMM", 10, 34438),
   S("cu", "COPPER", "MCX_COMM", 2500, 184130),
@@ -58,13 +58,19 @@ if (width > 700) {
   if (h.join("|") !== "Asset|Long / short|Lots|Running P&L|Booked P&L|Status") fail("simple headings", h);
   const row = await p.$$eval("#lp_body tr", (r) => r.map((x) => x.textContent));
   if (!row.some((t) => /Gold/.test(t) && /Short/.test(t))) fail("gold short row", row);
+  // An exit being retried (4 Nov 2026) is marked on its row in both views.
+  if (!row.some((t) => /Gold/.test(t) && /Exit retrying/.test(t))) fail("exit retrying chip (simple)", row);
   if (!/1 lots?|1/.test(await p.textContent("#lp_tfoot"))) fail("totals");
   await p.screenshot({ path: `list_simple_${theme}_${width}.png` });
   await p.click('#lp_view [data-v="full"]'); await p.waitForTimeout(200);
   h = await heads(); if (!h.includes("Margin required (today)") || !h.includes("Strategy")) fail("detailed headings", h);
+  if (!(await p.textContent("#lp_body")).includes("Exit retrying")) fail("exit retrying chip (detailed)");
   await p.click('#lp_view [data-v="simple"]'); await p.waitForTimeout(200);
   if ((await heads()).length !== 6) fail("back to simple");
-} else if (!(await p.$$("#lp_cards .lpc")).length) fail("phone cards");
+} else {
+  if (!(await p.$$("#lp_cards .lpc")).length) fail("phone cards");
+  if (!(await p.textContent("#lp_cards")).includes("Exit retrying")) fail("exit retrying chip (cards)");
+}
 if (errs.length) fail("page errors", errs);
 console.log("ok strategies simple view", theme, width);
 await b.close();

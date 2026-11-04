@@ -46,6 +46,11 @@ class Q {
   run() {
     const tab = T(this.t);
     let out;
+    if (this.op === "insert" && UNIQUE[this.t]) {
+      const u = UNIQUE[this.t];
+      for (const r of this.rows) if (u.where(r) && tab.some((x) => u.where(x) && u.cols.every((k) => String(x[k]) === String(r[k]))))
+        return { data: null, error: { code: "23505", message: `duplicate key value violates unique constraint (${this.t})` } };
+    }
     if (this.op === "insert" || this.op === "upsert") {
       out = this.rows.map((r) => {
         const row = { id: r.id ?? ++seq, created_at: new Date().toISOString(), ...(this.t === 'live_orders' ? { steps: 0, market_retry: false } : {}), ...JSON.parse(JSON.stringify(r)) };
@@ -72,6 +77,11 @@ class Q {
   }
   then(res, rej) { try { res(this.run()); } catch (e) { rej(e); } }
 }
+// Unique indexes the real tables have (only where a test needs them): a second insert fails with code 23505.
+export const UNIQUE = {
+  // migration 66: one signal of an event per strategy, candle and mode (hidden and failed rows don't count)
+  algo_signals: { cols: ["strategy_id", "event", "candle_time", "mode"], where: (r) => r.candle_time != null && !r.hidden && r.status !== "FAILED" },
+};
 // Primary keys the real tables have, for upserts made without onConflict.
 const PK = { lab_candles: ["asset", "kind"] };
 export const rpcCalls = [];

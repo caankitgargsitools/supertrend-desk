@@ -253,6 +253,24 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   positions, P&L, capital and the open page's own data (`deskSoft`, `loadCap`, Live / Trades / Orders tabs) every 30 s while
   the app is on screen (market open or not) and on coming back (visibilitychange, pageshow, focus, online; at most every
   10 s). Unsaved strategy settings are kept (`formDirty`). Test: `tests/ui/ui_sync.mjs`.
+- **Exit safety (Phase 1, 4 Nov 2026, Papa: "stop silent losses"; migration 71; tests `tests/sim/safety.test.mjs`)**:
+  paused = no new entries only — the tick, the per-second stop (`secondRisk`) and reconcile also run paused strategies
+  that hold a position (stops, exit signals, square-off; entries blocked by `_block`). Exits of a single-leg futures
+  position go to the contract held (`heldLeg` from `pos_broker`, quantity held), never "today's" near month. One decision
+  per candle: `claimSignal` writes the signal row before any order (migration 66's unique index; a repeat sends and
+  changes nothing). Live Dhan exits are booked `provisional` with `order_batch`; `fixLedger` finds the trade by batch and
+  confirms it with Dhan's fills (structures leg by leg). An exit Dhan rejects (also at market) puts the position back
+  from `live_orders.restore`, hides the provisional trade and sets `exec_state = 'exit_retry'` (`exitFailed`): the broker
+  stop goes back in, `retryExit` tries again every minute, after 5 tries (`EXIT_TRIES`) it stops, pauses and asks to close
+  by hand; the same for exits that didn't go (Delta, a stop that couldn't be cancelled). `cancelStop` confirms a stop is
+  really gone before an exit (else nothing is sent). `stuckWorking`: "working" for 10+ min → orders re-read from Dhan
+  (fill booked / failure handled / queued leg sent / empty flag cleared, owner told). A partly filled entry that is given
+  up or cancelled keeps the part filled (`partEntry`: pos_qty, lots, margin, its own stop). Dhan stop orders are day
+  orders: none is placed outside the session (`syncStop`), an expiry at the close isn't an alert, the stop goes back in at
+  the next open, reconcile alerts when an open position has no broker stop 5 min into its session. Options close on their
+  expiry day at 14:30 (`expiryExitDue`; `risk.expiry_exit = false` / `risk.expiry_exit_time` per strategy); a held option is
+  never priced from another expiry (`Dhan.premium` exact); entries take the next expiry Dhan lists (`Dhan.expiries`).
+  UI: "Exit retrying" chip; the Pause confirmation says positions keep their stops.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
@@ -409,6 +427,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
    same data (free); (c) 10–20 well-known strategy ideas from open-source repos (e.g. opening-range breakout, CPR-VWAP)
    through the Ideas Lab's tests (free). Not recommended: replacing our engine (Nautilus/LEAN/backtrader), crypto bots
    (freqtrade/jesse), Qlib, LLM-agent traders; OpenAlgo (AGPL) only later, as a separate service, if clients need other brokers.
+
+11. **Broker stops across the night (Phase 1, 4 Nov 2026)**: Dhan stop orders are day orders, so a positional position
+   has no broker stop from the close to the next open (the desk's own per-second stop runs from the first price). Use
+   Dhan's Forever Order (GTT) for positional stops instead? Needs testing in the supervised 1-lot test.
 
 ## Open items
 - **Held futures across their expiry (found 1 Nov 2026, awaiting Papa's choice):** a positional futures strategy keeps
