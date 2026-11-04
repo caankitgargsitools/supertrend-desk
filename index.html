@@ -1322,10 +1322,15 @@ body.dk-fs-on { overflow: hidden; }
               </div>
               <div class="lw-step"><h4><i>2</i>How to share it</h4>
                 <div class="lw-methods" id="lw_methods">
+                  <button class="lw-m" type="button" data-lwm="move"><i class="dot"></i><b>Same ₹ on a typical day<span class="lw-rec">RECOMMENDED</span></b><span>Lots so every strategy makes or loses about the same on a typical day's move of its asset (its average daily range over 20 days).</span></button>
                   <button class="lw-m" type="button" data-lwm="equal"><i class="dot"></i><b>Equal capital per strategy</b><span>Split evenly; each takes as many lots as its share covers.</span></button>
                   <button class="lw-m" type="button" data-lwm="pct"><i class="dot"></i><b>A percentage for each strategy</b><span>You set each strategy's share in the table.</span></button>
                   <button class="lw-m" type="button" data-lwm="asset"><i class="dot"></i><b>Lots per asset</b><span>You choose the lots for each asset; every strategy on it uses that number.</span></button>
-                  <button class="lw-m" type="button" data-lwm="risk"><i class="dot"></i><b>Equal risk per strategy<span class="lw-rec">RECOMMENDED</span></b><span>Lots from each strategy's worst backtest fall, so a bad patch costs about the same everywhere.</span></button>
+                  <button class="lw-m" type="button" data-lwm="risk"><i class="dot"></i><b>Equal risk per strategy</b><span>Lots from each strategy's worst backtest fall, so a bad patch costs about the same everywhere.</span></button>
+                </div>
+                <div class="lw-two" id="lw_moveBox" style="margin-top:8px">
+                  <label class="f"><span>Each strategy on a typical day (₹)</span><input id="lw_moveAmt" type="number" min="0" step="1000" placeholder="as much as the limit allows"></label>
+                  <p class="hint" id="lw_moveTxt" style="margin:0;align-self:end"></p>
                 </div>
                 <div class="lw-two" id="lw_riskBox" style="margin-top:8px">
                   <label class="f"><span>A bad patch may cost (% of capital)</span><input id="lw_riskPct" type="number" min="0.5" max="20" step="0.5" value="2"></label>
@@ -4188,7 +4193,7 @@ applyAdv();
 /* ---------- capital page ---------- */
 const cap = { open: false, mode: "LIVE", status: null };
 async function loadCapStatus() {
-  const [st, rates] = await Promise.all([db.rpc("my_capital").then(must), db.from("lab_margins").select("asset, price, fut_pct, fut_pct_i, sell_pct, sell_pct_i, checked_at").then((r) => r.data || []).catch(() => [])]);
+  const [st, rates] = await Promise.all([db.rpc("my_capital").then(must), db.from("lab_margins").select("asset, price, fut_pct, fut_pct_i, sell_pct, sell_pct_i, checked_at, day_move").then((r) => r.data || []).catch(() => [])]);
   cap.status = st; cap.rates = Object.fromEntries(rates.map((r) => [r.asset, r]));
   return cap.status;
 }
@@ -4320,7 +4325,7 @@ async function capDd(st) {
   const b = $("cap_dd_use"); if (b) b.onclick = () => { $("cap_deploy").value = String(sug); $("cap_msg").textContent = `Limit set to ${sug}% — press Save to keep it.`; $("cap_deploy").focus(); };
 }
 /* ---------- Lots wizard (Capital page) ---------- */
-const lw = { method: "risk", typesOff: new Set(), off: new Set(), pct: {}, assetLots: {}, capSet: false, plan: [] };
+const lw = { method: "move", typesOff: new Set(), off: new Set(), pct: {}, assetLots: {}, capSet: false, plan: [] };
 const LW_TYPES = ["Indices", "Stocks", "Commodities", "Crypto"];
 const lwType = (s) => isCrypto(s.data_segment) ? "Crypto" : isMcx(s.data_segment) ? "Commodities" : /EQ|STOCK/i.test(String(s.data_segment)) || (PRESETS[s.underlying] && PRESETS[s.underlying].stock) ? "Stocks" : "Indices";
 const lwName = (u) => (PRESETS[u] && PRESETS[u].name) || u;
@@ -4336,7 +4341,7 @@ function lwPlan() {
   const capAmt = Math.max(0, Number($("lw_cap").value) || 0);
   const rp = Number($("lw_riskPct").value) || 0, mult = Math.max(1, Number($("lw_mult").value) || 1);
   const all = myStrats().filter((x) => !x.archived && (!!x.live === (cap.mode === "LIVE")))
-    .map((s) => ({ s, margin: lwMargin(s), dd: Number(s.sizing && s.sizing.dd_per_lot) || null, type: lwType(s) }))
+    .map((s) => ({ s, margin: lwMargin(s), dd: Number(s.sizing && s.sizing.dd_per_lot) || null, move: lwMove(s), type: lwType(s) }))
     .sort((a, b) => String(a.s.underlying).localeCompare(String(b.s.underlying)) || String(a.s.name).localeCompare(String(b.s.name)));
   for (const r of all) r.on = !lw.off.has(r.s.id) && !lw.typesOff.has(r.type) && r.margin != null;
   const on = all.filter((r) => r.on);
@@ -4347,16 +4352,38 @@ function lwPlan() {
     if (lw.method === "equal") r.lots = Math.floor(capAmt / on.length / r.margin);
     else if (lw.method === "pct") r.lots = Math.floor(capAmt * (lw.pct[r.s.id] || 0) / 100 / r.margin);
     else if (lw.method === "asset") r.lots = Math.max(0, Math.floor(lw.assetLots[r.s.underlying] ?? 1));
+    else if (lw.method === "move") { if (!r.move) r.why = "no typical day's move stored for its asset yet"; }
     else if (r.dd) r.lots = Math.floor(capAmt * rp / 100 / (r.dd * mult));
     else r.why = "no backtest fall stored";
-    r.used = (r.lots || 0) * r.margin; r.fall = r.dd ? (r.lots || 0) * r.dd : null;
   }
+  const target = lw.method === "move" ? lwMoveLots(on, capAmt * Math.min(100, Math.max(5, Number($("lw_capPct").value) || 60)) / 100) : null;
+  for (const r of all) { r.used = (r.lots || 0) * r.margin; r.fall = r.dd ? (r.lots || 0) * r.dd : null; r.day = r.move ? (r.lots || 0) * r.move : null; }
   lw.plan = all;
-  return { capAmt, all, on };
+  return { capAmt, all, on, target };
+}
+/** Rupees one lot makes or loses on its asset's typical day's move (price × lot size × day_move); null if unknown. */
+function lwMove(s) {
+  const r = cap.rates && cap.rates[s.underlying], px = r && Number(r.price), dm = r && Number(r.day_move);
+  return px > 0 && dm > 0 && s.trade_type !== "OPTIONS" ? px * Number(s.lot_size) * dm : null;
+}
+/**
+ * "Same ₹ on a typical day" (4 Nov 2026, Papa): every ticked strategy gets lots = target ÷ its one-lot day's move,
+ * rounded to whole lots. The target is the box's amount, or else the largest one whose margin fits the limit (a big
+ * contract may still round to 0 lots: shown, not traded). Sets r.lots; returns the target used.
+ */
+function lwMoveLots(on, limit) {
+  const rs = on.filter((r) => r.move && r.margin);
+  if (!rs.length) return null;
+  const typed = Number($("lw_moveAmt").value) || 0;
+  const place = (T) => { for (const r of rs) r.lots = Math.max(0, Math.round(T / r.move)); return rs.reduce((a, r) => a + r.lots * r.margin, 0); };
+  if (typed > 0) { place(typed); return typed; }
+  let T = limit / rs.reduce((a, r) => a + r.margin / r.move, 0);
+  for (let i = 0; i < 200 && T > 0 && place(T) > limit; i++) T *= 0.98;
+  return Math.trunc(T);
 }
 function lwRender() {
   if (!$("lw_card")) return;
-  const { capAmt, all, on } = lwPlan(), live = cap.mode === "LIVE";
+  const { capAmt, all, on, target } = lwPlan(), live = cap.mode === "LIVE", byMove = lw.method === "move";
   const capPct = Math.min(100, Math.max(5, Number($("lw_capPct").value) || 60)), limit = capAmt * capPct / 100;
   const sized = on.filter((r) => r.lots != null);
   const used = sized.reduce((a, r) => a + r.used, 0), fall = sized.reduce((a, r) => a + (r.fall || 0), 0), lots = sized.reduce((a, r) => a + r.lots, 0);
@@ -4367,17 +4394,21 @@ function lwRender() {
     + (capPct > savedPct ? ` <b style="color:var(--red)">Above your saved limit of ${savedPct}%.</b>` : "") : "Enter the capital.";
   $("lw_capPct").style.borderColor = capPct > savedPct ? "var(--red)" : "";
   $("lw_riskBox").hidden = lw.method !== "risk";
+  $("lw_moveBox").hidden = !byMove;
+  const days = sized.filter((r) => r.lots > 0 && r.day).map((r) => r.day);
+  $("lw_moveTxt").textContent = byMove && target ? `Target ${rupeesShort(target)} each${Number($("lw_moveAmt").value) > 0 ? "" : " (the most your limit allows)"}; whole lots make it ${days.length ? `${rupeesShort(Math.min(...days))}–${rupeesShort(Math.max(...days))}` : "–"}.` : "";
   document.querySelectorAll("#lw_methods [data-lwm]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lwm === lw.method)));
   const tile = (k, v, sub, c) => `<div class="stat" style="--c:var(${c || "--line"})"><span class="label">${esc(k)}</span><span class="v">${esc(v)}</span><span class="hint">${esc(sub)}</span></div>`;
   $("lw_tiles").innerHTML = tile("Margin needed", rupeesShort(used), `${capAmt ? Math.round(used / capAmt * 100) : 0}% of capital · ${lots} lots`, over ? "--red" : "--blue")
     + tile("Left free", rupeesShort(Math.max(0, capAmt - used)), over ? `above your ${capPct}% limit` : `limit ${capPct}% = ${rupeesShort(limit)}`, over ? "--red" : "--green")
     + tile("Strategies trading", `${sized.length - zero} / ${on.length}`, zero ? `${zero} get 0 lots` : "all get at least 1 lot", zero ? "--yellow" : "--line")
-    + tile("Worst falls added up", rupeesShort(fall), `${capAmt ? (fall / capAmt * 100).toFixed(1) : 0}% of capital if all hit at once`);
+    + (byMove ? tile("Each on a typical day", target ? `≈ ${rupeesShort(target)}` : "–", days.length ? `${days.length} strategies · whole lots: ${rupeesShort(Math.min(...days))}–${rupeesShort(Math.max(...days))}` : "no strategy sized", "--green")
+      : tile("Worst falls added up", rupeesShort(fall), `${capAmt ? (fall / capAmt * 100).toFixed(1) : 0}% of capital if all hit at once`));
   $("lw_fill").style.width = `${capAmt ? Math.min(100, used / capAmt * 100) : 0}%`; $("lw_fill").style.background = over ? "var(--red)" : "var(--blue)";
   $("lw_capLine").style.left = `${capPct}%`;
   $("lw_meterTxt").textContent = `${rupeesShort(used)} of ${rupeesShort(capAmt)} in margin (yellow line: your ${capPct}% limit).`;
   const pctCol = lw.method === "pct", nCol = pctCol ? 8 : 7;
-  $("lw_tbl").tHead.innerHTML = `<tr><th>Strategy</th>${pctCol ? '<th class="n">Share %</th>' : ""}<th class="n">Now</th><th class="n">Margin / lot</th><th class="n">Worst fall / lot</th><th class="n">New lots</th><th class="n">Margin blocked</th><th class="n">Worst fall at these lots</th></tr>`;
+  $("lw_tbl").tHead.innerHTML = `<tr><th>Strategy</th>${pctCol ? '<th class="n">Share %</th>' : ""}<th class="n">Now</th><th class="n">Margin / lot</th><th class="n">${byMove ? "Typical day / lot" : "Worst fall / lot"}</th><th class="n">New lots</th><th class="n">Margin blocked</th><th class="n">${byMove ? "Typical day at these lots" : "Worst fall at these lots"}</th></tr>`;
   const groups = new Map(); for (const r of all) { if (!groups.has(r.s.underlying)) groups.set(r.s.underlying, []); groups.get(r.s.underlying).push(r); }
   let body = "";
   for (const [u, rs] of groups) {
@@ -4389,8 +4420,8 @@ function lwRender() {
       const note = r.margin == null ? "options: size in its settings" : r.why;
       body += `<tr class="${r.on ? "" : "off"}"><td class="nm"><label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" data-lwpick="${s.id}" ${r.on ? "checked" : ""} ${tOff || r.margin == null ? "disabled" : ""} style="margin-top:3px"><span style="min-width:0;display:block;color:inherit;font-size:13px;white-space:normal"><b>${esc(s.name.split(" · ")[0])}</b>${z ? ' <span class="chip red" style="display:inline">0 lots</span>' : ""}${s.position !== "FLAT" ? ` <span class="chip" style="display:inline">${s.position === "LONG" ? "Long" : "Short"} ${s.pos_lots || ""}</span>` : ""}<span>${esc(s.name.split(" · ").slice(2).join(" · ") || s.name)}${note ? ` — ${esc(note)}` : ""}</span></span></label></td>`
         + (pctCol ? `<td class="n"><input class="pct" type="number" min="0" max="100" step="0.5" data-lwpct="${s.id}" value="${r.on ? (lw.pct[s.id] || 0) : 0}" ${r.on ? "" : "disabled"}></td>` : "")
-        + `<td class="n mono">${esc(now)}</td><td class="n mono">${r.margin != null ? rupeesShort(r.margin) : "–"}</td><td class="n mono">${r.dd ? rupeesShort(r.dd) : "–"}</td>`
-        + `<td class="n lots ${z ? "z" : ""}">${r.on && r.lots != null ? r.lots : "–"}</td><td class="n mono">${r.on && r.lots != null ? rupeesShort(r.used) : "–"}</td><td class="n mono">${r.on && r.fall != null ? rupeesShort(r.fall) : "–"}</td></tr>`;
+        + `<td class="n mono">${esc(now)}</td><td class="n mono">${r.margin != null ? rupeesShort(r.margin) : "–"}</td><td class="n mono">${byMove ? (r.move ? `${rupeesShort(r.move)}<div class="hint sm">${(Number(cap.rates[s.underlying].day_move) * 100).toFixed(2)}% a day</div>` : "–") : r.dd ? rupeesShort(r.dd) : "–"}</td>`
+        + `<td class="n lots ${z ? "z" : ""}">${r.on && r.lots != null ? r.lots : "–"}</td><td class="n mono">${r.on && r.lots != null ? rupeesShort(r.used) : "–"}</td><td class="n mono">${byMove ? (r.on && r.day != null && r.lots ? rupeesShort(r.day) : "–") : r.on && r.fall != null ? rupeesShort(r.fall) : "–"}</td></tr>`;
     }
   }
   $("lw_tbl").tBodies[0].innerHTML = body || `<tr><td colspan="${nCol}" class="hint">No ${live ? "live" : "paper"} strategies.</td></tr>`;
@@ -4406,6 +4437,8 @@ function lwRender() {
   if (over) notes.push(["err", `Margin needed (${rupeesShort(used)}) is above your ${capPct}% limit (${rupeesShort(limit)}). Lower the lots or the share, or raise the limit.`]);
   for (const [u, v] of byA) if (capAmt && v / capAmt > .25) notes.push(["warn", `${lwName(u)} alone would block ${Math.round(v / capAmt * 100)}% of the capital when all its strategies are in a trade.`]);
   if (zero) notes.push(["warn", `${zero} strateg${zero === 1 ? "y gets" : "ies get"} 0 lots (${[...new Set(sized.filter((r) => !r.lots).map((r) => lwName(r.s.underlying)))].join(", ")}). Apply leaves ${zero === 1 ? "it" : "them"} as they are now; pause ${zero === 1 ? "it" : "them"} yourself, or move to a smaller contract (e.g. Gold Mini).`]);
+  const noMove = on.filter((r) => byMove && !r.move).length;
+  if (noMove) notes.push(["warn", `${noMove} strateg${noMove === 1 ? "y has" : "ies have"} no typical day's move stored for ${noMove === 1 ? "its asset" : "their assets"} yet (it is worked out every morning from the lab's daily candles); Apply leaves ${noMove === 1 ? "it" : "them"} unchanged.`]);
   const noDd = on.filter((r) => lw.method === "risk" && !r.dd).length;
   if (noDd) notes.push(["warn", `${noDd} strateg${noDd === 1 ? "y has" : "ies have"} no worst fall from a backtest stored, so “Equal risk” can't size ${noDd === 1 ? "it" : "them"}; Apply leaves ${noDd === 1 ? "it" : "them"} unchanged.`]);
   if (pctCol && Math.abs(pctSum - 100) > 0.5) notes.push(["err", `The shares add up to ${pctSum.toFixed(1)}%, not 100%.`]);
@@ -4435,7 +4468,7 @@ $("lw_card").addEventListener("change", (e) => {
   else if (el.dataset.lwpct) { lw.pct[el.dataset.lwpct] = Math.max(0, Number(el.value) || 0); lwRender(); }
   else if (el.dataset.lwasset) { lw.assetLots[el.dataset.lwasset] = Math.max(0, Math.floor(Number(el.value) || 0)); lwRender(); }
 });
-["lw_cap", "lw_capPct", "lw_riskPct", "lw_mult"].forEach((id) => $(id).addEventListener("input", () => { if (id === "lw_cap" || id === "lw_capPct") lw.capSet = true; lwRender(); }));
+["lw_cap", "lw_capPct", "lw_riskPct", "lw_mult", "lw_moveAmt"].forEach((id) => $(id).addEventListener("input", () => { if (id === "lw_cap" || id === "lw_capPct") lw.capSet = true; lwRender(); }));
 $("lw_apply").addEventListener("click", (e) => {
   const ch = lwChanges(), btn = e.currentTarget; if (!ch.length) return;
   const open = ch.filter((r) => r.s.position !== "FLAT").length, liveN = ch.filter((r) => r.s.live).length;

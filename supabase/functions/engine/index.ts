@@ -22,7 +22,7 @@ import {
   brokerQty, type BrokerStatus, brokerStopTrigger, chaseDecision, type Creds, dhanByTag, dhanCancel, dhanLtp, dhanModify, dhanPlace, dhanPositions, dhanStatus,
   positionDiff, productOf, resolveLeg, setDhanRpc, type Side, sideOf, stepFor, stopLimit, syncFno, toTick,
 } from "./execution.ts";
-import { loadMarginRates, refreshMargins } from "./margins.ts";
+import { loadMarginRates, refreshDayMoves, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
 import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
 import { legsFor, legSign, structMargin, structName, structOf } from "./structures.ts";
@@ -2902,6 +2902,8 @@ Deno.serve(async (req) => {
     return Response.json({ action, ...(await syncUser(sb, body.user_id, false)) });
   }
   if (action === "billing_day") return Response.json({ action, ...(await billingDay(sb)) });
+  // Each asset's typical day's move (the lots wizard's "same ₹ on a typical day"), every morning (cron day-moves).
+  if (action === "day_moves") return Response.json({ action, assets: await refreshDayMoves(sb) });
   if (action === "margins") {
     const admin = await adminAccount(sb);
     const { data: ls } = await sb.from("lab_settings").select("assets").eq("id", 1).maybeSingle();

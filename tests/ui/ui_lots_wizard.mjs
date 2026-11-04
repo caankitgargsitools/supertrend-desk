@@ -22,8 +22,9 @@ const strategies = [
   S("nodd", "ZINC", "MCX_COMM", 5000, null, { sizing: { mode: "AUTO", alloc_pct: 20, max_lots: 3 } }),
   S("x", "GOLD", "MCX_COMM", 100, null, { archived: true, active: false }),
 ];
-const rates = [["GOLD", 138485, .0925], ["GOLDM", 137010, .0925], ["COPPER", 1383.05, .09203], ["SOLUSD", 94.98, .1], ["MIDCPNIFTY", 13184.5, .11993], ["ZINC", 415.9, .08944]]
-  .map(([asset, price, fut_pct]) => ({ asset, price, fut_pct, fut_pct_i: fut_pct, sell_pct: null, sell_pct_i: null, checked_at: now }));
+// day_move: each asset's typical day's move (share of price); Zinc has none stored yet.
+const rates = [["GOLD", 138485, .0925, .012], ["GOLDM", 137010, .0925, .012], ["COPPER", 1383.05, .09203, .015], ["SOLUSD", 94.98, .1, .04], ["MIDCPNIFTY", 13184.5, .11993, .011], ["ZINC", 415.9, .08944, null]]
+  .map(([asset, price, fut_pct, day_move]) => ({ asset, price, fut_pct, fut_pct_i: fut_pct, sell_pct: null, sell_pct_i: null, checked_at: now, day_move }));
 const me = { user_id: A, email: "ca.ankitgarg@gmail.com", role: "admin", status: "active", can_build: true, terms_accepted: true, billing: {}, entries: { ok: true } };
 const res = {
   "rpc/whoami": me, "rpc/broker_status": { broker: "DHAN", has_token: true, token_tail: "abcd", has_url: true, url_host: "x", has_secret: true },
@@ -63,8 +64,25 @@ await p.fill("#lw_capPct", "85"); await p.dispatchEvent("#lw_capPct", "input");
 if (!/above your saved limit of 60%/.test(await p.textContent("#lw_notes"))) fail("limit warning", await p.textContent("#lw_notes"));
 await p.fill("#lw_capPct", "60"); await p.dispatchEvent("#lw_capPct", "input");
 const lotsOf = () => p.evaluate(() => Object.fromEntries(lw.plan.map((r) => [r.s.id, r.lots])));
-// Risk (default): 2% of ₹1 Cr = ₹2L ÷ (fall × 1.5).
+// Same ₹ on a typical day (default, 4 Nov 2026): lots = target ÷ (price × lot × day's move), whole lots, margin inside
+// the 60% limit; Zinc has no day's move stored → left out with a note.
 let L = await lotsOf();
+const plan = await p.evaluate(() => lw.plan.filter((r) => r.on).map((r) => ({ id: r.s.id, lots: r.lots, day: r.day, used: r.used })));
+const used = plan.reduce((a, r) => a + (r.used || 0), 0);
+if (used > 6e6 + 1) fail("move: margin above the limit", used);
+const days = plan.filter((r) => r.lots > 0).map((r) => r.day), mean = days.reduce((a, v) => a + v, 0) / days.length;
+if (!(days.length >= 5) || days.some((d) => Math.abs(d / mean - 1) > 0.5)) fail("move: typical-day rupees not alike", plan);
+if (L.nodd !== null) fail("move: zinc without a day's move", L);
+if (!/no typical day's move/.test(await p.textContent("#lw_notes"))) fail("move: no-move note", await p.textContent("#lw_notes"));
+if (!/Typical day at these lots/.test(await p.textContent("#lw_tbl thead"))) fail("move: columns");
+// A typed target: ₹1,00,000 each on a typical day.
+await p.fill("#lw_moveAmt", "100000"); await p.dispatchEvent("#lw_moveAmt", "input"); L = await lotsOf();
+const wantMove = { g1: 1, g2: 1, gm: 6, cu: 2, sol: 6, mid: 6 };
+for (const k in wantMove) if (L[k] !== wantMove[k]) fail("move lots " + k, L);
+if (!/Target ₹1\.00 L each|Target ₹1,00,000 each|Target ₹1L each/.test(await p.textContent("#lw_moveTxt"))) console.log("note:", await p.textContent("#lw_moveTxt"));
+await p.fill("#lw_moveAmt", ""); await p.dispatchEvent("#lw_moveAmt", "input");
+// Risk: 2% of ₹1 Cr = ₹2L ÷ (fall × 1.5).
+await p.click('[data-lwm="risk"]'); L = await lotsOf();
 const want = { g1: 0, g2: 0, gm: 3, cu: 0, sol: 2, mid: 3, nodd: null };
 for (const k in want) if (L[k] !== want[k]) fail("risk lots " + k, L);
 if (!/0 lots/.test(await p.textContent("#lw_notes"))) fail("zero-lot note");

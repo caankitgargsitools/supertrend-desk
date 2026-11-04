@@ -15,4 +15,5 @@ await one("kill.ts", "kill.mjs");
 await one("ideas.ts", "ideas.mjs");
 await one("prediction.ts", "pred.mjs");
 await one("sizing.ts", "sizing.mjs");
+await one("margins.ts", "margins.mjs");
 console.log("built parts");

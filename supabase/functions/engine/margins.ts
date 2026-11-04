@@ -125,3 +125,36 @@ export async function loadMarginRates(sb: SupabaseClient): Promise<Record<string
   const n = (x: unknown) => (Number(x) > 0 ? Number(x) : null);
   return Object.fromEntries((data ?? []).map((r) => [r.asset, { fut: n(r.fut_pct), futI: n(r.fut_pct_i), sell: n(r.sell_pct), sellI: n(r.sell_pct_i) }]));
 }
+
+/**
+ * An asset's typical day's move as a share of its price (4 Nov 2026, Papa: lots sized so every strategy makes or loses
+ * about the same on a typical day): the average true range of the last n daily candles, each day's range (including a
+ * gap from the day before) divided by the previous close. Null with fewer than n + 1 days.
+ */
+export function dayMovePct(bars: { h?: number[]; l?: number[]; c?: number[] } | null | undefined, n = 20): number | null {
+  const h = bars?.h ?? [], l = bars?.l ?? [], c = bars?.c ?? [];
+  const len = Math.min(h.length, l.length, c.length);
+  if (len < n + 1) return null;
+  let sum = 0, k = 0;
+  for (let i = len - n; i < len; i++) {
+    const pc = Number(c[i - 1]), hi = Number(h[i]), lo = Number(l[i]);
+    if (!(pc > 0) || !(hi >= lo)) continue;
+    sum += Math.max(hi - lo, Math.abs(hi - pc), Math.abs(lo - pc)) / pc; k++;
+  }
+  return k >= n * 0.8 ? +(sum / k).toFixed(5) : null;
+}
+/** Stores every priced asset's typical day's move (lab_margins.day_move) from the lab's daily candles. Returns how many. */
+export async function refreshDayMoves(sb: SupabaseClient): Promise<number> {
+  const { data: rows } = await sb.from("lab_margins").select("asset");
+  let n = 0;
+  for (const r of rows ?? []) {
+    try {
+      const [d] = await readCandles(sb, String(r.asset), ["D"]);
+      const m = dayMovePct(d?.bars);
+      if (m == null) continue;
+      await sb.from("lab_margins").update({ day_move: m, day_move_at: new Date().toISOString() }).eq("asset", r.asset);
+      n++;
+    } catch (e) { console.error("day move", r.asset, e); }
+  }
+  return n;
+}
