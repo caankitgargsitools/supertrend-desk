@@ -69,6 +69,7 @@ class Q {
       if (this.op === "delete") db[this.t] = tab.filter((r) => !out.includes(r));
       if (this.ord) { const [k, a] = this.ord; out = [...out].sort((x, y) => (x[k] > y[k] ? 1 : x[k] < y[k] ? -1 : 0) * (a ? 1 : -1)); }
       if (this.lim != null) out = out.slice(this.off ?? 0, (this.off ?? 0) + this.lim);
+      if (this.op === "select" && out.length > LIMITS.maxRows) out = out.slice(0, LIMITS.maxRows);
     }
     out = out.map((r) => ({ ...r }));
     if (this.cnt) return { data: this.head ? null : out, count: out.length, error: null };
@@ -77,6 +78,8 @@ class Q {
   }
   then(res, rej) { try { res(this.run()); } catch (e) { rej(e); } }
 }
+// The real database answers at most 1,000 rows a request whatever .limit() asks; tests can switch that cap on.
+export const LIMITS = { maxRows: Infinity };
 // Unique indexes the real tables have (only where a test needs them): a second insert fails with code 23505.
 export const UNIQUE = {
   // migration 66: one signal of an event per strategy, candle and mode (hidden and failed rows don't count)

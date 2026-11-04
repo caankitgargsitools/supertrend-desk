@@ -11,7 +11,7 @@ import { newAcc, type Plan, priceBatch, type SimData, slippageFor, slipped, trad
 import { DhanBusyError } from "./dhan.ts";
 import type { SLeg } from "./structures.ts";
 import { CRYPTO } from "./crypto.ts";
-import { assetRoot, cachedAsset, dbStore, labParams, labQuiet, LAB_ASSETS, type LabConfig, readCandles, saveCandles, screenOne, TOKEN_ERR } from "./lab.ts";
+import { assetRoot, cachedAsset, dbStore, labParams, labQuiet, LAB_ASSETS, type LabConfig, pagedRows, readCandles, saveCandles, screenOne, TOKEN_ERR } from "./lab.ts";
 import { loadMarginRates } from "./margins.ts";
 import { deflatedSharpe, median } from "./stats.ts";
 import { pValue, seeded, shuffledData } from "./noise.ts";
@@ -934,8 +934,8 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
     await Promise.all(ups);
   }
   // 3. Settings whose backtests are all done become portfolios.
-  const { data: left } = await sb.from("idea_legs").select("try_id").in("try_id", ids).eq("status", "pending").limit(5000);
-  const waiting = new Set((left ?? []).map((l) => l.try_id));
+  const left = await pagedRows((a, b) => sb.from("idea_legs").select("id, try_id").in("try_id", ids).eq("status", "pending").order("id").range(a, b));
+  const waiting = new Set(left.map((l) => l.try_id));
   let combined = 0;
   for (const t of mine.filter((x) => x.status === "running" && !waiting.has(x.id))) {
     const { data: legs } = await sb.from("idea_legs").select("asset, result, config").eq("try_id", t.id).eq("kind", "real").limit(2000);
@@ -968,7 +968,7 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
   // 5. Finalists whose stage-2 runs are all done: the final verdict.
   for (const t of mine.filter((x) => x.status === "stage2" && !waiting.has(x.id))) {
     const { data: row } = await sb.from("idea_tries").select("id, result, verdict").eq("id", t.id).single();
-    const { data: s2 } = await sb.from("idea_legs").select("kind, k, result").eq("try_id", t.id).in("kind", ["noise", "random"]).limit(5000);
+    const s2 = await pagedRows((a, b) => sb.from("idea_legs").select("id, kind, k, result").eq("try_id", t.id).in("kind", ["noise", "random"]).order("id").range(a, b));
     const byK = new Map<number, number>();
     for (const l of s2 ?? []) if (l.kind === "noise" && l.result && !l.result.error) byK.set(Number(l.k), (byK.get(Number(l.k)) ?? 0) + (Number(l.result.net) || 0));
     // Option parts of a combined portfolio stay real in every shuffled run.

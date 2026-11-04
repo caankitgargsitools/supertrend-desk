@@ -301,6 +301,11 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   `pos_expiry` = the new contract's expiry (`heldFutExpiry` reads it, else the held sec / the near month on the entry
   day). A roll exit Dhan refuses goes the exit-retry way (the retry exits). Holidays before the expiry aren't known, so a
   holiday can make the roll a day later at worst. Tests: `tests/sim/safety.test.mjs` "roll".
+- **Reads over 1,000 rows** (found 4 Nov 2026): the database answers at most 1,000 rows a request whatever `.limit()`
+  asks. `pagedRows` (lab.ts) reads 1,000 at a time; used for the Ideas Lab's stage-2 rows and pending legs and the
+  Strategy Lab's checks. Three Ideas Lab finalists (tries 134, 136, 466) had been judged "random-entry test didn't
+  finish" because their random row was cut off (the tests had finished: p 0.27 and 0.30, failing). Fake database
+  `LIMITS.maxRows` mimics the cap; test `tests/sim/pagedrows.test.mjs`.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

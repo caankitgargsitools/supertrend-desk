@@ -2121,8 +2121,8 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
   const qIds = (qAll ?? []).map((r) => r.id);
   const waiting = new Set<number>();
   for (let i = 0; i < qIds.length; i += 200) {
-    const { data: pw } = await sb.from("lab_checks").select("lab_id").in("lab_id", qIds.slice(i, i + 200)).eq("status", "pending").limit(10000);
-    for (const x of pw ?? []) waiting.add(x.lab_id);
+    const pw = await pagedRows((a, b) => sb.from("lab_checks").select("id, lab_id").in("lab_id", qIds.slice(i, i + 200)).eq("status", "pending").order("id").range(a, b));
+    for (const x of pw) waiting.add(x.lab_id);
   }
   const ready = qIds.filter((id) => !waiting.has(id)).slice(0, 20);
   const { data: queued } = ready.length
@@ -2131,7 +2131,7 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
   let decided = 0;
   const desk = (queued ?? []).length ? await deskFingerprints(sb) : new Set<string>();
   const ids = (queued ?? []).map((r) => r.id);
-  const { data: allCs } = ids.length ? await sb.from("lab_checks").select("lab_id, kind, asset, tf, status, result").in("lab_id", ids).neq("status", "void").limit(5000) : { data: [] };
+  const allCs = ids.length ? await pagedRows((a, b) => sb.from("lab_checks").select("id, lab_id, kind, asset, tf, status, result").in("lab_id", ids).neq("status", "void").order("id").range(a, b)) : [];
   for (const r of queued ?? []) {
     const cs = (allCs ?? []).filter((c) => c.lab_id === r.id);
     // A winner whose checks went missing goes back in the queue to get a fresh set (never stuck as "queued").
@@ -2503,4 +2503,20 @@ export async function labReverdict(sb: SupabaseClient, limit = 50): Promise<{ do
   }
   const { count } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("basic_passed", true).eq("robust_status", "done").is("superseded_by", null).or("robust->>rev.is.null,robust->>rev.neq.5");
   return { done, passed, flipped, left: count ?? 0 };
+}
+
+/**
+ * Every row of a query, 1,000 at a time: the database answers at most 1,000 rows a request whatever .limit() asks
+ * (4 Nov 2026: a finalist's 1,800 shuffled-price rows plus its random-entry row were cut off, and the random-entry
+ * test read as "didn't finish"). make(from, to) builds the query, ordered, with .range(from, to).
+ */
+export async function pagedRows<T = any>(make: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>, max = 200000): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; from < max; from += 1000) {
+    const { data, error } = await make(from, from + 999);
+    if (error) throw new Error(error.message);
+    out.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
 }
