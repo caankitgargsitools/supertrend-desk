@@ -373,5 +373,23 @@ await t("breaker: a run that works resets the count; the stop stays until it is 
   db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "z2");
 });
 
+// ---------------- lots that follow the typical day's move (4 Nov 2026) ----------------
+await t("move sizing: the entry takes target ÷ one lot's typical day, the new lots are saved; inside 20% nothing changes", async () => {
+  db.lab_margins = [{ asset: "NIFTY", price: 25000, fut_pct: 0.12, day_move: 0.02 }];
+  const S = add("m1", { live: false, risk: null, lots: 1, sizing: { mode: "MOVE", move_amt: 100000 } });
+  const e = E.entryLeg(S(), "LONG", 25000, 1, 1), legs = [e.leg].flat(), ns = { ...e.state, position: "LONG" }; delete ns._px;
+  const notes = [e.label];
+  assert.equal(await E.sizeEntry(S(), set, legs, ns, 25000, notes), true);
+  // one lot: 25,000 × 75 × 2% = ₹37,500 a typical day → ₹1,00,000 ÷ 37,500 = 2.67 → 3 lots
+  assert.equal(ns.pos_qty, 3); assert.equal(legs[0].quantity, "3"); assert.equal(S().lots, 3);
+  assert.match(notes.join(" | "), /→ 3 lots \(was 1\)/);
+  // a day later the move is 2.2% (2.42 lots wanted exactly): within 20% of 3 → stays 3, nothing saved
+  db.lab_margins[0].day_move = 0.022; S().lots = 3;
+  const e2 = E.entryLeg(S(), "LONG", 25000, 1, 3), legs2 = [e2.leg].flat(), ns2 = { ...e2.state, position: "LONG" }; delete ns2._px;
+  assert.equal(await E.sizeEntry(S(), set, legs2, ns2, 25000, [e2.label]), true);
+  assert.equal(ns2.pos_qty, 3);
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "m1");
+});
+
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);

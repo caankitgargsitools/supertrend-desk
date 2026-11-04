@@ -110,6 +110,23 @@ await p.click("#cf_yes"); await p.waitForTimeout(1200);
 const patches = writes.filter((w) => w.meth === "PATCH" && /algo_strategies/.test(w.u));
 if (patches.length !== 3) fail("patches", patches);
 for (const w of patches) { const x = JSON.parse(w.body), id = w.u.match(/id=eq\.(\w+)/)[1]; if (x.sizing.mode !== "FIXED" || x.lots !== ({ g1: 2, g2: 2, nodd: 1 })[id]) fail("patch body " + id, x); }
+// Same ₹ on a typical day, applied: saved as sizing MOVE with the target, so the lots follow the move by themselves.
+writes.length = 0;
+await p.click('[data-lwm="move"]'); await p.fill("#lw_moveAmt", "100000"); await p.dispatchEvent("#lw_moveAmt", "input");
+await p.click("#lw_apply"); await p.waitForSelector("#cf_yes");
+if (!/follow its asset's typical day's move at every new entry/.test(await p.textContent("#confirmBox"))) fail("move confirm wording", await p.textContent("#confirmBox"));
+await p.click("#cf_yes"); await p.waitForTimeout(1200);
+const mp = writes.filter((w) => w.meth === "PATCH" && /algo_strategies/.test(w.u)).map((w) => ({ id: w.u.match(/id=eq\.(\w+)/)[1], ...JSON.parse(w.body) }));
+if (mp.length < 5 || mp.some((x) => x.sizing.mode !== "MOVE" || x.sizing.move_amt !== 100000)) fail("move patches", mp);
+if (mp.find((x) => x.id === "gm").lots !== 6) fail("move patch lots gm", mp);
+// The strategy form offers the same mode: it reads back as sizing MOVE with its ₹, and refuses an empty amount.
+const form = await p.evaluate(() => {
+  $("z_mode").value = "MOVE"; $("z_move").value = "50000";
+  const ok = readSizing({ qty_mode: "LOTS" });
+  $("z_move").value = ""; let err = ""; try { readSizing({ qty_mode: "LOTS" }); } catch (e) { err = e.message; }
+  return { ok, err, text: sizeText(ok) };
+});
+if (form.ok.mode !== "MOVE" || form.ok.move_amt !== 50000 || !/₹ this strategy should make or lose/.test(form.err) || !/typical day/.test(form.text)) fail("form move sizing", form);
 if (errs.length) fail("page errors", errs);
 console.log("ok lots wizard", theme, width);
 await b.close();

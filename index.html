@@ -1204,7 +1204,8 @@ body.dk-fs-on { overflow: hidden; }
           </fieldset>
           <fieldset id="sizeSet"><legend class="label">Position size</legend>
             <div class="grid">
-              <label class="f wide"><span>How many lots</span><select id="z_mode"><option value="FIXED">Always the number of lots above</option><option value="AUTO">Automatic, from my capital (more after profits, fewer after losses)</option></select></label>
+              <label class="f wide"><span>How many lots</span><select id="z_mode"><option value="FIXED">Always the number of lots above</option><option value="AUTO">Automatic, from my capital (more after profits, fewer after losses)</option><option value="MOVE">Same ₹ on a typical day (lots follow the asset's daily move)</option></select></label>
+              <label class="f z-move"><span>₹ on a typical day</span><input id="z_move" type="number" min="1000" step="1000" placeholder="e.g. 50000"></label>
               <label class="f z-auto"><span>Use up to (% of my capital)</span><input id="z_alloc" type="number" min="0.1" max="100" step="any"></label>
               <label class="f z-auto adv"><span>Accept a drawdown of (% of that share)</span><input id="z_dd" type="number" min="1" max="100" step="1"></label>
               <div class="f z-auto adv"><span>Worst drawdown for 1 lot (₹)</span><div class="pair"><input id="z_ddlot" type="number" min="0" step="any" placeholder="from a backtest"><button class="btn small" id="z_fromBt" type="button">Use backtest</button></div></div>
@@ -3692,6 +3693,18 @@ $("b_active").addEventListener("click", (e) => run(e.currentTarget, async () => 
   const s = cur(); if (s.archived) return; await setFlag("active", !s.active);
   toast(s.active ? "Strategy paused." : isTimed(s) ? `Strategy active. It will act at ${String(s.entry_time).slice(0, 5)}.` : "Strategy active. It will act on the next completed candle.");
 }));
+/**
+ * A warning (not a block — Papa, 4 Nov 2026: "only warn") when going live would put two live strategies of the account
+ * on the same asset: the plan is one live strategy per asset, and two on one asset double its weight.
+ */
+function sameAssetWarn(list) {
+  const live = myStrats().filter((x) => x.live && !x.archived && !list.some((y) => y.id === x.id));
+  const all = [...live, ...list], by = new Map();
+  for (const x of all) by.set(x.underlying, [...(by.get(x.underlying) || []), x]);
+  const dup = [...by].filter(([, xs]) => xs.length > 1 && xs.some((x) => list.includes(x)));
+  if (!dup.length) return "";
+  return `<br><span class="same-asset" style="color:var(--yellow)"><b>⚠ Two live strategies on one asset:</b> ${dup.map(([u, xs]) => `${esc(assetLabel(u))} (${xs.length}: ${xs.map((x) => esc(String(x.name).split(" · ")[0])).join(", ")})`).join("; ")}. The plan is one live strategy per asset; together they double that asset's weight in your P&L.</span>`;
+}
 $("b_live").addEventListener("click", () => {
   const s = cur();
   if (s.live) return run($("b_live"), async () => { must(await db.rpc("set_live", { p_strategy: s.id, p_live: false })); await loadAll(); toast("Paper mode. Orders are logged, not sent."); });
@@ -3700,7 +3713,7 @@ $("b_live").addEventListener("click", () => {
   const bl = (me && me.billing) || {}, fee = Number(bl.deploy_fee || 0);
   const feeTxt = me && me.role !== "admin" && fee > 0 && !bl.trial_active && !(s.deploy_paid_until && s.deploy_paid_until >= istDate(0))
     ? `<br>A deployment fee of <strong>${rupees(fee)}</strong>${bl.deploy_fee_period === "ONE_TIME" ? " (once)" : " (for the next month)"} will be taken from your wallet.` : "";
-  askConfirm((isCrypto(s.data_segment) ? "<strong>Send real orders to Delta Exchange?</strong><br>From the next signal, this strategy places market orders on Delta Exchange India with your API key. Crypto trades round the clock and moves fast; check the paper-mode log first." : "<strong>Send real orders to Dhan?</strong><br>From the next signal, this strategy posts orders to your Dhan webhook, on your own account. Check the paper-mode log first.") + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + feeTxt,
+  askConfirm((isCrypto(s.data_segment) ? "<strong>Send real orders to Delta Exchange?</strong><br>From the next signal, this strategy places market orders on Delta Exchange India with your API key. Crypto trades round the clock and moves fast; check the paper-mode log first." : "<strong>Send real orders to Dhan?</strong><br>From the next signal, this strategy posts orders to your Dhan webhook, on your own account. Check the paper-mode log first.") + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + feeTxt + sameAssetWarn([s]),
     "Go live", async () => run($("b_live"), async () => { must(await db.rpc("set_live", { p_strategy: s.id, p_live: true })); await loadAll(); await refreshMe(); toast("Live. Real orders will be sent."); }), true);
 });
 $("b_flat").addEventListener("click", () => {
@@ -4109,12 +4122,14 @@ function posLevels(s) {
 /* ---------- position size (strategy form) ---------- */
 const defMarginPct = (seg) => isMcx(seg) || isCrypto(seg) ? 10 : 12;
 function sizeText(z) {
+  if (z && z.mode === "MOVE") return `Same ₹ on a typical day: ${rupees(z.move_amt)}`;
   if (!z || z.mode !== "AUTO") return "Fixed lots";
   return `Lots from capital: ${z.alloc_pct}% of equity, drawdown budget ${z.dd_pct}%` + (z.dd_per_lot ? ` (1 lot's worst drawdown ${rupees(z.dd_per_lot)} × ${z.dd_mult || 1.5})` : "") + `, margin ${z.margin_pct}%, max ${z.max_lots} lots`;
 }
 function fillSizing(s) {
   const z = s.sizing || {};
-  $("z_mode").value = z.mode === "AUTO" ? "AUTO" : "FIXED";
+  $("z_mode").value = z.mode === "AUTO" || z.mode === "MOVE" ? z.mode : "FIXED";
+  $("z_move").value = z.move_amt ? String(Math.trunc(z.move_amt)) : "";
   $("z_alloc").value = String(z.alloc_pct ?? 20); $("z_dd").value = String(z.dd_pct ?? 25);
   $("z_ddlot").value = z.dd_per_lot ? String(Math.trunc(z.dd_per_lot)) : ""; $("z_mult").value = String(z.dd_mult ?? 1.5);
   $("z_margin").value = String(z.margin_pct ?? defMarginPct(s.data_segment)); $("z_max").value = String(z.max_lots ?? 10);
@@ -4124,6 +4139,11 @@ function readSizing(out) {
   const mode = $("z_mode").value;
   const num = (id) => Number($(id).value);
   const z = { mode, alloc_pct: num("z_alloc"), dd_pct: num("z_dd"), dd_per_lot: $("z_ddlot").value.trim() ? Math.trunc(num("z_ddlot")) : null, dd_mult: num("z_mult"), margin_pct: num("z_margin"), max_lots: Math.trunc(num("z_max")) };
+  if (mode === "MOVE") {
+    const amt = Math.trunc(num("z_move"));
+    if (!(amt >= 1000)) throw new Error("Set the ₹ this strategy should make or lose on a typical day (₹1,000 or more).");
+    return { ...z, mode: "MOVE", move_amt: amt };
+  }
   if (mode !== "AUTO") return { ...z, mode: "FIXED" };
   if (!(z.alloc_pct > 0 && z.alloc_pct <= 100)) throw new Error("Share of equity must be between 0 and 100%.");
   if (!(z.dd_pct >= 1 && z.dd_pct <= 100)) throw new Error("Drawdown you accept must be 1–100%.");
@@ -4148,9 +4168,17 @@ function previewLots(s, z, equity, used, deploy) {
   return { lots: Math.max(0, lots), mLot, alloc, buying };
 }
 function applySizeVisibility() {
-  const auto = $("z_mode").value === "AUTO";
+  const auto = $("z_mode").value === "AUTO", move = $("z_mode").value === "MOVE";
   document.querySelectorAll(".z-auto").forEach((el) => el.hidden = !auto);
+  document.querySelectorAll(".z-move").forEach((el) => el.hidden = !move);
   const s = cur();
+  if (move) {
+    const r = s && cap.rates && cap.rates[s.underlying], dm = r && Number(r.day_move), px = r && Number(r.price), lot = Number($("f_lot_size").value || (s && s.lot_size)), amt = Number($("z_move").value) || 0;
+    const per = dm > 0 && px > 0 ? px * lot * dm : 0;
+    $("sizeHint").textContent = "At every new entry the lots = this ₹ ÷ what one lot makes or loses on the asset's typical day (its average daily range over the last 20 days, updated every morning). A change of 20% or less is ignored, so the lots don't jitter. The trade is skipped if not even one lot fits; the capital page's limit still applies."
+      + (per ? ` Today one lot moves about ${rupees(per)} a day (${(dm * 100).toFixed(2)}%)${amt ? `, so ${rupees(amt)} ≈ ${Math.round(amt / per)} lot${Math.round(amt / per) === 1 ? "" : "s"}` : ""}.` : "");
+    return;
+  }
   if (!auto) { $("sizeHint").textContent = "Every trade uses the number of lots set under Trade."; return; }
   let txt = showAdv
     ? "Before every entry: lots = the smallest of (share of equity ÷ money one lot needs), (drawdown budget ÷ (1 lot's worst drawdown × safety multiple)), the room left under the capital page's limit, and the maximum. If not even 1 lot fits, the entry is skipped and logged."
@@ -4168,8 +4196,8 @@ function applySizeVisibility() {
   }
   $("sizeHint").textContent = txt;
 }
-["z_mode", "z_alloc", "z_dd", "z_ddlot", "z_mult", "z_margin", "z_max"].forEach((id) => $(id).addEventListener("input", applySizeVisibility));
-$("z_mode").addEventListener("change", () => { if ($("z_mode").value === "AUTO" && !cap.status) loadCapStatus().then(applySizeVisibility).catch(() => {}); applySizeVisibility(); });
+["z_mode", "z_alloc", "z_dd", "z_ddlot", "z_mult", "z_margin", "z_max", "z_move"].forEach((id) => $(id).addEventListener("input", applySizeVisibility));
+$("z_mode").addEventListener("change", () => { if ($("z_mode").value !== "FIXED" && !cap.status) loadCapStatus().then(applySizeVisibility).catch(() => {}); applySizeVisibility(); });
 $("z_fromBt").addEventListener("click", (e) => run(e.currentTarget, async () => {
   const s = cur();
   const rows = must(await db.from("algo_backtests").select("id, params, summary").eq("strategy_id", s.id).in("status", ["done", "partial"]).order("id", { ascending: false }).limit(20));
@@ -4358,7 +4386,7 @@ function lwPlan() {
   }
   const target = lw.method === "move" ? lwMoveLots(on, capAmt * Math.min(100, Math.max(5, Number($("lw_capPct").value) || 60)) / 100) : null;
   for (const r of all) { r.used = (r.lots || 0) * r.margin; r.fall = r.dd ? (r.lots || 0) * r.dd : null; r.day = r.move ? (r.lots || 0) * r.move : null; }
-  lw.plan = all;
+  lw.plan = all; lw.target = target;
   return { capAmt, all, on, target };
 }
 /** Rupees one lot makes or loses on its asset's typical day's move (price × lot size × day_move); null if unknown. */
@@ -4451,7 +4479,8 @@ function lwRender() {
   $("lw_apply").textContent = changes.length ? `Apply these lots (${changes.length} change${changes.length === 1 ? "" : "s"})` : "Apply these lots";
 }
 /** Strategies whose saved lots would change: ticked, sized to 1 lot or more, and different from now (or on automatic lots). */
-const lwChanges = () => lw.plan.filter((r) => r.on && r.lots > 0 && (Number(r.s.lots) !== r.lots || (r.s.sizing && r.s.sizing.mode === "AUTO")));
+const lwChanges = () => lw.plan.filter((r) => r.on && r.lots > 0 && (Number(r.s.lots) !== r.lots || (r.s.sizing && r.s.sizing.mode === "AUTO")
+  || (lw.method === "move" ? !(r.s.sizing && r.s.sizing.mode === "MOVE" && Math.trunc(Number(r.s.sizing.move_amt)) === Math.trunc(lw.target || 0)) : !!(r.s.sizing && r.s.sizing.mode === "MOVE"))));
 $("lw_toggle").addEventListener("click", () => {
   const open = $("lw_body").hidden; $("lw_body").hidden = !open;
   $("lw_toggle").textContent = open ? "Hide" : "Show"; $("lw_toggle").setAttribute("aria-expanded", String(open));
@@ -4472,12 +4501,15 @@ $("lw_card").addEventListener("change", (e) => {
 $("lw_apply").addEventListener("click", (e) => {
   const ch = lwChanges(), btn = e.currentTarget; if (!ch.length) return;
   const open = ch.filter((r) => r.s.position !== "FLAT").length, liveN = ch.filter((r) => r.s.live).length;
-  askConfirm(`<b>Save new lots for ${ch.length} strateg${ch.length === 1 ? "y" : "ies"}?</b><br>Each is set to a fixed number of lots (automatic sizing is switched off for them).`
+  const byMove = lw.method === "move" && lw.target > 0;
+  askConfirm(`<b>Save new lots for ${ch.length} strateg${ch.length === 1 ? "y" : "ies"}?</b><br>` + (byMove
+    ? `Each is set to “Same ₹ on a typical day” at ${rupees(lw.target)}: from now on its lots follow its asset's typical day's move at every new entry (changes of 20% or less are ignored).`
+    : "Each is set to a fixed number of lots (automatic sizing is switched off for them).")
     + (open ? `<br>${open} ${open === 1 ? "has" : "have"} a position open: ${open === 1 ? "it exits" : "they exit"} with the lots held now; the new lots are used from the next entry (also after a reversal).` : "")
     + (liveN ? `<br><b>${liveN} ${liveN === 1 ? "is" : "are"} live: real orders will use the new lots.</b>` : ""), "Apply these lots", () => run(btn, async () => {
     let done = 0; const failed = [];
     for (const r of ch) {
-      const sizing = { ...(r.s.sizing || {}), mode: "FIXED" };
+      const sizing = byMove ? { ...(r.s.sizing || {}), mode: "MOVE", move_amt: Math.trunc(lw.target) } : { ...(r.s.sizing || {}), mode: "FIXED" };
       const res = await db.from("algo_strategies").update({ lots: r.lots, sizing }).eq("id", r.s.id);
       if (res.error) failed.push(`${r.s.name.split(" · ")[0]}: ${errorText(res.error)}`); else done++;
     }
@@ -8450,7 +8482,7 @@ async function bulkAction(kind) {
       + (paused ? `<br>${paused} of them ${paused === 1 ? "is" : "are"} paused; ${paused === 1 ? "it" : "they"} won't trade until activated.` : "")
       + (skipped ? `<br>${skipped} can't go live yet (${noDhan ? "no Dhan webhook" : "no Delta API key"}) and will be left in paper mode.` : "")
       + (feeN ? `<br>A deployment fee of <strong>${rupees(fee)}</strong> each${bl.deploy_fee_period === "ONE_TIME" ? " (once)" : " (for the next month)"} will be taken from your wallet for ${feeN} of them (${rupees(fee * feeN)} in all).` : "")
-      + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns.",
+      + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + sameAssetWarn(ready),
       "Go live", async () => run(btn, async () => {
         const bad = [];
         for (const s of ready) { const { error } = await db.rpc("set_live", { p_strategy: s.id, p_live: true }); if (error) bad.push(`${s.name}: ${errorText(error)}`); }
@@ -8508,7 +8540,7 @@ function renderList() {
         td.innerHTML = `<b>${esc(assetLabel(s.underlying))}</b>${s.last_error ? ' <span class="chip red">Error</span>' : ""}${s.kill_at ? ' <span class="chip red">Kill rule</span>' : ""}${s.exec_state === "working" ? ' <span class="chip yellow">Order working</span>' : ""}${s.exec_state === "exit_retry" ? ` <span class="chip red" title="${EXIT_RETRY_TIP}">Exit retrying</span>` : ""}<div class="hint sm">${esc(s.name.split(" · ")[0])}${tf ? ` · ${esc(tf)}` : ""}</div>`;
       }
       else if (t === "side") { td.innerHTML = s.position === "LONG" ? '<span class="chip green">Long</span>' : s.position === "SHORT" ? '<span class="chip red">Short</span>' : '<span class="hint">Flat</span>'; }
-      else if (t === "lots") { td.className = "n"; td.innerHTML = s.position !== "FLAT" ? `<b>${esc(String(s.pos_lots ?? "–"))}</b>` : `<span class="hint" title="Lots the next entry will use">${esc(s.sizing && s.sizing.mode === "AUTO" ? "auto" : String(s.lots ?? "–"))} next</span>`; }
+      else if (t === "lots") { td.className = "n"; td.innerHTML = s.position !== "FLAT" ? `<b>${esc(String(s.pos_lots ?? "–"))}</b>` : `<span class="hint" title="${s.sizing && s.sizing.mode === "MOVE" ? `Follows the asset's typical day's move (${rupees(s.sizing.move_amt)} a day): the next entry may use a little more or fewer` : "Lots the next entry will use"}">${esc(s.sizing && s.sizing.mode === "AUTO" ? "auto" : (s.sizing && s.sizing.mode === "MOVE" ? "≈" : "") + String(s.lots ?? "–"))} next</span>`; }
       else if (t === "num") { td.className = "n " + (v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""); td.textContent = rupees(v); }
       else if (t === "int") { td.className = "n"; td.textContent = String(v); }
       else if (t === "wrap") { td.className = "wr"; td.textContent = v; }

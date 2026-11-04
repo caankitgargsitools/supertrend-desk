@@ -140,5 +140,9 @@ await p.click('#lp_bulk [data-bulk="archive"]'); await okBtn(); await p.waitForT
 const ar = writes.find((w) => w.meth === "PATCH" && /algo_strategies/.test(w.u));
 if (!ar || !/id=in\.\(s1\)/.test(ar.u) || !/"archived":true/.test(ar.body)) fail("archive", writes);
 console.log("ok   strategies: exit positions now (only open ones, live warning), archive (flat only); restore / allow appear when they apply");
+// Going live with a second live strategy on an asset only warns (4 Nov 2026, Papa): s2 (Crude) is live already.
+const warn = await p.evaluate(() => ({ crude: sameAssetWarn([{ id: "new", name: "Another crude", underlying: "CRUDEOIL" }]), nifty: sameAssetWarn([state.strategies.find((x) => x.id === "s1")]) }));
+if (!/Two live strategies on one asset/.test(warn.crude) || !/Another crude/.test(warn.crude) || warn.nifty !== "") fail("same-asset warning", warn);
+console.log("ok   going live: a second live strategy on the same asset is warned about, not blocked");
 if (errs.length) fail("page errors", errs);
 await b.close();

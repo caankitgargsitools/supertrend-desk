@@ -83,3 +83,18 @@ export function fixedLotsFit(lots: number, marginLot: number, equity: number, us
   const r = (x: number) => `₹${Math.trunc(Math.max(0, x)).toLocaleString("en-IN")}`;
   return { lots: fit, why: `${lots} lot${lots === 1 ? "" : "s"} need ${r(marginLot * lots)} margin but only ${r(room)} is left inside your ${deployPct}% limit (capital ${r(equity)}, other open positions ${r(usedByOthers)})` };
 }
+
+/**
+ * "Same ₹ on a typical day" (sizing.mode MOVE, Papa 4 Nov 2026): lots for the next entry = the strategy's target ₹ ÷
+ * what one lot makes or loses on the asset's typical day (price × lot size × day's move), rounded. A change of 20% or
+ * less from the lots it trades now is ignored, so the lots don't jitter day to day. 0 = one lot is far bigger than the
+ * target (skip). why is null when the lots stay as they are.
+ */
+export const MOVE_BAND = 0.2;
+export function moveLots(current: number, target: number, perLot: number, band = MOVE_BAND): { lots: number; why: string | null } {
+  if (!(target > 0) || !(perLot > 0)) return { lots: current, why: null };
+  const exact = target / perLot, want = Math.max(0, Math.round(exact));
+  // Judged on the exact figure (2.4 wanted against 3 held is a 20% change, not the 33% that rounding to 2 would show).
+  if (current > 0 && exact >= 0.5 && Math.abs(exact - current) <= band * current) return { lots: current, why: null };
+  return { lots: want, why: `₹${r0(target)} on a typical day ÷ ₹${r0(perLot)} a lot → ${want} lot${want === 1 ? "" : "s"} (was ${current})` };
+}

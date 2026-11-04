@@ -201,7 +201,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   largest whose margin fits the wizard's limit. Typical day's move = average true range of the last 20 daily candles ÷
   previous close (`dayMovePct` in margins.ts), stored as `lab_margins.day_move` by engine action `day_moves` (cron
   `day-moves`, 08:51 IST daily; migration 73). Too-big contracts round to 0 lots (shown, left as they are). Tests:
-  `tests/sim/daymove.test.mjs`, `tests/ui/ui_lots_wizard.mjs`.
+  `tests/sim/daymove.test.mjs`, `tests/ui/ui_lots_wizard.mjs`. **It follows the move by itself** (Papa, 4 Nov 2026,
+  pending item): Apply saves `sizing = { mode: "MOVE", move_amt }` (also a "How many lots" choice in the strategy form,
+  `z_mode` MOVE / `z_move`); at every new entry `sizeEntry` → `moveLots` (sizing.ts) sets lots = move_amt ÷ (entry price ×
+  lot size × today's `day_move`), keeps the lots held when the exact figure is within ±20% (`MOVE_BAND`), saves new lots
+  on the strategy, skips the entry below 1 lot, then the "Never use more than" limit applies as for fixed lots. Lists
+  show "≈N next". Tests: `tests/sim/sizing.test.mjs` "move:", `tests/sim/safety.test.mjs` "move sizing".
+- Going live warns (doesn't block — Papa, 4 Nov 2026) when another live strategy of the account trades the same asset
+  (`sameAssetWarn`, single and bulk Go live). Test: `tests/ui/ui_bulk.mjs`.
   Fixed lots obey the limit too (2 Nov 2026, Papa): `sizeEntry` → `fixedLotsFit` (sizing.ts) cuts a fixed-lot entry to the lots
   that fit under "Never use more than" × (capital + P&L) minus this mode's other open positions (40 wanted, room for 36 →
   36; Papa, 2 Nov), skips only below 1 lot; only when a capital is set and the margin per lot is known; an exit in the

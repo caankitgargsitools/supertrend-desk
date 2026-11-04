@@ -6,7 +6,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { Dhan } from "./dhan.ts";
 import { type ChargeRates, newAcc, planBacktest, priceBatch, summarize, tradeCharges, validateParams, type Acc, type Plan } from "./backtest.ts";
 import { runSpreads } from "./spreads.ts";
-import { fixedLotsFit, lotsFor, marginPerLot, normaliseSizing } from "./sizing.ts";
+import { fixedLotsFit, lotsFor, marginPerLot, moveLots, normaliseSizing } from "./sizing.ts";
 import {
   addDays, aggregate, type DayBar, dayMinutes, fillTemplate, isCommodity, isComplete, isCrypto, isStockSeg, ist, nextExpiry, nextMonthlyExpiry, partialDay,
   pickBaseInterval, sessionFor, setHolidays, signalSeries, strikeFor, supertrend, timeToMin, tradingSession,
@@ -409,6 +409,36 @@ async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknow
     const last = notes.length - 1;
     if (last >= 0) notes[last] = notes[last].replace(/ x \d+$/, ` x ${e.state.pos_qty}`);
     notes.push(`Size: ${res.why}`);
+  } else if (s.sizing?.mode === "MOVE" && !multi && !opt) {
+    // Same ₹ on a typical day (Papa, 4 Nov 2026): the lots follow the asset's typical day's move at every new entry
+    // (changes of 20% or less ignored); the new lots are saved so the pages show them.
+    const { data: mr } = await sb.from("lab_margins").select("day_move").eq("asset", String(s.underlying)).maybeSingle();
+    const dm = Number(mr?.day_move) || 0, perLot = entryPx * Number(s.lot_size) * dm;
+    const mv = moveLots(lots, Number(s.sizing.move_amt) || 0, perLot);
+    if (!dm) notes.push("Size: no typical day's move stored for this asset yet; the saved lots are used");
+    else if (mv.lots < 1) { notes.push(`Entry skipped: one lot moves ₹${Math.trunc(perLot).toLocaleString("en-IN")} on a typical day, far more than the ₹${Math.trunc(Number(s.sizing.move_amt)).toLocaleString("en-IN")} target.`); return false; }
+    else if (mv.why) {
+      lots = mv.lots;
+      await sb.from("algo_strategies").update({ lots }).eq("id", s.id);
+      const e = entryLeg(s, newState.position, entryPx, legs.length, lots);
+      legs.splice(legs.length - 1, 1, ...asArr(e.leg));
+      Object.assign(newState, e.state); delete newState._px;
+      const last = notes.length - 1;
+      if (last >= 0) notes[last] = notes[last].replace(/ x \d+$/, ` x ${e.state.pos_qty}`);
+      notes.push(`Size: ${mv.why}`);
+    }
+    if (Number(set.capital ?? 0) > 0 && mLot > 0) {
+      const cs = await capitalState(set, !!s.live, s.id);
+      const fit = fixedLotsFit(lots, mLot, cs.equity, cs.used, Number(set.deploy_pct ?? 100), true);
+      if (fit.lots < 1) { notes.push(`Entry skipped: ${fit.why}.`); return false; }
+      if (fit.lots < lots) {
+        lots = fit.lots;
+        const e = entryLeg(s, newState.position, entryPx, legs.length, lots);
+        legs.splice(legs.length - 1, 1, ...asArr(e.leg));
+        Object.assign(newState, e.state); delete newState._px;
+        notes.push(`Size: ${fit.why} ⇒ ${lots} lot${lots === 1 ? "" : "s"}`);
+      }
+    }
   } else if (Number(set.capital ?? 0) > 0 && mLot > 0) {
     // Fixed lots: still kept inside the account's "never use more than" limit (other open positions of this mode).
     const cs = await capitalState(set, !!s.live, s.id);
