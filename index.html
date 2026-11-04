@@ -7720,6 +7720,7 @@ function deskPaint() {
   const live = desk.mode === "LIVE", all = deskStrats(), open = dkOpen(), st = cap.status || {};
   const names = new Map(state.strategies.map((x) => [x.id, x]));
   const ro = runOf(desk.mode), run = ro.upnl, margin = ro.margin, bk = bookOf(desk.mode), booked = bk.net, n = bk.n, wins = bk.wins;
+  desk.booked = booked; // shown beside the running P&L in the profit-flow panel (Papa, 4 Nov)
   const capital = Number(st.capital) || 0, equity = capital + Number(live ? st.live_net : st.paper_net || 0), limit = Number(st.deploy_pct) || 60;
   $("dk_sub").textContent = `${live ? "LIVE" : "PAPER"} · ${all.length} STRATEGIES · ${all.filter((x) => x.active).length} ACTIVE`;
   $("dk_acct").textContent = live ? "Live account" : "Paper account";
@@ -7793,7 +7794,7 @@ function deskLayout() {
   // below the running P&L box, overlapping the cloud a little.
   const top = narrow ? 72 : 30, bottom = 30;
   const o = dkOpen().slice().sort((a, b) => (Number(b.pos_upnl) || 0) - (Number(a.pos_upnl) || 0)), laneH = (desk.H - top - bottom) / Math.max(1, o.length);
-  const aTop = 92, aBot = desk.H - 22, aStep = (aBot - aTop) / (DK_AGENTS.length - 1);
+  const aTop = 128, aBot = desk.H - 22, aStep = (aBot - aTop) / (DK_AGENTS.length - 1);
   desk.agents = DK_AGENTS.map((a, i) => ({ ...a, x: desk.W - (narrow ? 38 : 62), y: aTop + aStep * i - 6 }));
   desk.links = desk.agents.map(() => o.map(() => ({ ph: Math.random() * Math.PI * 2, f: .35 + Math.random() * .7, run: Math.random() })));
   // Each stream ends at its own point inside the cloud (spread around its left half) and its tail wriggles like a snake (Papa, 3 Nov).
@@ -7958,11 +7959,14 @@ function deskDraw() {
     ctx.stroke(); if (!paused) { f.r += R * .035; f.a -= .02; } }
   desk.flashes = desk.flashes.filter((f) => f.a > 0);
   // Running P&L in the panel's top-right corner, clear of the cloud (Papa, 3 Nov).
-  const bw = narrow ? 168 : 196, bh = 52, bx = W - bw - 10, by = 10;
+  // Booked P&L alongside it (Papa, 4 Nov): every closed trade of this mode, as on the account card.
+  const bw = narrow ? 168 : 196, bh = 92, bx = W - bw - 10, by = 10, bkd = Number(desk.booked) || 0;
   ctx.fillStyle = "rgba(9,13,20,.82)"; ctx.strokeStyle = DK_COL.line; ctx.lineWidth = 1; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 6); else ctx.rect(bx, by, bw, bh); ctx.fill(); ctx.stroke();
   ctx.textAlign = "right"; ctx.textBaseline = "middle";
   ctx.fillStyle = good ? DK_COL.up : DK_COL.down; ctx.font = `600 ${narrow ? 18 : 22}px monospace`; ctx.fillText(dkSgn(tot), bx + bw - 12, by + 20);
   ctx.fillStyle = DK_COL.muted; ctx.font = "500 10px monospace"; ctx.fillText(`RUNNING P&L · ${desk.pool.length} DOTS`, bx + bw - 12, by + 40);
+  ctx.fillStyle = bkd >= 0 ? DK_COL.up : DK_COL.down; ctx.font = `600 ${narrow ? 15 : 17}px monospace`; ctx.fillText(dkSgn(bkd), bx + bw - 12, by + 62);
+  ctx.fillStyle = DK_COL.muted; ctx.font = "500 10px monospace"; ctx.fillText("BOOKED P&L", bx + bw - 12, by + 80);
   desk.raf = requestAnimationFrame(deskDraw);
 }
 function deskTimeline() {
