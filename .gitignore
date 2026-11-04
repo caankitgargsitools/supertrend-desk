@@ -20,4 +20,6 @@ tests/sim/sizing.mjs
 tests/sim/margins.mjs
 tests/sim/spreads.mjs
 tests/ui/*.png
+# screenshots the website tests save in the top folder (the app icons are in icons/)
+/*.png
 tests/ui/node_modules
