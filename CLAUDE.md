@@ -316,6 +316,12 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   runs give p 0.08, failing too). Also fixed: a random-entry leg waits until every real leg of its try is done (136's had
   run first, real 0 → "100%"); 136 re-queued. Fake database
   `LIMITS.maxRows` mimics the cap; test `tests/sim/pagedrows.test.mjs`.
+- **Shared paper data (TEMPORARY, 5 Nov 2026, Papa; see pending item 0)**: `SHARED_PAPER_DATA = true` (accounts.ts). A user
+  with no Dhan token reads market data through the admin's Dhan login (`dataAccount`: the user's own capital / limit
+  kept, webhook fields empty, `shared_data` set); their price requests are grouped under the admin (`dataUid`) so they
+  batch with his. Used only by the minute tick (`runOne`, the tick's price seed) and the per-second prices; a live
+  strategy on shared data is refused ("Connect your own Dhan account … to trade this strategy live"); orders, reconcile,
+  broker stops, funds and fills still read the user's own account. Test: `tests/sim/safety.test.mjs` "shared data".
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
@@ -454,6 +460,12 @@ failed ("stopped: never finished"); Anshul's two paper strategies paused, his er
 connect Dhan; cloud-session start-up hook (`.claude/settings.json`, `.claude/hooks/session-start.sh`). Kept as is:
 clients may go live by themselves (Papa: keep `set_live` as it is); the Strategy Lab generator stays on.
 Still open:
+0. **SUPER URGENT · SUPER IMPORTANT — roll back the shared paper data before any public / larger roll-out** (Papa,
+   5 Nov 2026). Turned on for close family users only: a user without a Dhan login paper trades on the admin's Dhan
+   prices (`SHARED_PAPER_DATA` in accounts.ts, `dataAccount` / `dataUid`). Risks: exchange data redistribution
+   (NSE vendor licence, Dhan API terms are for the account holder), one shared request budget, one token failing
+   stops everyone's paper. Roll back = set `SHARED_PAPER_DATA = false` and redeploy; then every user connects their own
+   Dhan account even for paper (free, no funds needed). Remind Papa whenever new users are added.
 1. **Broker stops across the night**: Dhan stop orders are day orders; use Dhan's Forever Order (GTT) for positional
    stops? Test in the supervised 1-lot test. (Papa, 4 Nov: discuss later.)
 2. **Database permissions**: tighten table grants (anon / authenticated have ALL; RLS is the only barrier). (Discuss later.)

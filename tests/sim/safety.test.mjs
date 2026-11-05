@@ -432,5 +432,24 @@ await t("roll (live): the exit goes to the expiring contract, the entry to the n
   db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "rl2");
 });
 
+// ---------------- Shared paper data (temporary, 5 Nov 2026, Papa: close family users only; to be rolled back) ----------------
+await t("shared data: a user without Dhan runs paper on the admin's prices; live is refused; no admin token → as before", async () => {
+  db.algo_strategies = db.algo_strategies.filter((x) => x.position === "FLAT" || x.owner_id !== "u1");
+  db.broker_accounts = db.broker_accounts.filter((x) => x.user_id !== "u3");
+  clock = Date.parse("2026-10-28T05:30:00Z"); db.risk_state = []; // Wednesday 11:00 IST, after the roll tests (the clock never goes back)
+  add("sp1", { owner_id: "u3", live: false });
+  add("sp2", { owner_id: "u3", live: true });
+  const prof0 = db.profiles; db.profiles = [];
+  clock += 60000; let r = await tick();
+  assert.match(String(r.sp1), /Connect your Dhan account/, "no admin account found: still refused");
+  db.profiles = [{ user_id: "u1", role: "admin", status: "active", created_at: "2026-01-01T00:00:00Z" }];
+  clock += 60000; r = await tick();
+  assert.doesNotMatch(String(r.sp1), /Connect your|error/i, `paper runs: ${r.sp1}`);
+  assert.match(String(r.sp2), /own Dhan account .* live/, "live on shared data refused");
+  assert.equal(db.live_orders.filter((o) => o.strategy_id === "sp2" || o.strategy_id === "sp1").length, 0, "no orders");
+  db.profiles = prof0 ?? [];
+  db.algo_strategies = db.algo_strategies.filter((x) => !["sp1", "sp2"].includes(x.id));
+});
+
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);

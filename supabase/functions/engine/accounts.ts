@@ -5,6 +5,8 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 export type Account = {
   user_id: string; broker: string; dhan_client_id: string | null; dhan_access_token: string | null; webhook_url: string | null; webhook_secret: string | null;
   capital: number | null; capital_since: string | null; deploy_pct: number | null; funds_at: string | null;
+  /** Prices come from the admin's Dhan login (SHARED_PAPER_DATA): paper only, never orders. */
+  shared_data?: boolean;
 };
 
 /** Broker account of a user (Dhan today; the broker column leaves room for others). */
@@ -25,6 +27,38 @@ export async function adminAccount(sb: SupabaseClient): Promise<Account | null> 
   const { data: p } = await sb.from("profiles").select("user_id").eq("role", "admin").eq("status", "active").order("created_at").limit(1).maybeSingle();
   const id = p?.user_id ?? (await sb.from("app_owner").select("user_id").maybeSingle()).data?.user_id;
   return id ? accountFor(sb, id) : null;
+}
+
+/**
+ * SHARED PAPER DATA — TEMPORARY (5 Nov 2026, Papa: only close family users for now; "we will roll it back" before any
+ * public or larger roll-out, when every user connects their own Dhan account even for paper). A user without a Dhan
+ * token gets the admin's Dhan login for market data, so their PAPER strategies run. Never for orders: the tick refuses a
+ * live strategy on shared data, and the order, reconcile and broker-stop paths still read the user's own account.
+ * Roll back: set this to false (and remove dataAccount / dataUid's callers' fallback if wanted).
+ */
+export const SHARED_PAPER_DATA = true;
+
+async function adminCached(sb: SupabaseClient, cache?: Map<string, Account | null>) {
+  if (cache?.has("__admin")) return cache.get("__admin")!;
+  const a = await adminAccount(sb);
+  cache?.set("__admin", a);
+  return a;
+}
+
+/** The Dhan account whose login reads market data for this user: their own, else (SHARED_PAPER_DATA) the admin's. */
+export async function dataAccount(sb: SupabaseClient, userId: string, cache?: Map<string, Account | null>): Promise<Account | null> {
+  const own = await accountFor(sb, userId, "DHAN", cache);
+  if (own?.dhan_access_token || !SHARED_PAPER_DATA) return own;
+  const adm = await adminCached(sb, cache);
+  if (!adm?.dhan_access_token || !adm.dhan_client_id) return own;
+  return { ...(own ?? { capital: null, capital_since: null, deploy_pct: null, funds_at: null } as Account), user_id: userId, broker: "DHAN",
+    dhan_client_id: adm.dhan_client_id, dhan_access_token: adm.dhan_access_token, webhook_url: null, webhook_secret: null, shared_data: true };
+}
+
+/** Whose login a user's price requests are grouped under (the admin's for a user on shared data), so they are batched. */
+export async function dataUid(sb: SupabaseClient, userId: string, cache?: Map<string, Account | null>): Promise<string> {
+  const a = await dataAccount(sb, userId, cache);
+  return a?.shared_data ? String((await adminCached(sb, cache))!.user_id) : userId;
 }
 
 export const credsOf = (a: Account | null) => ({ client: a?.dhan_client_id ?? "", token: a?.dhan_access_token ?? "" });

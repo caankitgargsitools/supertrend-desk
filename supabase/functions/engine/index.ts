@@ -23,7 +23,7 @@ import {
   positionDiff, productOf, resolveLeg, setDhanRpc, type Side, sideOf, stepFor, stopLimit, syncFno, toTick,
 } from "./execution.ts";
 import { loadMarginRates, refreshDayMoves, refreshMargins } from "./margins.ts";
-import { type Account, accountFor, adminAccount, credsOf, entryGate, withMasters } from "./accounts.ts";
+import { type Account, accountFor, adminAccount, credsOf, dataAccount, dataUid, entryGate, withMasters } from "./accounts.ts";
 import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
 import { legsFor, legSign, structMargin, structName, structOf } from "./structures.ts";
 import { auditStrategy } from "./audit.ts";
@@ -1541,7 +1541,7 @@ async function pricesTick(rows: Strategy[]) {
     if (isCommodity(seg) && !/^\d+$/.test(sec)) {
       let r = mcxSecMemo.get(sec);
       if (!r) {
-        const set = await accountFor(sb, s.owner_id, "DHAN", accounts).catch(() => null);
+        const set = await dataAccount(sb, s.owner_id, accounts).catch(() => null);
         if (!set?.dhan_access_token) return;
         r = (await dataSecurity(sb, credsOf(set), seg, sec, today).catch(() => ({ sec: "" }))).sec;
         if (r) mcxSecMemo.set(sec, r);
@@ -1549,7 +1549,7 @@ async function pricesTick(rows: Strategy[]) {
       if (!r) return;
       sec = r;
     }
-    add(s.owner_id, seg, sec);
+    add(await dataUid(sb, s.owner_id, accounts), seg, sec);
     want.set(s.id, { s, key: `${seg}|${sec}` });
   }));
   // Live orders being worked: their own contracts (the order manager chases them with these prices).
@@ -3077,12 +3077,13 @@ Deno.serve(async (req) => {
       if (nowIst.min < sess.open || nowIst.min > sess.close + 5) return;
       let sec = String(x.data_security_id);
       if (isCommodity(seg)) {
-        const set = await accountFor(sb, x.owner_id, "DHAN", accounts).catch(() => null);
+        const set = await dataAccount(sb, x.owner_id, accounts).catch(() => null);
         if (!set?.dhan_access_token) return;
         sec = (await dataSecurity(sb, credsOf(set), seg, sec, nowIst.date).catch(() => ({ sec: "" }))).sec;
       }
       if (!sec) return;
-      const m = byOwner.get(x.owner_id) ?? {}; (m[seg] ??= []).push(sec); byOwner.set(x.owner_id, m);
+      const du = await dataUid(sb, x.owner_id, accounts);
+      const m = byOwner.get(du) ?? {}; (m[seg] ??= []).push(sec); byOwner.set(du, m);
     }));
     // Prices the per-second updater fetched in the last 10 seconds are used as they are (it skips a second now and
     // then when Dhan rate-limits; asking Dhan again here would only collide with it).
@@ -3116,7 +3117,7 @@ Deno.serve(async (req) => {
       if (tick && !outside && quietNow(s, sess)) { results[s.id] = "waiting for its candle"; return; }
       if (!s.owner_id) throw new Error("This strategy has no owner.");
       const broker = isCr ? "DELTA" : "DHAN";
-      let set = await accountFor(sb, s.owner_id, broker, accounts);
+      let set = isCr ? await accountFor(sb, s.owner_id, broker, accounts) : await dataAccount(sb, s.owner_id, accounts);
       if (isCr) {
         // Paper trading on crypto needs no account (prices are public); live trading needs the Delta API key.
         if (s.live && !(set?.dhan_client_id && set?.dhan_access_token)) throw new Error("Add your Delta Exchange API key and secret (Delta Exchange connection) to trade this strategy live.");
@@ -3131,6 +3132,8 @@ Deno.serve(async (req) => {
         }
       } else if (!set?.dhan_access_token) throw new Error("Connect your Dhan account (client ID and access token) to run this strategy.");
       if (!set) throw new Error("No broker account.");
+      // Shared paper data (temporary): prices only, never orders.
+      if (set.shared_data && s.live) throw new Error("Connect your own Dhan account (client ID and access token) to trade this strategy live. Paper trading uses the desk's shared prices for now.");
       // Dhan funds, every 10 minutes while the market ticks run.
       if (action === "tick" && !fundsDone.has(set.user_id) && (!set.funds_at || Date.now() - Date.parse(set.funds_at) > 600000)) {
         fundsDone.add(set.user_id); await refreshFunds(set.user_id).catch(() => {});
