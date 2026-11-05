@@ -1694,6 +1694,13 @@ body.dk-fs-on { overflow: hidden; }
         <label class="f"><span>Results period</span><select id="mk_yrs"><option value="1">1 year</option><option value="2">2 years</option><option value="3" selected>3 years</option><option value="4">4 years</option><option value="5">5 years</option></select></label>
         <label class="f"><span>Sort by</span><select id="mk_sort"><option value="ret">Return</option><option value="net">Net profit</option><option value="dd">Smallest drawdown</option><option value="win">Win rate</option><option value="price">Price</option><option value="new">Newest</option></select></label>
       </div>
+      <div class="bulkbar" id="mk_bulk" hidden>
+        <span id="mk_bulk_n"></span>
+        <button class="btn small primary" type="button" id="mk_bulk_add">Add selected</button>
+        <button class="btn small" type="button" id="mk_bulk_all">Select all shown</button>
+        <button class="btn small" type="button" id="mk_bulk_clear">Clear selection</button>
+      </div>
+      <div class="formbar" style="margin:8px 0 0"><button class="btn small" type="button" id="mk_pick_all">Select all shown</button><span class="hint">Tick strategies to add several at once.</span></div>
       <div class="cards" id="mk_cards"></div>
       <div id="mk_detail" style="margin-top:16px"></div>
     </section>
@@ -8761,12 +8768,12 @@ $("b_publish").addEventListener("click", () => {
 });
 
 /* ---------- marketplace ---------- */
-const mk = { rows: [], open: null, yrs: "1" };
+const mk = { rows: [], open: null, yrs: "1", pick: new Set(), shown: [] };
 async function loadMarket() {
   const [rows] = await Promise.all([db.rpc("market_listings").then(must), refreshMe()]);
   mk.rows = rows || [];
   $("mk_bal").textContent = me && me.billing ? `Wallet ${rupees(me.billing.balance)}` : "";
-  renderMarket();
+  renderMarket(); renderMkBulk();
 }
 function per(l, y) { return (l.results || {})[y] || null; }
 const pctTxt = (v) => v === null || v === undefined ? "–" : `${Number(v).toFixed(1)}%`;
@@ -8774,6 +8781,8 @@ function renderMarket() {
   const q = $("mk_q").value.trim().toLowerCase(), y = $("mk_yrs").value, sort = $("mk_sort").value;
   const val = (l) => { const r = per(l, y) || {}; return { ret: Number(r.return_pct ?? -1e9), net: Number(r.net ?? -1e12), dd: -Number(r.max_dd_pct ?? 1e9), win: Number(r.win_rate ?? -1), price: -Number(l.price), new: Date.parse(l.created_at) }[sort]; };
   const rows = mk.rows.filter((l) => !q || [l.title, l.asset, assetLabel(l.asset), l.instrument, l.summary].join(" ").toLowerCase().includes(q)).sort((a, b) => val(b) - val(a));
+  mk.shown = rows.filter((l) => l.status === "published").map((l) => l.id);
+  for (const id of [...mk.pick]) if (!mk.rows.some((l) => l.id === id && l.status === "published")) mk.pick.delete(id);
   const box = $("mk_cards"); box.innerHTML = rows.length ? "" : `<p class="hint">${mk.rows.length ? "Nothing matches." : isAdmin() ? "No listings yet. Open a strategy and press “Publish to marketplace”." : "No strategies on offer yet."}</p>`;
   for (const l of rows) {
     const r = per(l, y);
@@ -8786,6 +8795,12 @@ function renderMarket() {
       <p class="hint" style="margin:0">On ₹5,00,000 capital, 1 lot per trade, after brokerage and statutory charges.</p>
       <div class="actions"><button class="btn small" data-a="det" type="button">Details &amp; trades</button>${l.status === "published" ? `<button class="btn small primary" data-a="buy" type="button">${l.owned ? "Add another copy" : Number(l.price) > 0 ? `Buy for ${rupees(l.price)}` : "Add (free)"}</button>` : ""}</div>
       ${isAdmin() ? `<div class="ued"><div class="grid"><label class="f"><span>Status</span><select data-f="status"><option value="draft">Draft</option><option value="published">Published</option><option value="hidden">Hidden</option></select></label><label class="f"><span>Price (₹)</span><input data-f="price" type="number" min="0" step="any"></label><label class="f wide"><span>Title</span><input data-f="title"></label><label class="f wide"><span>Description</span><input data-f="summary"></label></div><div class="actions"><button class="btn small primary" data-a="save" type="button">Save listing</button><button class="btn small" data-a="rerun" type="button">Re-run results</button><span class="hint">${l.users} user${l.users === 1 ? "" : "s"} running it</span></div></div>` : ""}`;
+    if (l.status === "published") {
+      const pk = document.createElement("label"); pk.className = "showtr mk-pick"; pk.style.cssText = "margin:0 0 4px;font-size:13px";
+      pk.innerHTML = `<input type="checkbox" data-mkpick="${l.id}" ${mk.pick.has(l.id) ? "checked" : ""}> Select`;
+      pk.querySelector("input").addEventListener("change", (e) => { e.target.checked ? mk.pick.add(l.id) : mk.pick.delete(l.id); renderMkBulk(); });
+      c.prepend(pk);
+    }
     c.querySelector(".label").textContent = `${assetLabel(l.asset)} · ${l.instrument || ""}`;
     c.querySelector("h3").textContent = l.title;
     c.querySelector(".price").textContent = Number(l.price) > 0 ? rupees(l.price) : "Free";
@@ -8806,6 +8821,50 @@ function renderMarket() {
   }
 }
 ["mk_q", "mk_yrs", "mk_sort"].forEach((id) => $(id).addEventListener(id === "mk_q" ? "input" : "change", renderMarket));
+/* ---------- add several marketplace strategies at once (5 Nov 2026, Papa: admins and users) ---------- */
+function renderMkBulk() {
+  const sel = mk.rows.filter((l) => mk.pick.has(l.id));
+  $("mk_bulk").hidden = !sel.length;
+  $("mk_pick_all").parentElement.hidden = !!sel.length || !mk.shown.length;
+  if (!sel.length) return;
+  const cost = sel.filter((l) => !l.owned).reduce((a, l) => a + Number(l.price || 0), 0), owned = sel.filter((l) => l.owned).length;
+  $("mk_bulk_n").textContent = `${sel.length} selected · ${cost > 0 ? `${rupees(cost)} in all` : "free"}${owned ? ` · ${owned} you own already (another copy is free)` : ""}`;
+}
+function bulkBuyForm() {
+  const sel = mk.rows.filter((l) => mk.pick.has(l.id) && l.status === "published");
+  if (!sel.length) { toast("Tick the strategies to add first."); return; }
+  const cost = sel.filter((l) => !l.owned).reduce((a, l) => a + Number(l.price || 0), 0), bal = me && me.billing ? Number(me.billing.balance) : 0;
+  const box = $("mk_detail");
+  box.innerHTML = `<div class="ued"><h3 style="font-size:16px">Add ${sel.length} strateg${sel.length === 1 ? "y" : "ies"}</h3>
+    <p class="hint" style="margin:0">${sel.map((l) => esc(l.title)).join(", ")}.</p>
+    <p class="hint" style="margin:0">${cost > 0 ? `Together ${rupees(cost)}, taken from your wallet (balance ${rupees(bal)})${cost > bal && !isAdmin() ? `: <b style="color:var(--red)">not enough; the ones that don't fit are left out</b>` : ""}.` : "Free."} Each is added to your strategies paused and in paper mode, so nothing is sent to Dhan until you switch it on and go live.</p>
+    <div class="grid"><label class="f"><span>Capital to deploy for each (₹)</span><input id="bb_cap" type="number" min="0" step="any" inputmode="decimal" placeholder="blank = fixed lots"></label>
+      <label class="f"><span>Never more than (lots)</span><input id="bb_max" type="number" min="1" step="1" value="5"></label>
+      <label class="f"><span>Lots per trade (if no capital)</span><input id="bb_lots" type="number" min="1" step="1" value="1"></label></div>
+    <label class="showtr"><input type="checkbox" id="bb_ok"> I understand backtest results don't guarantee future returns, derivatives trading can lose money, and this is not investment advice.</label>
+    <div class="formbar"><button class="btn primary" id="bb_go" type="button" disabled>Add ${sel.length}</button><button class="btn" id="bb_no" type="button">Cancel</button><span class="hint" id="bb_msg"></span></div></div>`;
+  $("bb_ok").addEventListener("change", () => $("bb_go").disabled = !$("bb_ok").checked);
+  $("bb_no").addEventListener("click", () => box.innerHTML = "");
+  $("bb_go").addEventListener("click", (e) => run(e.currentTarget, async () => {
+    const cap = Number($("bb_cap").value) || 0, lots = Math.trunc(Number($("bb_lots").value)) || 1, mx = Math.trunc(Number($("bb_max").value)) || 5;
+    let done = 0; const bad = [];
+    for (let i = 0; i < sel.length; i++) {
+      const l = sel[i];
+      $("bb_msg").innerHTML = `<span class="spin"></span> Adding ${i + 1} of ${sel.length}…`;
+      const { error } = await db.rpc("buy_listing", { p_listing: l.id, p_name: l.title, p_capital: cap, p_lots: lots, p_max_lots: mx });
+      if (error) bad.push(`${l.title}: ${errorText(error)}`); else { done++; mk.pick.delete(l.id); }
+    }
+    box.innerHTML = ""; await loadAll(); await refreshMe(); await loadMarket().catch(() => {});
+    renderMkBulk();
+    toast(bad.length ? `${done} added; ${bad.length} not added (${bad[0]})` : `${done} strateg${done === 1 ? "y" : "ies"} added to your strategies, paused and in paper mode.`);
+  }));
+  box.scrollIntoView({ block: "nearest" });
+}
+$("mk_bulk_add").addEventListener("click", bulkBuyForm);
+const mkPickAll = () => { for (const id of mk.shown) mk.pick.add(id); renderMarket(); renderMkBulk(); };
+$("mk_bulk_all").addEventListener("click", mkPickAll);
+$("mk_pick_all").addEventListener("click", mkPickAll);
+$("mk_bulk_clear").addEventListener("click", () => { mk.pick.clear(); renderMarket(); renderMkBulk(); });
 function buyForm(l) {
   const box = $("mk_detail");
   box.innerHTML = `<div class="ued"><h3 style="font-size:16px"></h3>

@@ -94,6 +94,11 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   draft listing (title = name without "Lab #n · ", summary = asset · futures/options · candle size, one price typed in
   the confirm box), backtests queued; published from the Marketplace page. Also "Delete permanently" for ticked archived strategies (delete filtered on
   `archived = true`; Papa asked for it so the list doesn't grow too heavy).
+- **Marketplace: add several at once** (5 Nov 2026, Papa: admins and users): a "Select" tick on every published listing,
+  "Select all shown", a bar with the count, the total price (owned ones are free copies) and "Add selected" → one form
+  (capital each or lots per trade, max lots, the risk tick) → `buy_listing` per listing, a progress line while it runs;
+  ones that fail (e.g. not enough in the wallet) stay ticked. `mk.pick`, `renderMkBulk`, `bulkBuyForm`. Test:
+  `tests/ui/ui_market_bulk.mjs` (args: role theme width).
 - **Compare** (29 Oct 2026; sidebar "Compare", `cmpPane`, `renderCmp`): "⇄ Compare" on lab rows/cards/detail and desk
   list rows/cards/strategy page, or ⇄ Compare in either bulk bar; up to 4 (list in this browser's localStorage `cmp`,
   each keeps its colour slot `c`; a bar at the bottom shows the picks). Lab strategies use their futures backtest
