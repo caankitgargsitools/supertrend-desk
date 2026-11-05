@@ -1547,6 +1547,7 @@ body.dk-fs-on { overflow: hidden; }
         <button class="btn small" type="button" data-bulk="paper">Back to paper</button>
         <button class="btn small danger" type="button" data-bulk="exit" hidden>Exit positions now</button>
         <button class="btn small" type="button" data-bulk="allow" hidden>Allow new trades again</button>
+        <button class="btn small" type="button" data-bulk="market" hidden>Add to marketplace</button>
         <button class="btn small" type="button" data-bulk="archive">Archive</button>
         <button class="btn small" type="button" data-bulk="restore" hidden>Restore</button>
         <button class="btn small danger" type="button" data-bulk="purge" hidden>Delete permanently</button>
@@ -8377,6 +8378,7 @@ function renderBulkBar() {
   b("purge").hidden = !arch; b("compare").hidden = n > CMP_MAX;
   b("restore").hidden = !arch; b("allow").hidden = !sel.some((s) => s.kill_at && !s.archived);
   for (const k of ["on", "off", "live", "paper", "archive"]) b(k).hidden = arch === n;
+  b("market").hidden = !isAdmin() || !sel.some((s) => !s.archived && !s.locked && !s.is_master);
 }
 async function bulkAction(kind) {
   if (kind === "clear") { lsel.clear(); renderList(); return; }
@@ -8408,6 +8410,34 @@ async function bulkAction(kind) {
   }
   const sel = state.strategies.filter((s) => lsel.has(s.id) && !s.archived);
   if (!sel.length) { toast("They are all archived; use Restore first."); return; }
+  if (kind === "market") {
+    // Papa, 5 Nov 2026: the single "Publish to marketplace" for many at once. Each becomes a draft listing (a private
+    // copy of today's settings for buyers, its 1–5 year backtests queued); you publish them on the Marketplace page.
+    if (!isAdmin()) return;
+    const ok = sel.filter((s) => !s.archived && !s.locked && !s.is_master);
+    const { data: had } = ok.length ? await db.from("listings").select("source_strategy, status").in("source_strategy", ok.map((s) => s.id)) : { data: [] };
+    const listed = new Set((had || []).filter((l) => l.status !== "hidden").map((l) => l.source_strategy));
+    const todo = ok.filter((s) => !listed.has(s.id)), skip = sel.length - todo.length;
+    if (!todo.length) { toast(listed.size ? "They are already on the marketplace (as drafts or published)." : "None of them can be listed (archived, bought or a listing's own copy)."); return; }
+    let price = 0;
+    askConfirm(`<strong>Add ${nS(todo.length)} to the marketplace?</strong><br>${names(todo)}.<br>Each becomes a <b>draft</b> listing titled by its name: a private copy of today's settings is made for buyers and its 1, 2, 3, 4 and 5-year backtests are queued (they run two at a time, so ${todo.length * 5} backtests take a while). Publish each one on the Marketplace page when its results are in.`
+      + (skip ? `<br>${skip} left out (already listed, archived, or bought).` : "")
+      + `<label class="f" style="margin-top:8px;max-width:220px"><span>Price for each (₹, one-time; 0 = free)</span><input id="bk_mkprice" type="number" min="0" step="any" value="0"></label>`,
+      "Add to marketplace", () => run(btn, async () => {
+        const bad = [];
+        for (const s of todo) {
+          const title = String(s.name).replace(/^Lab #\d+ · /, "").slice(0, 120);
+          const tf = Number(s.timeframe_min) || 0, daily = tf >= 375 || !!(s.rules && s.rules.daily);
+          const summary = `${assetLabel(s.underlying)} · ${s.trade_type === "OPTIONS" ? "options" : "futures"} · ${daily ? "daily candles" : tf ? `${tf}-minute candles` : ""}${s.intraday ? " · intraday" : ""}`.replace(/ · $/, "");
+          const { error } = await db.rpc("publish_strategy", { p_strategy: s.id, p_title: title, p_summary: summary, p_price: price });
+          if (error) bad.push(`${s.name}: ${errorText(error)}`);
+        }
+        await loadAll();
+        toast(bad.length ? `${todo.length - bad.length} added as drafts; ${bad.length} failed (${bad[0]})` : `${nS(todo.length)} added to the marketplace as drafts. Their backtests are running.`);
+      }));
+    const pi = $("bk_mkprice"); if (pi) pi.addEventListener("input", () => { price = Math.max(0, Number(pi.value) || 0); });
+    return;
+  }
   if (kind === "archive") {
     const open = sel.filter((s) => s.position !== "FLAT"), todo = sel.filter((s) => s.position === "FLAT");
     if (!todo.length) { toast("Exit the open positions before archiving these strategies."); return; }

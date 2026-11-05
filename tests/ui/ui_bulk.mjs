@@ -144,5 +144,18 @@ console.log("ok   strategies: exit positions now (only open ones, live warning),
 const warn = await p.evaluate(() => ({ crude: sameAssetWarn([{ id: "new", name: "Another crude", underlying: "CRUDEOIL" }]), nifty: sameAssetWarn([state.strategies.find((x) => x.id === "s1")]) }));
 if (!/Two live strategies on one asset/.test(warn.crude) || !/Another crude/.test(warn.crude) || warn.nifty !== "") fail("same-asset warning", warn);
 console.log("ok   going live: a second live strategy on the same asset is warned about, not blocked");
+// Add to marketplace in bulk (5 Nov 2026, Papa): admins only; a bought strategy (s2) is left out; each becomes a draft
+// listing at the price typed.
+await p.evaluate(() => { lsel.clear(); for (const s of state.strategies) if (["s1", "s2"].includes(s.id)) lsel.add(s.id); renderList(); });
+if (await p.evaluate(() => document.querySelector('#lp_bulk [data-bulk="market"]').hidden)) fail("market button hidden for the admin");
+writes.length = 0;
+await p.click('#lp_bulk [data-bulk="market"]'); await p.waitForSelector("#bk_mkprice");
+const mkMsg = await p.textContent("#confirmBox");
+if (!/Add 1 strategy to the marketplace/.test(mkMsg) || !/1 left out/.test(mkMsg) || !/draft/.test(mkMsg)) fail("market confirm", mkMsg);
+await p.fill("#bk_mkprice", "999"); await p.dispatchEvent("#bk_mkprice", "input");
+await okBtn(); await p.waitForTimeout(1000);
+const pub = writes.filter((w) => /rpc\/publish_strategy/.test(w.u)).map((w) => JSON.parse(w.body));
+if (pub.length !== 1 || pub[0].p_strategy !== "s1" || pub[0].p_price !== 999 || pub[0].p_title !== "My Nifty Supertrend" || !/futures/.test(pub[0].p_summary)) fail("publish rpc", pub);
+console.log("ok   strategies: add to marketplace in bulk (drafts, bought ones left out, one price for all)");
 if (errs.length) fail("page errors", errs);
 await b.close();

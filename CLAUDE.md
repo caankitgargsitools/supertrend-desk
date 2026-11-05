@@ -89,7 +89,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   Exit positions now (`desk_engine` flatten per open one; live ones warned), Allow new trades again (`kill_allow`), Archive
   (flat only), Restore. Strategy Lab (admins) — tick rows / select all shown → Save as strategies (the version the table
   shows, paused + paper; skips ones still in the tougher test or already on the desk), Star / Remove star, Download Excel.
-  Test: `tests/ui/ui_bulk.mjs`. Also "Delete permanently" for ticked archived strategies (delete filtered on
+  Test: `tests/ui/ui_bulk.mjs`. **Add to marketplace** (5 Nov 2026, Papa; admins): the ticked strategies that aren't archived,
+  bought (locked) or a listing's copy, and aren't already listed (not hidden), each go through `publish_strategy` as a
+  draft listing (title = name without "Lab #n · ", summary = asset · futures/options · candle size, one price typed in
+  the confirm box), backtests queued; published from the Marketplace page. Also "Delete permanently" for ticked archived strategies (delete filtered on
   `archived = true`; Papa asked for it so the list doesn't grow too heavy).
 - **Compare** (29 Oct 2026; sidebar "Compare", `cmpPane`, `renderCmp`): "⇄ Compare" on lab rows/cards/detail and desk
   list rows/cards/strategy page, or ⇄ Compare in either bulk bar; up to 4 (list in this browser's localStorage `cmp`,
