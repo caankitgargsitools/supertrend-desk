@@ -348,6 +348,13 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   same password worked on another device): an eye button inside the sign-in password and the two new-password fields
   (`input[data-eye]` → `.pwbox` / `.eye`; hidden again on submit); never on the broker key fields. Test:
   `tests/ui/ui_login_eye.mjs` (args: theme width).
+- **Android app** (6 Nov 2026, Papa; `android/`): AnkGenie 1.0, package `com.ankgenie.app`, Android 5.0+, a full-screen
+  WebView of https://supertrend-desk.vercel.app/ (live site, so portal changes need no new app; other sites open in the
+  browser; back button goes back; links to the site open in the app). Built by `android/build.sh` without the Android SDK
+  (dl.google.com is blocked from cloud sessions): Ubuntu's aapt / dalvik-exchange / zipalign / apksigner + android.jar
+  API 33 from GitHub. Not a Trusted Web Activity (its Google libraries can't be downloaded here), so **phone
+  notifications don't work inside the app** (WebView has no web push); Chrome's "Install app" still gets them. The
+  signing key isn't in the repo; a rebuild with a new key means uninstalling the old app first.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
