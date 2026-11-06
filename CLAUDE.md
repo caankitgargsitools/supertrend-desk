@@ -344,6 +344,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   `data_valid_until`, and notifies the owner (kind "error", link `/?conn=1`, pushed to the phone) 7, 5, 3 and 1 day(s)
   before the plan ends (`DATA_WARN_DAYS`, `dataWarnDue`; a missed day warns at the step reached) and at once when Dhan
   reports it inactive; `data_warned` = "<validity>|<days>" or "off" stops repeats. Test: `tests/sim/dataplan.test.mjs`.
+- **Show password** (6 Nov 2026, Papa, after a client's phone sign-in failed twice with "wrong email or password" while the
+  same password worked on another device): an eye button inside the sign-in password and the two new-password fields
+  (`input[data-eye]` → `.pwbox` / `.eye`; hidden again on submit); never on the broker key fields. Test:
+  `tests/ui/ui_login_eye.mjs` (args: theme width).
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.

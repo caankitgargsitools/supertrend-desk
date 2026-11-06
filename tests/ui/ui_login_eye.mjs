@@ -1,0 +1,26 @@
+// Show password on the sign-in box (6 Nov 2026, Papa: a client on a phone got "wrong email or password"). Args: theme width.
+import { chromium } from "playwright";
+const theme = process.argv[2] || "dark", width = Number(process.argv[3] || 390);
+const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const p = await (await b.newContext({ viewport: { width, height: 800 }, colorScheme: theme })).newPage();
+const errs = []; p.on("pageerror", (e) => errs.push(e.message));
+await p.route(/supabase\.co/, (r) => r.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
+await p.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+const fail = (m, x) => { console.log("FAIL", m, JSON.stringify(x ?? "")); process.exit(1); };
+await p.goto("http://localhost:8765/index.html"); await p.waitForSelector("#g_pass", { state: "visible" });
+await p.fill("#g_pass", "Secret 123");
+if (await p.getAttribute("#g_pass", "type") !== "password") fail("hidden at first");
+const eye = p.locator("#g_pass + .eye");
+const [ib, eb] = [await p.locator("#g_pass").boundingBox(), await eye.boundingBox()];
+if (!(eb.x >= ib.x && eb.x + eb.width <= ib.x + ib.width + 1 && eb.y >= ib.y - 1 && eb.y + eb.height <= ib.y + ib.height + 1)) fail("eye sits inside the field", { ib, eb });
+await eye.click();
+if (await p.getAttribute("#g_pass", "type") !== "text" || await eye.getAttribute("aria-pressed") !== "true" || await eye.getAttribute("aria-label") !== "Hide password") fail("shows the password");
+if (await p.inputValue("#g_pass") !== "Secret 123") fail("value kept");
+if (process.env.SHOT) await p.screenshot({ path: `${process.env.SHOT}/login_eye_${theme}_${width}.png` });
+await eye.click();
+if (await p.getAttribute("#g_pass", "type") !== "password") fail("hides it again");
+if (await p.locator("#np1 + .eye").count() !== 1 || await p.locator("#c_token + .eye").count() !== 0) fail("eye on own passwords only, never on broker keys");
+const sw = await p.evaluate(() => document.documentElement.scrollWidth); if (sw > width + 1) fail("sideways scroll", sw);
+if (errs.length) fail("page errors", errs);
+console.log("ok   show password", theme, width);
+await b.close();

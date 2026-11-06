@@ -968,6 +968,13 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one .dk-foot > div { padding: 5px 10px; }
 }
 @media (min-width: 1280px) and (max-width: 1599px) { body.dk-one #deskPane { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.7fr) 210px; } }
+/* Show password (Papa, 6 Nov 2026: a client typing on a phone got "wrong email or password"): an eye button inside the field. */
+.pwbox { position: relative; display: block; }
+.pwbox input { width: 100%; padding-right: 44px; box-sizing: border-box; }
+.pwbox .eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 36px; height: 32px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); cursor: pointer; border-radius: 8px; }
+.pwbox .eye:hover, .pwbox .eye[aria-pressed="true"] { color: var(--ink); }
+.pwbox .eye:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.pwbox .eye svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 </style>
 </head>
 <body>
@@ -1004,7 +1011,7 @@ body.dk-fs-on { overflow: hidden; }
     <p class="hint" id="g_hint">Sign in with the login your admin gave you.</p>
     <form id="loginForm" style="margin-top:12px">
       <label class="f"><span>Email</span><input id="g_email" type="email" autocomplete="username" required></label>
-      <label class="f"><span>Password</span><input id="g_pass" type="password" autocomplete="current-password" required minlength="8"></label>
+      <label class="f"><span>Password</span><input id="g_pass" type="password" autocomplete="current-password" required minlength="8" data-eye></label>
       <div class="formbar"><button class="btn primary" type="submit" id="g_go">Sign in</button><span class="hint" id="g_msg"></span></div>
     </form>
     <p class="hint" style="margin-top:14px"><a href="#setup" id="g_switch">First time here? Create the owner account</a></p>
@@ -1511,8 +1518,8 @@ body.dk-fs-on { overflow: hidden; }
       <div class="head"><h2>Change my password</h2></div>
       <form id="passForm" novalidate style="margin-top:12px">
         <div class="grid">
-          <label class="f"><span>New password (8+ characters)</span><input id="np1" type="password" autocomplete="new-password"></label>
-          <label class="f"><span>Type it again</span><input id="np2" type="password" autocomplete="new-password"></label>
+          <label class="f"><span>New password (8+ characters)</span><input id="np1" type="password" autocomplete="new-password" data-eye></label>
+          <label class="f"><span>Type it again</span><input id="np2" type="password" autocomplete="new-password" data-eye></label>
         </div>
         <div class="formbar"><button class="btn primary" type="submit">Change password</button><span class="hint" id="np_msg"></span></div>
       </form>
@@ -9405,6 +9412,16 @@ function paintGate() {
   $("g_pass").autocomplete = setupMode ? "new-password" : "current-password";
 }
 $("g_switch").addEventListener("click", (e) => { e.preventDefault(); setupMode = !setupMode; $("g_msg").textContent = ""; paintGate(); });
+const EYE_ON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A9.8 9.8 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.7 8.4 2 12 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+document.querySelectorAll("input[data-eye]").forEach((inp) => {
+  const box = document.createElement("span"); box.className = "pwbox"; inp.parentNode.insertBefore(box, inp); box.appendChild(inp);
+  const b = document.createElement("button"); b.type = "button"; b.className = "eye"; b.setAttribute("aria-label", "Show password"); b.setAttribute("aria-pressed", "false"); b.innerHTML = EYE_ON;
+  b.addEventListener("click", () => { const show = inp.type === "password"; inp.type = show ? "text" : "password"; b.setAttribute("aria-pressed", String(show)); b.setAttribute("aria-label", show ? "Hide password" : "Show password"); b.innerHTML = show ? EYE_OFF : EYE_ON; inp.focus(); });
+  box.appendChild(b);
+  // Hidden again when the form is sent, so it isn't left visible on screen.
+  inp.form && inp.form.addEventListener("submit", () => { inp.type = "password"; b.setAttribute("aria-pressed", "false"); b.innerHTML = EYE_ON; });
+});
 $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const email = $("g_email").value.trim(), password = $("g_pass").value;
