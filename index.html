@@ -853,10 +853,10 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-pulsebox { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--dk-line); }
 .dk-pulses { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; margin-top: 6px; align-items: end; }
 .dk-pulse { display: grid; justify-items: center; gap: 3px; text-align: center; min-width: 0; cursor: default; }
-.dk-pulse .bars { height: 30px; display: flex; gap: 2px; align-items: flex-end; }
-.dk-pulse .bars i { width: 3.5px; border-radius: 2px; height: 20%; background: var(--dk-up); box-shadow: 0 0 5px rgba(46,212,127,.5); transition: height .16s ease-out; }
-.dk-pulse.warn .bars i { background: var(--dk-amber); box-shadow: 0 0 5px rgba(243,178,60,.5); transition-duration: .4s; }
-.dk-pulse.bad .bars i { background: var(--dk-down); box-shadow: 0 0 7px rgba(255,92,108,.7); animation: dkblink 1s steps(2) infinite; height: 14% !important; }
+.dk-pulse .bars { height: 42px; display: flex; gap: 2px; align-items: flex-end; }
+.dk-pulse .bars i { width: 4.5px; border-radius: 2px; height: 20%; background: #4dffa0; box-shadow: 0 0 7px rgba(77,255,160,.85), 0 0 2px rgba(255,255,255,.35); transition: height .45s ease-in-out; }
+.dk-pulse.warn .bars i { background: #ffc54d; box-shadow: 0 0 7px rgba(255,197,77,.8); transition-duration: .9s; }
+.dk-pulse.bad .bars i { background: var(--dk-down); box-shadow: 0 0 9px rgba(255,92,108,.9); animation: dkblink 1s steps(2) infinite; height: 14% !important; }
 .dk-pulse.off .bars i { background: var(--dk-dim); box-shadow: none; animation: none; height: 12% !important; }
 @keyframes dkblink { 50% { opacity: .35; } }
 .dk-pulse .n { font: 600 8px/1.2 var(--font-data); letter-spacing: 0; text-transform: uppercase; color: var(--dk-muted); overflow-wrap: anywhere; }
@@ -8023,9 +8023,9 @@ function feedState(k, limit) {
   if (age <= limit * 2.5) return { c: "warn", s: "slow", t: `late · last ${ago}${extra}` };
   return { c: "bad", s: "stopped", t: `stopped · last ${ago}${extra}` };
 }
-/* The bars move unevenly (Papa, 6 Nov 2026: "the patterns should keep on changing"): every 160 ms each running feed's four
+/* The bars move unevenly (Papa, 6 Nov 2026: "the patterns should keep on changing"): every 450 ms each running feed's four
    bars get new heights from that feed's current pattern — random jumps, a rolling wave, a climb or a burst — and each feed
-   switches to another pattern every 2–6 s, so no two feeds and no two moments look alike. Amber feeds move less often and
+   switches to another pattern every 3–8 s, so no two feeds and no two moments look alike. Amber feeds move less often and
    lower; red and grey ones stand still (their CSS fixes the height). */
 const dkPulse = new Map(); // feed -> { mode, until, ph }
 function dkPulseTick() {
@@ -8036,7 +8036,7 @@ function dkPulseTick() {
     const ok = el.classList.contains("ok"), warn = el.classList.contains("warn");
     if (!ok && !warn) continue;
     let st = dkPulse.get(el.dataset.f);
-    if (!st || now > st.until) { st = { mode: ["rand", "wave", "climb", "burst"][Math.floor(Math.random() * 4)], until: now + 2000 + Math.random() * 4000, ph: Math.random() * 6.3, sp: .006 + Math.random() * .01 }; dkPulse.set(el.dataset.f, st); }
+    if (!st || now > st.until) { st = { mode: ["rand", "wave", "climb", "burst"][Math.floor(Math.random() * 4)], until: now + 3000 + Math.random() * 5000, ph: Math.random() * 6.3, sp: .0025 + Math.random() * .004 }; dkPulse.set(el.dataset.f, st); }
     if ((warn || slow) && Math.random() < .7) continue; // amber (and reduced motion): fewer changes
     const bars = el.querySelectorAll(".bars i"), t = now * st.sp + st.ph;
     bars.forEach((b, i) => {
@@ -8050,7 +8050,7 @@ function dkPulseTick() {
     });
   }
 }
-setInterval(dkPulseTick, 160);
+setInterval(dkPulseTick, 450); // slower (Papa, 6 Nov: "it's moving too fast")
 function deskFeedsPaint() {
   const box = $("dk_feeds"); if (!box || page !== "desk") return;
   if (!box.children.length) box.innerHTML = DK_FEEDS.map(([k, a, b]) => `<div class="dk-pulse off" role="listitem" data-f="${k}"><div class="bars"><i></i><i></i><i></i><i></i></div><div class="n">${a}<br>${b}</div><div class="s">…</div></div>`).join("");
