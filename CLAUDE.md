@@ -364,6 +364,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   in use / visits (`engaged_min`, `visits_24h`); "Pages ▸" opens a row per page (`aaPages` → `admin_user_pages(p_user,
   p_hours)`: visits, on screen, in use, last visit; 24 h / 7 days; labels `PAGE_LABEL`). Test: `tests/ui/ui_activity.mjs`
   (args: theme width).
+- **Desk · system feeds** (6 Nov 2026, Papa chose pulse bars and these 6 feeds; migration 80): at the top of the Activity panel
+  (`#dk_feeds`, `.dk-pulse`), one small equalizer each for Dhan NSE/BSE prices, Dhan MCX prices, Delta prices, the stop
+  watcher, the order manager and the broker match. From `desk_feeds()` every 5 s (ages repainted each second,
+  `deskFeedsLoad` / `deskFeedsPaint` / `feedState`): green and bouncing while the feed is within its own rhythm — prices and
+  stops 20 s, order manager 150 s, broker match 420 s (Papa: a 5-minute check stays green until the next is due) — amber
+  up to 2.5× that, then red and blinking; grey when it has nothing to do (market shut, no open position; the loop runs only
+  then). Hover: when it last worked, and "no live orders / strategy" when the job runs with nothing to do. Tested in
+  `tests/ui/ui_desk.mjs`.
 - **Desk quotes on phones** (6 Nov 2026, Papa): folded to one row by default; "All ▾" / "Less ▴" (`#dk_qtog`, `dkQFold`,
   localStorage `dkQOpen`); big screens unchanged. Tested in `tests/ui/ui_desk.mjs`.
 - **Show password** (6 Nov 2026, Papa, after a client's phone sign-in failed twice with "wrong email or password" while the

@@ -50,6 +50,8 @@ if (process.env.MANYQ) {
   stk.forEach((a, i) => add("NSE_EQ", String(900 + i), a, 1000 + i * 37, 1000 + i * 37 + (i % 3 - 1) * 9.5));
   coins.forEach((a, i) => add("DELTA", a, a, 100 + i * 3, 100 + i * 3.1));
 }
+// System feeds: ages in seconds at each request (prices fresh, Delta stopped, stops late, orders 100 s, broker match 400 s).
+const feedAge = { nse: 2, mcx: 3, crypto: 200, stops: 30, orders: 100, reconcile: 400 };
 const writes = [];
 await p.route(/supabase\.co/, (r) => {
   const u = r.request().url().replace(/^.*supabase\.co/, ""), meth = r.request().method();
@@ -58,6 +60,7 @@ await p.route(/supabase\.co/, (r) => {
   if (meth === "PATCH") return r.fulfill({ status: 204, body: "" });
   const m = u.match(/\/rest\/v1\/(rpc\/[a-z_]+|[a-z_]+)/), key = m && m[1];
   let body = key in res ? res[key] : [];
+  if (key === "rpc/desk_feeds") { const now = Date.now(); body = { now: new Date(now).toISOString(), open: 4, live_orders: 0, live_n: 0, ...Object.fromEntries(Object.entries(feedAge).map(([k, a]) => [k, new Date(now - a * 1000).toISOString()])) }; }
   if (/application\/vnd\.pgrst\.object/.test(r.request().headers()["accept"] || "") && Array.isArray(body)) body = body[0] ?? null;
   r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 });
@@ -100,6 +103,18 @@ if (!process.env.MANYQ && (q.length !== 8 || !/^Nifty 50 22,935\.5 ▲ 0\.59%$/.
 if (await p.evaluate(() => getComputedStyle(document.getElementById("dk_quotes")).animationName !== "none")) fail("quotes don't scroll");
 res.live_prices[0].px = 22950; res.live_prices[0].at = new Date().toISOString();
 await p.waitForFunction(() => document.querySelector('#dk_quotes [data-a="NIFTY"]').classList.contains("fu"), null, { timeout: 5000 }).catch(() => fail("a rising price flashes green"));
+// System feeds (Papa, 6 Nov): pulse bars; a feed stays green until overdue for its own rhythm (broker match: 5 min + 2).
+await p.waitForTimeout(5200);
+const feeds = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll("#dk_feeds .dk-pulse")].map((e) => [e.dataset.f, e.className.replace("dk-pulse ", "")])));
+const mk = await p.evaluate(() => ({ nse: marketOpenFor("NSE_EQ"), mcx: marketOpenFor("MCX_COMM") }));
+const want = { nse: mk.nse ? "ok" : "off", mcx: mk.mcx ? "ok" : "off", crypto: "bad", stops: "warn", orders: "ok", reconcile: "ok" };
+if (JSON.stringify(feeds) !== JSON.stringify(want)) fail("feed states", { feeds, want });
+if (!/no live strategy to match/.test(await p.getAttribute('#dk_feeds [data-f="reconcile"]', "title"))) fail("broker match says it has nothing live to match");
+if ((await p.textContent("#dk_feedsum")).trim() !== "1 stopped") fail("feed summary", await p.textContent("#dk_feedsum"));
+if (await p.evaluate(() => getComputedStyle(document.querySelector('#dk_feeds [data-f="orders"] .bars i')).animationName) !== "dkeq") fail("a running feed keeps pulsing");
+feedAge.reconcile = 500; feedAge.crypto = 1;
+await p.waitForFunction(() => /warn/.test(document.querySelector('#dk_feeds [data-f="reconcile"]').className) && /ok/.test(document.querySelector('#dk_feeds [data-f="crypto"]').className), null, { timeout: 9000 })
+  .catch(() => fail("overdue broker match turns amber; Delta back to green"));
 // Phones (Papa, 6 Nov): the strip folds to one row; "All ▾" opens it, "Less ▴" folds it again.
 if (width <= 760) {
   const h0 = await p.evaluate(() => document.getElementById("dk_quotes").getBoundingClientRect().height);

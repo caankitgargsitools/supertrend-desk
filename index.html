@@ -849,6 +849,21 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-brand small { display: block; color: var(--dk-muted); font: 500 10.5px var(--font-data); letter-spacing: .06em; margin-top: 3px; }
 .dk-quotes { display: flex; flex-wrap: wrap; gap: 3px 4px; justify-content: flex-start; align-content: center; align-items: center; min-width: 0; }
 .dk-qwrap { position: relative; min-width: 0; align-self: center; }
+/* System feeds (Papa, 6 Nov 2026: "pulse bars … keep coming; red on a break"): one small equalizer per feed. */
+.dk-pulsebox { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--dk-line); }
+.dk-pulses { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; margin-top: 6px; align-items: end; }
+.dk-pulse { display: grid; justify-items: center; gap: 3px; text-align: center; min-width: 0; cursor: default; }
+.dk-pulse .bars { height: 30px; display: flex; gap: 2px; align-items: flex-end; }
+.dk-pulse .bars i { width: 3.5px; border-radius: 2px; height: 20%; background: var(--dk-up); box-shadow: 0 0 5px rgba(46,212,127,.5); animation: dkeq .9s ease-in-out infinite; }
+.dk-pulse .bars i:nth-child(2) { animation-delay: -.3s; animation-duration: 1.1s; } .dk-pulse .bars i:nth-child(3) { animation-delay: -.6s; animation-duration: .8s; } .dk-pulse .bars i:nth-child(4) { animation-delay: -.15s; animation-duration: 1.3s; }
+@keyframes dkeq { 0%, 100% { height: 18%; } 50% { height: 100%; } }
+.dk-pulse.warn .bars i { background: var(--dk-amber); box-shadow: 0 0 5px rgba(243,178,60,.5); animation-duration: 2.2s; }
+.dk-pulse.bad .bars i { background: var(--dk-down); box-shadow: 0 0 7px rgba(255,92,108,.7); animation: dkblink 1s steps(2) infinite; height: 14%; }
+.dk-pulse.off .bars i { background: var(--dk-dim); box-shadow: none; animation: none; height: 12%; }
+@keyframes dkblink { 50% { opacity: .35; } }
+.dk-pulse .n { font: 600 8px/1.2 var(--font-data); letter-spacing: 0; text-transform: uppercase; color: var(--dk-muted); overflow-wrap: anywhere; }
+.dk-pulse .s { font: 600 8.5px var(--font-data); color: var(--dk-up); } .dk-pulse.warn .s { color: var(--dk-amber); } .dk-pulse.bad .s { color: var(--dk-down); } .dk-pulse.off .s { color: var(--dk-dim); }
+@media (prefers-reduced-motion: reduce) { .dk-pulse .bars i { animation-duration: 3s; } }
 .dk-qtog { display: none; }
 /* Phones (Papa, 6 Nov 2026): the strip folds to one row, "All ▾" opens every quote, "Less ▴" folds it again (remembered). */
 @media (max-width: 760px) {
@@ -1715,7 +1730,7 @@ body.dk-fs-on { overflow: hidden; }
         <div class="dk-panel dk-tlp"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Timeline · last 3 weeks</span><span class="dk-lbl">bar = open position · dot = closed trade</span></div><div class="dk-svgbox"><svg id="dk_tl" width="100%" height="300" role="img" aria-label="Timeline of open positions and closed trades by asset"></svg></div></div>
         <div class="dk-panel dk-skp"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Capital flow · margin in use</span><span class="dk-lbl">asset → side → result</span></div><div class="dk-svgbox"><svg id="dk_sk" width="100%" height="300" role="img" aria-label="Margin in use flowing from assets to long or short, then to in profit or in loss"></svg></div></div>
       </div>
-      <div class="dk-panel dk-actp"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Activity</span><span class="dk-lbl">newest first</span></div><div class="dk-feed" id="dk_feed"></div></div>
+      <div class="dk-panel dk-actp"><div class="dk-pulsebox"><div class="dk-lr"><span>System feeds</span><span id="dk_feedsum"></span></div><div class="dk-pulses" id="dk_feeds" role="list" aria-label="System feeds"></div></div><div class="dk-ph"><span class="dk-lbl"><b>●</b> Activity</span><span class="dk-lbl">newest first</span></div><div class="dk-feed" id="dk_feed"></div></div>
       <footer class="dk-foot">
         <div><div class="dk-lbl">Avg closed trade</div><div class="dk-v" id="dk_favg">–</div></div>
         <div><div class="dk-lbl">Best open</div><div class="dk-v dk-up" id="dk_fbest">–</div></div>
@@ -7935,6 +7950,7 @@ function deskClock() {
   const mk = [["NSE", marketOpenFor("NSE_EQ")], ["MCX", marketOpenFor("MCX_COMM")], ["DELTA", true]];
   $("dk_mk").innerHTML = mk.map(([n, o]) => `<span class="${o ? "open" : ""}">${n} ${o ? "OPEN" : "SHUT"}</span>`).join("");
   deskClock.n = (deskClock.n || 0) + 1; if (deskClock.n % 3 === 1) deskQuotes(); // the quotes strip, every 3 s
+  if (deskClock.n % 5 === 1) deskFeedsLoad(); deskFeedsPaint(); // system feeds: read every 5 s, ages every second
 }
 /** Numbers, tiles, feed, ticker: everything that is plain HTML. */
 function deskPaint() {
@@ -7983,6 +7999,43 @@ function deskPaint() {
     return { time: istText(t.exit_at), what: `${x ? dkName(x.underlying) : "–"} ${String(t.side || "").toLowerCase()} closed · ${String(t.exit_why || "").replace(/\s*\(.*$/, "").slice(0, 40)}`, v: Number(t.net) || 0 }; });
   const rows = [...desk.feed, ...closed].slice(0, 50);
   $("dk_feed").innerHTML = rows.length ? rows.map((f) => `<div><span class="w">${esc(f.time)}</span><span>${esc(f.what)}</span><span class="${f.v >= 0 ? "dk-up" : "dk-down"}">${esc(dkSgn(f.v))}</span></div>`).join("") : '<p class="dk-lbl">No activity yet.</p>';
+}
+/* ---------- System feeds (Papa, 6 Nov 2026): pulse bars for Dhan NSE/BSE and MCX prices, Delta prices, the stop watcher,
+   the order manager and the broker match. A feed stays green (bars bouncing) until it is overdue for its own rhythm —
+   prices and stops every second, the order manager every minute, the broker match every 5 minutes (a 12:00 check keeps it
+   green until about 12:07) — then amber, then red. Grey when it has nothing to do (market shut, nothing open). Times from
+   desk_feeds (what the system already records; no extra Dhan / Delta calls). */
+const DK_FEEDS = [["nse", "Dhan", "NSE/BSE", 20], ["mcx", "Dhan", "MCX", 20], ["crypto", "Delta", "crypto", 20], ["stops", "Stop", "watcher", 20], ["orders", "Order", "manager", 150], ["reconcile", "Broker", "match", 420]];
+const dkF = { data: null, skew: 0, busy: false };
+async function deskFeedsLoad() {
+  if (page !== "desk" || document.hidden || dkF.busy) return;
+  dkF.busy = true;
+  try { const r = (await db.rpc("desk_feeds")).data; if (r && r.now) { dkF.data = r; dkF.skew = Date.parse(r.now) - Date.now(); } } catch { /* next round */ } finally { dkF.busy = false; }
+}
+function feedState(k, limit) {
+  const d = dkF.data; if (!d) return { c: "off", s: "…", t: "checking" };
+  const nse = marketOpenFor("NSE_EQ"), mcx = marketOpenFor("MCX_COMM"), open = Number(d.open) || 0, loop = open > 0 || nse || mcx;
+  const applies = k === "nse" ? nse : k === "mcx" ? mcx : k === "crypto" ? loop : k === "stops" ? open > 0 : true;
+  const off = k === "nse" || k === "mcx" ? "market shut" : k === "stops" ? "no open position" : "idle";
+  if (!applies) return { c: "off", s: k === "nse" || k === "mcx" ? "shut" : "idle", t: off };
+  const at = d[k] ? Date.parse(d[k]) : 0, age = at ? (Date.now() + dkF.skew - at) / 1000 : Infinity;
+  const ago = !at ? "never" : age < 60 ? `${Math.max(0, Math.round(age))} s ago` : age < 3600 ? `${Math.round(age / 60)} min ago` : `${Math.round(age / 3600)} h ago`;
+  const extra = k === "orders" && !Number(d.live_orders) ? " · no live orders to work right now" : k === "reconcile" && !Number(d.live_n) ? " · no live strategy to match right now" : "";
+  if (age <= limit) return { c: "ok", s: "live", t: `running · last ${ago}${extra}` };
+  if (age <= limit * 2.5) return { c: "warn", s: "slow", t: `late · last ${ago}${extra}` };
+  return { c: "bad", s: "stopped", t: `stopped · last ${ago}${extra}` };
+}
+function deskFeedsPaint() {
+  const box = $("dk_feeds"); if (!box || page !== "desk") return;
+  if (!box.children.length) box.innerHTML = DK_FEEDS.map(([k, a, b]) => `<div class="dk-pulse off" role="listitem" data-f="${k}"><div class="bars"><i></i><i></i><i></i><i></i></div><div class="n">${a}<br>${b}</div><div class="s">…</div></div>`).join("");
+  let bad = 0, warn = 0;
+  for (const [k, a, b, limit] of DK_FEEDS) {
+    const el = box.querySelector(`[data-f="${k}"]`), f = feedState(k, limit);
+    if (!el.classList.contains(f.c)) el.className = "dk-pulse " + f.c;
+    el.querySelector(".s").textContent = f.s; el.title = `${a} ${b}: ${f.t}`; el.setAttribute("aria-label", el.title);
+    if (f.c === "bad") bad++; else if (f.c === "warn") warn++;
+  }
+  const sum = $("dk_feedsum"); sum.textContent = !dkF.data ? "" : bad ? `${bad} stopped` : warn ? `${warn} slow` : "all running"; sum.style.color = bad ? "var(--dk-down)" : warn ? "var(--dk-amber)" : "var(--dk-up)";
 }
 /* ---------- Desk quotes strip (Papa, 6 Nov 2026): Nifty 50, Sensex, Bank Nifty, Fin Nifty, Midcap Nifty and every asset this account trades,
    price now and % up / down today (vs the previous close in ticker_ref); still, not scrolling; a chip flashes green or
