@@ -545,7 +545,37 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   and rupees; positive = worse for the trader); `slippage_summary(p_user)` — per strategy, live fills' slippage against
   the signal prices (legs, average, worst, rupee total). Both for the owner or an admin; the website shows them as the
   Trades tab's "Story ▸" and a Slippage card (closes the open item "slippage column + per-strategy slippage summary").
-- **Still from the audit, done elsewhere this day**: see the website and strategy entries added below as they land.
+- **Strategy rule families (6–7 Nov 2026, engine v147; `tests/sim/{data_oi,piv,fib,gap,squeeze,gen_cover,cal,vix,div,stockmom,wf,method}.test.mjs`)**:
+  volume stored for every asset (`toCol(rows, true)`; old files v → 0) and open interest fetched (`oi: true`, `Raw/DayBar.oi`;
+  real OI only for MCX in the lab — index / stock signals run on spot) → indicator `OI` (oi_rising / oi_falling /
+  oi_up_price_up / oi_up_price_down). New indicators in rules.ts: `PIV` (classic / Camarilla / CPR from the previous day
+  or week: above/below/cross pp, r1, s1; cpr_narrow / cpr_wide = CPR width vs k × 20-period median), `FIB` (zigzag swings
+  by k × ATR or n-bar fractals, `indicators.ts swings`, no look-ahead: pullback_to_382/50/618 within tol × ATR with a
+  confirmation candle, rally_* mirrors, in_zone_bull/bear, broke_down/up_786; every condition may carry a `level`;
+  `RuleSet.fill = "LEVEL"` makes the backtester fill at the level intrabar on the next candle (`simulateRules`), entries
+  only; `tgt.type = "FIB"` targets = extensions of the last swing (`riskInit(..., swing)`; live: `_swing` travels with
+  the new state into `armRisk`)), `GAP` (open vs previous close in daily-ATR units: gap_up_gt / gap_dn_gt / gap_filled /
+  gap_held), `RANGE` (nr_n, inside_bar on the previous candle; range_gt_atr / range_lt_atr), `KC` Keltner (above_upper /
+  below_lower / squeeze = Bollinger inside Keltner / squeeze_release), `BB` bandwidth_pctile_lt / _gt, `CAL`
+  (is / not_expiry_day, days_to_expiry_lt, turn_of_month, event_day ± n from table `market_events` — migration 83,
+  admins read; `loadMarketEvents` once a day → `logic.ts setMarketEvents`), `VIX` (India VIX, Dhan IDX_I 21, a
+  non-tradable data asset `DATA_ASSETS`, kept out of `LAB_ASSETS`: vix_gt / lt / rising / pctile_gt / lt; the lab's data
+  phase refreshes its candles; user backtests download it when rules use it; live: `rulesExt` in index.ts fetches daily
+  + 5-minute VIX when `rulesUse(rules, "VIX")`), `DIV` (RSI / MACD bull / bear divergence over the last two swings).
+  Honest note in code: pivots and Fibonacci are mostly folklore — built so the lab can test them fairly. Generator
+  (lab.ts `TplRow` tables): DON, PIV, KC, GAP, FIB (half with LEVEL fills), DIV, RANGE, VOL, TIME, CAL (indices + stocks),
+  VIX (indices) added; MCX gets intraday strategies 30% of the time; mirrors / nearby settings know the new params.
+  Ideas Lab: `stockmom` (order 18) — cross-sectional momentum on the 33 stock futures, 3/6/12-month skipping the last
+  month, top 3/5, with / without bottom-k short, 0.5% risk per position. Lab method: `labWalkForward` (lab.ts; table
+  `lab_walkforward`, migration 84; engine action `lab_walkforward`, nightly 03:30 IST from `engine_minute`, migration 86)
+  re-ranks each asset/mode group quarter by quarter on the trades before the quarter, picks the top k and records only
+  the next quarter → the stitched out-of-sample curve (caveat in code: a survivor pool); `consistencyScore(..., plateau)`
+  adds a soft 0–10 plateau part when ≥ 3 nearby-setting results exist (other weights scaled to 90); `regimeStats`
+  (VIX tercile / ADX > 25 vs < 20 / above vs below SMA200) stored as `metrics.regimes` by `screenOne`. `pagedRows` at
+  every capped lab / ideas read; the whole-table `lab_tried` paging replaced by `triedOf()` fingerprint lookups.
+  Combinations notify once per run (`comboDigest`) instead of once per asset / timeframe. Left out on purpose:
+  stock-futures OI, per-commodity MCX expiry calendars for CAL, a live resting limit order for LEVEL fills, VIX for crypto.
+- **Still from the audit, done elsewhere this day**: see the website entries added below as they land.
 - **Open questions put to Papa 6 Nov 2026 (no answer within a minute → pending, ask again)**: (1) switch the four lab
   jobs (3, 10, 26, 29) back on now that the dispatcher is in and the tick closes stuck runs; (2) revoke the blanket ALL
   grants from anon / authenticated and grant back what the app uses; (3) rebuild the navigation as 5 client entries

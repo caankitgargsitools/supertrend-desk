@@ -10,3 +10,8 @@ Never test against the real database with test rows.
 
 UI checks (`tests/ui/*.mjs`) use Playwright with mocked Supabase responses: serve the repo root with
 `python3 -m http.server 8765` and run `node tests/ui/ui_audit.mjs`.
+
+Strategy-research tests (6 Nov 2026; `node build_all.mjs` also bundles rules / indicators / logic / backtest / risk):
+`data_oi` (volume + open interest), `piv` (pivots), `fib` (swings, Fibonacci, LEVEL fills, FIB target), `gap`, `squeeze`
+(bandwidth / RANGE / Keltner), `gen_cover` (generator coverage), `cal` (calendar), `vix` (India VIX), `div`
+(divergences), `stockmom` (Ideas Lab stock momentum), `wf` (walk-forward), `method` (plateau score, regimes).

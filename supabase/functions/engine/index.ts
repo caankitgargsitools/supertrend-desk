@@ -12,10 +12,10 @@ import {
   pickBaseInterval, sessionFor, setHolidays, signalSeries, strikeFor, supertrend, timeToMin, tradingSession,
 } from "./logic.ts";
 import { dataSecurity, syncMcx } from "./instruments.ts";
-import { allConds, decide, describeCond, type RuleExt, ruleSets, RuleBook, rulesUse, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
+import { allConds, decide, describeCond, type RuleExt, ruleSets, RuleBook, rulesUse, ruleTimeframes, swingParamsOf, swingSizes, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
-import { effectiveStop, hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
-import { fromCol, LAB_ASSETS, labNext, labOptStep, labReverdict, labStart, labStep, loadCryptoAssets, loadMarketEvents, pagedRows, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
+import { effectiveStop, hasLevels, needsSwing, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
+import { fromCol, LAB_ASSETS, labNext, labOptStep, labReverdict, labStart, labStep, labWalkForward, loadCryptoAssets, loadMarketEvents, pagedRows, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
 import { runCombos } from "./combos.ts";
 import { contractsFor, CRYPTO, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaCancel, deltaOrderChecked, deltaOrderState, deltaPositions, deltaStop, deltaStopMove, niceLot } from "./crypto.ts";
 import {
@@ -297,7 +297,7 @@ async function premiumOf(dhan: Dhan, s: Strategy, st: Record<string, any>): Prom
   } catch { return null; }
 }
 /** Stop / target levels for a position just entered (stored in pos_risk). */
-async function armRisk(s: Strategy, set: Settings, st: Record<string, any>, px: number, atrNow: number, notes: string[]) {
+async function armRisk(s: Strategy, set: Settings, st: Record<string, any>, px: number, atrNow: number, notes: string[], swing = 0) {
   const r = riskOf(s);
   if (!r) return;
   const pr: PosRisk = { basis: r.basis, entry: px };
@@ -307,7 +307,7 @@ async function armRisk(s: Strategy, set: Settings, st: Record<string, any>, px: 
     const premium = r.basis === "PREMIUM";
     const dir = premium ? (st.pos_option_side === "SELL" ? -1 : 1) : (st.position === "LONG" ? 1 : -1);
     const ref = premium ? pr.entryPrem : px;
-    const rs = ref ? riskInit(r, dir, ref, atrNow, Math.floor(Date.now() / 60000) * 60) : null;
+    const rs = ref ? riskInit(r, dir, ref, atrNow, Math.floor(Date.now() / 60000) * 60, swing) : null;
     if (rs) {
       Object.assign(pr, rs);
       const f = (x: number | null | undefined) => x == null ? "–" : (+x.toFixed(2)).toString();
@@ -962,6 +962,8 @@ async function finishNow(s: Strategy, set: Settings, update: Record<string, unkn
     if (cur) s = { ...s, ...cur };
     const entryPx = newState._px as number | undefined;
     delete newState._px;
+    const swing = Number(newState._swing) || 0;
+    delete newState._swing;
     const entering = (newState.position === "LONG" || newState.position === "SHORT") && entryPx !== undefined;
     const exiting = s.position !== "FLAT" && ["EXIT", "REVERSE", "SQUARE_OFF"].includes(event);
     if (entering && s._block) notes.push(`Entry skipped: ${s._block}`);
@@ -970,7 +972,7 @@ async function finishNow(s: Strategy, set: Settings, update: Record<string, unkn
       legs.pop();
       if (!legs.length) { await logSignal(s, "INFO", notes.join(" | "), candle); await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "indicator state"); return; }
       newState = { ...FLAT_STATE }; event = "EXIT";
-    } else if (entering) await armRisk(s, set, newState, entryPx!, atrNow, notes);
+    } else if (entering) await armRisk(s, set, newState, entryPx!, atrNow, notes, swing);
     // A second run that sees the same candle again (a slow position update) sends nothing and changes nothing.
     if (!(await claimSignal(s, event, candle))) { console.warn(`signal for ${s.id} at ${candle.t} already handled`); return; }
     const ok = await sendOrders(s, set, event, legs, notes.join(" | "), candle);
@@ -1295,6 +1297,8 @@ async function processRules(s: Strategy, set: Settings, action: string) {
       }
       if (d.enter && position === "FLAT" && canEnter(s)) {
         const e = entryLeg(s, d.enter, last.c, legs.length + 1);
+        // A Fibonacci target needs the size of the last completed swing (risk.ts riskInit's `swing`).
+        if (needsSwing(riskOf(s))) e.state._swing = swingSizes(bars, swingParamsOf(rules)).at(-1) ?? 0;
         legs.push(...asArr(e.leg)); notes.push(`${d.enter === "LONG" ? "Buy" : "Sell"} rules met (${label(d.enter === "LONG" ? "long" : "short")}): ${e.label}`);
         event = event === "EXIT" ? "REVERSE" : "ENTRY";
         newState = { position: d.enter, ...e.state };
@@ -3287,6 +3291,16 @@ Deno.serve(async (req) => {
   // The morning card (Papa, 6 Nov 2026 audit "delight" list): at 08:30 IST (engine_minute) one note per user with open
   // positions and their stops, today's expiries, the token and data plan, the breaker and new lab passes.
   if (action === "morning") return Response.json({ action, ...(await morningCards()) });
+  // The Strategy Lab's walk-forward "stitched out-of-sample curve" (lab.ts labWalkForward): one group instalment per
+  // call, chained while a group is half done; nightly from engine_minute (03:30 IST).
+  if (action === "lab_walkforward") {
+    EdgeRuntime.waitUntil((async () => {
+      const r = await labWalkForward(sb);
+      console.log("walk-forward", JSON.stringify(r));
+      if (r && !r.idle && r.finished === false) await selfCall({ action: "lab_walkforward" });
+    })().catch((e) => console.error("walk-forward", e)));
+    return Response.json({ action, accepted: true });
+  }
   if (action === "kill") {
     EdgeRuntime.waitUntil(killCheck(Number((body as { offset?: number }).offset) || 0).catch((e) => console.error("kill", e)));
     return Response.json({ action, accepted: true });

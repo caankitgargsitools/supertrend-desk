@@ -2692,7 +2692,7 @@ export function walkForward(pool: { id: number; trades: { exit: string; net: num
   const quarters: WfQuarter[] = [];
   let i = fromCursor;
   for (; i < list.length; i++) {
-    if (deadline()) return { quarters, cursor: i, finished: false, list };
+    if (i > fromCursor && deadline()) return { quarters, cursor: i, finished: false, list }; // at least one quarter per call: always progress
     const q = list[i], from = quarterStart(q), to = quarterStart(nextQuarter(q));
     const scored: { id: number; score: number; qNet: number }[] = [];
     for (const p of pool) {
