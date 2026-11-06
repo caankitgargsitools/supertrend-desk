@@ -111,7 +111,10 @@ const want = { nse: mk.nse ? "ok" : "off", mcx: mk.mcx ? "ok" : "off", crypto: "
 if (JSON.stringify(feeds) !== JSON.stringify(want)) fail("feed states", { feeds, want });
 if (!/no live strategy to match/.test(await p.getAttribute('#dk_feeds [data-f="reconcile"]', "title"))) fail("broker match says it has nothing live to match");
 if ((await p.textContent("#dk_feedsum")).trim() !== "1 stopped") fail("feed summary", await p.textContent("#dk_feedsum"));
-if (await p.evaluate(() => getComputedStyle(document.querySelector('#dk_feeds [data-f="orders"] .bars i')).animationName) !== "dkeq") fail("a running feed keeps pulsing");
+// The bars move unevenly: heights change over time, differ from bar to bar and from feed to feed.
+const hs = async () => p.evaluate(() => ["orders", "reconcile"].map((f) => [...document.querySelectorAll(`#dk_feeds [data-f="${f}"] .bars i`)].map((i) => i.style.height).join()));
+const s1 = await hs(); await p.waitForTimeout(700); const s2 = await hs();
+if (s1[0] === s2[0] || s1[0] === s1[1] || new Set(s2[0].split(",")).size < 2) fail("running feeds keep moving, unevenly", { s1, s2 });
 feedAge.reconcile = 500; feedAge.crypto = 1;
 await p.waitForFunction(() => /warn/.test(document.querySelector('#dk_feeds [data-f="reconcile"]').className) && /ok/.test(document.querySelector('#dk_feeds [data-f="crypto"]').className), null, { timeout: 9000 })
   .catch(() => fail("overdue broker match turns amber; Delta back to green"));
