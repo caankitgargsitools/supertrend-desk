@@ -1,4 +1,4 @@
-// Stock futures (1 Nov 2026, Papa): 10 liquid Nifty 50 stocks, traded as NSE stock futures (FUTSTK, monthly).
+// Stock futures (1 Nov 2026, Papa; 33 since 6 Nov): liquid Nifty 50 stocks, traded as NSE stock futures (FUTSTK, monthly).
 // Like the indices, signals and backtests use the share price (NSE_EQ cash candles, no futures premium added) and orders
 // go to the near-month future. Lot sizes come from Dhan's F&O list (fno_contracts) when it has them.
 //
@@ -9,7 +9,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { ist } from "./logic.ts";
 
-export type Stock = { key: string; name: string; sec: string; lot: number; slip: number };
+export type Stock = { key: string; name: string; sec: string; lot: number; slip: number; dhan?: string };
 /** Dhan NSE_EQ security ids and lot sizes checked against Dhan's instrument list on 1 Nov 2026. */
 export const STOCKS: Stock[] = [
   { key: "RELIANCE", name: "Reliance Industries", sec: "2885", lot: 500, slip: 0.0003 },
@@ -22,15 +22,44 @@ export const STOCKS: Stock[] = [
   { key: "AXISBANK", name: "Axis Bank", sec: "5900", lot: 625, slip: 0.0004 },
   { key: "LT", name: "Larsen & Toubro", sec: "11483", lot: 175, slip: 0.0004 },
   { key: "KOTAKBANK", name: "Kotak Mahindra Bank", sec: "1922", lot: 2000, slip: 0.0004 },
+  // 6 Nov 2026 (Papa: "implement point 1"): 23 more liquid F&O stocks; ids and lots from Dhan's NSE_FNO list that day
+  // (UNDERLYING_SECURITY_ID, LOT_SIZE). Tata Motors trades as TMPV (passenger vehicles) since its demerger.
+  { key: "ITC", name: "ITC", sec: "1660", lot: 1975, slip: 0.0004 },
+  { key: "HINDUNILVR", name: "Hindustan Unilever", sec: "1394", lot: 300, slip: 0.0004 },
+  { key: "BAJFINANCE", name: "Bajaj Finance", sec: "317", lot: 750, slip: 0.0004 },
+  { key: "BAJAJFINSV", name: "Bajaj Finserv", sec: "16675", lot: 300, slip: 0.0005 },
+  { key: "MM", name: "Mahindra & Mahindra", sec: "2031", lot: 200, slip: 0.0004, dhan: "M&M" },
+  { key: "MARUTI", name: "Maruti Suzuki", sec: "10999", lot: 50, slip: 0.0004 },
+  { key: "TMPV", name: "Tata Motors (passenger vehicles)", sec: "3456", lot: 1750, slip: 0.0005 },
+  { key: "TATASTEEL", name: "Tata Steel", sec: "3499", lot: 2750, slip: 0.0004 },
+  { key: "JSWSTEEL", name: "JSW Steel", sec: "11723", lot: 675, slip: 0.0005 },
+  { key: "SUNPHARMA", name: "Sun Pharma", sec: "3351", lot: 350, slip: 0.0004 },
+  { key: "TITAN", name: "Titan", sec: "3506", lot: 175, slip: 0.0004 },
+  { key: "ADANIENT", name: "Adani Enterprises", sec: "25", lot: 309, slip: 0.0005 },
+  { key: "ADANIPORTS", name: "Adani Ports", sec: "15083", lot: 475, slip: 0.0005 },
+  { key: "NTPC", name: "NTPC", sec: "11630", lot: 1600, slip: 0.0004 },
+  { key: "POWERGRID", name: "Power Grid", sec: "14977", lot: 1900, slip: 0.0004 },
+  { key: "ONGC", name: "ONGC", sec: "2475", lot: 2250, slip: 0.0005 },
+  { key: "COALINDIA", name: "Coal India", sec: "20374", lot: 1350, slip: 0.0005 },
+  { key: "HCLTECH", name: "HCL Technologies", sec: "7229", lot: 400, slip: 0.0004 },
+  { key: "WIPRO", name: "Wipro", sec: "3787", lot: 3000, slip: 0.0005 },
+  { key: "ULTRACEMCO", name: "UltraTech Cement", sec: "11532", lot: 50, slip: 0.0005 },
+  { key: "ASIANPAINT", name: "Asian Paints", sec: "236", lot: 250, slip: 0.0005 },
+  { key: "HDFCLIFE", name: "HDFC Life", sec: "467", lot: 1100, slip: 0.0005 },
+  { key: "SBILIFE", name: "SBI Life", sec: "21808", lot: 375, slip: 0.0005 },
 ];
+/** Dhan's symbol → the desk's key where Dhan's has a character that breaks links and database filters ("M&M"). */
+export const DHAN_ALIAS: Record<string, string> = Object.fromEntries(STOCKS.filter((s) => s.dhan).map((s) => [s.dhan!, s.key]));
 export const STOCK_KEYS = STOCKS.map((s) => s.key);
 export const isStock = (key: string) => STOCK_KEYS.includes(String(key));
 const BY_SEC = new Map(STOCKS.map((s) => [s.sec, s.key]));
 /** The stock for an NSE_EQ security id (the desk's data_security_id). */
 /** The underlying of a row in Dhan's F&O list: its column, or for a stock future the trading symbol's first part
  *  ("RELIANCE-Nov2026-FUT") when that column is empty. */
-export const fnoUnderlying = (ins: string, und: string | undefined, sym: string | undefined) =>
-  und || (ins === "FUTSTK" ? String(sym ?? "").split("-")[0] : "");
+export const fnoUnderlying = (ins: string, und: string | undefined, sym: string | undefined) => {
+  const u = und || (ins === "FUTSTK" || ins === "OPTSTK" ? String(sym ?? "").split("-")[0] : "");
+  return DHAN_ALIAS[u] ?? u;
+};
 export const stockOfSec = (seg: string, sec: string) => seg === "NSE_EQ" ? BY_SEC.get(String(sec)) ?? null : null;
 
 /* ---------- splits and bonuses ---------- */

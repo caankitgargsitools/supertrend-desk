@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-// Stock futures (1 Nov 2026): the 10 stocks in the strategy form, the lab settings and variation lists; filling one.
+// Stock futures (1 Nov 2026; 33 from 6 Nov): the stocks in the strategy form, the lab settings and variation lists; filling one.
 const role = "admin";
 const width = Number(process.argv[2] || 1440);
 const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
@@ -87,6 +87,6 @@ const r = await p.evaluate(() => {
     msg: document.getElementById("formMsg").textContent, lab: !!document.querySelector(`#lab_asset_pop [data-a="KOTAKBANK"]`) && !!document.querySelector(`#lab_asset_pop [data-type="STK"]`) };
 });
 console.log(JSON.stringify(r));
-const ok = r.names.length === 10 && r.seg === "NSE_EQ" && r.sec === "2885" && r.instr === "EQUITY" && r.fut === "RELIANCE1!" && r.lot === "500" && r.tt === "FUTURES" && r.flag === "MONTH" && /stock futures/.test(r.msg) && r.lab;
+const ok = r.names.length === 33 && r.names.includes("MM") && r.names.includes("TMPV") && r.seg === "NSE_EQ" && r.sec === "2885" && r.instr === "EQUITY" && r.fut === "RELIANCE1!" && r.lot === "500" && r.tt === "FUTURES" && r.flag === "MONTH" && /stock futures/.test(r.msg) && r.lab;
 console.log(ok && !errs.length ? "OK" : "FAIL", errs);
 await b.close(); process.exit(ok && !errs.length ? 0 : 1);

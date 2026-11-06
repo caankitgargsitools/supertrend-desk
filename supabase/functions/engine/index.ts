@@ -3099,6 +3099,25 @@ Deno.serve(async (req) => {
   // Each asset's typical day's move (the lots wizard's "same ₹ on a typical day"), every morning (cron day-moves).
   if (action === "day_moves") return Response.json({ action, assets: await refreshDayMoves(sb), quotes: await tickerRefresh(false).catch((e) => String(e)) });
   if (action === "ticker") return Response.json({ action, quotes: await tickerRefresh(!!body.missing) });
+  // Admin look-up in one of Dhan's instrument lists (6 Nov 2026, adding assets): rows whose underlying / symbol match q.
+  if (action === "instr_find") {
+    const b2 = body as { seg?: string; q?: string; ins?: string; limit?: number };
+    const seg = String(b2.seg || "NSE_FNO"), q = String(b2.q || "").toUpperCase(), adm = credsOf(await adminAccount(sb));
+    if (!/^[A-Z_]+$/.test(seg) || !q) return Response.json({ error: "seg and q needed" }, { status: 400 });
+    const r = await fetch(`https://api.dhan.co/v2/instrument/${seg}`, { headers: { Accept: "text/csv", "access-token": adm.token, "client-id": adm.client }, signal: AbortSignal.timeout(45000) });
+    if (!r.ok) return Response.json({ error: `HTTP ${r.status}` });
+    const lines = (await r.text()).split(/\r?\n/), head = lines[0].split(","), pick = ["SECURITY_ID", "INSTRUMENT", "UNDERLYING_SECURITY_ID", "UNDERLYING_SYMBOL", "SYMBOL_NAME", "DISPLAY_NAME", "SM_EXPIRY_DATE", "STRIKE_PRICE", "OPTION_TYPE", "LOT_SIZE", "TICK_SIZE", "EXPIRY_FLAG"];
+    const ix = pick.map((k) => head.indexOf(k)), out: Record<string, string>[] = [], counts: Record<string, number> = {};
+    for (const line of lines.slice(1)) {
+      const a2 = line.split(",");
+      const hay = [a2[head.indexOf("UNDERLYING_SYMBOL")], a2[head.indexOf("SYMBOL_NAME")], a2[head.indexOf("DISPLAY_NAME")]].join(" ").toUpperCase();
+      if (!hay.includes(q)) continue;
+      if (b2.ins && a2[head.indexOf("INSTRUMENT")] !== b2.ins) continue;
+      const ins = a2[head.indexOf("INSTRUMENT")]; counts[ins] = (counts[ins] ?? 0) + 1;
+      if (out.length < Math.min(60, Number(b2.limit) || 25)) out.push(Object.fromEntries(pick.map((k, i) => [k, ix[i] >= 0 ? a2[ix[i]] : ""])));
+    }
+    return Response.json({ action, seg, q, counts, rows: out });
+  }
   if (action === "margins") {
     const admin = await adminAccount(sb);
     const { data: ls } = await sb.from("lab_settings").select("assets").eq("id", 1).maybeSingle();
