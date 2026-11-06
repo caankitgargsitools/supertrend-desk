@@ -24,3 +24,5 @@ tests/sim/*.png
 # screenshots the website tests save in the top folder (the app icons are in icons/)
 /*.png
 tests/ui/node_modules
+tests/sim/instr.mjs
+tests/sim/listedopts.mjs
