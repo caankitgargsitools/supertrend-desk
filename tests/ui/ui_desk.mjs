@@ -33,9 +33,9 @@ const res = {
   "rpc/my_capital": { capital: 10000000, since: null, deploy_pct: 60, live_net: 0, paper_net: 0, live_used: 0, paper_used: 0, funds: {} },
   "rpc/desk_series": { first: new Date(Date.now() - 2 * 864e5).toISOString(), step_s: 3600, rows: Array.from({ length: 48 }, (_, i) => ({ t: new Date(Date.now() - (48 - i) * 3600e3).toISOString(), m: 2600000 + i * 1000, u: 300000 + i * 2000, r: 30000 + i * 100, n: 3 })) },
   "algo_strategies": strategies, "lab_margins": rates,
-  "ticker_ref": [["IDX_I", "13", "NIFTY", 22800], ["IDX_I", "51", "SENSEX", 74500], ["IDX_I", "442", "MIDCPNIFTY", 13800], ["MCX_COMM", "575011", "GOLD", 141000], ["MCX_COMM", "574829", "COPPER", 1400],
+  "ticker_ref": [["IDX_I", "13", "NIFTY", 22800], ["IDX_I", "51", "SENSEX", 74500], ["IDX_I", "442", "MIDCPNIFTY", 13800], ["IDX_I", "27", "FINNIFTY", 26000], ["MCX_COMM", "575011", "GOLD", 141000], ["MCX_COMM", "574829", "COPPER", 1400],
     ["DELTA", "SOLUSD", "SOLUSD", 92], ["MCX_COMM", "999", "SILVER", 90000]].map(([seg, sec, asset, prev_close]) => ({ seg, sec, asset, prev_close })),
-  "live_prices": [["IDX_I", "13", 22935.5], ["IDX_I", "51", 74101.51], ["IDX_I", "442", 13925.7], ["MCX_COMM", "575011", 142382], ["MCX_COMM", "574829", 1394.8], ["DELTA", "SOLUSD", 89.685], ["MCX_COMM", "999", 91000]]
+  "live_prices": [["IDX_I", "13", 22935.5], ["IDX_I", "51", 74101.51], ["IDX_I", "442", 13925.7], ["IDX_I", "27", 26130], ["MCX_COMM", "575011", 142382], ["MCX_COMM", "574829", 1394.8], ["DELTA", "SOLUSD", 89.685], ["MCX_COMM", "999", 91000]]
     .map(([seg, sec, px]) => ({ seg, sec, px, at: new Date().toISOString() })),
   "algo_trades": [40000, -12000, 5500].map((net, i) => ({ id: i + 1, strategy_id: ["g1", "sol", "cu"][i], user_id: A, side: "SHORT", mode: "PAPER", net, exit_at: new Date(Date.now() - (i + 1) * 86400000).toISOString(), exit_why: "Trailing stop (gap)", lots: 1 })),
 };
@@ -83,7 +83,7 @@ await p.waitForTimeout(400);
 // Quotes strip (Papa, 6 Nov): still, the three indices first, then this account's assets (not Silver: nothing trades it), % today.
 await p.waitForTimeout(3500);
 const q = await p.$$eval("#dk_quotes .dk-q", (x) => x.map((e) => [...e.children].map((c) => c.textContent).join(" ")));
-if (q.length !== 6 || !/^Nifty 50 22,935\.5 ▲ 0\.59%$/.test(q[0]) || !/^Sensex .*▼ 0\.53%$/.test(q[1]) || !/Midcap/.test(q[2]) || q.some((t) => /Silver/.test(t)) || !/SOLUSD.*▼ 2\.52%/.test(q[5])) fail("quotes strip", q);
+if (q.length !== 7 || !/^Nifty 50 22,935\.5 ▲ 0\.59%$/.test(q[0]) || !/^Sensex .*▼ 0\.53%$/.test(q[1]) || !/^Fin Nifty 26,130 ▲ 0\.50%$/.test(q[2]) || !/Midcap/.test(q[3]) || q.some((t) => /Silver/.test(t)) || !/SOLUSD.*▼ 2\.52%/.test(q[6])) fail("quotes strip", q);
 if (await p.evaluate(() => getComputedStyle(document.getElementById("dk_quotes")).animationName !== "none")) fail("quotes don't scroll");
 res.live_prices[0].px = 22950; res.live_prices[0].at = new Date().toISOString();
 await p.waitForFunction(() => document.querySelector('#dk_quotes [data-a="NIFTY"]').classList.contains("fu"), null, { timeout: 5000 }).catch(() => fail("a rising price flashes green"));

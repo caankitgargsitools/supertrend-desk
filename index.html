@@ -7915,11 +7915,11 @@ function deskPaint() {
   const rows = [...desk.feed, ...closed].slice(0, 50);
   $("dk_feed").innerHTML = rows.length ? rows.map((f) => `<div><span class="w">${esc(f.time)}</span><span>${esc(f.what)}</span><span class="${f.v >= 0 ? "dk-up" : "dk-down"}">${esc(dkSgn(f.v))}</span></div>`).join("") : '<p class="dk-lbl">No activity yet.</p>';
 }
-/* ---------- Desk quotes strip (Papa, 6 Nov 2026): Nifty 50, Sensex, Midcap Nifty and every asset this account trades,
+/* ---------- Desk quotes strip (Papa, 6 Nov 2026): Nifty 50, Sensex, Bank Nifty, Fin Nifty, Midcap Nifty and every asset this account trades,
    price now and % up / down today (vs the previous close in ticker_ref); still, not scrolling; a chip flashes green or
    red when its price moves. Prices from live_prices (the per-second loop), read every 3 s while the Desk is open. */
 const dkQ = { ref: [], refAt: 0, last: new Map(), busy: false };
-const DK_Q_FIXED = ["NIFTY", "SENSEX", "MIDCPNIFTY"];
+const DK_Q_FIXED = ["NIFTY", "SENSEX", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]; // always shown, in this order (Fin Nifty, Bank Nifty: Papa, 6 Nov)
 function dkQKind(seg) { return seg === "IDX_I" ? 0 : String(seg).startsWith("MCX") ? 1 : seg === "DELTA" ? 3 : 2; }
 async function deskQuotes() {
   if (page !== "desk" || document.hidden || dkQ.busy) return;

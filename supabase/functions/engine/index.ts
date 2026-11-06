@@ -1308,11 +1308,12 @@ async function tokenCheckOne(force: boolean, set: { id: number; client_id: strin
     return { renewed: false, reason: "network" };
   }
 }
-/** The Desk's quotes strip (Papa, 6 Nov 2026): Nifty 50, Sensex and Midcap Nifty always, plus every asset an active
+/** The Desk's quotes strip (Papa, 6 Nov 2026): Nifty 50, Sensex, Bank Nifty, Fin Nifty and Midcap Nifty always, plus every asset an active
  *  strategy trades. Each instrument's previous close (from the lab's stored daily candles, else Dhan's / Delta's) goes into
  *  ticker_ref; the page divides the live price (live_prices) by it for today's %. `missing`: only instruments not yet
- *  done today. The per-second prices also fetch the three indices (`TICKER_FIXED`). */
-export const TICKER_FIXED = [{ seg: "IDX_I", sec: "13", asset: "NIFTY" }, { seg: "IDX_I", sec: "51", asset: "SENSEX" }, { seg: "IDX_I", sec: "442", asset: "MIDCPNIFTY" }];
+ *  done today. The per-second prices also fetch these indices (`TICKER_FIXED`). */
+export const TICKER_FIXED = [{ seg: "IDX_I", sec: "13", asset: "NIFTY" }, { seg: "IDX_I", sec: "51", asset: "SENSEX" }, { seg: "IDX_I", sec: "25", asset: "BANKNIFTY" },
+  { seg: "IDX_I", sec: "27", asset: "FINNIFTY" }, { seg: "IDX_I", sec: "442", asset: "MIDCPNIFTY" }]; // Fin Nifty and Bank Nifty: Papa, 6 Nov
 async function tickerRefresh(missing: boolean) {
   const today = todayIst(), adm = await adminAccount(sb), creds = credsOf(adm);
   const { data: rows } = await sb.from("algo_strategies").select("underlying, data_segment, data_security_id, data_instrument").eq("archived", false).eq("active", true).eq("is_master", false);
@@ -1634,7 +1635,7 @@ async function pricesTick(rows: Strategy[]) {
     want.set(s.id, { s, key: `${seg}|${sec}` });
   }));
   // Live orders being worked: their own contracts (the order manager chases them with these prices).
-  // The Desk's quotes strip: Nifty 50, Sensex and Midcap Nifty, in the admin's batched request (no extra Dhan call).
+  // The Desk's quotes strip: the fixed indices, in the admin's batched request (no extra Dhan call).
   if (inSessionNow("IDX_I")) { const adm = await adminAccount(sb).catch(() => null); if (adm?.dhan_access_token) for (const f of TICKER_FIXED) add(adm.user_id, f.seg, f.sec); }
   const { data: work } = await sb.from("live_orders").select("user_id, seg, sec").eq("broker", "DHAN").in("state", ["queued", "working"]);
   for (const w of work ?? []) add(w.user_id, w.seg, String(w.sec));
