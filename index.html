@@ -847,11 +847,16 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-logo { width: 30px; height: 30px; border-radius: 5px; background: var(--dk-panel2); border: 1px solid var(--dk-line); display: grid; place-items: center; font: 700 12px var(--font-data); color: var(--dk-amber); }
 .dk-brand h2 { font: 700 18px/1 var(--font-data); letter-spacing: .12em; margin: 0; color: var(--dk-text); }
 .dk-brand small { display: block; color: var(--dk-muted); font: 500 10.5px var(--font-data); letter-spacing: .06em; margin-top: 3px; }
-.dk-ticker { overflow: hidden; white-space: nowrap; mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent); min-width: 0; }
-.dk-run { display: inline-block; padding-left: 100%; animation: dktick 70s linear infinite; font: 500 12px var(--font-data); }
-.dk-run span { margin-right: 28px; }
-.dk-run .dk-tag { color: var(--dk-down); background: var(--dk-down-soft); padding: 1px 6px; border-radius: 3px; margin-right: 8px; font-weight: 600; }
-@keyframes dktick { to { transform: translateX(-100%); } }
+.dk-quotes { display: flex; flex-wrap: wrap; gap: 4px 6px; justify-content: center; align-content: center; min-width: 0; }
+.dk-q { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 8px; border-radius: 4px; background: var(--dk-panel2); border: 1px solid var(--dk-line); font: 500 11.5px var(--font-data); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dk-q b { font: 600 11px var(--font-ui); color: var(--dk-muted); }
+.dk-q i { font-style: normal; }
+.dk-q .px { color: var(--dk-text); font-weight: 600; }
+.dk-q .ch { font-size: 11px; font-weight: 600; }
+.dk-q.fu { animation: dkqup .9s ease-out; } .dk-q.fd { animation: dkqdn .9s ease-out; }
+@keyframes dkqup { 0% { background: rgba(46,212,127,.55); border-color: var(--dk-up); box-shadow: 0 0 12px rgba(46,212,127,.6); } 100% { background: var(--dk-panel2); border-color: var(--dk-line); box-shadow: none; } }
+@keyframes dkqdn { 0% { background: rgba(255,92,108,.55); border-color: var(--dk-down); box-shadow: 0 0 12px rgba(255,92,108,.6); } 100% { background: var(--dk-panel2); border-color: var(--dk-line); box-shadow: none; } }
+@media (prefers-reduced-motion: reduce) { .dk-q.fu, .dk-q.fd { animation-duration: .3s; } }
 .dk-clock { text-align: right; }
 .dk-t { font: 600 18px/1 var(--font-data); color: var(--dk-amber); font-variant-numeric: tabular-nums; }
 .dk-mk { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
@@ -860,7 +865,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-modebar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .dk-main { display: grid; grid-template-columns: 270px minmax(0, 1fr) 290px; gap: 12px; align-items: start; }
 @media (max-width: 1560px) { .dk-main { grid-template-columns: 260px minmax(0, 1fr); } .dk-heat { grid-column: 1 / -1; } .dk-heat .dk-tiles { max-height: none; } }
-@media (max-width: 760px) { .dk-main { grid-template-columns: minmax(0, 1fr); } .dk-top { grid-template-columns: 1fr auto; } .dk-ticker { grid-column: 1 / -1; grid-row: 2; } }
+@media (max-width: 760px) { .dk-main { grid-template-columns: minmax(0, 1fr); } .dk-top { grid-template-columns: 1fr auto; } .dk-quotes { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; } }
 .dk-big { font: 600 32px/1.05 var(--font-data); margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
 .dk-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-top: 12px; }
 .dk-v { font: 600 15px var(--font-data); font-variant-numeric: tabular-nums; color: var(--dk-text); }
@@ -907,7 +912,6 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-foot { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; background: var(--dk-line); border: 1px solid var(--dk-line); border-radius: 6px; overflow: hidden; }
 .dk-foot > div { background: var(--dk-panel); padding: 8px 10px; min-width: 0; }
 @media (max-width: 760px) { .dk-foot { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (prefers-reduced-motion: reduce) { .dk-run { animation-duration: 200s; } }
 
 /* Profit flow full screen (Papa, 3 Nov): the panel fills the screen; the canvas takes all the room between header and footer. */
 .dk-fs { padding: 4px 6px; line-height: 0; }
@@ -927,35 +931,35 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one .topalert { margin: 8px 8px 0 !important; max-width: none; }
   body.dk-one footer.disclaim { display: none; }
   body.dk-one #deskPane { height: calc(100vh - 16px); min-height: 640px; box-sizing: border-box; overflow: hidden; padding: 8px; gap: 8px;
-    grid-template-columns: 250px minmax(0, 2.4fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) auto; }
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2.4fr) 250px; grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) auto; }
   body.dk-one #deskPane .dk-main, body.dk-one #deskPane .dk-low { display: contents; }
   body.dk-one #deskPane .dk-top, body.dk-one #deskPane .dk-modebar, body.dk-one #deskPane .dk-foot { grid-column: 1 / -1; }
   body.dk-one #deskPane .dk-top { padding: 6px 10px; }
   body.dk-one #deskPane .dk-panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 8px 10px; }
   body.dk-one #deskPane .dk-ph { margin-bottom: 4px; }
-  body.dk-one .dk-acctp { grid-column: 1; grid-row: 3; overflow: auto !important; }
+  body.dk-one .dk-acctp { grid-column: 4; grid-row: 3; overflow: auto !important; }
   body.dk-one .dk-acctp .dk-big { font-size: 26px; }
   body.dk-one .dk-acctp .dk-kv { margin-top: 8px; gap: 6px 12px; }
   body.dk-one .dk-acctp .dk-barrow { margin-top: 8px; }
-  body.dk-one .dk-flow { grid-column: 2; grid-row: 3 / 5; padding: 0 !important; }
+  body.dk-one .dk-flow { grid-column: 3; grid-row: 3 / 5; padding: 0 !important; }
   body.dk-one .dk-flow:not(.full) #dk_cv { flex: 1 1 auto; height: auto; min-height: 0; }
   body.dk-one .dk-flowfoot { padding: 4px 10px; }
-  body.dk-one .dk-heat { grid-column: 3; grid-row: 3; }
+  body.dk-one .dk-heat { grid-column: 2; grid-row: 3; }
   body.dk-one .dk-heat .dk-tiles { max-height: none; flex: 1 1 auto; min-height: 0; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
   body.dk-one .dk-tile .p { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
-  body.dk-one .dk-cvp { grid-column: 4; grid-row: 3; }
+  body.dk-one .dk-cvp { grid-column: 1; grid-row: 3; }
   body.dk-one .dk-cvp #dk_cvp { flex: 1 1 auto; height: auto; min-height: 0; }
   body.dk-one .dk-cvp .dk-cvp-read { margin: 0 0 4px; }
   body.dk-one .dk-cvp .dk-cvp-read b { font-size: 13px; }
   body.dk-one #dk_cvp_big { display: none; }
   body.dk-one #dk_cvp_note, body.dk-one .dk-cvp .dk-date { display: none; }
   body.dk-one .dk-cvp .dk-cvp-read { gap: 2px 12px; }
-  body.dk-one .dk-tlp { grid-column: 3; grid-row: 4; }
-  body.dk-one .dk-skp { grid-column: 4; grid-row: 4; }
+  body.dk-one .dk-tlp { grid-column: 2; grid-row: 4; }
+  body.dk-one .dk-skp { grid-column: 1; grid-row: 4; }
   body.dk-one .dk-tlp .dk-ph > .dk-lbl:last-child, body.dk-one .dk-skp .dk-ph > .dk-lbl:last-child { display: none; }
   body.dk-one .dk-svgbox { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   body.dk-one #dk_tl, body.dk-one #dk_sk { display: block; height: 100%; }
-  body.dk-one .dk-actp { grid-column: 1; grid-row: 4; }
+  body.dk-one .dk-actp { grid-column: 4; grid-row: 4; }
   body.dk-one .dk-feed { max-height: none; flex: 1 1 auto; min-height: 0; align-content: start; }
   body.dk-one .dk-foot .dk-v { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   body.dk-one .dk-feed div { grid-template-columns: 62px minmax(0, 1fr); font-size: 10.5px; padding: 3px 5px; }
@@ -963,7 +967,7 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one #deskPane .dk-foot { margin-left: 0; }
   body.dk-one .dk-foot > div { padding: 5px 10px; }
 }
-@media (min-width: 1280px) and (max-width: 1599px) { body.dk-one #deskPane { grid-template-columns: 210px minmax(0, 1.7fr) minmax(0, 1fr) minmax(0, 1fr); } }
+@media (min-width: 1280px) and (max-width: 1599px) { body.dk-one #deskPane { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.7fr) 210px; } }
 </style>
 </head>
 <body>
@@ -1626,7 +1630,7 @@ body.dk-fs-on { overflow: hidden; }
     <section id="deskPane" hidden>
       <header class="dk-top">
         <div class="dk-brand"><div class="dk-logo">AG</div><div><h2>DESK</h2><small id="dk_sub"></small></div></div>
-        <div class="dk-ticker" aria-label="Live feed"><div class="dk-run" id="dk_ticker"></div></div>
+        <div class="dk-quotes" id="dk_quotes" aria-label="Prices now and change today"></div>
         <div class="dk-clock"><div class="dk-t" id="dk_clock">--:--:--</div><div class="dk-mk" id="dk_mk"></div></div>
       </header>
       <div class="dk-modebar"><div class="seg" id="dk_mode" role="group" aria-label="Mode"><button type="button" data-m="LIVE" aria-pressed="false">Live</button><button type="button" data-m="PAPER" aria-pressed="true">Paper</button></div><span class="dk-lbl" id="dk_note"></span><button class="dk-btn dk-onebtn" id="dk_one" type="button" aria-pressed="false" title="Fit the whole desk on one screen and hide the menu">One screen</button></div>
@@ -7854,6 +7858,7 @@ function deskClock() {
   $("dk_clock").textContent = `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} IST`;
   const mk = [["NSE", marketOpenFor("NSE_EQ")], ["MCX", marketOpenFor("MCX_COMM")], ["DELTA", true]];
   $("dk_mk").innerHTML = mk.map(([n, o]) => `<span class="${o ? "open" : ""}">${n} ${o ? "OPEN" : "SHUT"}</span>`).join("");
+  deskClock.n = (deskClock.n || 0) + 1; if (deskClock.n % 3 === 1) deskQuotes(); // the quotes strip, every 3 s
 }
 /** Numbers, tiles, feed, ticker: everything that is plain HTML. */
 function deskPaint() {
@@ -7902,10 +7907,48 @@ function deskPaint() {
     return { time: istText(t.exit_at), what: `${x ? dkName(x.underlying) : "–"} ${String(t.side || "").toLowerCase()} closed · ${String(t.exit_why || "").replace(/\s*\(.*$/, "").slice(0, 40)}`, v: Number(t.net) || 0 }; });
   const rows = [...desk.feed, ...closed].slice(0, 50);
   $("dk_feed").innerHTML = rows.length ? rows.map((f) => `<div><span class="w">${esc(f.time)}</span><span>${esc(f.what)}</span><span class="${f.v >= 0 ? "dk-up" : "dk-down"}">${esc(dkSgn(f.v))}</span></div>`).join("") : '<p class="dk-lbl">No activity yet.</p>';
-  if (!deskPaint.tickerAt || Date.now() - deskPaint.tickerAt > 20000) {
-    deskPaint.tickerAt = Date.now();
-    $("dk_ticker").innerHTML = '<span class="dk-tag">LIVE FEED</span>' + rows.slice(0, 14).map((f) => `<span>${esc(f.what)} <b class="${f.v >= 0 ? "dk-up" : "dk-down"}">${esc(dkSgn(f.v))}</b></span>`).join("");
-  }
+}
+/* ---------- Desk quotes strip (Papa, 6 Nov 2026): Nifty 50, Sensex, Midcap Nifty and every asset this account trades,
+   price now and % up / down today (vs the previous close in ticker_ref); still, not scrolling; a chip flashes green or
+   red when its price moves. Prices from live_prices (the per-second loop), read every 3 s while the Desk is open. */
+const dkQ = { ref: [], refAt: 0, last: new Map(), busy: false };
+const DK_Q_FIXED = ["NIFTY", "SENSEX", "MIDCPNIFTY"];
+function dkQKind(seg) { return seg === "IDX_I" ? 0 : String(seg).startsWith("MCX") ? 1 : seg === "DELTA" ? 3 : 2; }
+async function deskQuotes() {
+  if (page !== "desk" || document.hidden || dkQ.busy) return;
+  dkQ.busy = true;
+  try {
+    if (!dkQ.refAt || Date.now() - dkQ.refAt > 300e3) { dkQ.ref = (await db.from("ticker_ref").select("seg, sec, asset, prev_close")).data || []; dkQ.refAt = Date.now(); }
+    const px = (await db.from("live_prices").select("seg, sec, px, at")).data || [];
+    const pmap = new Map(px.map((r) => [`${r.seg}|${r.sec}`, r]));
+    const mine = new Set([...DK_Q_FIXED, ...myStrats().filter((x) => !x.archived && x.active).map((x) => String(x.underlying))]);
+    // One chip per asset: of its contracts, the one with the freshest price.
+    const by = new Map();
+    for (const r of dkQ.ref) {
+      if (!mine.has(r.asset)) continue;
+      const p = pmap.get(`${r.seg}|${r.sec}`); if (!p) continue;
+      const cur = by.get(r.asset); if (!cur || Date.parse(p.at) > Date.parse(cur.p.at)) by.set(r.asset, { r, p });
+    }
+    const list = [...by.values()].sort((a, b) => dkQKind(a.r.seg) - dkQKind(b.r.seg) || (DK_Q_FIXED.indexOf(a.r.asset) + 1 || 9) - (DK_Q_FIXED.indexOf(b.r.asset) + 1 || 9) || dkName(a.r.asset).localeCompare(dkName(b.r.asset)));
+    const box = $("dk_quotes"); if (!box) return;
+    const key = list.map((x) => x.r.asset).join();
+    if (box.dataset.k !== key) {
+      box.dataset.k = key;
+      box.innerHTML = list.length ? list.map((x) => `<span class="dk-q" data-a="${esc(x.r.asset)}"><b>${esc(dkName(x.r.asset))}</b><i class="px"></i><i class="ch"></i></span>`).join("") : '<span class="dk-lbl">Prices appear when the markets open.</span>';
+    }
+    for (const x of list) {
+      const el = box.querySelector(`[data-a="${CSS.escape(x.r.asset)}"]`); if (!el) continue;
+      const v = Number(x.p.px), pc = Number(x.r.prev_close), ch = pc > 0 ? (v / pc - 1) * 100 : null;
+      el.querySelector(".px").textContent = v.toLocaleString("en-IN", { maximumFractionDigits: v < 10 ? 4 : 2, minimumFractionDigits: v < 10 ? 2 : 0 });
+      const c = el.querySelector(".ch");
+      c.textContent = ch == null ? "" : `${ch >= 0 ? "▲" : "▼"} ${Math.abs(ch).toFixed(2)}%`;
+      c.className = "ch " + (ch == null ? "" : ch >= 0 ? "dk-up" : "dk-down");
+      const was = dkQ.last.get(x.r.asset);
+      if (was != null && v !== was) { el.classList.remove("fu", "fd"); void el.offsetWidth; el.classList.add(v > was ? "fu" : "fd"); }
+      dkQ.last.set(x.r.asset, v);
+      el.title = `${dkName(x.r.asset)}: ${el.querySelector(".px").textContent}${pc > 0 ? ` · previous close ${pc.toLocaleString("en-IN")}` : ""}`;
+    }
+  } catch { /* next round */ } finally { dkQ.busy = false; }
 }
 /** A live price move of one open position (from the per-second marks): a dot along its stream. */
 function deskMove(s, delta) {

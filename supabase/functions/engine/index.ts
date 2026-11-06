@@ -1274,6 +1274,7 @@ async function tokenCheck(force: boolean, userId?: string) {
     out[r.user_id] = await tokenCheckOne(force, r).catch((e) => ({ renewed: false, reason: String(e) }));
     await dataPlanCheck(r.id).catch((e) => console.error("data plan", e));
   }
+  if (!userId) await tickerRefresh(true).catch((e) => console.error("ticker", e)); // assets added since the morning
   const mine = userId ? out[userId] as Record<string, unknown> | undefined : undefined;
   return userId ? (mine ?? { renewed: false, reason: "no token" }) : { accounts: Object.keys(out).length, results: out };
 }
@@ -1306,6 +1307,47 @@ async function tokenCheckOne(force: boolean, set: { id: number; client_id: strin
     await note(`Renewal failed (${e instanceof Error ? e.message : String(e)}). Retrying next hour.`, { token_expires_at: expIso });
     return { renewed: false, reason: "network" };
   }
+}
+/** The Desk's quotes strip (Papa, 6 Nov 2026): Nifty 50, Sensex and Midcap Nifty always, plus every asset an active
+ *  strategy trades. Each instrument's previous close (from the lab's stored daily candles, else Dhan's / Delta's) goes into
+ *  ticker_ref; the page divides the live price (live_prices) by it for today's %. `missing`: only instruments not yet
+ *  done today. The per-second prices also fetch the three indices (`TICKER_FIXED`). */
+export const TICKER_FIXED = [{ seg: "IDX_I", sec: "13", asset: "NIFTY" }, { seg: "IDX_I", sec: "51", asset: "SENSEX" }, { seg: "IDX_I", sec: "442", asset: "MIDCPNIFTY" }];
+async function tickerRefresh(missing: boolean) {
+  const today = todayIst(), adm = await adminAccount(sb), creds = credsOf(adm);
+  const { data: rows } = await sb.from("algo_strategies").select("underlying, data_segment, data_security_id, data_instrument").eq("archived", false).eq("active", true).eq("is_master", false);
+  const items = new Map<string, { seg: string; sec: string; asset: string; instr: string }>();
+  for (const f of TICKER_FIXED) items.set(`${f.seg}|${f.sec}`, { ...f, instr: "INDEX" });
+  for (const r of rows ?? []) {
+    const seg = String(r.data_segment); let sec = String(r.data_security_id);
+    if (isCommodity(seg) && !/^\d+$/.test(sec)) sec = (await dataSecurity(sb, creds, seg, sec, today).catch(() => ({ sec: "" }))).sec;
+    if (sec && !items.has(`${seg}|${sec}`)) items.set(`${seg}|${sec}`, { seg, sec, asset: String(r.underlying), instr: String(r.data_instrument || "") });
+  }
+  let done: Set<string> = new Set();
+  if (missing) { const { data: have } = await sb.from("ticker_ref").select("seg, sec").eq("ref_day", today); done = new Set((have ?? []).map((x) => `${x.seg}|${x.sec}`)); }
+  const prevMemo = new Map<string, number | null>();
+  const prevOf = async (it: { seg: string; sec: string; asset: string; instr: string }) => {
+    if (prevMemo.has(it.asset)) return prevMemo.get(it.asset)!;
+    let pc: number | null = null;
+    try {
+      const [d] = await readCandles(sb, it.asset, ["D"]);
+      const t = d?.bars?.t ?? [], c = d?.bars?.c ?? [];
+      for (let j = t.length - 1; j >= 0; j--) if (ist(Number(t[j])).date < today && Number(c[j]) > 0) { pc = Number(c[j]); break; }
+    } catch { /* not a lab asset */ }
+    if (pc == null) try {
+      const bars = isCrypto(it.seg) ? await cryptoDailyDelta(it.sec, addDays(today, -10), today)
+        : await dhanFor(adm!).daily(it.sec, it.seg, it.instr || (it.seg === "IDX_I" ? "INDEX" : isCommodity(it.seg) ? "FUTCOM" : "EQUITY"), addDays(today, -10), today);
+      const prev = bars.filter((b) => b.day < today).at(-1); pc = prev ? Number(prev.c) : null;
+    } catch { pc = null; }
+    prevMemo.set(it.asset, pc); return pc;
+  };
+  let n = 0;
+  for (const [k, it] of items) {
+    if (done.has(k)) continue;
+    const pc = await prevOf(it);
+    await sb.from("ticker_ref").upsert({ seg: it.seg, sec: it.sec, asset: it.asset, prev_close: pc, ref_day: today, at: new Date().toISOString() }); n++;
+  }
+  return n;
 }
 /** Warnings before the Dhan Data API plan ends (Papa, 6 Nov 2026): days left at which the owner is told. */
 export const DATA_WARN_DAYS = [7, 5, 3, 1];
@@ -1592,6 +1634,8 @@ async function pricesTick(rows: Strategy[]) {
     want.set(s.id, { s, key: `${seg}|${sec}` });
   }));
   // Live orders being worked: their own contracts (the order manager chases them with these prices).
+  // The Desk's quotes strip: Nifty 50, Sensex and Midcap Nifty, in the admin's batched request (no extra Dhan call).
+  if (inSessionNow("IDX_I")) { const adm = await adminAccount(sb).catch(() => null); if (adm?.dhan_access_token) for (const f of TICKER_FIXED) add(adm.user_id, f.seg, f.sec); }
   const { data: work } = await sb.from("live_orders").select("user_id, seg, sec").eq("broker", "DHAN").in("state", ["queued", "working"]);
   for (const w of work ?? []) add(w.user_id, w.seg, String(w.sec));
   const px = new Map<string, number>();
@@ -3052,7 +3096,8 @@ Deno.serve(async (req) => {
   }
   if (action === "billing_day") return Response.json({ action, ...(await billingDay(sb)) });
   // Each asset's typical day's move (the lots wizard's "same ₹ on a typical day"), every morning (cron day-moves).
-  if (action === "day_moves") return Response.json({ action, assets: await refreshDayMoves(sb) });
+  if (action === "day_moves") return Response.json({ action, assets: await refreshDayMoves(sb), quotes: await tickerRefresh(false).catch((e) => String(e)) });
+  if (action === "ticker") return Response.json({ action, quotes: await tickerRefresh(!!body.missing) });
   if (action === "margins") {
     const admin = await adminAccount(sb);
     const { data: ls } = await sb.from("lab_settings").select("assets").eq("id", 1).maybeSingle();
