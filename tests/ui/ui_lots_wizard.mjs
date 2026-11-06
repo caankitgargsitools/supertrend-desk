@@ -54,14 +54,16 @@ await p.goto("http://localhost:8765/index.html"); await p.waitForTimeout(1500);
 const fail = (m, x) => { console.log("FAIL", m, JSON.stringify(x ?? "")); process.exit(1); };
 await p.evaluate(() => openCap()); await p.waitForTimeout(800);
 await p.click('#cap_mode [data-m="PAPER"]'); await p.waitForTimeout(800);
-// The wizard prefills capital + booked P&L (₹96.5L here); the lot figures below are worked out from a round ₹1 crore typed in.
-await p.fill("#lw_cap", "10000000"); await p.dispatchEvent("#lw_cap", "input"); await p.waitForTimeout(200);
 // Drawdown check: each strategy (its own trades) falls ₹4.5L = 4.7% of the capital now (₹96.5L = capital + booked P&L, the same figure
 // as the Capital tile since 6 Nov 2026); all 7 together ₹31.5L = 32.6% → limit 50%.
 await p.waitForSelector("#cap_dd_use", { timeout: 8000 }).catch(() => fail("no drawdown suggestion", null));
 const dd = await p.textContent("#cap_dd");
 if (!/32\.6%/.test(dd) || !/4\.7%/.test(dd) || !/Use 50%/.test(dd)) fail("drawdown figures", dd.slice(0, 600));
 await p.click("#cap_dd_use"); if (await p.inputValue("#cap_deploy") !== "50") fail("use suggestion");
+// The Lots wizard is its own tab since 6 Nov 2026 (M5). It prefills capital + booked P&L (₹96.5L here); the lot figures below
+// are worked out from a round ₹1 crore typed in.
+await p.click('#cap_tabs [data-t="lots"]'); await p.waitForTimeout(200);
+await p.fill("#lw_cap", "10000000"); await p.dispatchEvent("#lw_cap", "input"); await p.waitForTimeout(200);
 // The capital tile says it includes archived strategies' trades (all the mocked trades belong to archived "x").
 if (!/includes −₹3,50,000 from archived/.test(await p.textContent("#cap_stats"))) fail("archived note", await p.textContent("#cap_stats"));
 // The wizard's limit above the saved one (60%) warns.

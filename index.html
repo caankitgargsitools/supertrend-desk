@@ -269,6 +269,7 @@ legend { padding: 0; margin-bottom: 4px; }
 /* Confirmations open in the middle of the screen, wherever the button was. */
 #confirmBox:not([hidden]) { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 16px; background: rgba(15, 23, 42, .45); }
 #confirmBox .confirm { width: min(480px, 100%); padding: 18px; box-shadow: 0 12px 40px rgba(0, 0, 0, .25); }
+#confirmBox .confirm.wide { width: min(680px, 100%); } .confirm table.golive th, .confirm table.golive td { white-space: normal; }
 .toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--panel);
   padding: 10px 16px; border-radius: 99px; font-size: 13px; max-width: calc(100% - 32px); z-index: 20; }
 .gate { max-width: 560px; margin: 40px auto; padding-inline: 16px; }
@@ -1387,6 +1388,7 @@ body.dk-fs-on { overflow: hidden; }
             <button class="btn" id="cap_funds" type="button">Refresh Dhan funds</button>
           </div>
         </div>
+        <div class="seg" id="cap_tabs" role="tablist" aria-label="Capital page" style="margin-top:10px"><button type="button" role="tab" data-t="main" aria-pressed="true">Capital &amp; limit</button><button type="button" role="tab" data-t="lots" aria-pressed="false">Lots wizard</button><button type="button" role="tab" data-t="trades" aria-pressed="false">Closed trades</button></div>
         <div id="cap_stats" style="margin-top:12px"></div>
         <form novalidate id="capForm" style="margin-top:14px">
           <div class="grid">
@@ -1451,13 +1453,13 @@ body.dk-fs-on { overflow: hidden; }
           </div>
         </div>
       </section>
-      <section class="card">
+      <section class="card" id="cap_sec_strats">
         <h3 style="font-size:15px;margin:0 0 8px">Strategies</h3>
         <div class="scroll"><table><thead><tr><th>Strategy</th><th>Status</th><th>Position</th><th class="n">Money in use</th><th>Lots</th><th class="n">Next trade (lots)</th><th class="n">Profit / loss</th></tr></thead><tbody id="cap_body"></tbody></table></div>
         <p class="hint" id="cap_rates" style="margin:8px 0 0"></p>
         <p class="hint adv" style="margin:8px 0 0">Capital held: margin for futures and option writing (contract value × margin %), premium paid for option buying, estimated at entry. “Next entry” uses the last price; option buying is sized at entry from the live premium.</p>
       </section>
-      <section class="card">
+      <section class="card" id="cap_sec_trades">
         <h3 style="font-size:15px;margin:0 0 8px">Closed trades</h3>
         <div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Closed (IST)</th><th>Strategy</th><th>Contract</th><th class="n">Lots</th><th class="n">Bought / sold at</th><th class="n">Closed at</th><th class="n">Charges</th><th class="n">Profit / loss</th><th>Why it closed</th></tr></thead><tbody id="cap_trades"></tbody></table></div>
         <p class="hint adv" style="margin:8px 0 0">Estimated by the desk from the index or futures price, or the option's premium from Dhan's option chain, with charges at current rates; whole rupees. Your Dhan contract notes are the final word.</p>
@@ -1499,6 +1501,9 @@ body.dk-fs-on { overflow: hidden; }
             <label class="f"><span>Winners long-tested each night (00:30 IST)</span><input id="ls_long" type="number" min="0" max="40" step="1"></label>
           </div>
           <div class="f"><span>Assets to research</span><div class="assetpick" id="ls_assets"></div></div>
+          <div class="f" id="ls_events"><span>Market-event days (RBI, Fed, budget …) for the Calendar rule's “event day”</span>
+            <div class="scroll" style="max-height:220px;overflow-y:auto"><table class="mini"><thead><tr><th>Day</th><th>Name</th></tr></thead><tbody id="ev_rows"><tr><td colspan="2" class="hint">Loading…</td></tr></tbody></table></div>
+            <div class="formbar" style="margin-top:6px"><input type="date" id="ev_day" lang="en-IN" aria-label="Event day"><input id="ev_name" placeholder="e.g. RBI policy" autocomplete="off" aria-label="Event name"><button class="btn small" id="ev_add" type="button">Add day</button><span class="hint" id="ev_msg"></span></div></div>
           <p class="hint">Indices are tested on 5-minute candles (and once-a-day); commodities on daily candles, with MCX 5-minute candles (from the contracts Dhan still lists, growing every night) used for the timeframe test. Mini contracts move like their big contracts, so testing both mostly repeats work. In non-stop mode, back-to-back runs reuse candles fetched in the last 6 hours, and while any strategy is active (paper or live) the lab, including option pricing, works only 11:30 PM – 8:30 AM; a run going outside that window stops by itself. Runs you start yourself (“Run now”, variations, manual tests) still run when you ask.</p>
           <div class="formbar"><button class="btn primary" type="submit">Save lab settings</button><span class="hint" id="ls_msg"></span></div>
         </form>
@@ -1612,6 +1617,9 @@ body.dk-fs-on { overflow: hidden; }
         <div id="tf_list" class="tlist" style="margin-top:10px"></div>
         <p class="hint" id="tf_note" style="margin:8px 0 0"></p>
         <div id="auditBox" style="margin-top:16px"></div>
+        <section class="card" id="dhanCheck" style="margin-top:16px"><h3 style="font-size:16px;margin:0">Daily check with Dhan</h3>
+          <p class="hint">After each market session the desk reads your Dhan positions, matches them with the desk's live trades and uses Dhan's realised profit where they agree, so your Booked P&amp;L matches your broker.</p>
+          <div class="scroll"><table class="mini"><thead><tr><th>Day</th><th class="n">Desk net</th><th class="n">Dhan realised (whole account)</th><th class="n">Trades matched</th><th>Note</th></tr></thead><tbody id="wl_days"></tbody></table></div></section>
       </div>
       <div id="lp_live_box" hidden>
         <div class="formbar hint" id="lv_top" style="margin:0 0 8px"></div>
@@ -1826,9 +1834,6 @@ body.dk-fs-on { overflow: hidden; }
           <div class="scroll"><table class="mini"><thead><tr><th>When</th><th>Type</th><th>Details</th><th class="n">Amount</th></tr></thead><tbody id="wl_txns"></tbody></table></div>
         </div>
       </div>
-      <h3 style="font-size:16px;margin-top:16px">Daily check with Dhan</h3>
-      <p class="hint">After each market session the desk reads your Dhan positions, matches them with the desk's live trades and uses Dhan's realised profit where they agree, so your P&amp;L here matches your broker.</p>
-      <div class="scroll"><table class="mini"><thead><tr><th>Day</th><th class="n">Desk net</th><th class="n">Dhan realised (whole account)</th><th class="n">Trades matched</th><th>Note</th></tr></thead><tbody id="wl_days"></tbody></table></div>
     </section>
 
     <section class="card" id="adminPane" hidden>
@@ -2444,7 +2449,7 @@ function plainCond(c, s) {
 function riskPlain(r, s) {
   if (!r) return "None: exits only on the strategy's own signal";
   const on = r.basis === "PREMIUM" ? "option price" : "index price";
-  const q = (x) => x.type === "POINTS" ? `${x.value} points` : x.type === "PCT" ? `${x.value}%` : `${x.value} × ATR(${r.atr_len || 14}) (${x.value} times the average candle range)`;
+  const q = (x) => x.type === "POINTS" ? `${x.value} points` : x.type === "PCT" ? `${x.value}%` : x.type === "FIB" ? `${x.value}% of the last swing (Fibonacci)` : `${x.value} × ATR(${r.atr_len || 14}) (${x.value} times the average candle range)`;
   const parts = [];
   if (r.sl) parts.push(`Stop loss ${q(r.sl)} from entry`);
   if (r.tgt) parts.push(`take profit at ${q(r.tgt)}`);
@@ -2532,10 +2537,34 @@ const IND_DEFS = {
   TIME: { name: "Time of day / day of week (IST)", params: [["from", "From hour (0–23)", 2], ["to", "To hour (1–24)", 5], ["d", "Day (0 Sun … 6 Sat)", 5]], ops: [["in_hours", "is between the hours"], ["on_weekday", "is the day"], ["not_weekend", "is a weekday (Mon–Fri)"]] },
   BTC: { name: "Bitcoin trend (crypto filter)", params: [["len", "EMA length (days)", 50]], ops: [["btc_up", "Bitcoin's daily close above its EMA"], ["btc_down", "Bitcoin's daily close below its EMA"]] },
   FUND: { name: "Funding rate (crypto, % per 8h)", params: [], ops: [["gt", "is above"], ["lt", "is below"]], value: 0.01 },
+  // The research build (6 Nov 2026): open interest, pivots, Fibonacci, gaps, candle ranges, Keltner, calendar, VIX, divergence.
+  OI: { name: "Open interest (futures)", params: [["n", "Compared with (candles ago)", 5]],
+    ops: [["oi_rising", "is rising"], ["oi_falling", "is falling"], ["oi_up_price_up", "rising with the price rising (long build-up)"], ["oi_up_price_down", "rising with the price falling (short build-up)"]] },
+  PIV: { name: "Pivot points (prev. day / week)", params: [["src", "Levels from", 0], ["kind", "Kind", 0], ["k", "CPR width vs 20-day median (×)", 0.5]],
+    ops: [["above_pp", "price above the pivot"], ["below_pp", "price below the pivot"], ["cross_up_pp", "crosses above the pivot"], ["cross_down_pp", "crosses below the pivot"],
+      ["above_r1", "price above R1"], ["below_s1", "price below S1"], ["cross_up_r1", "crosses above R1"], ["cross_down_s1", "crosses below S1"],
+      ["cpr_narrow", "central pivot range is narrow"], ["cpr_wide", "central pivot range is wide"]] },
+  FIB: { name: "Fibonacci retracement (last swing)", params: [["mode", "Swings by", 0], ["k", "Swing threshold (× ATR, zigzag)", 2], ["n", "Fractal width (candles)", 5], ["tol", "Tolerance (× ATR)", 0.2]],
+    ops: [["pullback_to_382", "pulls back to 38.2% and closes up"], ["pullback_to_50", "pulls back to 50% and closes up"], ["pullback_to_618", "pulls back to 61.8% and closes up"],
+      ["rally_to_382", "rallies to 38.2% and closes down"], ["rally_to_50", "rallies to 50% and closes down"], ["rally_to_618", "rallies to 61.8% and closes down"],
+      ["in_zone_bull", "inside the 38.2–61.8% pullback zone (up swing)"], ["in_zone_bear", "inside the 38.2–61.8% rally zone (down swing)"],
+      ["broke_down_786", "up swing failed (close under 78.6%)"], ["broke_up_786", "down swing failed (close over 78.6%)"]] },
+  GAP: { name: "Opening gap (vs previous close)", params: [["k", "Gap size (× daily ATR)", 1], ["mins", "Held for the first (minutes)", 15]],
+    ops: [["gap_up_gt", "gapped up more than k ATR"], ["gap_dn_gt", "gapped down more than k ATR"], ["gap_filled", "gap filled (back through the previous close)"], ["gap_held", "gap held through the first N minutes"]] },
+  RANGE: { name: "Candle range", params: [["n", "Narrowest of the last (candles)", 7], ["k", "Range vs ATR (×)", 1.5], ["len", "ATR length", 14]],
+    ops: [["nr_n", "previous candle was the narrowest of the last N"], ["inside_bar", "previous candle was an inside bar"], ["range_gt_atr", "this candle's range over k × ATR"], ["range_lt_atr", "this candle's range under k × ATR"]] },
+  KC: { name: "Keltner channel", params: [["len", "Length", 20], ["k", "ATR multiple", 1.5], ["mult", "Bollinger std dev (squeeze)", 2]],
+    ops: [["above_upper", "close above the upper channel"], ["below_lower", "close below the lower channel"], ["squeeze", "Bollinger bands inside the channel (squeeze)"], ["squeeze_release", "squeeze just released"]] },
+  CAL: { name: "Calendar", params: [["wd", "Expiry weekday (1 Mon … 5 Fri)", 2], ["monthly", "Monthly expiry (1) or weekly (0)", 1], ["a", "Last N trading days", 2], ["b", "First N trading days", 3], ["n", "Days around an event", 0]],
+    ops: [["is_expiry_day", "is an expiry day"], ["not_expiry_day", "is not an expiry day"], ["days_to_expiry_lt", "days to the expiry are under"], ["turn_of_month", "is the turn of the month"], ["event_day", "is a market-event day (± N days)"]], value: 3 },
+  VIX: { name: "India VIX", params: [["n", "Rising vs (candles ago)", 5], ["look", "Percentile over (candles)", 250]],
+    ops: [["vix_gt", "is above"], ["vix_lt", "is below"], ["vix_rising", "is rising"], ["vix_pctile_gt", "percentile above"], ["vix_pctile_lt", "percentile below"]], value: 15 },
+  DIV: { name: "Divergence (RSI / MACD vs price swings)", params: [["mode", "Swings by", 0], ["k", "Swing threshold (× ATR)", 2], ["n", "Fractal width", 5], ["len", "RSI length", 14], ["within", "Signal lasts (candles)", 3]],
+    ops: [["rsi_bull_div", "bullish RSI divergence"], ["rsi_bear_div", "bearish RSI divergence"], ["macd_bull_div", "bullish MACD divergence (12,26,9)"], ["macd_bear_div", "bearish MACD divergence (12,26,9)"]] },
 };
 // Parameters that may be 0 (an hour of the day, Sunday).
-const ZERO_OK = new Set(["from", "d", "w"]);
-const VALUE_OPS = new Set(["gt", "lt", "cross_above", "cross_below", "has_buy", "has_sell"]);
+const ZERO_OK = new Set(["from", "d", "w", "src", "kind", "mode", "monthly", "n"]);
+const VALUE_OPS = new Set(["gt", "lt", "cross_above", "cross_below", "has_buy", "has_sell", "days_to_expiry_lt", "vix_gt", "vix_lt", "vix_pctile_gt", "vix_pctile_lt"]);
 const COND_TFS = [["base", "Strategy timeframe"], ["1", "1 min"], ["3", "3 min"], ["5", "5 min"], ["15", "15 min"], ["25", "25 min"], ["30", "30 min"], ["45", "45 min"], ["60", "1 hour"], ["75", "75 min"], ["120", "2 hours"], ["125", "125 min"], ["240", "4 hours"], ["D", "Daily"], ["W", "Weekly"]];
 const RULE_SETS = [
   ["long", "buy", "Buy (go long / bullish options) when", true],
@@ -2575,9 +2604,18 @@ function condRow(setKey, idx, c) {
       sel.addEventListener("change", () => { c.p = c.p || {}; c.p.w = Number(sel.value); formDirty = true; });
       row.append(wrapLabel(label, sel)); continue;
     }
-    if (k === "src") { // liquidity sweep: which levels
+    if (k === "src" && c.ind !== "PIV") { // liquidity sweep: which levels
       const sel = mkSel([["0", "Swing high / low"], ["1", "Previous day high / low"]], String(c.p && c.p.src !== undefined ? c.p.src : dv));
       sel.addEventListener("change", () => { c.p = c.p || {}; c.p.src = Number(sel.value); formDirty = true; });
+      row.append(wrapLabel(label, sel)); continue;
+    }
+    const CHOICES = { "PIV|src": [["0", "Previous day"], ["1", "Previous week"]], "PIV|kind": [["0", "Classic (PP, R1–R3, S1–S3)"], ["1", "Camarilla (H3/H4, L3/L4)"]],
+      "FIB|mode": [["0", "Zigzag (k × ATR reversals)"], ["1", "Fractals (n candles either side)"]], "DIV|mode": [["0", "Zigzag (k × ATR reversals)"], ["1", "Fractals (n candles either side)"]],
+      "CAL|monthly": [["1", "Monthly (last weekday of the month)"], ["0", "Weekly"]] };
+    const ch = CHOICES[`${c.ind}|${k}`];
+    if (ch) {
+      const sel = mkSel(ch, String(c.p && c.p[k] !== undefined ? c.p[k] : dv));
+      sel.addEventListener("change", () => { c.p = c.p || {}; c.p[k] = Number(sel.value); formDirty = true; });
       row.append(wrapLabel(label, sel)); continue;
     }
     const inp = document.createElement("input"); inp.type = "number"; inp.step = k === "factor" || k === "mult" ? "0.1" : "1"; inp.min = ZERO_OK.has(k) ? "0" : "1";
@@ -2617,6 +2655,14 @@ function renderRules() {
     const mode = mkSel([["ALL", "ALL"], ["ANY", "ANY"]], set.mode);
     mode.addEventListener("change", () => { set.mode = mode.value; renderRules(); formDirty = true; });
     h.append(mode, document.createTextNode(" of these are true"));
+    if (key === "long" || key === "short") {
+      // Entry fill (research build): at the candle's close, or a limit order at the first condition's level for the next candle (backtests).
+      const fill = mkSel([["CLOSE", "fills at the candle's close"], ["LEVEL", "limit order at the condition's level (backtest; next candle)"]], set.fill || "CLOSE");
+      fill.title = "LEVEL: the entry rests as a limit order at the level the first condition names (a Fibonacci level, a pivot, yesterday's high, a band …) for the next candle; filled there if the candle trades through it, else at that candle's close. Backtest realism only; live entries fill at the close as before.";
+      fill.disabled = !!ruleState.daily; fill.className = "fillsel"; fill.setAttribute("aria-label", "Entry fill");
+      fill.addEventListener("change", () => { if (fill.value === "LEVEL") set.fill = "LEVEL"; else delete set.fill; formDirty = true; paintDirty(); });
+      h.append(document.createTextNode(" · "), wrapLabel("Entry fill", fill));
+    }
     wrap.append(h);
     set.conds.forEach((c, i) => wrap.append(condRow(key, i, c)));
     if (!set.conds.length) { const p = document.createElement("p"); p.className = "hint"; p.textContent = key.startsWith("exit") ? "No exit rules: the position closes on the opposite signal (or when its own rules stop being true)." : "No conditions: this side won't trade."; wrap.append(p); }
@@ -3873,6 +3919,24 @@ function sameAssetWarn(list) {
   if (!dup.length) return "";
   return `<br><span class="same-asset" style="color:var(--yellow)"><b>⚠ Two live strategies on one asset:</b> ${dup.map(([u, xs]) => `${esc(assetLabel(u))} (${xs.length}: ${xs.map((x) => esc(String(x.name).split(" · ")[0])).join(", ")})`).join("; ")}. The plan is one live strategy per asset; together they double that asset's weight in your P&L.</span>`;
 }
+/** What going live means for these strategies (H5): asset, lots, today's margin, stop, expiry / roll, the charges note. */
+function goLiveSummary(list) {
+  const row = (s) => {
+    const z = s.sizing || {}, lots = z.mode === "MOVE" ? `≈${s.lots || "?"} by the day's move` : z.mode === "AUTO" ? `auto (${z.alloc_pct}% of capital)` : plural(Number(s.lots) || 1, "lot");
+    const m = marginRequired(s), stop = s.risk ? (riskText(s.risk, true) || "none") : "none";
+    const exp = isCrypto(s.data_segment) ? "perpetual, no expiry" : s.trade_type === "OPTIONS" ? `${s.expiry_flag === "MONTH" ? "monthly" : "weekly"} expiry · closed on expiry day` : s.intraday ? `squared off daily at ${String(s.square_off || "").slice(0, 5)}` : s.risk && s.risk.roll === false ? "held to expiry (no roll)" : "near month · rolls the day before expiry";
+    return `<tr><td>${esc(assetLabel(s.underlying))}<div class="hint sm">${esc(String(s.name || "").split(" · ")[0])}</div></td><td>${esc(lots)}</td><td class="n">${m.v ? `≈ ${rupees(m.v)}` : "–"}</td><td>${esc(stop)}</td><td>${esc(exp)}</td></tr>`;
+  };
+  return `<div class="scroll" style="margin:8px 0"><table class="mini golive"><thead><tr><th>Asset</th><th>Lots</th><th class="n">Margin</th><th>Stop</th><th>Expiry / roll</th></tr></thead><tbody>${list.map(row).join("")}</tbody></table></div><p class="hint" style="margin:0">Margin is today's figure for one entry. Brokerage, exchange and statutory charges apply to every order and come off the Booked P&amp;L.</p>`;
+}
+/** The first go-live of this account (no strategy is or has been live): LIVE has to be typed. */
+const firstLive = () => !myStrats().some((x) => x.live || x.live_since);
+const liveTypeHTML = () => firstLive() ? `<label class="f" style="margin-top:10px"><span>Your first live strategy — type LIVE to confirm</span><input id="cf_live" autocomplete="off" autocapitalize="characters" placeholder="LIVE"></label>` : "";
+function wireLiveType() {
+  const box = $("confirmBox").querySelector(".confirm"); if (box) box.classList.add("wide");
+  const inp = $("cf_live"); if (!inp) return;
+  $("cf_yes").disabled = true; inp.addEventListener("input", () => { $("cf_yes").disabled = inp.value.trim().toUpperCase() !== "LIVE"; }); inp.focus();
+}
 $("b_live").addEventListener("click", () => {
   const s = cur();
   if (s.live) return run($("b_live"), async () => { must(await db.rpc("set_live", { p_strategy: s.id, p_live: false })); await loadAll(); toast("Paper mode. Orders are logged, not sent."); });
@@ -3881,8 +3945,10 @@ $("b_live").addEventListener("click", () => {
   const bl = (me && me.billing) || {}, fee = Number(bl.deploy_fee || 0);
   const feeTxt = me && me.role !== "admin" && fee > 0 && !bl.trial_active && !(s.deploy_paid_until && s.deploy_paid_until >= istDate(0))
     ? `<br>A deployment fee of <strong>${rupees(fee)}</strong>${bl.deploy_fee_period === "ONE_TIME" ? " (once)" : " (for the next month)"} will be taken from your wallet.` : "";
-  askConfirm((isCrypto(s.data_segment) ? "<strong>Send real orders to Delta Exchange?</strong><br>From the next signal, this strategy places market orders on Delta Exchange India with your API key. Crypto trades round the clock and moves fast; check the paper-mode log first." : "<strong>Send real orders to Dhan?</strong><br>From the next signal, this strategy posts orders to your Dhan webhook, on your own account. Check the paper-mode log first.") + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + feeTxt + sameAssetWarn([s]),
+  askConfirm((isCrypto(s.data_segment) ? "<strong>Send real orders to Delta Exchange?</strong><br>From the next signal, this strategy places market orders on Delta Exchange India with your API key. Crypto trades round the clock and moves fast; check the paper-mode log first." : "<strong>Send real orders to Dhan?</strong><br>From the next signal, this strategy posts orders to your Dhan webhook, on your own account. Check the paper-mode log first.")
+    + goLiveSummary([s]) + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + feeTxt + sameAssetWarn([s]) + liveTypeHTML(),
     "Go live", async () => run($("b_live"), async () => { must(await db.rpc("set_live", { p_strategy: s.id, p_live: true })); await loadAll(); await refreshMe(); toast("Live. Real orders will be sent."); }), true);
+  wireLiveType();
 });
 $("b_flat").addEventListener("click", () => {
   const s = cur();
@@ -4146,10 +4212,11 @@ $("cn_fx_save").addEventListener("click", (e) => run(e.currentTarget, async () =
 
 /* ---------- stop loss & risk (strategy form) ---------- */
 const RISK_TYPES = [["NONE", "Off"], ["POINTS", "Points"], ["PCT", "%"], ["ATR", "× ATR"]];
-for (const id of ["r_sl_type", "r_tgt_type", "r_trail_type"]) { const el = $(id); for (const [v, t] of RISK_TYPES) { const o = document.createElement("option"); o.value = v; o.textContent = t; el.append(o); } }
+const TGT_TYPES = [...RISK_TYPES, ["FIB", "% of the last swing (Fibonacci extension: 100 / 127.2 / 161.8)"]];
+for (const id of ["r_sl_type", "r_tgt_type", "r_trail_type"]) { const el = $(id); for (const [v, t] of (id === "r_tgt_type" ? TGT_TYPES : RISK_TYPES)) { const o = document.createElement("option"); o.value = v; o.textContent = t; el.append(o); } }
 function riskText(r, short) {
   if (!r) return short ? "" : "No stop loss";
-  const q = (x) => x.type === "POINTS" ? `${x.value} pts` : x.type === "PCT" ? `${x.value}%` : `${x.value}×ATR(${r.atr_len || 14})`;
+  const q = (x) => x.type === "POINTS" ? `${x.value} pts` : x.type === "PCT" ? `${x.value}%` : x.type === "FIB" ? `${x.value}% of the swing` : `${x.value}×ATR(${r.atr_len || 14})`;
   const parts = [];
   if (r.sl) parts.push(`SL ${q(r.sl)}`);
   if (r.tgt) parts.push(`target ${q(r.tgt)}`);
@@ -4249,6 +4316,8 @@ function applyRiskVisibility() {
     const sel = $(`r_${k}_type`);
     sel.querySelector('option[value="ATR"]').disabled = premium || timed;
     if (sel.value === "ATR" && (premium || timed)) sel.value = "PCT";
+    // The Fibonacci target needs the rule book's swings: condition strategies on the underlying only.
+    const fibOpt = sel.querySelector('option[value="FIB"]'); if (fibOpt) { fibOpt.disabled = premium || timed || $("f_kind").value !== "RULES"; if (sel.value === "FIB" && fibOpt.disabled) sel.value = "PCT"; }
     $(`r_${k}_val`).disabled = sel.value === "NONE"; $(`r_${k}_val`).hidden = sel.value === "NONE"; // the value box only once a type is chosen
   }
   $("r_atr_len").closest(".f").hidden = premium || timed;
@@ -4278,7 +4347,9 @@ function readRisk(out) {
     const v = Number($(`r_${k}_val`).value);
     if (!(v > 0)) throw new Error(`${names[k]}: enter a value above 0, or switch it off.`);
     if (type === "PCT" && v >= 100 && !(basis === "PREMIUM" && k === "tgt" && out.option_side !== "SELL")) throw new Error(`${names[k]} must be under 100%.`);
+    if (type === "FIB" && !(v >= 50 && v <= 400)) throw new Error("A Fibonacci target is a % of the last swing: 100, 127.2 or 161.8 are the usual ones (50–400 allowed).");
     if (type === "ATR" && (basis === "PREMIUM" || out.strategy_kind === "TIMED")) throw new Error("ATR-based levels work on the underlying price of candle strategies; use points or % here.");
+    if (type === "FIB" && (k !== "tgt" || basis === "PREMIUM" || out.strategy_kind !== "RULES")) throw new Error("A Fibonacci target works only as the target of a condition strategy on the underlying price.");
     r[k] = { type, value: v };
   }
   const mdl = $("r_mdl").value.trim();
@@ -4424,6 +4495,15 @@ function openCap() {
   cmpCache.clear();
   withLoading($("capPane"), loadCap()).catch((e) => toast(errorText(e)));
 }
+/** Capital page tabs (M5): Capital & limit (tiles, form, drawdown check, the strategies' money in use) · Lots wizard · Closed trades. */
+function capTab(t) {
+  cap.tab = t; try { localStorage.setItem("capTab", t); } catch { /* not remembered */ }
+  document.querySelectorAll("#cap_tabs [data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === t)));
+  $("cap_stats").hidden = $("capForm").hidden = $("cap_sec_strats").hidden = t !== "main";
+  $("lw_card").hidden = t !== "lots"; $("cap_sec_trades").hidden = t !== "trades";
+}
+document.querySelectorAll("#cap_tabs [data-t]").forEach((b) => b.addEventListener("click", () => capTab(b.dataset.t)));
+capTab((() => { try { return localStorage.getItem("capTab") || "main"; } catch { return "main"; } })());
 function closeCap() { if (!cap.open) return; cap.open = false; $("capPane").hidden = true; $("openCap").classList.remove("primary"); }
 async function loadCap() {
   const st = await loadCapStatus(), trades = myTrades.filter((t) => t.mode === cap.mode).slice(0, 200); // the latest 200 closed trades of the mode
@@ -4525,7 +4605,7 @@ async function capDd(st) {
       ${tile("If every worst fall came at once", pTxt(sumPct), "", "very unlikely; the upper bound", "--line")}
       ${tile("Margin if all are in a trade", pTxt(pc(marginAll)), "", rupeesShort(marginAll), "--blue")}
     </div>
-    ${sug != null ? `<div class="dd-sug"><span>Suggested limit for “Never use more than”:</span><b class="big">${sug}%</b><span class="hint" style="flex:1 1 260px;margin:0">Keeps free about 1.5 × the worst fall (${pTxt(basis)}${maxSingle > togPct ? ", the worst single strategy" : ", all together"}) so a bad patch doesn't eat into the margin. ${pc(marginAll) != null && pc(marginAll) > sug ? `All strategies in a trade at once need ${pTxt(pc(marginAll))}: above this, so some entries would wait for room.` : ""}</span><button class="btn" type="button" id="cap_dd_use">Use ${sug}%</button></div>` : ""}
+    ${sug != null ? `<p class="dd-sug hint" style="margin-top:10px">You could allow up to <b>${sug}%</b> for “Never use more than” and still keep 1.5 × the worst fall (${pTxt(basis)}${maxSingle > togPct ? ", the worst single strategy" : ", all together"}) free; <b>${Number(st.deploy_pct) || 60}%</b> is saved.${pc(marginAll) != null && pc(marginAll) > sug ? ` All strategies in a trade at once need ${pTxt(pc(marginAll))}: above that, some entries would wait for room.` : ""} <button class="btn small" type="button" id="cap_dd_use">Use ${sug}%</button></p>` : ""}
     <details><summary>Each strategy</summary><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Strategy</th><th class="n">Lots</th><th class="n">Worst fall (all its years)</th><th class="n">% of capital</th><th class="n">Worst fall ${yr(from).slice(0, 4)}→</th><th>From</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.s.name.split(" · ")[0])} <span class="hint">${esc(r.s.underlying)}</span></td><td class="n mono">${r.lots}${r.auto ? " (auto)" : ""}</td><td class="n mono">${r.all ? rupeesShort(r.all.dd) : "–"}</td><td class="n mono">${r.all ? pTxt(pc(r.all.dd)) : "–"}</td><td class="n mono">${r.common ? rupeesShort(r.common.dd) : "–"}</td><td class="hint">${esc(r.src)}${r.tr.length ? ` · ${yr(r.tr[0].t).slice(0, 4)}–${yr(r.tr.at(-1).t).slice(0, 4)}` : ""}</td></tr>`).join("")}</tbody></table></div>
     <p class="hint" style="margin:6px 0 0">Backtest falls are history, not a limit: a real fall can be deeper. Strategies on automatic lots are counted at their saved lots. Change the lots with the wizard below and this check follows.</p></details>`;
   const b = $("cap_dd_use"); if (b) b.onclick = () => { $("cap_deploy").value = String(sug); $("cap_msg").textContent = `Limit set to ${sug}% — press Save to keep it.`; $("cap_deploy").focus(); };
@@ -6238,7 +6318,21 @@ function renderLabSettings() {
   }
 }
 $("openLab").addEventListener("click", () => lab.open ? null : openLab());
-$("lab_settings_btn").addEventListener("click", () => { const f = $("labSetForm"); f.hidden = !f.hidden; if (!f.hidden) renderLabSettings(); });
+$("lab_settings_btn").addEventListener("click", () => { const f = $("labSetForm"); f.hidden = !f.hidden; if (!f.hidden) { renderLabSettings(); loadEvents().catch(() => {}); } });
+/** Market-event days (migration 83): listed newest first; an admin adds a day + name (the Calendar rule's "event day" uses them). */
+async function loadEvents() {
+  const rows = await db.from("market_events").select("day, name").order("day", { ascending: false }).limit(200).then((r) => r.data || []).catch(() => []);
+  fillRows("ev_rows", rows, "No event days yet.", (r) => [[fmtDay(r.day), "when"], [r.name || ""]]);
+}
+$("ev_add").addEventListener("click", (e) => {
+  const day = $("ev_day").value, name = $("ev_name").value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) { $("ev_msg").textContent = "Pick the day."; return; }
+  if (!name) { $("ev_msg").textContent = "Name the event."; return; }
+  run(e.currentTarget, async () => {
+    must(await db.from("market_events").upsert({ day, name }, { onConflict: "day" }));
+    $("ev_name").value = ""; $("ev_msg").textContent = `Added ${fmtDay(day)}.`; await loadEvents();
+  });
+});
 $("labSetForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const assets = [...document.querySelectorAll("#ls_assets input:checked")].map((i) => i.value);
@@ -6740,7 +6834,7 @@ function wireOpenLinks(box) { box.querySelectorAll("[data-open]").forEach((a) =>
 let deskTrades = [];
 async function loadAllTrades() {
   deskTrades = myTrades;
-  fillTradeFilters(); renderAllTrades(); loadAudit().catch(() => {});
+  fillTradeFilters(); renderAllTrades(); loadAudit().catch(() => {}); loadDhanCheck().catch(() => {});
 }
 /* daily self-check: every strategy's trades replayed with the backtest engine */
 async function loadAudit() {
@@ -8956,13 +9050,14 @@ async function bulkAction(kind) {
       + (paused ? `<br>${paused} of them ${paused === 1 ? "is" : "are"} paused; ${paused === 1 ? "it" : "they"} won't trade until activated.` : "")
       + (skipped ? `<br>${skipped} can't go live yet (${noDhan ? "no Dhan webhook" : "no Delta API key"}) and will be left in paper mode.` : "")
       + (feeN ? `<br>A deployment fee of <strong>${rupees(fee)}</strong> each${bl.deploy_fee_period === "ONE_TIME" ? " (once)" : " (for the next month)"} will be taken from your wallet for ${feeN} of them (${rupees(fee * feeN)} in all).` : "")
-      + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + sameAssetWarn(ready),
+      + goLiveSummary(ready) + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + sameAssetWarn(ready) + liveTypeHTML(),
       "Go live", async () => run(btn, async () => {
         const bad = [];
         for (const s of ready) { const { error } = await db.rpc("set_live", { p_strategy: s.id, p_live: true }); if (error) bad.push(`${s.name}: ${errorText(error)}`); }
         await loadAll(); await refreshMe();
-        toast(bad.length ? `${ready.length - bad.length} live; ${bad.length} not changed (${bad[0]})` : `${ready.length} strateg${ready.length === 1 ? "y" : "ies"} live. Real orders will be sent.`);
+        toast(bad.length ? `${ready.length - bad.length} live; ${bad.length} not changed (${bad[0]})` : `${plural(ready.length, "strategy", "strategies")} live. Real orders will be sent.`);
       }), true);
+    wireLiveType();
   }
 }
 document.querySelectorAll("#lp_bulk [data-bulk]").forEach((b) => b.addEventListener("click", () => bulkAction(b.dataset.bulk)));
@@ -9390,10 +9485,9 @@ const KIND = { RECHARGE: "Recharge", PROFIT_SHARE: "Profit share", DEPLOY_FEE: "
 async function refreshMe() { try { me = must(await db.rpc("whoami")); } catch { /* keep the last */ } return me; }
 async function loadWallet() {
   await refreshMe();
-  const [txns, reqs, days] = await Promise.all([
+  const [txns, reqs] = await Promise.all([
     db.from("wallet_txns").select("created_at, amount, kind, note").eq("user_id", me.user_id).order("id", { ascending: false }).limit(300).then(must),
     db.from("recharge_requests").select("created_at, amount, ref, status, note").eq("user_id", me.user_id).order("id", { ascending: false }).limit(50).then(must),
-    db.from("daily_pnl").select("day, desk_net, dhan_realised, matched, note").eq("user_id", me.user_id).order("day", { ascending: false }).limit(60).then(must),
   ]);
   const b = me.billing || {}, e = me.entries || {};
   const sk = await db.rpc("shukrana_summary").then((x) => x.data).catch(() => null);
@@ -9407,10 +9501,15 @@ async function loadWallet() {
   </div>`;
   $("wl_payto").innerHTML = b.pay_to ? `Pay to: <strong></strong>${b.pay_note ? `<br><span></span>` : ""}` : "The admin hasn't added payment details yet. Ask them how to pay.";
   if (b.pay_to) { $("wl_payto").querySelector("strong").textContent = b.pay_to; const sp = $("wl_payto").querySelector("span"); if (sp) sp.textContent = b.pay_note; }
-  const fill = (id, rows, empty, cells) => { const tb = $(id); tb.innerHTML = rows.length ? "" : `<tr><td colspan="5" class="hint">${empty}</td></tr>`; for (const r of rows) { const tr = document.createElement("tr"); cells(r).forEach(([t, cls]) => { const td = document.createElement("td"); td.className = cls || ""; td.textContent = t; tr.append(td); }); tb.append(tr); } };
-  fill("wl_txns", txns, "No entries yet.", (t) => [[fmtDate(t.created_at), "when"], [KIND[t.kind] || t.kind], [t.note || "", "hint"], [rupees(t.amount), "n " + (t.amount > 0 ? "pos-num" : "neg-num")]]);
-  fill("wl_reqs", reqs, "No requests yet.", (r) => [[fmtDate(r.created_at), "when"], [rupees(r.amount), "n"], [r.ref || ""], [r.status === "PENDING" ? "Waiting for the admin" : r.status === "APPROVED" ? "Added" : `Rejected${r.note ? ": " + r.note : ""}`]]);
-  fill("wl_days", days, "No checks yet. They run after each market session on days with live trades.", (d) => [[d.day, "when"], [rupees(d.desk_net), "n"], [d.dhan_realised == null ? "–" : rupees(d.dhan_realised), "n"], [String(d.matched ?? 0), "n"], [d.note || "", "hint"]]);
+  fillRows("wl_txns", txns, "No entries yet.", (t) => [[fmtDate(t.created_at), "when"], [KIND[t.kind] || t.kind], [t.note || "", "hint"], [rupees(t.amount), "n " + (t.amount > 0 ? "pos-num" : "neg-num")]]);
+  fillRows("wl_reqs", reqs, "No requests yet.", (r) => [[fmtDate(r.created_at), "when"], [rupees(r.amount), "n"], [r.ref || ""], [r.status === "PENDING" ? "Waiting for the admin" : r.status === "APPROVED" ? "Added" : `Rejected${r.note ? ": " + r.note : ""}`]]);
+}
+/** Rows of plain text cells into a table body. */
+function fillRows(id, rows, empty, cells) { const tb = $(id); tb.innerHTML = rows.length ? "" : `<tr><td colspan="5" class="hint">${empty}</td></tr>`; for (const r of rows) { const tr = document.createElement("tr"); cells(r).forEach(([t, c]) => { const td = document.createElement("td"); td.className = c || ""; td.textContent = t; tr.append(td); }); tb.append(tr); } }
+/** The daily match with Dhan (Trades tab since 6 Nov 2026; it was on the Wallet page). */
+async function loadDhanCheck() {
+  const days = await db.from("daily_pnl").select("day, desk_net, dhan_realised, matched, note").eq("user_id", me.user_id).order("day", { ascending: false }).limit(60).then((r) => r.data || []).catch(() => []);
+  fillRows("wl_days", days, "No checks yet. They run after each market session on days with live trades.", (d) => [[d.day, "when"], [rupees(d.desk_net), "n"], [d.dhan_realised == null ? "–" : rupees(d.dhan_realised), "n"], [String(d.matched ?? 0), "n"], [d.note || "", "hint"]]);
 }
 $("wl_form").addEventListener("submit", (e) => {
   e.preventDefault();
@@ -9435,17 +9534,21 @@ function shukranaWhat(sk) {
 function renderShukranaCard(box, sk, list, adminView) {
   if (!box) return;
   if (!sk || sk.pct == null) { box.innerHTML = ""; return; }
-  const bal = Number(sk.balance), owed = bal < 0;
+  const bal = Number(sk.balance), owed = bal < 0, since = fmtDay(sk.since), rate = `${Number(sk.pct)}% of new live profit since ${since}`;
+  const line = owed ? `You owe <b>${rupees(-bal)}</b> Shukrana` : bal > 0 ? `You are <b>${rupees(bal)}</b> ahead on Shukrana` : `Shukrana is <b>settled</b>`;
   box.innerHTML = `<div class="skcard${owed ? " owed" : ""}">
-    <div class="skhead"><h3>Shukrana</h3><span class="hint">${Number(sk.pct)}% of new profit · running, no fixed periods</span></div>
-    <div class="stats">
-      <div class="stat"><span class="label">Shukrana due</span><span class="v">${rupees(sk.due)}</span><span class="hint">so far, from ${Number(sk.trades)} live trade${Number(sk.trades) === 1 ? "" : "s"}</span></div>
+    <div class="skhead"><h3>Shukrana</h3><span class="hint">running, no fixed periods</span></div>
+    <p class="skline" style="margin:6px 0 0;font-size:15px">${line} · <span class="hint">${esc(rate)}</span></p>
+    <details style="margin-top:6px"><summary class="hint" style="cursor:pointer">Details ▸</summary>
+    <div class="stats" style="margin-top:8px">
+      <div class="stat"><span class="label">Shukrana due</span><span class="v">${rupees(sk.due)}</span><span class="hint">so far, from ${plural(Number(sk.trades), "live trade")}</span></div>
       <div class="stat"><span class="label">Shukrana accepted</span><span class="v">${rupees(sk.accepted)}</span><span class="hint">${sk.last_accepted ? `last on ${esc(sk.last_accepted)}` : "none yet"}</span></div>
       <div class="stat"><span class="label">Balance</span><span class="v ${owed ? "down" : bal > 0 ? "up" : ""}">${owed ? `${rupees(-bal)} due` : bal > 0 ? `${rupees(bal)} ahead` : "Settled"}</span><span class="hint">accepted − due</span></div>
-      <div class="stat"><span class="label">Live profit since start</span><span class="v ${Number(sk.net) >= 0 ? "up" : "down"}">${rupees(sk.net)}</span><span class="hint">${Number(sk.to_recover) > 0 ? `${rupees(sk.to_recover)} below its best: no new Shukrana until that is made back` : "at its best so far"}</span></div>
+      <div class="stat"><span class="label">Booked P&amp;L (live) since ${esc(since)}</span><span class="v ${Number(sk.net) >= 0 ? "up" : "down"}">${rupees(sk.net)}</span><span class="hint">${Number(sk.to_recover) > 0 ? `${rupees(sk.to_recover)} below its best: no new Shukrana until that is made back` : "at its best so far"}</span></div>
     </div>
     <p class="hint" style="margin:8px 0 0">${shukranaWhat(sk)}</p>
     ${list.length ? `<div class="scroll" style="margin-top:8px"><table class="mini"><thead><tr><th>Date</th><th class="n">Shukrana accepted</th><th>Note</th></tr></thead><tbody>${list.map((r) => `<tr><td class="when">${esc(r.accepted_on)}</td><td class="n ${Number(r.amount) < 0 ? "neg-num" : ""}">${rupees(r.amount)}${Number(r.amount) < 0 ? ' <span class="hint sm">correction</span>' : ""}</td><td class="hint">${esc(r.note || "")}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    </details>
   </div>`;
 }
 /** Admin › Shukrana: every client with a rate, what is due, accepted and owed; set rates and record Shukrana accepted. */
