@@ -156,13 +156,14 @@ export class Dhan {
     return stk ? adjustRows(rows, actionsFor(stk), "d") : rows;
   }
 
-  /** Expired index options (weekly or monthly series) by strike relative to spot (ATM, ATM+k). Up to 30 days per call. */
+  /** Expired index (or, with instrument OPTSTK, stock) options, weekly or monthly series, by strike relative to spot (ATM, ATM+k). Up to 30 days per call. */
   async rolling(o: {
     sec: string; segment: string; interval: number; code: number; k: number; type: "CALL" | "PUT"; from: string; to: string; flag?: "WEEK" | "MONTH";
+    instrument?: "OPTIDX" | "OPTSTK";
   }): Promise<OptBar[]> {
     const strike = o.k === 0 ? "ATM" : o.k > 0 ? `ATM+${o.k}` : `ATM${o.k}`;
     const j = await this.post("/charts/rollingoption", {
-      exchangeSegment: o.segment, interval: String(o.interval), securityId: Number(o.sec), instrument: "OPTIDX",
+      exchangeSegment: o.segment, interval: String(o.interval), securityId: Number(o.sec), instrument: o.instrument ?? "OPTIDX",
       expiryFlag: o.flag ?? "WEEK", expiryCode: o.code, strike, drvOptionType: o.type,
       requiredData: ["open", "high", "low", "close", "strike", "spot"], fromDate: o.from, toDate: o.to,
     });

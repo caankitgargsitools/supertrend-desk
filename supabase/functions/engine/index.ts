@@ -32,6 +32,7 @@ import { KILL_EARLY, KILL_FULL, killVerdict } from "./kill.ts";
 import { ideasStep } from "./ideas.ts";
 import { actionsFor, adjustPosition, daysOf, loadStockActions, splitFactor, STOCK_KEYS, stockLots } from "./stocks.ts";
 import { readCandles } from "./candles.ts";
+import { findListed, isListedOpt, optRows, pickListed } from "./listedopts.ts";
 import { githubOidcOk, predFeed, predKeyOk, predPull, predPush } from "./prediction.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
@@ -246,7 +247,8 @@ function entryLeg(s: Strategy, want: Pos, close: number, sort: number, lots = Nu
   // Buying: bullish → CE, bearish → PE. Writing: bullish → sell PE, bearish → sell CE.
   const selling = s.option_side === "SELL";
   const optType = (want === "LONG") !== selling ? "CE" : "PE";
-  const strike = strikeFor(close, s.strike_step, s.strike_offset, optType);
+  // A stock / MCX option: the listed strike picked in sizeEntry (`_strike`, from Dhan's list); indices: price ± steps.
+  const strike = Number((s as any)._strike) > 0 ? Number((s as any)._strike) : strikeFor(close, s.strike_step, s.strike_offset, optType);
   const expiry = s.expiry_override && s.expiry_override >= today.date
     ? s.expiry_override
     : s.expiry_flag === "MONTH" ? nextMonthlyExpiry(today, s.expiry_weekday, s.roll_on_expiry) : nextExpiry(today, s.expiry_weekday, s.roll_on_expiry);
@@ -280,7 +282,14 @@ function canEnter(s: Strategy): boolean {
   return !(r?.max_day_loss && String(s.day_pnl_date) === todayIst() && Number(s.day_pnl) <= -r.max_day_loss);
 }
 async function premiumOf(dhan: Dhan, s: Strategy, st: Record<string, any>): Promise<number | null> {
-  try { return await dhan.premium(s.data_security_id, s.data_segment, String(st.pos_expiry), Number(st.pos_strike), st.pos_option_type); } catch { return null; }
+  try {
+    // Stocks and MCX (6 Nov 2026): the held contract's own last price (exact expiry, strike and type, never another).
+    if (isListedOpt(s)) {
+      const k = findListed(await optRows(sb, s, todayIst()), String(st.pos_expiry), Number(st.pos_strike), String(st.pos_option_type));
+      return k ? await dhan.ltp(k.seg, k.sec_id) : null;
+    }
+    return await dhan.premium(s.data_security_id, s.data_segment, String(st.pos_expiry), Number(st.pos_strike), st.pos_option_type);
+  } catch { return null; }
 }
 /** Stop / target levels for a position just entered (stored in pos_risk). */
 async function armRisk(s: Strategy, set: Settings, st: Record<string, any>, px: number, atrNow: number, notes: string[]) {
@@ -337,7 +346,22 @@ async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknow
   const opt = s.trade_type === "OPTIONS", multi = isMulti(s);
   // An option entry goes to an expiry Dhan really lists (4 Nov 2026): the date worked out from the expiry weekday can
   // miss a holiday-shifted or changed expiry day; the next listed one on or after it is used instead.
-  if (opt && !multi && newState.pos_expiry) {
+  if (opt && isListedOpt(s)) {
+    // Options on a stock or an MCX commodity (6 Nov 2026): the next listed expiry and the listed strike nearest the price,
+    // "strikes away" counted in listed strikes (Dhan's list, fno_contracts); never a contract Dhan doesn't list.
+    if (multi) { notes.push("Entry skipped: option structures aren't available on stocks or MCX commodities yet; use a single option."); return false; }
+    const type = String(newState.pos_option_type) as "CE" | "PE";
+    const k = pickListed(await optRows(sb, s, todayIst()).catch(() => []), entryPx, Number(s.strike_offset) || 0, type, todayIst(), !!s.roll_on_expiry);
+    if (!k) { notes.push(`Entry skipped: no ${s.underlying} ${type} options listed at Dhan.`); return false; }
+    s = { ...s, expiry_override: k.expiry, _strike: k.strike } as Strategy;
+    const lots0 = Number(newState.pos_lots) || (s.qty_mode === "LOTS" ? Number(newState.pos_qty) : Number(newState.pos_qty) / Number(s.lot_size)) || Number(s.lots);
+    const ne = entryLeg(s, newState.position, entryPx, legs.length, lots0);
+    legs.splice(legs.length - 1, 1, ...asArr(ne.leg));
+    Object.assign(newState, ne.state);
+    delete newState._px;
+    const last = notes.length - 1;
+    if (last >= 0) notes[last] = notes[last].replace(/(Buy|Sell) \S+ [\d.]+ (CE|PE) \([\d-]+\)/, `$1 ${s.dhan_symbol} ${k.strike} ${type} (${k.expiry})`);
+  } else if (opt && !multi && newState.pos_expiry) {
     const list = await dhanFor(set).expiries(String(s.data_security_id), String(s.data_segment)).catch(() => null);
     const want = String(newState.pos_expiry);
     const e = list?.length && !list.includes(want) ? list.find((x) => x >= want) : null;

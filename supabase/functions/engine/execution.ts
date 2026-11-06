@@ -195,6 +195,14 @@ export async function dhanLtp(c: Creds, seg: string, sec: string): Promise<numbe
 /* ---------------------------------------------------------------- contracts (security ids, lot sizes, ticks) */
 
 const FNO_UNDERLYINGS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX", "SENSEX50"];
+/** Keeps, for each underlying, only the rows of the given instrument in its two nearest expiries (fewer rows to store
+ *  and read: a stock's options run to 500+ contracts a month). Works in place. */
+export function nearestTwo(rows: Record<string, unknown>[], instrument: string) {
+  const exps = new Map<string, string[]>();
+  for (const r of rows) if (r.instrument === instrument) { const l = exps.get(String(r.underlying)) ?? []; if (!l.includes(String(r.expiry))) l.push(String(r.expiry)); exps.set(String(r.underlying), l); }
+  const keep = new Map([...exps].map(([u, l]) => [u, new Set(l.sort().slice(0, 2))]));
+  for (let i = rows.length - 1; i >= 0; i--) if (rows[i].instrument === instrument && !keep.get(String(rows[i].underlying))?.has(String(rows[i].expiry))) rows.splice(i, 1);
+}
 /** Downloads Dhan's F&O instrument lists (NSE and BSE) and keeps the index futures and options, and the desk's stock futures, of the next 4 months. */
 export async function syncFno(sb: SupabaseClient, c: Creds): Promise<number> {
   const until = new Date(Date.now() + 125 * 86400000).toISOString().slice(0, 10);
@@ -216,13 +224,16 @@ export async function syncFno(sb: SupabaseClient, c: Creds): Promise<number> {
       const ins = a[iIns], exp = (a[iExp] ?? "").slice(0, 10);
       // Stock futures: the underlying from the trading symbol ("RELIANCE-Nov2026-FUT") when the column is empty.
       const und = fnoUnderlying(ins, a[iUnd], iSym >= 0 ? a[iSym] : undefined);
-      const stk = ins === "FUTSTK" && seg === "NSE_FNO" && isStock(und); // stock futures (no stock options)
+      // The desk's stock futures, and (6 Nov 2026) their options: OPTSTK, the two nearest expiries (picked below).
+      const stk = (ins === "FUTSTK" || ins === "OPTSTK") && seg === "NSE_FNO" && isStock(und);
       if (!stk && ((ins !== "FUTIDX" && ins !== "OPTIDX") || !FNO_UNDERLYINGS.includes(und))) continue;
       if (!(exp >= today && exp <= until)) continue;
-      rows.push({ sec_id: a[iSec], seg, underlying: und, instrument: ins, expiry: exp, strike: ins === "OPTIDX" && iStr >= 0 ? Number(a[iStr]) : null,
-        opt_type: ins === "OPTIDX" && iOpt >= 0 ? a[iOpt] : null, lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) / 100 || null : null, // Dhan lists the tick in paise
+      const opt = ins.startsWith("OPT");
+      rows.push({ sec_id: a[iSec], seg, underlying: und, instrument: ins, expiry: exp, strike: opt && iStr >= 0 ? Number(a[iStr]) : null,
+        opt_type: opt && iOpt >= 0 ? a[iOpt] : null, lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) / 100 || null : null, // Dhan lists the tick in paise
         display: iDisp >= 0 ? a[iDisp] : null, synced_at: now });
     }
+    nearestTwo(rows, "OPTSTK");
     for (let i = 0; i < rows.length; i += 500) {
       const { error } = await sb.from("fno_contracts").upsert(rows.slice(i, i + 500));
       if (error) throw new Error(error.message);
@@ -240,6 +251,22 @@ export async function resolveLeg(sb: SupabaseClient, c: Creds, s: Record<string,
   const exch = String(leg.exchange ?? s.exchange ?? "NSE").toUpperCase();
   const instr = String(leg.instrument ?? "").toUpperCase();
   const symbol = String(leg.symbol ?? "").replace(/[1-9]!$/, "").toUpperCase();
+  // An option on a stock or an MCX commodity (6 Nov 2026): the exact listed contract (OPTSTK / OPTFUT in fno_contracts).
+  const optLeg = instr === "OPT" || !!leg.option_type;
+  if (optLeg && (exch === "MCX" || isStock(symbol))) {
+    const mseg = exch === "MCX" ? "MCX_COMM" : "NSE_FNO";
+    const strike = Number(leg.strike_price ?? leg.strike), type = String(leg.option_type ?? "").toUpperCase(), exp = String(leg.expiry_date ?? leg.expiry ?? "").slice(0, 10);
+    if (mseg === "NSE_FNO") {
+      const { data: f } = await sb.from("fno_contracts").select("synced_at").eq("seg", mseg).order("synced_at", { ascending: false }).limit(1);
+      if (!f?.length || Date.now() - Date.parse(f[0].synced_at) > 20 * 3600000) await syncFno(sb, c);
+    }
+    const { data } = await sb.from("fno_contracts").select("sec_id, lot, tick, display").eq("seg", mseg).eq("underlying", symbol || String(s.underlying))
+      .eq("instrument", mseg === "MCX_COMM" ? "OPTFUT" : "OPTSTK").eq("expiry", exp).eq("strike", strike).eq("opt_type", type).limit(1);
+    const k = data?.[0];
+    if (!k) throw new Error(`No ${symbol || s.underlying} ${strike} ${type} option expiring ${exp} in Dhan's list.`);
+    return { sec: String(k.sec_id), seg: mseg, lot: Number(k.lot) || (mseg === "MCX_COMM" ? 1 : Number(s.lot_size) || 1), tick: Number(k.tick) || 0.05,
+      label: String(k.display ?? `${symbol} ${strike} ${type}`), option: true };
+  }
   if (exch === "MCX") {
     const pick = async () => (await sb.from("mcx_contracts").select("sec_id, display, expiry, lot, tick").eq("underlying", symbol || String(s.underlying))
       .gt("expiry", onDate).order("expiry").limit(1)).data?.[0];

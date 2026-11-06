@@ -3,6 +3,7 @@
 // this module looks up the live contract from a table refreshed from Dhan's instrument list once a day.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isCommodity } from "./logic.ts";
+import { nearestTwo } from "./execution.ts";
 
 const STALE_MS = 20 * 3600 * 1000;
 
@@ -21,8 +22,16 @@ export async function syncMcx(sb: SupabaseClient, clientId: string, token: strin
   if ([iSec, iIns, iUnd, iExp].some((i) => i < 0)) throw new Error("Dhan's MCX instrument list has an unexpected format.");
   const now = new Date().toISOString();
   const rows: Record<string, unknown>[] = [];
+  // Options on the futures (6 Nov 2026, Papa): OPTFUT, the two nearest expiries of each commodity, into fno_contracts.
+  const iStr = col("STRIKE_PRICE"), iOpt = col("OPTION_TYPE"), today = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+  const opts: Record<string, unknown>[] = [];
   for (const line of lines.slice(1)) {
     const a = line.split(",");
+    if (a[iIns] === "OPTFUT" && (a[iExp] ?? "").slice(0, 10) >= today && iStr >= 0 && iOpt >= 0) {
+      opts.push({ seg: "MCX_COMM", sec_id: a[iSec], underlying: a[iUnd], instrument: "OPTFUT", expiry: a[iExp].slice(0, 10), strike: Number(a[iStr]), opt_type: a[iOpt],
+        lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) / 100 || null : null, display: a[iDisp] ?? null, synced_at: now });
+      continue;
+    }
     if (a[iIns] !== "FUTCOM" || !/^\d{4}-\d{2}-\d{2}/.test(a[iExp] ?? "")) continue;
     rows.push({ sec_id: a[iSec], underlying: a[iUnd], display: a[iDisp] ?? null, expiry: a[iExp].slice(0, 10), synced_at: now,
       lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) / 100 || null : null }); // Dhan lists the tick in paise
@@ -33,6 +42,11 @@ export async function syncMcx(sb: SupabaseClient, clientId: string, token: strin
     if (error) throw new Error(error.message);
   }
   await sb.from("mcx_contracts").delete().lt("synced_at", now); // drop expired / delisted contracts
+  nearestTwo(opts, "OPTFUT");
+  for (let i = 0; i < opts.length; i += 500) {
+    const { error } = await sb.from("fno_contracts").upsert(opts.slice(i, i + 500));
+    if (error) console.error("mcx options", error.message); // the futures above are what trading needs first
+  }
   return rows.length;
 }
 

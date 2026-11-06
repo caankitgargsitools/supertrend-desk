@@ -373,6 +373,34 @@ await t("breaker: a run that works resets the count; the stop stays until it is 
   db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "z2");
 });
 
+// ---------------- options on a stock / an MCX commodity (6 Nov 2026) ----------------
+await t("stock option entry: the next listed expiry and the listed strike nearest the price; premium from that contract's own price", async () => {
+  const later = (n) => new Date(Date.now() + n * 86400000 + 19800000).toISOString().slice(0, 10), iso = new Date().toISOString(), fno0 = db.fno_contracts;
+  db.fno_contracts = [1460, 1480, 1500, 1520].flatMap((k, i) => [
+    { seg: "NSE_FNO", sec_id: String(91000 + i), underlying: "RELIANCE", instrument: "OPTSTK", expiry: later(18), strike: k, opt_type: "CE", lot: 500, synced_at: iso },
+    { seg: "NSE_FNO", sec_id: String(92000 + i), underlying: "RELIANCE", instrument: "OPTSTK", expiry: later(18), strike: k, opt_type: "PE", lot: 500, synced_at: iso }]);
+  dhan.ltp["91002"] = 31.5; // the 1500 CE
+  const S = add("so1", { live: false, trade_type: "OPTIONS", option_side: "BUY", underlying: "RELIANCE", data_segment: "NSE_EQ", data_security_id: "2885", exchange: "NSE",
+    dhan_symbol: "RELIANCE", lot_size: 500, strike_step: 50, strike_offset: 1, expiry_flag: "MONTH", expiry_weekday: 2, roll_on_expiry: false, risk: null, sizing: null });
+  const e = E.entryLeg(S(), "LONG", 1487, 1, 1), legs = [e.leg].flat(), ns = { ...e.state, position: "LONG" }; delete ns._px;
+  const notes = [e.label];
+  assert.equal(await E.sizeEntry(S(), set, legs, ns, 1487, notes), true);
+  assert.equal(ns.pos_strike, 1500, "nearest listed 1480, one out of the money = 1500 (the 50-step guess would have been 1550)");
+  assert.equal(ns.pos_expiry, later(18)); assert.equal(ns.pos_option_type, "CE");
+  assert.equal(String(legs[0].strike_price), "1500"); assert.equal(legs[0].expiry_date, later(18));
+  assert.equal(ns.pos_entry_prem, 31.5, "the premium is that listed contract's last price");
+  assert.match(notes[0], /Buy RELIANCE 1500 CE/);
+  // nothing listed: no guessing a contract
+  db.fno_contracts = [];
+  const S2 = add("so2", { live: false, trade_type: "OPTIONS", option_side: "BUY", underlying: "CRUDEOIL", data_segment: "MCX_COMM", data_security_id: "CRUDEOIL", exchange: "MCX",
+    dhan_symbol: "CRUDEOIL", lot_size: 100, strike_step: 50, strike_offset: 0, expiry_flag: "MONTH", expiry_weekday: 2, roll_on_expiry: false, risk: null, sizing: null });
+  const e2 = E.entryLeg(S2(), "SHORT", 7900, 1, 1), legs2 = [e2.leg].flat(), ns2 = { ...e2.state, position: "SHORT" }; delete ns2._px;
+  const n2 = [e2.label];
+  assert.equal(await E.sizeEntry(S2(), set, legs2, ns2, 7900, n2), false);
+  assert.match(n2.join(" | "), /no CRUDEOIL PE options listed at Dhan/);
+  db.algo_strategies = db.algo_strategies.filter((x) => !["so1", "so2"].includes(x.id));
+  db.fno_contracts = fno0;
+});
 // ---------------- lots that follow the typical day's move (4 Nov 2026) ----------------
 await t("move sizing: the entry takes target ÷ one lot's typical day, the new lots are saved; inside 20% nothing changes", async () => {
   db.lab_margins = [{ asset: "NIFTY", price: 25000, fut_pct: 0.12, day_move: 0.02 }];

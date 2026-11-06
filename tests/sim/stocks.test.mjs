@@ -110,8 +110,55 @@ await t("Dhan's F&O list: the desk's stock futures are kept (underlying from the
   db.fno_contracts = [];
   globalThis.fetch = async (url) => new Response(String(url).includes("NSE_FNO") ? csv : "SECURITY_ID,INSTRUMENT,UNDERLYING_SYMBOL,SM_EXPIRY_DATE\n");
   const n = await X.syncFno(sb, { client: "c", token: "t" });
-  assert.equal(n, 3);
-  assert.deepEqual(db.fno_contracts.map((r) => [r.underlying, r.instrument, r.lot]).sort(), [["KOTAKBANK", "FUTSTK", 2000], ["NIFTY", "FUTIDX", 65], ["RELIANCE", "FUTSTK", 500]]);
+  assert.equal(n, 4, "stock options are kept too (6 Nov 2026)");
+  assert.deepEqual(db.fno_contracts.map((r) => [r.underlying, r.instrument, r.lot]).sort(), [["KOTAKBANK", "FUTSTK", 2000], ["NIFTY", "FUTIDX", 65], ["RELIANCE", "FUTSTK", 500], ["RELIANCE", "OPTSTK", 500]]);
+  const o = db.fno_contracts.find((r) => r.instrument === "OPTSTK"); assert.equal(o.strike, 1400); assert.equal(o.opt_type, "CE");
+});
+// ---------- options on stocks and MCX (6 Nov 2026, Papa: points 3 and 4) ----------
+await t("options on stocks / MCX: next listed expiry, nearest listed strike, strikes away counted in listed strikes", async () => {
+  await build({ entryPoints: [E + "listedopts.ts"], bundle: true, format: "esm", platform: "node", outfile: "listedopts.mjs", logLevel: "error", plugins: [plug] });
+  const O = await import("./listedopts.mjs");
+  const R = (exp, k, t, sec) => ({ sec_id: sec, seg: "NSE_FNO", expiry: exp, strike: k, opt_type: t, lot: 500 });
+  const rows = [R("2026-11-24", 1460, "CE", "a"), R("2026-11-24", 1480, "CE", "b"), R("2026-11-24", 1500, "CE", "c"), R("2026-11-24", 1520, "CE", "d"),
+    R("2026-11-24", 1480, "PE", "e"), R("2026-11-24", 1460, "PE", "f"), R("2026-12-29", 1500, "CE", "g")];
+  assert.equal(O.pickListed(rows, 1487, 0, "CE", "2026-11-06", false).sec_id, "b", "ATM = nearest listed strike");
+  assert.equal(O.pickListed(rows, 1487, 1, "CE", "2026-11-06", false).strike, 1500, "1 out of the money for a call = next higher");
+  assert.equal(O.pickListed(rows, 1487, 1, "PE", "2026-11-06", false).strike, 1460, "1 out of the money for a put = next lower");
+  assert.equal(O.pickListed(rows, 1487, 9, "CE", "2026-11-06", false).strike, 1520, "never beyond the listed strikes");
+  assert.equal(O.pickListed(rows, 1500, 0, "CE", "2026-11-24", true).expiry, "2026-12-29", "roll: not the series expiring today");
+  assert.equal(O.pickListed(rows, 1500, 0, "CE", "2026-11-24", false).expiry, "2026-11-24");
+  assert.equal(O.pickListed([], 1500, 0, "CE", "2026-11-06", false), null);
+  assert.equal(O.findListed(rows, "2026-11-24", 1500, "CE").sec_id, "c"); assert.equal(O.findListed(rows, "2026-11-24", 1500, "PE"), null);
+  assert.ok(O.isListedOpt({ data_segment: "NSE_EQ" }) && O.isListedOpt({ data_segment: "MCX_COMM" }) && !O.isListedOpt({ data_segment: "IDX_I" }));
+});
+await t("options on stocks / MCX: two nearest expiries kept; orders go to the exact OPTSTK / OPTFUT contract", async () => {
+  const X = await import("./exec.mjs");
+  const keep = [{ instrument: "OPTSTK", underlying: "SBIN", expiry: "2026-11-24" }, { instrument: "OPTSTK", underlying: "SBIN", expiry: "2026-12-29" }, { instrument: "OPTSTK", underlying: "SBIN", expiry: "2027-01-26" }, { instrument: "FUTSTK", underlying: "SBIN", expiry: "2027-01-26" }];
+  X.nearestTwo(keep, "OPTSTK");
+  assert.deepEqual(keep.map((r) => r.instrument + r.expiry), ["OPTSTK2026-11-24", "OPTSTK2026-12-29", "FUTSTK2027-01-26"]);
+  const iso = new Date().toISOString(), today = new Date(Date.now() + 19800000).toISOString().slice(0, 10), later = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  db.fno_contracts = [
+    { seg: "NSE_FNO", sec_id: "71001", underlying: "RELIANCE", instrument: "OPTSTK", expiry: later(18), strike: 1500, opt_type: "CE", lot: 500, tick: 0.05, display: "RELIANCE 1500 CALL", synced_at: iso },
+    { seg: "MCX_COMM", sec_id: "72001", underlying: "CRUDEOIL", instrument: "OPTFUT", expiry: later(11), strike: 7900, opt_type: "PE", lot: 1, tick: 0.1, display: "CRUDEOIL 7900 PUT", synced_at: iso },
+  ];
+  const r = await X.resolveLeg(sb, { client: "c", token: "t" }, { exchange: "NSE", lot_size: 500 }, { exchange: "NSE", symbol: "RELIANCE", instrument: "OPT", option_type: "CE", strike: 1500, expiry: later(18) }, today);
+  assert.equal(r.sec, "71001"); assert.equal(r.seg, "NSE_FNO"); assert.equal(r.option, true); assert.equal(X.brokerQty(r.seg, 2, r.lot), 1000, "NSE: shares");
+  const m = await X.resolveLeg(sb, { client: "c", token: "t" }, { exchange: "MCX", lot_size: 100, underlying: "CRUDEOIL" }, { exchange: "MCX", symbol: "CRUDEOIL", instrument: "OPT", option_type: "PE", strike: 7900, expiry: later(11) }, today);
+  assert.equal(m.sec, "72001"); assert.equal(m.seg, "MCX_COMM"); assert.equal(X.brokerQty(m.seg, 2, m.lot), 2, "MCX: lots");
+  await assert.rejects(X.resolveLeg(sb, { client: "c", token: "t" }, { exchange: "MCX", underlying: "CRUDEOIL" }, { exchange: "MCX", symbol: "CRUDEOIL", instrument: "OPT", option_type: "CE", strike: 7900, expiry: later(11) }, today), /No CRUDEOIL 7900 CE option/);
+});
+await t("Dhan's MCX list: futures to mcx_contracts, options on the futures (two nearest expiries) to fno_contracts", async () => {
+  await build({ entryPoints: [E + "instruments.ts"], bundle: true, format: "esm", platform: "node", outfile: "instr.mjs", logLevel: "error", plugins: [plug] });
+  const I = await import("./instr.mjs");
+  const d = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  const csv = ["SECURITY_ID,INSTRUMENT,UNDERLYING_SYMBOL,DISPLAY_NAME,SM_EXPIRY_DATE,STRIKE_PRICE,OPTION_TYPE,LOT_SIZE,TICK_SIZE",
+    `81001,FUTCOM,CRUDEOIL,CRUDEOIL NOV FUT,${d(13)},-0.01,XX,1,100`,
+    `81002,OPTFUT,CRUDEOIL,CRUDEOIL 7900 CALL,${d(11)},7900,CE,1,10`, `81003,OPTFUT,CRUDEOIL,CRUDEOIL 7900 PUT,${d(11)},7900,PE,1,10`,
+    `81004,OPTFUT,CRUDEOIL,CRUDEOIL 7900 CALL DEC,${d(40)},7900,CE,1,10`, `81005,OPTFUT,CRUDEOIL,CRUDEOIL 7900 CALL JAN,${d(70)},7900,CE,1,10`].join("\n");
+  db.mcx_contracts = []; db.fno_contracts = [];
+  globalThis.fetch = async () => new Response(csv);
+  assert.equal(await I.syncMcx(sb, "c", "t"), 1, "one futures contract");
+  assert.deepEqual(db.fno_contracts.map((r) => [r.sec_id, r.instrument, r.expiry === d(70)]).sort(), [["81002", "OPTFUT", false], ["81003", "OPTFUT", false], ["81004", "OPTFUT", false]], "January's dropped: two nearest expiries");
 });
 await t("the lab's candle download for a stock finds Kotak's 5:1 split in Dhan's raw candles; reads come back smooth; generated strategies are stock futures", async () => {
   const L = await import("./lab.mjs");

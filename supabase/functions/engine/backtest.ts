@@ -563,7 +563,10 @@ export async function priceBatch(
       if (rows) { m = groupByDay(rows.map((r) => { const q = ist(r.t); return { ...r, day: q.date, min: q.min }; })); cache.set(key, m); }
     }
     if (!m) {
-      const get = (from: string, to: string) => dhan.rolling({ sec: s.data_security_id, segment: optionsSegment(s), interval: 5, code, k, type, from, to, flag: s.expiry_flag === "MONTH" ? "MONTH" : "WEEK" });
+      // Stock options (6 Nov 2026): Dhan's expired-options history as OPTSTK on the share's id. MCX options have none.
+      if (isCommodity(String(s.data_segment))) throw new Error("MCX options can't be backtested: Dhan keeps no history of expired MCX options. Run it on paper to judge it.");
+      const get = (from: string, to: string) => dhan.rolling({ sec: s.data_security_id, segment: optionsSegment(s), interval: 5, code, k, type, from, to, flag: s.expiry_flag === "MONTH" ? "MONTH" : "WEEK",
+        instrument: String(s.data_segment) === "NSE_EQ" ? "OPTSTK" : "OPTIDX" });
       let rows: OptBar[];
       try { rows = await get(ws, addDays(ws, 30)); }
       catch (e) {
