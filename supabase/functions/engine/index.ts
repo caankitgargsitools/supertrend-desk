@@ -15,7 +15,7 @@ import { dataSecurity, syncMcx } from "./instruments.ts";
 import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
 import { effectiveStop, hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
-import { fromCol, LAB_ASSETS, labNext, labOptStep, labReverdict, labStart, labStep, loadCryptoAssets, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
+import { fromCol, LAB_ASSETS, labNext, labOptStep, labReverdict, labStart, labStep, loadCryptoAssets, pagedRows, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
 import { runCombos } from "./combos.ts";
 import { contractsFor, CRYPTO, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaCancel, deltaOrderChecked, deltaOrderState, deltaPositions, deltaStop, deltaStopMove, niceLot } from "./crypto.ts";
 import {
@@ -112,6 +112,11 @@ function dhanFor(set: Settings): Dhan {
 }
 
 async function saveChart(s: Strategy, bars: ChartBar[], st: number[], trend: number[]) {
+  // Rewritten only when a bar closed (or every 5 minutes for the bar in progress): the same chart used to be written
+  // every tick for every strategy (394 k rewrites of a 10 KB blob, 6 Nov 2026 audit).
+  const lastT = bars.at(-1)?.t ?? 0, prev = chartLast.get(s.id);
+  if (prev && prev.t === lastT && Date.now() - prev.at < 300000) return;
+  chartLast.set(s.id, { t: lastT, at: Date.now() });
   const from = Math.max(0, bars.length - CHART_BARS);
   const chart = bars.slice(from).map((b, k) => {
     const i = from + k;
@@ -507,10 +512,10 @@ async function bookPnl(s: Strategy, set: Settings, update: Record<string, unknow
   const net = Math.trunc(gross - costs);
   const contract = opt ? `${s.pos_option_side === "SELL" ? "Sell " : ""}${s.dhan_symbol} ${s.pos_strike} ${s.pos_option_type} (${s.pos_expiry})` : `${s.futures_symbol} ${s.position === "LONG" ? "long" : "short"}`;
   const entryAt = s.pos_entry_date ? `${s.pos_entry_date}` : null;
-  await sb.from("algo_trades").insert({
+  await must(() => sb.from("algo_trades").insert({
     strategy_id: s.id, user_id: s.owner_id ?? null, broker_ref: brokerRef(s), mode: s.live ? "LIVE" : "PAPER", entry_day: entryAt, exit_at: new Date().toISOString(), side: s.position, contract,
     lots: lotsOf(s), units, entry_px: +inPx.toFixed(2), exit_px: +outPx!.toFixed(2), gross: Math.trunc(gross), costs: Math.trunc(costs), net, exit_why: why.slice(0, 200), ...ledgerTag(s),
-  });
+  }), "ledger row");
   if (r?.max_day_loss) {
     const today = todayIst();
     const base = String(s.day_pnl_date) === today ? Number(s.day_pnl) || 0 : 0;
@@ -531,11 +536,11 @@ async function bookMulti(s: Strategy, set: Settings, update: Record<string, unkn
     costs += tradeCharges({ from: "", to: "", capital: 0, brokerage: 20, charges: ratesFor(s), near_code: 1 }, l.opt !== "FUT", (sg === 1 ? a : b) * u, (sg === 1 ? b : a) * u).total;
   }
   const net = Math.trunc(gross - costs), inNet = netPrem(legs, legs.map((l) => Number(l.px))), outNet = netPrem(legs, px);
-  await sb.from("algo_trades").insert({
+  await must(() => sb.from("algo_trades").insert({
     strategy_id: s.id, user_id: s.owner_id ?? null, broker_ref: brokerRef(s), mode: s.live ? "LIVE" : "PAPER", entry_day: s.pos_entry_date ?? null, exit_at: new Date().toISOString(), side: s.position,
     contract: `${structName(structOf(s)!)}: ${legs.map((l) => mlegText(s, l)).join(" · ")}`.slice(0, 300), lots: lotsOf(s), units,
     entry_px: +inNet.toFixed(2), exit_px: +outNet.toFixed(2), gross: Math.trunc(gross), costs: Math.trunc(costs), net, exit_why: why.slice(0, 200), ...ledgerTag(s),
-  });
+  }), "ledger row (structure)");
   const r = riskOf(s);
   if (r?.max_day_loss) {
     const today = todayIst();
@@ -594,14 +599,14 @@ async function riskExitNow(s: Strategy, set: Settings, pr: PosRisk, hit: { px: n
   const ok = await sendOrders(s, set, event, asArr(exitLeg(s, 1)), `${hit.why}${pr.basis === "PREMIUM" ? " (premium)" : ""}: ${exitLabel(s)}`, { t: hit.t, c: under });
   if (!ok) {
     await exitFailed(s, update, hit.why, "the stop-loss exit didn't go");
-    await sb.from("algo_strategies").update(update).eq("id", s.id);
+    await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "exit retry state");
     return { ...s, ...update };
   }
   const crFill = s.live && isCrypto(String(s.data_segment)) ? deltaFill.exit : null;
   const out = await bookPnl(s, set, update, crFill ?? under, hit.why, pr.basis === "PREMIUM" ? hit.px : undefined);
   await saveFills([fillOf(s, "Exit", out ?? (s.trade_type === "OPTIONS" ? null : hit.px))]);
   Object.assign(update, FLAT_STATE);
-  await sb.from("algo_strategies").update(update).eq("id", s.id);
+  await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "position after the stop");
   return { ...s, ...update };
 }
 
@@ -656,13 +661,28 @@ async function sendDelta(s: Strategy, set: Settings, event: string, legs: Record
         try {
           const st = await deltaOrderState(sb, set.user_id, pb.stopId);
           if (st.state === "closed" && st.unfilled === 0) { stopClosed = true; deltaFill.exit = st.avg; out.push(`already closed by the stop order at Delta${st.avg ? ` at ${st.avg}` : ""}`); }
-          else await deltaCancel(sb, set.user_id, String(pb.symbol ?? pb.legs[0]?.sec), pb.stopId).catch(() => {});
+          else {
+            // The stop must really be gone before the exit goes — one filling after the exit opens a position the
+            // other way (Dhan got this check on 4 Nov, Delta on 6 Nov 2026).
+            try { await deltaCancel(sb, set.user_id, String(pb.symbol ?? pb.legs[0]?.sec), pb.stopId); }
+            catch (e) {
+              const again = await deltaOrderState(sb, set.user_id, pb.stopId).catch(() => null);
+              if (again?.state === "closed" && again.unfilled === 0) { stopClosed = true; deltaFill.exit = again.avg; out.push(`already closed by the stop order at Delta${again.avg ? ` at ${again.avg}` : ""}`); }
+              else if (again?.state !== "cancelled") {
+                const msg = e instanceof Error ? e.message : String(e);
+                await logSignal(s, event, description, candle, "FAILED", payload, `Couldn't cancel the stop order ${pb.stopId} at Delta Exchange (${msg.slice(0, 160)}); the exit waits for it.`);
+                await alert(s, "Stop order couldn't be cancelled", `Before the exit the desk couldn't cancel the stop order at Delta Exchange (${msg.slice(0, 160)}). Nothing was sent; the desk tries again in a minute.`, `stopcancel-${s.id}`);
+                return false;
+              }
+            }
+          }
           await sb.from("live_orders").update({ state: stopClosed ? "filled" : "cancelled", avg_px: stopClosed ? st.avg : null, done_at: nowIso(), note: stopClosed ? "filled (desk exit came after)" : "cancelled before the desk's exit" })
             .eq("broker_order_id", pb.stopId).eq("state", "resting");
         } catch (e) { out.push(`stop order check failed: ${e instanceof Error ? e.message : e}`); }
       }
       status = "SENT";
       let opened: PosBroker | null = null;
+      let partExit: { symbol: string; size: number; filled: number; avg: number; id: string } | null = null;
       // Delta holds one net position per coin: when another live strategy of the account holds the same coin (one long,
       // one short), a reduce-only exit would be refused (there may be nothing to reduce). Then the exit goes as a plain
       // order for this strategy's own part, after checking that part is really there (31 Oct 2026).
@@ -690,7 +710,7 @@ async function sendDelta(s: Strategy, set: Settings, event: string, legs: Record
           const st = await deltaOrderChecked(sb, set.user_id, { symbol: String(o.symbol), size: Number(o.size), side: o.side as "buy" | "sell", reduceOnly });
           const filled = st.size - st.unfilled;
           out.push(`${o.side} ${o.size} ${o.symbol}: order ${st.id || "?"} ${st.state}${st.avg ? ` filled at ${st.avg}` : ""}${st.unfilled ? `, ${st.unfilled} unfilled` : ""}`);
-          if (o.reduce_only) deltaFill.exit = st.avg ?? deltaFill.exit;
+          if (o.reduce_only) { deltaFill.exit = st.avg ?? deltaFill.exit; if (filled > 0 && st.unfilled > 0) partExit = { symbol: String(o.symbol), size: Number(o.size), filled, avg: Number(st.avg) || 0, id: String(st.id ?? "") }; }
           else {
             deltaFill.entry = st.avg;
             if (filled > 0) opened = { broker: "DELTA", symbol: String(o.symbol), legs: [{ sec: String(o.symbol), seg: "DELTA", qty: (o.side === "buy" ? 1 : -1) * filled }],
@@ -703,8 +723,18 @@ async function sendDelta(s: Strategy, set: Settings, event: string, legs: Record
         }
       }
       if (opened) opened.step = stepFor(Number(opened.fill) || 0, opened.tick, false);
+      // An exit that filled only in part (6 Nov 2026 audit): that part is booked at Delta's price and the position
+      // shrinks to the rest, so the retry closes only what is still open instead of the whole quantity again.
+      if (partExit && status === "FAILED" && partExit.avg > 0 && s.position !== "FLAT") {
+        const perLot = contractsFor(partExit.symbol, Number(s.lot_size), 1) || 1;
+        const upd = await bookPart(s, set, { seg: "DELTA", sec: partExit.symbol, lot: perLot, option: false, id: partExit.id }, partExit.filled, partExit.size, partExit.avg,
+          `${description.split(" | ")[0]} — part closed at Delta before the rest failed`);
+        await must(() => sb.from("algo_strategies").update(upd).eq("id", s.id), "part exit");
+        Object.assign(s, upd); // the caller's retry works from the smaller position
+        out.push(`${partExit.filled} of ${partExit.size} closed and booked; ${partExit.size - partExit.filled} still open`);
+      }
       // The position as Delta holds it (read by the stop order and the 5-minute check); a closed one has none.
-      if (opened || payload.orders.some((o) => o.reduce_only)) await sb.from("algo_strategies").update({ pos_broker: opened }).eq("id", s.id);
+      if (opened || (payload.orders.some((o) => o.reduce_only) && !(partExit && status === "FAILED"))) await must(() => sb.from("algo_strategies").update({ pos_broker: opened }).eq("id", s.id), "Delta position record");
       response = out.join(" | ").slice(0, 1000);
     }
   }
@@ -852,7 +882,18 @@ async function claimSignal(s: Strategy, event: string, candle: Candle): Promise<
     close: candle.c ?? null, lag_ms: tickT0 ? Date.now() - tickT0 : null,
   }).select("id").single();
   if (error) {
-    if (String((error as { code?: string }).code) === "23505" || /duplicate key|once_per_candle/i.test(error.message)) return false;
+    if (String((error as { code?: string }).code) === "23505" || /duplicate key|once_per_candle/i.test(error.message)) {
+      // A claim left behind by a worker that died between claiming and sending (CPU limit, a restart) must not block
+      // this candle for good — for a square-off the candle is the same every minute (6 Nov 2026 audit): after two
+      // minutes a claim still "sending" is taken over.
+      const { data: old } = await sb.from("algo_signals").select("id, status, created_at").eq("strategy_id", s.id).eq("event", event).eq("mode", s.live ? "LIVE" : "PAPER")
+        .eq("candle_time", new Date(candle.t * 1000).toISOString()).maybeSingle();
+      if (old?.status === "PENDING" && Date.now() - Date.parse(old.created_at) > 120000) {
+        const { data: took } = await sb.from("algo_signals").update({ description: "sending… (taken over from a run that never finished)", created_at: nowIso() }).eq("id", old.id).eq("status", "PENDING").select("id");
+        if (took?.length) { claimed = { id: Number(old.id), sid: s.id }; return true; }
+      }
+      return false;
+    }
     return true; // any other trouble writing the log must not stop a real exit or entry
   }
   claimed = { id: Number(data!.id), sid: s.id };
@@ -869,6 +910,26 @@ function actLocked<T>(fn: () => Promise<T>): Promise<T> {
   const run = actChain.then(fn, fn);
   actChain = run.then(() => {}, () => {});
   return run;
+}
+/**
+ * A database write on the order / position path has to succeed (6 Nov 2026 audit): one that failed quietly left the
+ * desk's record and the broker apart (a stop order placed twice, a position re-entered, a ledger row missing). Tried
+ * three times; then it throws, which the caller turns into last_error, the breaker and an alert.
+ */
+async function must<T extends { error: { message: string } | null }>(write: () => PromiseLike<T>, what: string): Promise<T> {
+  let last = "";
+  for (let i = 0; i < 3; i++) {
+    const r = await write();
+    if (!r.error) return r;
+    last = r.error.message;
+    await new Promise((res) => setTimeout(res, 300 * (i + 1)));
+  }
+  throw new Error(`Database write failed (${what}): ${last}`);
+}
+/** The engine calling itself for the next instalment of a long job (audit, kill rule, ideas, lab). */
+async function selfCall(body: Record<string, unknown>) {
+  const { data: sec } = await sb.from("engine_secret").select("secret").single();
+  await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/engine`, { method: "POST", headers: { "Content-Type": "application/json", "x-engine-secret": sec!.secret }, body: JSON.stringify(body) });
 }
 /** Start of the current tick, rounded down to the minute (when the candles closed); for the decision delay. */
 let tickT0: number | null = null;
@@ -889,6 +950,16 @@ const finish = (s: Strategy, set: Settings, update: Record<string, unknown>, leg
   actLocked(() => finishNow(s, set, update, legs, event, notes, newState, candle, atrNow));
 async function finishNow(s: Strategy, set: Settings, update: Record<string, unknown>, legs: Record<string, unknown>[], event: string, notes: string[], newState: Record<string, unknown>, candle: Candle, atrNow = 0) {
   if (legs.length) {
+    // The position may have changed since this tick read the row (the per-second stop watcher exits under this same
+    // lock, a partly filled entry shrinks it): decide on what the row says now, not on a copy up to a minute old
+    // (6 Nov 2026 audit — the old copy booked a second exit or re-entered on top of a position already closed).
+    const { data: cur } = await sb.from("algo_strategies").select("position, exec_state, pos_qty, pos_lots, pos_broker, pos_entry_px, pos_entry_prem, pos_risk, pos_legs, pos_margin, day_pnl, day_pnl_date").eq("id", s.id).maybeSingle();
+    if (cur && (cur.position !== s.position || (cur.exec_state && cur.exec_state !== s.exec_state))) {
+      await logSignal(s, "INFO", `Skipped: the position changed while this candle was being worked (now ${cur.position}${cur.exec_state ? `, ${cur.exec_state}` : ""}); nothing sent for ${event}.`, candle);
+      await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "indicator state");
+      return;
+    }
+    if (cur) s = { ...s, ...cur };
     const entryPx = newState._px as number | undefined;
     delete newState._px;
     const entering = (newState.position === "LONG" || newState.position === "SHORT") && entryPx !== undefined;
@@ -897,7 +968,7 @@ async function finishNow(s: Strategy, set: Settings, update: Record<string, unkn
     if (entering && (s._block || !(await sizeEntry(s, set, legs, newState, entryPx!, notes)))) {
       // Not enough capital: drop the entry; an exit in the same signal still goes out.
       legs.pop();
-      if (!legs.length) { await logSignal(s, "INFO", notes.join(" | "), candle); await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
+      if (!legs.length) { await logSignal(s, "INFO", notes.join(" | "), candle); await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "indicator state"); return; }
       newState = { ...FLAT_STATE }; event = "EXIT";
     } else if (entering) await armRisk(s, set, newState, entryPx!, atrNow, notes);
     // A second run that sees the same candle again (a slow position update) sends nothing and changes nothing.
@@ -919,7 +990,7 @@ async function finishNow(s: Strategy, set: Settings, update: Record<string, unkn
   } else if (event === "INFO") {
     await logSignal(s, event, notes.join(" "), candle);
   }
-  await sb.from("algo_strategies").update(update).eq("id", s.id);
+  await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), legs.length ? "position after the signal" : "strategy state");
 }
 
 async function processFlip(s: Strategy, set: Settings, action: string) {
@@ -1511,9 +1582,13 @@ async function chainBacktest(id: number) {
  * normal range (under the worst 1% after 10 trades, the worst 5% after 20), new trades stop and the owner is told.
  * After "Allow new trades again" it is judged only on the trades made since.
  */
-async function killCheck() {
-  const { data: rows } = await sb.from("algo_strategies").select("id, owner_id, name, lab_id, lots, kill_at, kill_override_trades").eq("active", true).eq("archived", false).not("lab_id", "is", null).is("kill_at", null);
-  for (const s of rows ?? []) {
+async function killCheck(offset = 0, perCall = 3) {
+  // Three strategies per call (each reads a whole backtest trade list), the rest chain on — a single call used to read
+  // every one before the self-check wrote its first row, and the 2-second CPU limit killed both (6 Nov 2026 audit).
+  const { data: all } = await sb.from("algo_strategies").select("id, owner_id, name, lab_id, lots, kill_at, kill_override_trades").eq("active", true).eq("archived", false).not("lab_id", "is", null).is("kill_at", null).order("id");
+  const rows = (all ?? []).slice(offset, offset + perCall);
+  if ((all ?? []).length > offset + perCall) await selfCall({ action: "kill", offset: offset + perCall });
+  for (const s of rows) {
     const { data: lr } = await sb.from("lab_results").select("config, trades_long").eq("id", s.lab_id).maybeSingle();
     const bt = ((lr?.trades_long?.n ?? []) as number[]).map(Number), btLots = Number(lr?.config?.lots) || 1;
     const { data: tr } = await sb.from("algo_trades").select("net, lots, exit_at").eq("strategy_id", s.id).eq("hidden", false).order("exit_at");
@@ -1531,7 +1606,6 @@ async function killCheck() {
 }
 async function runAudit(batch: string, offset: number) {
   const today = ist(Date.now() / 1000).date, days = 30;
-  if (!offset) await killCheck().catch((e) => console.error("kill", e));
   const { data: tr } = await sb.from("algo_trades").select("strategy_id, mode").eq("hidden", false).gte("entry_day", addDays(today, -days));
   // Also every running strategy without trades in the window (checked for trades the desk should have taken).
   const { data: run } = await sb.from("algo_strategies").select("id, live").eq("active", true).eq("archived", false).eq("strategy_kind", "RULES");
@@ -1541,7 +1615,8 @@ async function runAudit(batch: string, offset: number) {
   const creds = credsOf(await adminAccount(sb));
   const t0 = Date.now();
   let i = offset;
-  for (; i < pairs.length && (i === offset || Date.now() - t0 < 20000) && i < offset + 2; i++) {
+  // One strategy per call: a replay is a cold gunzip + parse of years of candles, close to the CPU limit by itself.
+  for (; i < pairs.length && (i === offset || Date.now() - t0 < 20000) && i < offset + 1; i++) {
     const [sid, mode] = pairs[i].split("|");
     const { data: s } = await sb.from("algo_strategies").select("*").eq("id", sid).maybeSingle();
     if (!s) continue;
@@ -1553,10 +1628,11 @@ async function runAudit(batch: string, offset: number) {
     }
   }
   if (i < pairs.length) {
-    const { data: sec } = await sb.from("engine_secret").select("secret").single();
-    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/engine`, { method: "POST", headers: { "Content-Type": "application/json", "x-engine-secret": sec!.secret }, body: JSON.stringify({ action: "audit", batch, offset: i }) });
+    await selfCall({ action: "audit", batch, offset: i });
     return { batch, done: i, of: pairs.length };
   }
+  // All replayed: the kill rule runs after, in its own calls.
+  await selfCall({ action: "kill", offset: 0 }).catch((e) => console.error("kill", e));
   // All done: one note per owner with the strategies that showed a gap.
   const { data: rows } = await sb.from("desk_audit").select("user_id, name, mode, verdict, issues, missed, extra").eq("batch", batch);
   const byUser = new Map<string, typeof rows>();
@@ -1605,8 +1681,7 @@ async function pricesLoop() {
     const t = Date.now();
     try {
       if (Date.now() - rowsAt > 5000) {
-        const { data: r0 } = await sb.from("algo_strategies").select(PRICE_COLS).eq("archived", false).or("active.eq.true,position.neq.FLAT");
-        rows = (r0 ?? []) as Strategy[]; rowsAt = Date.now();
+        rows = await pagedRows<Strategy>((a, z) => sb.from("algo_strategies").select(PRICE_COLS).eq("archived", false).or("active.eq.true,position.neq.FLAT").order("id").range(a, z)); rowsAt = Date.now();
         await priceHolidays(ist(Date.now() / 1000).date);
         // Nothing open and no Dhan strategy inside its trading hours: no need to price.
         if (!rows.some((x) => x.position !== "FLAT" || (x.active && !isCrypto(String(x.data_segment)) && inSessionNow(String(x.data_segment))))) break;
@@ -1639,11 +1714,24 @@ function inSessionNow(seg: string) {
   return nowI.min >= sess.open && nowI.min <= sess.close;
 }
 let tickerTicks = 0; const tickerRefs: { at: number; rows: { seg: string; sec: string }[] } = { at: 0, rows: [] };
+const priceAcc = { at: 0, map: new Map<string, Account | null>() };
+let adminMemo: { at: number; acc: Account | null } | null = null;
+/** The admin's account for the quotes strip, read once a minute. */
+async function adminCached(): Promise<Account | null> {
+  if (!adminMemo || Date.now() - adminMemo.at > 60000) adminMemo = { at: Date.now(), acc: await adminAccount(sb).catch(() => null) };
+  return adminMemo.acc;
+}
+/** The last price written per open position (live_marks is written only when it moves, or every 15 s). */
+const lastMarkPx = new Map<string, { ltp: number; at: number }>();
+/** The last chart bar written per strategy (algo_chart is written on a new bar, or every 5 minutes). */
+const chartLast = new Map<string, { t: number; at: number }>();
 async function pricesTick(rows: Strategy[]) {
   const nowI = ist(Date.now() / 1000), today = nowI.date;
   const at = nowIso(); // the round's start: of two overlapping rounds, the later-started one's prices are the newer
   await priceHolidays(today);
-  const accounts = new Map<string, Account | null>();
+  // Accounts are read once a minute, not once a second (6 Nov 2026 audit: 2.7 M reads of broker_accounts a month).
+  if (Date.now() - priceAcc.at > 60000) { priceAcc.map = new Map(); priceAcc.at = Date.now(); }
+  const accounts = priceAcc.map;
   const bySeg = new Map<string, Record<string, string[]>>(); // owner -> seg -> secs
   const coins = new Set<string>();
   const want = new Map<string, { s: Strategy; key: string }>();
@@ -1671,10 +1759,10 @@ async function pricesTick(rows: Strategy[]) {
   }));
   // Live orders being worked: their own contracts (the order manager chases them with these prices).
   // The Desk's quotes strip: the fixed indices, in the admin's batched request (no extra Dhan call).
-  if (inSessionNow("IDX_I")) { const adm = await adminAccount(sb).catch(() => null); if (adm?.dhan_access_token) for (const f of TICKER_FIXED) add(adm.user_id, f.seg, f.sec); }
+  if (inSessionNow("IDX_I")) { const adm = await adminCached(); if (adm?.dhan_access_token) for (const f of TICKER_FIXED) add(adm.user_id, f.seg, f.sec); }
   // The rest of the strip (every stock, MCX commodity and coin): every 5th round, in the same batched requests.
   if ((tickerTicks = (tickerTicks + 1) % 5) === 0) {
-    const adm = await adminAccount(sb).catch(() => null);
+    const adm = await adminCached();
     if (!tickerRefs.at || Date.now() - tickerRefs.at > 300000) { const { data } = await sb.from("ticker_ref").select("seg, sec"); tickerRefs.rows = data ?? []; tickerRefs.at = Date.now(); }
     for (const r of tickerRefs.rows) {
       if (r.seg === "DELTA") coins.add(String(r.sec));
@@ -1713,7 +1801,15 @@ async function pricesTick(rows: Strategy[]) {
     if (s0.position === "FLAT" || s0.trade_type === "OPTIONS" || isMulti(s0)) continue;
     const p = px.get(key); if (!(Number(p) > 0)) continue;
     // A stock future on its split / bonus ex-date is adjusted before its stop is looked at.
-    const s = await stockExDate(s0, p!).catch((e) => { console.error("ex-date", e); return s0; });
+    let s: Strategy;
+    try { s = await stockExDate(s0, p!); }
+    catch (e) {
+      // Not knowing whether today is an ex-date, the price can't be trusted against the stop: this strategy sits out
+      // this second (the pre-split stop would meet the post-split price), and the owner is told once a day.
+      console.error("ex-date", e);
+      await alert(s0, "Split check failed", `The desk couldn't check ${s0.underlying} for a split / bonus today (${e instanceof Error ? e.message : e}); its stop isn't judged on live prices until the check works.`, `exdate-${s0.id}-${today}`).catch(() => {});
+      continue;
+    }
     const pr = (s.pos_risk ?? {}) as PosRisk;
     const inPx = Number(s.pos_entry_px ?? pr.entry ?? 0), dir = s.position === "LONG" ? 1 : -1;
     const upnl = inPx > 0 ? Math.trunc((p! - inPx) * dir * unitsOf(s)) : null;
@@ -1722,7 +1818,14 @@ async function pricesTick(rows: Strategy[]) {
     // The strategy row itself (lists, capital, alerts) every 10 seconds.
     if (Date.now() - (rowWriteAt.get(s.id) ?? (s.pos_ltp_at ? Date.parse(s.pos_ltp_at) : 0)) > 10000) rowWriteAt.set(s.id, Date.now()), slow.push(sb.from("algo_strategies").update({ pos_ltp: +p!.toFixed(2), pos_upnl: upnl, pos_ltp_at: at }).eq("id", s.id).eq("position", s.position));
   }
-  if (marks.length && at >= lastMarkAt) { lastMarkAt = at; await sb.from("live_marks").upsert(marks); }
+  // Realtime decodes every write of live_marks (18% of all database time, 6 Nov 2026 audit): unchanged prices are
+  // written only every 15 seconds, so the row never looks stale but a flat market costs nothing.
+  const moved = marks.filter((m) => { const l = lastMarkPx.get(m.strategy_id); return !l || l.ltp !== m.ltp || Date.now() - l.at > 15000; });
+  if (moved.length && at >= lastMarkAt) {
+    lastMarkAt = at;
+    const { error } = await sb.from("live_marks").upsert(moved);
+    if (!error) for (const m of moved) lastMarkPx.set(m.strategy_id, { ltp: m.ltp, at: Date.now() });
+  }
   await Promise.all(checks);
   await Promise.all(slow);
   return { prices: px.size, marks: marks.length };
@@ -1776,8 +1879,12 @@ async function stockActionToday(s: Strategy, px: number, today: string, set0?: S
   // nightly download re-judges it from the raw candles.
   if (raw) try { rawI = (await raw.intraday(String(s.data_security_id), "NSE_EQ", "EQUITY", 5, `${addDays(today, -6)} 09:00:00`, `${addDays(today, -1)} 23:59:00`)).at(-1)?.c ?? null; } catch { rawI = null; }
   const jump = (ref: number | null) => ref == null || splitFactor(px / ref) === f;
-  await sb.from("stock_actions").upsert({ asset: key, day: today, factor: f, in_daily: jump(rawD), in_intraday: jump(rawI), seen_at: nowIso() }, { onConflict: "asset,day" });
+  await must(() => sb.from("stock_actions").upsert({ asset: key, day: today, factor: f, in_daily: jump(rawD), in_intraday: jump(rawI), seen_at: nowIso() }, { onConflict: "asset,day" }), "stock action");
   await loadStockActions(sb, 0);
+  // Candles kept in memory were adjusted with the actions known when they were fetched: dropped, so the next read sees
+  // the whole series at today's basis (6 Nov 2026 audit — a 50% step inside the series flipped every indicator).
+  for (const k of [...SPAN_CACHE.keys()]) if (k.startsWith(`${s.data_security_id}|`)) SPAN_CACHE.delete(k);
+  for (const k of [...DAILY_CACHE.keys()]) if (k.startsWith(`${s.data_security_id}|`)) DAILY_CACHE.delete(k);
   stockDayMemo.set(mk, f);
   return f;
 }
@@ -2284,7 +2391,7 @@ async function queueDhan(s: Strategy, set: Settings, event: string, legs: Record
   rows = rows.map((r) => ({ ...r, batch, signal_id: lastSignalId, state: r.state ?? "queued" }));
   const { data: ins, error } = await sb.from("live_orders").insert(rows).select("*");
   if (error) { console.error("live_orders", error); lastLiveBatch = null; return false; }
-  await sb.from("algo_strategies").update({ exec_state: "working", exec_at: nowIso(), ...(nExit ? { pos_broker: null } : {}) }).eq("id", s.id);
+  await must(() => sb.from("algo_strategies").update({ exec_state: "working", exec_at: nowIso(), ...(nExit ? { pos_broker: null } : {}) }).eq("id", s.id), "order state");
   // The first leg goes straight away (the order manager places the rest, in order, as each fills).
   const first = (ins ?? []).sort((a, b) => a.seq - b.seq).find((r) => r.state === "queued");
   if (first) {
@@ -2372,8 +2479,21 @@ async function placeRow(r: LiveRow, c: Creds): Promise<boolean> {
  */
 async function failRow(r: LiveRow, reason: string): Promise<boolean> {
   if (r.purpose === "exit" && !r.market_retry) {
-    await sb.from("live_orders").update({ market_retry: true, note: `rejected (${reason.slice(0, 120)}); retrying at market`, updated_at: nowIso() }).eq("id", r.id);
     const set = await accountFor(sb, r.user_id, "DHAN");
+    // Part of the exit may have traded before the rest was refused (6 Nov 2026 audit): only the rest goes again.
+    const st = set && r.broker_order_id ? await dhanStatus(credsOf(set), r.broker_order_id).catch(() => null) : null;
+    const done = Math.min(Number(r.qty), Number(st?.filled) || 0);
+    if (st && done >= Number(r.qty)) { await onFilled(r, st); return true; }
+    if (st && done > 0) {
+      await must(() => sb.from("live_orders").update({ state: "filled", avg_px: st.avg ?? null, filled_qty: done, done_at: nowIso(), updated_at: nowIso(),
+        note: `${done} of ${r.qty} filled; the rest (${reason.slice(0, 80)}) goes again at market` }).eq("id", r.id), "part of an exit");
+      const copy: Record<string, unknown> = { ...r, qty: Number(r.qty) - done, market_retry: true, state: "queued", broker_order_id: null, correlation_id: null, limit_px: null, avg_px: null,
+        filled_qty: null, placed_at: null, done_at: null, steps: 0, cross_qty: null, cross_px: null, note: `the rest of order ${r.id}`, updated_at: nowIso() };
+      delete copy.id; delete copy.created_at;
+      const { data: rest } = await must(() => sb.from("live_orders").insert(copy).select("*").single(), "exit remainder");
+      return set ? placeRow(rest as LiveRow, credsOf(set)) : false;
+    }
+    await sb.from("live_orders").update({ market_retry: true, note: `rejected (${reason.slice(0, 120)}); retrying at market`, updated_at: nowIso() }).eq("id", r.id);
     if (set) return placeRow({ ...r, market_retry: true }, credsOf(set));
   }
   // An entry the exchange cancelled or rejected after part of it traded: that part is the position.
@@ -2389,13 +2509,25 @@ async function failRow(r: LiveRow, reason: string): Promise<boolean> {
     const anyFilled = (await sb.from("live_orders").select("id").eq("batch", r.batch).eq("state", "filled").eq("purpose", "entry")).data?.length;
     const upd: Record<string, unknown> = { exec_state: null, active: false };
     if (r.purpose === "exit") {
-      const exitFilled = (await sb.from("live_orders").select("id").eq("batch", r.batch).eq("state", "filled").eq("purpose", "exit")).data?.length;
-      if (r.restore && !exitFilled && s.exec_state === "working") {
-        // Still open at Dhan: the desk holds it again, with its stops; the booked trade was never real.
+      const exRows = (await sb.from("live_orders").select("sec, qty, filled_qty, avg_px, state").eq("batch", r.batch).eq("purpose", "exit")).data ?? [];
+      const filledRows = exRows.filter((x) => x.state === "filled");
+      // One contract closed in part, the rest refused: the part is a real trade, the rest is still open at Dhan.
+      const single = !isMulti(s) && exRows.every((x) => x.sec === r.sec);
+      const partQty = single ? filledRows.reduce((a, x) => a + (Number(x.filled_qty) || Number(x.qty)), 0) : 0;
+      const fullQty = Math.max(0, ...exRows.map((x) => Number(x.qty) || 0));
+      if (r.restore && s.exec_state === "working" && (!filledRows.length || (single && partQty > 0 && partQty < fullQty))) {
+        // Still open at Dhan (all of it, or the rest): the desk holds it again, with its stops; the booked trade was never real.
         const back: Record<string, unknown> = { ...(r.restore as Record<string, unknown>), exec_state: null, pos_ltp_at: null };
         await sb.from("algo_trades").update({ hidden: true, provisional: false, exit_why: `Not executed: Dhan rejected the exit (${reason.slice(0, 80)})` }).eq("order_batch", r.batch).eq("provisional", true);
-        await exitFailed({ ...s, ...back } as Strategy, back, String((back.pos_broker as PosBroker | null)?.exitWhy ?? r.event ?? "exit"), `Dhan rejected the exit for ${r.label} (${reason.slice(0, 120)}), also at market`);
-        await sb.from("algo_strategies").update(back).eq("id", s.id);
+        if (partQty > 0) {
+          const set = await accountFor(sb, r.user_id, "DHAN");
+          const wavg = filledRows.reduce((a, x) => a + Number(x.avg_px) * (Number(x.filled_qty) || Number(x.qty)), 0) / partQty;
+          if (set && wavg > 0) Object.assign(back, await bookPart({ ...s, ...back } as Strategy, set, { seg: r.seg, sec: r.sec, lot: r.lot, option: !!r.option, id: r.broker_order_id },
+            partQty, fullQty, wavg, `${String((back.pos_broker as PosBroker | null)?.exitWhy ?? r.event ?? "exit")} — part closed at Dhan before the rest was rejected`));
+        }
+        await exitFailed({ ...s, ...back } as Strategy, back, String((back.pos_broker as PosBroker | null)?.exitWhy ?? r.event ?? "exit"),
+          `Dhan rejected the exit for ${r.label} (${reason.slice(0, 120)}), also at market${partQty > 0 ? `; ${partQty} of ${fullQty} had already closed` : ""}`);
+        await must(() => sb.from("algo_strategies").update(back).eq("id", s.id), "position put back");
         return false;
       }
       upd.last_error = `Exit order rejected by Dhan (${reason.slice(0, 150)}), also at market. The strategy is paused: close ${r.label} in Dhan.`;
@@ -2463,8 +2595,35 @@ async function partEntry(r: LiveRow, st: BrokerStatus, rest: string) {
     last_error: null,
   };
   if (avg) { if (s.trade_type === "OPTIONS") upd.pos_entry_prem = +Number(avg).toFixed(2); else if (!indexFut) upd.pos_entry_px = +Number(avg).toFixed(2); }
-  await sb.from("algo_strategies").update(upd).eq("id", s.id);
+  await must(() => sb.from("algo_strategies").update(upd).eq("id", s.id), "part entry");
   await alert(s, "Entry filled in part", `${filled} of ${r.qty} of ${r.label} filled at ${avg ?? "?"}; ${rest}. The desk holds the part that filled and places its stop-loss for it.`);
+}
+
+/** Lots a broker quantity stands for (MCX orders are in lots, NSE / BSE in units, Delta in contracts per lot). */
+const lotsOfQty = (seg: string, qty: number, lot: number) => seg === "MCX_COMM" ? qty : qty / (lot || 1);
+/**
+ * Part of an exit traded before the rest of it was refused (6 Nov 2026 audit — the desk used to send the whole quantity
+ * again, over-closing the position and opening one the other way). That part is a real trade at the broker's price, and
+ * the position shrinks to what is still open. Returns the fields to write on the strategy (the caller writes them).
+ */
+async function bookPart(s: Strategy, set: Settings, leg: { seg: string; sec: string; lot: number | null; option: boolean; id: string | null }, filledQty: number, ofQty: number, avg: number, why: string): Promise<Record<string, unknown>> {
+  const pb = s.pos_broker as PosBroker | null;
+  const lotsDone = lotsOfQty(leg.seg, filledQty, Number(leg.lot) || Number(s.lot_size) || 1);
+  const part: Strategy = { ...s, pos_lots: lotsDone, pos_qty: s.qty_mode === "LOTS" ? lotsDone : Math.round(lotsDone * Number(s.lot_size)) };
+  const indexFut = !leg.option && leg.seg !== "MCX_COMM" && leg.seg !== "DELTA";
+  const px = indexFut ? avg - (pb?.offset || 0) : avg; // index futures are booked on the index basis, like their entry
+  const update: Record<string, unknown> = {};
+  lastLiveBatch = null; // this part is final (the broker's own price), not provisional
+  await bookPnl(part, set, update, px, `${why} (${filledQty} of ${ofQty})`.slice(0, 200), s.trade_type === "OPTIONS" ? avg : undefined);
+  await saveFills([{ ...fillOf(part, "Exit", px), broker_px: +Number(avg).toFixed(2), broker_qty: filledQty, broker_ids: [String(leg.id ?? "")], broker_at: nowIso() }]);
+  const left = Math.max(0, Number(s.pos_qty) - Number(part.pos_qty));
+  const legs = (pb?.legs ?? []).map((l) => l.sec === leg.sec ? { ...l, qty: Math.sign(l.qty) * Math.max(0, Math.abs(l.qty) - filledQty) } : l);
+  Object.assign(update, {
+    pos_qty: left, pos_lots: s.qty_mode === "LOTS" ? left : Math.round(left / (Number(s.lot_size) || 1)),
+    pos_margin: s.pos_margin != null && Number(s.pos_qty) > 0 ? Math.trunc(Number(s.pos_margin) * left / Number(s.pos_qty)) : s.pos_margin,
+    pos_broker: pb ? { ...pb, legs } : pb,
+  });
+  return update;
 }
 
 /** After a leg finishes: the next queued leg of the same order goes out; when none are left the strategy is free. */
@@ -2486,7 +2645,7 @@ async function onFilled(r: LiveRow, st: BrokerStatus) {
   const avg = cq ? (exch && exAvg ? +((cq * cp + exch * exAvg) / (cq + exch)).toFixed(4) : cp) : exAvg;
   const total = cq + exch;
   st = { ...st, filled: total, avg };
-  await sb.from("live_orders").update({ state: "filled", avg_px: avg, filled_qty: total, done_at: nowIso(), updated_at: nowIso() }).eq("id", r.id);
+  await must(() => sb.from("live_orders").update({ state: "filled", avg_px: avg, filled_qty: total, done_at: nowIso(), updated_at: nowIso() }).eq("id", r.id), "order filled");
   if (r.signal_id && avg) {
     const { data: g } = await sb.from("algo_signals").select("fills").eq("id", r.signal_id).single();
     const fills = (g?.fills ?? []) as Fill[];
@@ -2507,7 +2666,7 @@ async function onFilled(r: LiveRow, st: BrokerStatus) {
       if (s.trade_type === "OPTIONS") upd.pos_entry_prem = +Number(avg).toFixed(2);
       else if (!indexFut) upd.pos_entry_px = +Number(avg).toFixed(2);
     }
-    await sb.from("algo_strategies").update(upd).eq("id", s.id);
+    await must(() => sb.from("algo_strategies").update(upd).eq("id", s.id), "fill record");
   } else if (avg) await fixLedger(s, r, avg);
   await afterRow(s.id, r.batch);
 }
@@ -2541,7 +2700,12 @@ async function fixLedger(s: Strategy, r: LiveRow, exitAvg: number) {
   } else {
     const e = await entryOf(String(r.sec));
     if (!e?.avg_px) return;
-    inPx = Number(e.avg_px); outPx = exitAvg;
+    // An exit that went in two orders (a part filled before the rest was re-sent at market) is priced on all its fills.
+    const { data: exRows } = await sb.from("live_orders").select("avg_px, filled_qty, qty").eq("batch", r.batch).eq("purpose", "exit").eq("sec", r.sec).eq("state", "filled");
+    const tot = (exRows ?? []).reduce((a, x) => a + (Number(x.filled_qty) || Number(x.qty)), 0);
+    const wavg = tot > 0 && (exRows ?? []).length > 1 && (exRows ?? []).every((x) => Number(x.avg_px) > 0)
+      ? (exRows ?? []).reduce((a, x) => a + Number(x.avg_px) * (Number(x.filled_qty) || Number(x.qty)), 0) / tot : exitAvg;
+    inPx = Number(e.avg_px); outPx = +wavg.toFixed(4);
     const units = Number(t.units), dir = r.side === "SELL" ? 1 : -1; // the exit sells what was bought
     gross = (outPx - inPx) * dir * units;
     costs = tradeCharges(cfg, !!r.option, (dir === 1 ? inPx : outPx) * units, (dir === 1 ? outPx : inPx) * units).total;
@@ -2573,7 +2737,8 @@ async function runOrders(passes = 4) {
         try {
           const set = await accountFor(sb, r.user_id, r.broker, accts);
           if (!set?.dhan_access_token) continue;
-          if (r.state === "resting") { await checkStop(r, set); continue; }
+          // Booking a stop fill goes through the same lock as every other booking (it shares the signal / ledger state).
+          if (r.state === "resting") { await actLocked(() => checkStop(r, set)); continue; }
           // An order matched inside the desk earlier in this pass (crossInside) has moved on: never judge it on old data.
           const { data: fresh } = await sb.from("live_orders").select("state, broker_order_id").eq("id", r.id).maybeSingle();
           if (!fresh || fresh.state !== r.state || fresh.broker_order_id !== r.broker_order_id) continue;
@@ -2744,7 +2909,18 @@ async function syncStop(s: Strategy, set: Settings): Promise<Strategy> {
     next.stopErrAt = nowIso();
     await alert(s, "Stop order not placed", `The stop-loss order at ${pb.broker === "DELTA" ? "Delta Exchange" : "Dhan"} couldn't be ${pb.stopId ? "moved" : "placed"} (${e instanceof Error ? e.message : e}). The desk still watches its own stop every minute.`, `stoperr-${s.id}`);
   }
-  await sb.from("algo_strategies").update({ pos_broker: next }).eq("id", s.id);
+  try { await must(() => sb.from("algo_strategies").update({ pos_broker: next }).eq("id", s.id), "stop order record"); }
+  catch (e) {
+    // The record of the stop just placed couldn't be saved: without it a second stop would go in next minute, so the
+    // new one is taken back and the owner told (6 Nov 2026 audit).
+    if (next.stopId && !pb.stopId) {
+      try { if (pb.broker === "DELTA") await deltaCancel(sb, set.user_id, String(pb.symbol ?? leg.sec), next.stopId); else await dhanCancel(credsOf(set), next.stopId); }
+      catch (e2) { console.error("stop take-back", e2); }
+      await sb.from("live_orders").update({ state: "cancelled", done_at: nowIso(), note: "taken back: its record couldn't be saved" }).eq("broker_order_id", next.stopId).eq("state", "resting");
+    }
+    await alert(s, "Stop order record not saved", `The stop-loss order was placed but the desk couldn't save its record (${e instanceof Error ? e.message : e}), so it was cancelled again (two stops must never rest at once). The desk still watches its own stop and tries again in a minute.`, `stoprec-${s.id}`);
+    throw e;
+  }
   return { ...s, pos_broker: next };
 }
 /** A resting stop order: filled → the desk books the exit at its price; cancelled / rejected by the broker → you are told. */
@@ -2783,7 +2959,7 @@ async function checkStop(r: LiveRow, set: Settings) {
   lastLiveBatch = null;
   await saveFills([{ ...fillOf(s, "Exit", out), broker_px: avg ?? undefined, broker_qty: filled, broker_ids: [String(r.broker_order_id)], broker_at: nowIso() }]);
   Object.assign(update, FLAT_STATE);
-  await sb.from("algo_strategies").update(update).eq("id", s.id);
+  await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "position after the broker stop");
   if (r.broker === "DHAN" && avg) await fixLedger(s, { ...r, created_at: nowIso() }, avg);
 }
 
@@ -2857,6 +3033,10 @@ async function breakerAfterTick(ok: Set<string>, err: Map<string, string>, known
   for (const u of new Set([...ok, ...err.keys()])) {
     const b = known.get(u);
     if (ok.has(u)) { if (b && b.err_ticks) await sb.from("risk_state").update({ err_ticks: 0, updated_at: nowIso() }).eq("user_id", u); continue; }
+    // An account counts as failing only when none of its active strategies last ran cleanly (6 Nov 2026 audit: one
+    // strategy with a bad contract next to quiet 15-minute ones used to stop the whole account's trades).
+    const { data: fine } = await sb.from("algo_strategies").select("id").eq("owner_id", u).eq("active", true).eq("archived", false).is("last_error", null).limit(1);
+    if (fine?.length) continue;
     const msg = String(err.get(u) ?? "").slice(0, 300), n = (b?.err_ticks ?? 0) + 1;
     const halt = n >= BREAKER_TICKS && !b?.halted_at;
     await sb.from("risk_state").upsert({ user_id: u, err_ticks: n, last_error: msg, updated_at: nowIso(),
@@ -2938,11 +3118,11 @@ async function rollFutures(s: Strategy, set: Settings, exp: string) {
     const entryL = asArr(e.leg).map((l) => ({ ...l, _after: exp }));
     const why = `Rolled to the next month before the ${exp} expiry`;
     const ok = await sendOrders(s, set, "ROLL", [...exitL, ...entryL], `${why}: ${exitLabel(s)} → ${e.label} (${next} contract)`, { c: px });
-    if (!ok) { await exitFailed(s, update, why, "the roll's exit didn't go"); await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
+    if (!ok) { await exitFailed(s, update, why, "the roll's exit didn't go"); await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "roll retry state"); return; }
     const out = await bookPnl(s, set, update, px, why);
     await saveFills([fillOf(s, "Exit", out), fillOf({ ...s, ...e.state, position: s.position }, "Entry", px)]);
     Object.assign(update, { pos_entry_px: px, pos_entry_date: todayIst(), pos_expiry: next, pos_ltp: null, pos_ltp_at: null, pos_upnl: null });
-    await sb.from("algo_strategies").update(update).eq("id", s.id);
+    await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "position after the roll");
   });
 }
 /** Tries an exit that failed before (exec_state 'exit_retry') again, once a minute. True when it handled the strategy. */
@@ -2955,7 +3135,7 @@ async function retryExit(s: Strategy, set: Settings): Promise<boolean> {
   const update: Record<string, unknown> = { last_run_at: nowIso() };
   const n = (Number(pb?.exitTries) || 0) + 1;
   await flatten(s, set, update, { c: px ?? (Number(s.pos_ltp) || undefined) }, `Exit retried (attempt ${n} of ${EXIT_TRIES}): ${String(pb?.exitWhy ?? "exit")}`.slice(0, 190), "EXIT");
-  await sb.from("algo_strategies").update(update).eq("id", s.id);
+  await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "position after the exit retry");
   return true;
 }
 /** When an option position is closed on its expiry day (risk.expiry_exit_time, default 14:30 IST). */
@@ -3033,7 +3213,7 @@ Deno.serve(async (req) => {
   if (action === "backtest") {
     if (!body.backtest_id) return Response.json({ error: "backtest_id missing" }, { status: 400 });
     // When a run ends, the next waiting backtest (queued by users or the marketplace) starts.
-    EdgeRuntime.waitUntil(runBacktestJob(Number(body.backtest_id)).finally(async () => { await sb.rpc("kick_backtests"); }));
+    EdgeRuntime.waitUntil(runBacktestJob(Number(body.backtest_id)).finally(async () => { await sb.rpc("kick_backtests"); }).catch((e) => console.error("backtest", e)));
     return Response.json({ accepted: true });
   }
 
@@ -3049,6 +3229,10 @@ Deno.serve(async (req) => {
     const batch = b.batch || `${ist(Date.now() / 1000).date}-${Date.now().toString(36)}`;
     EdgeRuntime.waitUntil(runAudit(batch, Number(b.offset) || 0).catch((e) => console.error("audit", e)));
     return Response.json({ action, accepted: true, batch });
+  }
+  if (action === "kill") {
+    EdgeRuntime.waitUntil(killCheck(Number((body as { offset?: number }).offset) || 0).catch((e) => console.error("kill", e)));
+    return Response.json({ action, accepted: true });
   }
   if (action === "pred_feed") return Response.json({ action, ...(await predFeed(sb, credsOf(await adminAccount(sb)))) });
   if (action === "combos") return Response.json({ action, ...(await runCombos(sb)) });
@@ -3126,7 +3310,7 @@ Deno.serve(async (req) => {
         catch (e) { console.error("crypto candles", k, e); }
       }
       await refreshCryptoMargins(sb, keys);
-    })());
+    })().catch((e) => console.error("crypto candles", e)));
     return Response.json({ action, coins: keys });
   }
   if (action === "token" || action === "token_renew") return Response.json({ action, ...(await tokenCheck(action === "token_renew", body.user_id)) });
@@ -3194,11 +3378,19 @@ Deno.serve(async (req) => {
     const { data: got } = await sb.from("engine_lock").update({ until: new Date(Date.now() + 110000).toISOString() }).eq("name", lockName).lt("until", nowIso()).select("name");
     if (!got?.length) return Response.json({ action, skipped: "previous tick still running" });
   }
-  let q = sb.from("algo_strategies").select("*");
   // Active strategies, and paused ones still holding a position (their stops, exits and square-off keep running).
-  q = body.strategy_id ? q.eq("id", body.strategy_id) : q.or("active.eq.true,position.neq.FLAT").eq("is_master", false);
-  const { data: rows0, error } = await q;
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  // Read in pages: the database answers at most 1,000 rows a request (6 Nov 2026 audit — strategy 1,001 would never tick).
+  const strategyQ = () => { const q0 = sb.from("algo_strategies").select("*"); return body.strategy_id ? q0.eq("id", body.strategy_id) : q0.or("active.eq.true,position.neq.FLAT").eq("is_master", false); };
+  let rows0: Strategy[];
+  try { rows0 = await pagedRows<Strategy>((a, z) => strategyQ().order("id").range(a, z)); }
+  catch (e) { return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 }); }
+  // A lab run whose worker never came back blocks every later run (the one-running index); after an hour without a
+  // lease it is closed as failed (the lab's own watchdog job is paused since the 6 Nov outage).
+  if (action === "tick" && !body.strategy_id) {
+    const { error: we } = await sb.from("lab_runs").update({ status: "failed", error: "stopped: the worker never came back (engine watchdog)", finished_at: nowIso() })
+      .eq("status", "running").lt("lease_until", new Date(Date.now() - 3600000).toISOString());
+    if (we) console.error("lab watchdog", we.message);
+  }
   // Bought strategies run on their publisher's rules.
   const strategies = await withMasters(sb, rows0 ?? []);
 
@@ -3315,7 +3507,7 @@ Deno.serve(async (req) => {
       if (tick && expiryExitDue(s)) {
         const update: Record<string, unknown> = { last_run_at: nowIso() };
         await flatten(s, set, update, { c: Number(s.pos_ltp) || undefined }, `Expiry day: ${s.pos_expiry ?? "a leg"} expires today, closed at ${expiryExitTime(s)}`, "SQUARE_OFF");
-        await sb.from("algo_strategies").update(update).eq("id", s.id);
+        await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "position after the expiry exit");
         results[s.id] = "closed on its expiry day"; okUsers.add(String(s.owner_id)); return;
       }
       // Positional futures roll to the next month on the trading day before expiry (Papa, 4 Nov 2026).
