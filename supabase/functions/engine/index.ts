@@ -3297,7 +3297,8 @@ Deno.serve(async (req) => {
     EdgeRuntime.waitUntil((async () => {
       const r = await labWalkForward(sb);
       console.log("walk-forward", JSON.stringify(r));
-      if (r && !r.idle && r.finished === false) await selfCall({ action: "lab_walkforward" });
+      // Chain on to the next instalment / the next group until nothing is left to compute (idle).
+      if (r && !r.idle) await selfCall({ action: "lab_walkforward" });
     })().catch((e) => console.error("walk-forward", e)));
     return Response.json({ action, accepted: true });
   }
