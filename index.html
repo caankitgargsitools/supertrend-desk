@@ -992,6 +992,12 @@ body.dk-fs-on { overflow: hidden; }
 #aa_table td, #aa_table th { white-space: normal; vertical-align: top; }
 #aa_table td:first-child { max-width: 260px; }
 #aa_table td .hint { font-size: 11.5px; }
+#aa_table .aa-pages { margin-top: 6px; }
+#aa_table tr.aa-det > td { background: var(--panel-2); }
+.aa-detbox { display: grid; gap: 8px; justify-items: start; }
+.aa-dt { border-collapse: collapse; font-size: 13px; min-width: min(560px, 100%); }
+.aa-dt th, .aa-dt td { padding: 4px 10px; text-align: left; border-bottom: 1px solid var(--line); }
+.aa-dt .n { text-align: right; font-variant-numeric: tabular-nums; }
 .pwbox { position: relative; display: block; }
 .pwbox input { width: 100%; padding-right: 44px; box-sizing: border-box; }
 .pwbox .eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 36px; height: 32px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); cursor: pointer; border-radius: 8px; }
@@ -1854,7 +1860,7 @@ body.dk-fs-on { overflow: hidden; }
       </div>
       <div id="ad_shukrana" hidden></div>
       <div id="ad_activity" hidden>
-        <p class="hint" id="aa_note" style="margin:8px 0">Each user's last 24 hours. Active time counts the 5-minute spells the app was open on their screen (recorded from 6 Nov 2026). Capital = the capital set on their Capital page; in use = margin of open positions. P&amp;L after charges, hidden trades left out.</p>
+        <p class="hint" id="aa_note" style="margin:8px 0">Each user's last 24 hours. Active time: “open” counts the 5-minute spells the app was on their screen, “in use” the time they were scrolling, tapping or typing (both recorded from 6 Nov 2026). “Pages ▸” shows each page they opened, how often and for how long. Capital = the capital set on their Capital page; in use = margin of open positions. P&amp;L after charges, hidden trades left out.</p>
         <div class="formbar" style="margin:0 0 8px"><button class="btn small" id="aa_refresh" type="button">Refresh</button><span class="hint" id="aa_sum"></span></div>
         <div class="scroll"><table class="big-table" id="aa_table"><thead><tr><th>User</th><th class="n">Active 24 h</th><th class="n">Capital</th><th class="n">Live</th><th class="n">Paper</th><th class="n">Trades 24 h</th><th>Status</th></tr></thead><tbody id="aa_body"></tbody></table></div>
       </div>
@@ -9263,8 +9269,9 @@ async function loadActivity() {
     return `<td class="n" data-v="${real + run}"><div>${n} strateg${n === 1 ? "y" : "ies"}${open ? ` · ${open} open` : ""}${used ? ` · ${esc(rupees(used))} in use` : ""}</div>
       <div class="hint">booked <span class="${cls(real)}">${esc(rupees(real))}</span> · running <span class="${cls(run)}">${esc(rupees(run))}</span></div></td>`; };
   $("aa_body").innerHTML = rows.length ? rows.map((u) => `<tr>
-    <td><b>${esc(u.full_name || u.email)}</b><div class="hint">${esc(u.email)} · seen ${esc(agoText(u.last_seen))}${u.last_sign_in_at ? ` · signed in ${esc(agoText(u.last_sign_in_at))}` : ""}</div></td>
-    <td class="n" data-v="${Number(u.active_min) || 0}">${Number(u.active_min) ? esc(hrsMin(u.active_min)) : "–"}</td>
+    <td><b>${esc(u.full_name || u.email)}</b><div class="hint">${esc(u.email)} · seen ${esc(agoText(u.last_seen))}${u.last_sign_in_at ? ` · signed in ${esc(agoText(u.last_sign_in_at))}` : ""}</div>
+      <button class="btn small aa-pages" type="button" data-u="${esc(u.user_id)}" aria-expanded="false">Pages ▸</button></td>
+    <td class="n" data-v="${Number(u.active_min) || 0}">${Number(u.active_min) ? `<div>open ${esc(hrsMin(u.active_min))}</div><div class="hint">in use ${esc(hrsMin(u.engaged_min))} · ${Number(u.visits_24h) || 0} visit${Number(u.visits_24h) === 1 ? "" : "s"}</div>` : "–"}</td>
     <td class="n" data-v="${Number(u.capital) || 0}">${Number(u.capital) ? esc(rupees(u.capital)) : "–"}</td>
     ${mode(u, "live")}${mode(u, "paper")}
     <td class="n" data-v="${Number(u.trades_24h) || 0}">${Number(u.trades_24h) || 0}</td>
@@ -9282,10 +9289,57 @@ function dkQFold(open) {
 try { dkQFold(localStorage.getItem("dkQOpen") === "1"); } catch { dkQFold(false); }
 $("dk_qtog").addEventListener("click", () => { const open = $("dk_qwrap").classList.contains("folded"); dkQFold(open); try { localStorage.setItem("dkQOpen", open ? "1" : "0"); } catch { /* private window */ } });
 $("aa_refresh").addEventListener("click", (e) => run(e.currentTarget, () => loadActivity()));
+/** A user's pages (Papa, 6 Nov 2026): visits, time on screen, time in use, last visit; last 24 h or 7 days. */
+const secTxt = (s) => { s = Math.round(Number(s) || 0); return s < 60 ? `${s} s` : hrsMin(s / 60); };
+async function aaPages(btn, period) {
+  // From the user's button (no period): open with 24 h, or close when open. From the 24 h / 7 days switch: reload.
+  const tr = btn.closest("tr"), next = tr.nextElementSibling, uid = btn.dataset.u, hours = period || 24;
+  if (!period && next && next.classList.contains("aa-det")) { next.remove(); btn.setAttribute("aria-expanded", "false"); btn.textContent = "Pages ▸"; return; }
+  if (next && next.classList.contains("aa-det")) next.remove();
+  const det = document.createElement("tr"); det.className = "aa-det"; det.dataset.h = String(hours);
+  det.innerHTML = `<td colspan="7"><span class="spin" aria-hidden="true"></span> Loading pages…</td>`; tr.after(det);
+  btn.setAttribute("aria-expanded", "true"); btn.textContent = "Pages ▾";
+  try {
+    const rows = must(await db.rpc("admin_user_pages", { p_user: uid, p_hours: hours })) || [];
+    const per = `<span class="seg aa-per">${[[24, "24 h"], [168, "7 days"]].map(([h, l]) => `<button class="btn small" type="button" data-h="${h}" aria-pressed="${h === hours}">${l}</button>`).join("")}</span>`;
+    det.innerHTML = `<td colspan="7"><div class="aa-detbox">${per}${rows.length ? `<table class="aa-dt"><thead><tr><th>Page</th><th class="n">Visits</th><th class="n">On screen</th><th class="n">In use</th><th>Last visit</th></tr></thead><tbody>${rows.map((r) =>
+      `<tr><td>${esc(PAGE_LABEL[r.page] || r.page)}</td><td class="n">${Number(r.visits) || 0}</td><td class="n">${esc(secTxt(r.open_s))}</td><td class="n">${esc(secTxt(r.active_s))}</td><td>${esc(agoText(r.last_at))}</td></tr>`).join("")}</tbody></table>`
+      : `<p class="hint" style="margin:6px 0 0">No page time recorded in this period (recorded from 6 Nov 2026).</p>`}</div></td>`;
+    det.querySelectorAll(".aa-per [data-h]").forEach((b2) => b2.addEventListener("click", () => aaPages(btn, Number(b2.dataset.h)).catch((e) => toast(errorText(e)))));
+  } catch (e) { det.innerHTML = `<td colspan="7" class="hint">${esc(errorText(e))}</td>`; }
+}
+$("aa_body").addEventListener("click", (e) => { const b2 = e.target.closest(".aa-pages"); if (b2) aaPages(b2).catch((x) => toast(errorText(x))); });
 /** Presence for Admin › User activity: a 5-minute mark while the app is on screen (one tiny write at most every 5 min). */
 let presenceAt = 0;
 function touchPresence() { if (!me || document.hidden || Date.now() - presenceAt < 290000) return; presenceAt = Date.now(); db.rpc("touch_presence").then(() => {}, () => { presenceAt = 0; }); }
 setInterval(touchPresence, 60000); document.addEventListener("visibilitychange", touchPresence);
+/* Time per page for Admin › User activity (Papa, 6 Nov 2026): every second the page on screen gets a second "open", and a
+   second "in use" when there was a scroll, tap, click or key in the last 30 s; a change of page counts a visit. Reported
+   about once a minute (and when the app goes to the background) through log_activity; nothing else is recorded. */
+const PAGE_LABEL = { list: "Strategies", strat: "A strategy's page", desk: "Desk", market: "Marketplace", wallet: "Wallet", admin: "Admin", conn: "Connections",
+  lab: "Strategy Lab", cap: "Capital", cmp: "Compare", combo: "Combinations", ideas: "Ideas Lab", pred: "Prediction Lab", health: "System health", spread: "Spread watcher",
+  terms: "Terms", pass: "My password" };
+const pgAct = { cur: null, tick: Date.now(), input: 0, acc: new Map() };
+const pgMark = () => { pgAct.input = Date.now(); };
+for (const ev of ["scroll", "wheel", "pointerdown", "keydown", "touchstart", "pointermove"]) document.addEventListener(ev, pgMark, { passive: true, capture: true });
+setInterval(() => {
+  const now = Date.now(), dt = Math.min(5, (now - pgAct.tick) / 1000); pgAct.tick = now;
+  if (!me || document.hidden || !page) { pgAct.cur = null; return; }
+  const k = String(page).toLowerCase().replace(/[^a-z_]/g, "").slice(0, 24) || "other";
+  const a = pgAct.acc.get(k) || { open: 0, active: 0, visits: 0 };
+  if (pgAct.cur !== k) { a.visits++; pgAct.cur = k; }
+  a.open += dt; if (now - pgAct.input < 30000) a.active += dt;
+  pgAct.acc.set(k, a);
+}, 1000);
+function pgFlush() {
+  if (!me || !pgAct.acc.size) return;
+  const rows = [...pgAct.acc].map(([page, a]) => ({ page, open_s: Math.round(a.open), active_s: Math.round(a.active), visits: a.visits })).filter((r) => r.open_s || r.visits);
+  pgAct.acc.clear();
+  if (rows.length) db.rpc("log_activity", { p: rows }).then(() => {}, () => {});
+}
+setInterval(pgFlush, 60000);
+document.addEventListener("visibilitychange", () => { if (document.hidden) { pgFlush(); pgAct.cur = null; } });
+addEventListener("pagehide", pgFlush);
 function renderUsers() {
   const cols = [["email", "Login"], ["full_name", "Name"], ["phone", "Phone"], ["status", "Status"], ["trial_until", "Trial till"], ["balance", "Wallet", "num"], ["strategies", "Strategies", "int"],
     ["live", "Live", "int"], ["live_net", "Live P&L", "num"], ["fees_paid", "Fees paid", "num"], ["broker_ok", "Dhan"], ["pending", "Recharges waiting", "int"], ["created_at", "Joined", "when"]];

@@ -358,7 +358,12 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   5 min while on screen, `touchPresence`, table `user_presence`, counted from 6 Nov 2026; Supabase's auth audit log is empty),
   last seen / last sign-in, capital (Capital page), Live and Paper cells (active strategies, open, margin in use, booked P&L via
   `ledger_net_user`, running P&L = sum of `pos_upnl`), closed trades in 24 h, Dhan connected, error-breaker stop. 7 columns,
-  wrapping cells; a summary line. Test: `tests/ui/ui_activity.mjs` (args: theme width).
+  wrapping cells; a summary line. **In use and pages** (same day, migration 79): the app counts per page seconds on screen,
+  seconds in use (a scroll, wheel, tap, pointer move or key in the last 30 s) and visits (`pgAct`, `pgFlush` about once a
+  minute and when hidden → `log_activity`, table `user_page_time` per 5-minute bucket, capped); the Active cell shows open /
+  in use / visits (`engaged_min`, `visits_24h`); "Pages ▸" opens a row per page (`aaPages` → `admin_user_pages(p_user,
+  p_hours)`: visits, on screen, in use, last visit; 24 h / 7 days; labels `PAGE_LABEL`). Test: `tests/ui/ui_activity.mjs`
+  (args: theme width).
 - **Desk quotes on phones** (6 Nov 2026, Papa): folded to one row by default; "All ▾" / "Less ▴" (`#dk_qtog`, `dkQFold`,
   localStorage `dkQOpen`); big screens unchanged. Tested in `tests/ui/ui_desk.mjs`.
 - **Show password** (6 Nov 2026, Papa, after a client's phone sign-in failed twice with "wrong email or password" while the
