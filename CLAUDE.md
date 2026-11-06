@@ -254,6 +254,13 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   timeline (open positions as bars, closed trades as dots); capital flow (margin: asset → long / short → in profit / in
   loss); activity list; stats bar. Animation runs only while the page is open and visible (`deskStop`). Test:
   `tests/ui/ui_desk.mjs` (args: theme width).
+- **Desk · one screen** (6 Nov 2026, Papa: "fit it in one screen … hide the menu on the left"): on screens ≥ 1280 px the
+  Desk opens as one screen-high grid (`body.dk-one`, `deskOneApply`; toggle `#dk_one` "One screen" / "Show menu", on by
+  default, remembered in localStorage `deskOne`): the left menu is hidden while the Desk is open (`hideNewPanes` removes
+  the class on leaving); row 1 account · profit flow · strategy tiles, row 2 capital deployed vs profit (dates, note and
+  Expand hidden) · timeline · capital flow · activity, then the stats bar. Timeline / capital flow size to their boxes
+  (`clientHeight`), long asset names shorten with "…" (`dkFit`, full name on hover), narrow boxes get shorter labels.
+  Tested in `tests/ui/ui_desk.mjs` (args: theme width [height]; every panel inside the window, no page scroll).
 - **Desk · capital deployed vs profit** (3 Nov 2026, Papa: "a perpetual graph … any time in the past"; migration 70):
   cron `desk-snapshot` every 5 min → `desk_snapshot()` stores per user and mode margin in use, running P&L, realised P&L
   (`ledger_net_user`) and open positions in `desk_snapshots` (kept for good, ~600 rows a day); `desk_series(mode, from, to,

@@ -915,6 +915,51 @@ details.xp > summary:hover { background: var(--blue-soft); }
   padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
 .dk-flow.full #dk_cv { flex: 1 1 auto; height: auto; min-height: 0; }
 body.dk-fs-on { overflow: hidden; }
+/* One-screen desk (Papa, 6 Nov 2026: "fit it in one screen … hide the menu on the left"): on big screens every panel
+   sits in one screen-high grid; the left menu is hidden while the Desk is open. Toggle #dk_one (localStorage deskOne). */
+.dk-onebtn { display: none; margin-left: auto; }
+@media (min-width: 1280px) {
+  .dk-onebtn { display: inline-block; }
+  .dk-onebtn[aria-pressed="true"] { color: var(--dk-ink); background: var(--dk-amber); border-color: var(--dk-amber); }
+  body.dk-one .bar { display: none; }
+  body.dk-one #app, body.dk-one .wrap { margin-left: 0 !important; max-width: none !important; padding: 8px !important; }
+  body.dk-one .topalert { margin: 8px 8px 0 !important; max-width: none; }
+  body.dk-one footer.disclaim { display: none; }
+  body.dk-one #deskPane { height: calc(100vh - 16px); min-height: 640px; box-sizing: border-box; overflow: hidden; padding: 8px; gap: 8px;
+    grid-template-columns: 250px repeat(3, minmax(0, 1fr)) 290px; grid-template-rows: auto auto minmax(0, 1.4fr) minmax(0, 1fr) auto; }
+  body.dk-one #deskPane .dk-main, body.dk-one #deskPane .dk-low { display: contents; }
+  body.dk-one #deskPane .dk-top, body.dk-one #deskPane .dk-modebar, body.dk-one #deskPane .dk-foot { grid-column: 1 / -1; }
+  body.dk-one #deskPane .dk-top { padding: 6px 10px; }
+  body.dk-one #deskPane .dk-panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 8px 10px; }
+  body.dk-one #deskPane .dk-ph { margin-bottom: 4px; }
+  body.dk-one .dk-acctp { grid-column: 1; grid-row: 3; overflow: auto !important; }
+  body.dk-one .dk-acctp .dk-big { font-size: 26px; }
+  body.dk-one .dk-acctp .dk-kv { margin-top: 8px; gap: 6px 12px; }
+  body.dk-one .dk-acctp .dk-barrow { margin-top: 8px; }
+  body.dk-one .dk-flow { grid-column: 2 / 5; grid-row: 3; padding: 0 !important; }
+  body.dk-one .dk-flow:not(.full) #dk_cv { flex: 1 1 auto; height: auto; min-height: 0; }
+  body.dk-one .dk-flowfoot { padding: 4px 10px; }
+  body.dk-one .dk-heat { grid-column: 5; grid-row: 3; }
+  body.dk-one .dk-heat .dk-tiles { max-height: none; flex: 1 1 auto; min-height: 0; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
+  body.dk-one .dk-cvp { grid-column: 1 / 3; grid-row: 4; }
+  body.dk-one .dk-cvp #dk_cvp { flex: 1 1 auto; height: auto; min-height: 0; }
+  body.dk-one .dk-cvp .dk-cvp-read { margin: 0 0 4px; }
+  body.dk-one .dk-cvp .dk-cvp-read b { font-size: 13px; }
+  body.dk-one #dk_cvp_big { display: none; }
+  body.dk-one #dk_cvp_note, body.dk-one .dk-cvp .dk-date { display: none; }
+  body.dk-one .dk-cvp .dk-cvp-read { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; gap: 4px 14px; }
+  body.dk-one .dk-tlp { grid-column: 3; grid-row: 4; }
+  body.dk-one .dk-skp { grid-column: 4; grid-row: 4; }
+  body.dk-one .dk-tlp .dk-ph > .dk-lbl:last-child, body.dk-one .dk-skp .dk-ph > .dk-lbl:last-child { display: none; }
+  body.dk-one .dk-svgbox { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  body.dk-one #dk_tl, body.dk-one #dk_sk { display: block; height: 100%; }
+  body.dk-one .dk-actp { grid-column: 5; grid-row: 4; }
+  body.dk-one .dk-feed { max-height: none; flex: 1 1 auto; min-height: 0; }
+  body.dk-one .dk-feed div { grid-template-columns: 74px minmax(0, 1fr) auto; font-size: 11px; padding: 3px 5px; }
+  body.dk-one #deskPane .dk-foot { margin-left: 0; }
+  body.dk-one .dk-foot > div { padding: 5px 10px; }
+}
+@media (min-width: 1280px) and (max-width: 1599px) { body.dk-one #deskPane { grid-template-columns: 220px repeat(3, minmax(0, 1fr)) 250px; } }
 </style>
 </head>
 <body>
@@ -1580,9 +1625,9 @@ body.dk-fs-on { overflow: hidden; }
         <div class="dk-ticker" aria-label="Live feed"><div class="dk-run" id="dk_ticker"></div></div>
         <div class="dk-clock"><div class="dk-t" id="dk_clock">--:--:--</div><div class="dk-mk" id="dk_mk"></div></div>
       </header>
-      <div class="dk-modebar"><div class="seg" id="dk_mode" role="group" aria-label="Mode"><button type="button" data-m="LIVE" aria-pressed="false">Live</button><button type="button" data-m="PAPER" aria-pressed="true">Paper</button></div><span class="dk-lbl" id="dk_note"></span></div>
+      <div class="dk-modebar"><div class="seg" id="dk_mode" role="group" aria-label="Mode"><button type="button" data-m="LIVE" aria-pressed="false">Live</button><button type="button" data-m="PAPER" aria-pressed="true">Paper</button></div><span class="dk-lbl" id="dk_note"></span><button class="dk-btn dk-onebtn" id="dk_one" type="button" aria-pressed="false" title="Fit the whole desk on one screen and hide the menu">One screen</button></div>
       <div class="dk-main">
-        <div class="dk-panel">
+        <div class="dk-panel dk-acctp">
           <div class="dk-ph"><span class="dk-lbl"><b>●</b> <span id="dk_acct">Account</span></span><span class="dk-badge" id="dk_risk">SAFE</span></div>
           <div class="dk-lbl">Running P&amp;L · open positions</div>
           <div class="dk-big" id="dk_run">₹0</div>
@@ -1621,10 +1666,10 @@ body.dk-fs-on { overflow: hidden; }
         <p class="dk-lbl dk-sm" id="dk_cvp_note" style="margin:6px 0 0;text-transform:none;letter-spacing:0"></p>
       </div>
       <div class="dk-low">
-        <div class="dk-panel"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Timeline · last 3 weeks</span><span class="dk-lbl">bar = open position · dot = closed trade</span></div><div class="dk-svgbox"><svg id="dk_tl" width="100%" height="300" role="img" aria-label="Timeline of open positions and closed trades by asset"></svg></div></div>
-        <div class="dk-panel"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Capital flow · margin in use</span><span class="dk-lbl">asset → side → result</span></div><div class="dk-svgbox"><svg id="dk_sk" width="100%" height="300" role="img" aria-label="Margin in use flowing from assets to long or short, then to in profit or in loss"></svg></div></div>
+        <div class="dk-panel dk-tlp"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Timeline · last 3 weeks</span><span class="dk-lbl">bar = open position · dot = closed trade</span></div><div class="dk-svgbox"><svg id="dk_tl" width="100%" height="300" role="img" aria-label="Timeline of open positions and closed trades by asset"></svg></div></div>
+        <div class="dk-panel dk-skp"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Capital flow · margin in use</span><span class="dk-lbl">asset → side → result</span></div><div class="dk-svgbox"><svg id="dk_sk" width="100%" height="300" role="img" aria-label="Margin in use flowing from assets to long or short, then to in profit or in loss"></svg></div></div>
       </div>
-      <div class="dk-panel"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Activity</span><span class="dk-lbl">newest first</span></div><div class="dk-feed" id="dk_feed"></div></div>
+      <div class="dk-panel dk-actp"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Activity</span><span class="dk-lbl">newest first</span></div><div class="dk-feed" id="dk_feed"></div></div>
       <footer class="dk-foot">
         <div><div class="dk-lbl">Avg closed trade</div><div class="dk-v" id="dk_favg">–</div></div>
         <div><div class="dk-lbl">Best open</div><div class="dk-v dk-up" id="dk_fbest">–</div></div>
@@ -6122,7 +6167,7 @@ const myStrats = () => state.strategies.filter((x) => me && x.owner_id === me.us
 function instName(s) { return s.trade_type === "OPTIONS" ? (s.option_side === "SELL" ? "Option writing" : "Option buying") : "Futures"; }
 function assetLabel(k) { return (PRESETS[k] && PRESETS[k].name) || k || "–"; }
 const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane", "ideasPane", "predPane", "cmpPane", "comboPane", "healthPane", "spreadPane", "deskPane"];
-function hideNewPanes() { NEW_PANES.forEach((id) => $(id).hidden = true); }
+function hideNewPanes() { NEW_PANES.forEach((id) => $(id).hidden = true); document.body.classList.remove("dk-one"); }
 function markNav(id) { document.querySelectorAll("#nav .btn").forEach((b) => b.id === id ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")); }
 /** One page at a time: list, strat, market, wallet, admin, conn, cap, lab, terms. */
 /* ---------- stay on the same page after a refresh (Papa, 3 Nov): page, open strategy and Strategies tab, per browser ---------- */
@@ -6171,7 +6216,7 @@ function showPage(name) {
   else if (name === "pred") { $("predPane").hidden = false; withLoading($("predPane"), renderPred()).catch((e) => toast(errorText(e))); startPredPoll(); }
   else if (name === "pass") { $("passPane").hidden = false; $("np_msg").textContent = ""; }
   else if (name === "health") { $("healthPane").hidden = false; withLoading($("healthPane"), renderHealth()).catch((e) => toast(errorText(e))); }
-  else if (name === "desk") { $("deskPane").hidden = false; withLoading($("deskPane"), renderDesk()).catch((e) => toast(errorText(e))); }
+  else if (name === "desk") { $("deskPane").hidden = false; deskOneApply(); withLoading($("deskPane"), renderDesk()).catch((e) => toast(errorText(e))); }
   else if (name === "spread") { $("spreadPane").hidden = false; withLoading($("spreadPane"), renderSpread()).catch((e) => toast(errorText(e))); }
   else if (name === "combo") { $("comboPane").hidden = false; withLoading($("comboPane"), renderCombo()).catch((e) => toast(errorText(e))); }
   else if (name === "cmp") { $("cmpPane").hidden = false; cmpCache.clear(); withLoading($("cmpPane"), renderCmp()).catch((e) => toast(errorText(e))); }
@@ -8059,21 +8104,25 @@ function deskDraw() {
   ctx.fillStyle = DK_COL.muted; ctx.font = "500 10px monospace"; ctx.fillText("BOOKED P&L", bx + bw - 12, by + 80);
   desk.raf = requestAnimationFrame(deskDraw);
 }
+/** A label cut to n characters with "…" (charts in the one-screen desk). */
+const dkFit = (t, n) => { n = Math.max(4, Math.floor(n)); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
 function deskTimeline() {
-  const svg = $("dk_tl"), w = Math.max(560, svg.clientWidth || 600), h = 300, left = 104, right = 12, top = 18, bottom = 24;
+  const one = document.body.classList.contains("dk-one"), svg = $("dk_tl"), w = one ? Math.max(200, svg.clientWidth || 300) : Math.max(560, svg.clientWidth || 600), h = one ? Math.max(150, svg.clientHeight || 300) : 300, right = 12, top = 18, bottom = 24;
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
   const names = new Map(state.strategies.map((x) => [x.id, x])), end = Date.now(), start = end - 21 * 86400000;
   const tr = desk.trades.filter((t) => Date.parse(t.exit_at) >= start && names.has(t.strategy_id));
   const open = dkOpen();
   const assets = [...new Set([...open.map((s) => s.underlying), ...tr.map((t) => names.get(t.strategy_id).underlying)])].slice(0, 14);
   if (!assets.length) { svg.innerHTML = `<text x="12" y="24" fill="${DK_COL.muted}" font-size="12">No trades in the last 3 weeks.</text>`; return; }
+  // Room for the longest asset name (e.g. "Midcap Nifty Select"), at most a third of the width.
+  const left = Math.round(Math.max(Math.min(104, w * .34), Math.min(w * .34, Math.max(...assets.map((u) => dkName(u).length)) * 6.4 + 14))), fitN = (t) => dkFit(t, (left - 14) / 6.4);
   const rowH = (h - top - bottom) / assets.length, x = (t) => left + (t - start) / (end - start) * (w - left - right);
   let g = "";
-  for (let d = 0; d <= 21; d += 3) { const t = start + d * 86400000, xx = x(t), lab = new Date(t + 19800000).toISOString().slice(5, 10).split("-").reverse().join("/");
+  for (let d = 0; d <= 21; d += w < 450 ? 7 : 3) { const t = start + d * 86400000, xx = x(t), lab = new Date(t + 19800000).toISOString().slice(5, 10).split("-").reverse().join("/");
     g += `<line x1="${xx}" x2="${xx}" y1="${top}" y2="${h - bottom}" stroke="${DK_COL.line}"/><text x="${xx}" y="${h - 8}" fill="${DK_COL.muted}" font-size="10" text-anchor="middle">${lab}</text>`; }
   assets.forEach((u, i) => {
     const y = top + i * rowH + rowH / 2;
-    g += `<text x="${left - 8}" y="${y + 3}" fill="${DK_COL.text}" font-size="10.5" text-anchor="end">${esc(dkName(u))}</text><line x1="${left}" x2="${w - right}" y1="${y}" y2="${y}" stroke="${DK_COL.line}" stroke-dasharray="2 4"/>`;
+    g += `<text x="${left - 8}" y="${y + 3}" fill="${DK_COL.text}" font-size="10.5" text-anchor="end">${esc(fitN(dkName(u)))}<title>${esc(dkName(u))}</title></text><line x1="${left}" x2="${w - right}" y1="${y}" y2="${y}" stroke="${DK_COL.line}" stroke-dasharray="2 4"/>`;
     open.filter((s) => s.underlying === u).forEach((s, j) => { const since = Date.parse((s.pos_entry_date || istDate(0)) + "T03:30:00Z"), x0 = x(Math.max(start, since)), c = (Number(s.pos_upnl) || 0) >= 0 ? DK_COL.up : DK_COL.down;
       g += `<rect x="${x0}" y="${y - 6 + j * 5}" width="${Math.max(3, x(end) - x0)}" height="5" rx="2" fill="${c}" opacity=".85"><title>${esc(dkLabId(s))} ${s.position} since ${esc(s.pos_entry_date || "")} · ${esc(dkSgn(Number(s.pos_upnl) || 0))}</title></rect>`; });
     tr.filter((t) => names.get(t.strategy_id).underlying === u).forEach((t) => { const v = Number(t.net) || 0, r = 3 + Math.min(7, Math.sqrt(Math.abs(v)) / 60), c = v >= 0 ? DK_COL.up : DK_COL.down;
@@ -8082,12 +8131,14 @@ function deskTimeline() {
   svg.innerHTML = g;
 }
 function deskSankey() {
-  const svg = $("dk_sk"), w = Math.max(480, svg.clientWidth || 520), h = 300, pad = 14, nodeW = 10, gap = 6;
+  const one = document.body.classList.contains("dk-one"), svg = $("dk_sk"), w = one ? Math.max(200, svg.clientWidth || 300) : Math.max(480, svg.clientWidth || 520), h = one ? Math.max(150, svg.clientHeight || 300) : 300, pad = 14, nodeW = 10, gap = 6;
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
   const o = dkOpen().filter((s) => Number(s.pos_margin) > 0), total = o.reduce((a, s) => a + Number(s.pos_margin), 0);
   if (!total) { svg.innerHTML = `<text x="12" y="24" fill="${DK_COL.muted}" font-size="12">No margin in use.</text>`; return; }
   const assets = Object.entries(o.reduce((m, s) => (m[s.underlying] = (m[s.underlying] || 0) + Number(s.pos_margin), m), {})).sort((a, b) => b[1] - a[1]);
-  const sc = (h - 2 * pad - gap * (assets.length - 1)) / total, sc2 = (h - 2 * pad - gap) / total, X = [150, w / 2 - nodeW / 2 + 30, w - 96];
+  const sc = (h - 2 * pad - gap * (assets.length - 1)) / total, sc2 = (h - 2 * pad - gap) / total, X = [Math.round(Math.max(Math.min(150, w * .34), Math.min(w * .42, Math.max(...assets.map(([u, v]) => (dkName(u) + " " + rupeesShort(v)).length)) * 6.1 + 12))), w / 2 - nodeW / 2 + 30, w - (w < 400 ? 58 : 96)];
+  // A narrow box (one-screen desk on a smaller screen): the middle column halfway, shorter labels.
+  const nw = w < 400; if (nw || X[1] < X[0] + 50) X[1] = Math.round((X[0] + nodeW + X[2]) / 2 - nodeW / 2);
   let y = pad; const aN = assets.map(([u, v], i) => { const n = { u, v, y, hh: v * sc, c: DK_ASSET[i % DK_ASSET.length] }; y += n.hh + gap; return n; });
   const side = (s) => s.position === "LONG" ? "LONG" : "SHORT", res = (s) => (Number(s.pos_upnl) || 0) >= 0 ? "PROFIT" : "LOSS";
   const sv = { LONG: 0, SHORT: 0 }, rv = { PROFIT: 0, LOSS: 0 }; for (const s of o) { sv[side(s)] += Number(s.pos_margin); rv[res(s)] += Number(s.pos_margin); }
@@ -8097,9 +8148,9 @@ function deskSankey() {
   let g = ""; const so = { LONG: 0, SHORT: 0 }, ro = { PROFIT: 0, LOSS: 0 };
   for (const a of aN) { let off = 0; for (const s of o.filter((x) => x.underlying === a.u)) { const k = side(s), m = Number(s.pos_margin); g += band(X[0] + nodeW, a.y + off, m * sc, X[1], sN[k].y + so[k], m * sc2, a.c); off += m * sc; so[k] += m * sc2; } }
   for (const k of ["LONG", "SHORT"]) { let off = 0; for (const s of o.filter((x) => side(x) === k)) { const r = res(s), m = Number(s.pos_margin) * sc2; g += band(X[1] + nodeW, sN[k].y + off, m, X[2], rN[r].y + ro[r], m, r === "PROFIT" ? DK_COL.up : DK_COL.down); off += m; ro[r] += m; } }
-  for (const a of aN) g += `<rect x="${X[0]}" y="${a.y}" width="${nodeW}" height="${Math.max(1.5, a.hh)}" fill="${a.c}"/><text x="${X[0] - 6}" y="${a.y + a.hh / 2 + 3}" fill="${DK_COL.text}" font-size="10" text-anchor="end">${esc(dkName(a.u))} ${rupeesShort(a.v)}</text>`;
-  for (const k of ["LONG", "SHORT"]) if (sv[k]) g += `<rect x="${X[1]}" y="${sN[k].y}" width="${nodeW}" height="${sN[k].hh}" fill="${sN[k].c}"/><text x="${X[1] + nodeW / 2}" y="${sN[k].y + sN[k].hh / 2 + 3}" fill="${DK_COL.text}" font-size="10.5" text-anchor="middle" style="paint-order:stroke" stroke="${DK_COL.ink}" stroke-width="3">${k === "LONG" ? "Long" : "Short"} ${rupeesShort(sv[k])}</text>`;
-  for (const k of ["PROFIT", "LOSS"]) if (rv[k]) g += `<rect x="${X[2]}" y="${rN[k].y}" width="${nodeW}" height="${rN[k].hh}" fill="${rN[k].c}"/><text x="${X[2] + nodeW + 6}" y="${rN[k].y + rN[k].hh / 2 + 3}" fill="${DK_COL.text}" font-size="10.5">${k === "PROFIT" ? "In profit" : "In loss"}</text><text x="${X[2] + nodeW + 6}" y="${rN[k].y + rN[k].hh / 2 + 16}" fill="${DK_COL.muted}" font-size="10">${rupeesShort(rv[k])}</text>`;
+  for (const a of aN) g += `<rect x="${X[0]}" y="${a.y}" width="${nodeW}" height="${Math.max(1.5, a.hh)}" fill="${a.c}"/><text x="${X[0] - 6}" y="${a.y + a.hh / 2 + 3}" fill="${DK_COL.text}" font-size="10" text-anchor="end">${esc(dkFit(dkName(a.u) + " " + rupeesShort(a.v), (X[0] - 10) / 6.1))}<title>${esc(dkName(a.u))} ${rupeesShort(a.v)}</title></text>`;
+  for (const k of ["LONG", "SHORT"]) if (sv[k]) g += `<rect x="${X[1]}" y="${sN[k].y}" width="${nodeW}" height="${sN[k].hh}" fill="${sN[k].c}"/><text x="${X[1] + nodeW / 2}" y="${sN[k].y + sN[k].hh / 2 + 3}" fill="${DK_COL.text}" font-size="10.5" text-anchor="middle" style="paint-order:stroke" stroke="${DK_COL.ink}" stroke-width="3">${nw ? (k === "LONG" ? "L" : "S") : (k === "LONG" ? "Long" : "Short")} ${rupeesShort(sv[k])}</text>`;
+  for (const k of ["PROFIT", "LOSS"]) if (rv[k]) g += `<rect x="${X[2]}" y="${rN[k].y}" width="${nodeW}" height="${rN[k].hh}" fill="${rN[k].c}"/><text x="${X[2] + nodeW + 6}" y="${rN[k].y + rN[k].hh / 2 + 3}" fill="${DK_COL.text}" font-size="10.5">${k === "PROFIT" ? (nw ? "Profit" : "In profit") : (nw ? "Loss" : "In loss")}</text><text x="${X[2] + nodeW + 6}" y="${rN[k].y + rN[k].hh / 2 + 16}" fill="${DK_COL.muted}" font-size="10">${rupeesShort(rv[k])}</text>`;
   svg.innerHTML = g;
 }
 /* ---------- Desk: capital deployed vs realised / running / total profit (Papa, 3 Nov 2026) ----------
@@ -8251,7 +8302,19 @@ $("nav_desk").addEventListener("click", () => showPage("desk"));
 $("dk_mode").querySelectorAll("[data-m]").forEach((b) => b.addEventListener("click", () => { desk.mode = b.dataset.m; withLoading($("deskPane"), renderDesk()).catch((e) => toast(errorText(e))); }));
 $("dk_pause").addEventListener("click", () => { desk.paused = !desk.paused; $("dk_pause").textContent = desk.paused ? "Resume" : "Pause"; });
 $("dk_tiles").addEventListener("click", (e) => { const t = e.target.closest("[data-dk]"); if (t) openStrat(t.dataset.dk); });
-addEventListener("resize", () => { if (page !== "desk") return; clearTimeout(deskLayout.t); deskLayout.t = setTimeout(() => { deskLayout(); deskTimeline(); deskSankey(); }, 150); });
+addEventListener("resize", () => { if (page !== "desk") return; deskOneApply(); clearTimeout(deskLayout.t); deskLayout.t = setTimeout(deskRelayout, 150); });
+/** One-screen desk (Papa, 6 Nov 2026): on by default on screens 1280 px and wider; remembered in this browser. */
+function deskOneWanted() { try { return localStorage.getItem("deskOne") !== "0"; } catch { return true; } }
+function deskOneApply() {
+  const want = deskOneWanted(), on = page === "desk" && want && innerWidth >= 1280;
+  document.body.classList.toggle("dk-one", on);
+  const b = $("dk_one"); if (b) { b.setAttribute("aria-pressed", String(want)); b.textContent = want ? "Show menu" : "One screen"; }
+}
+function deskRelayout() { if (page !== "desk") return; deskLayout(); desk.pool = []; desk.amb = []; deskFill(); deskTimeline(); deskSankey(); deskCvpDraw(); }
+$("dk_one").addEventListener("click", () => {
+  try { localStorage.setItem("deskOne", deskOneWanted() ? "0" : "1"); } catch { /* private window: this visit only */ }
+  deskOneApply(); requestAnimationFrame(deskRelayout);
+});
 document.addEventListener("visibilitychange", () => { if (page === "desk" && !document.hidden && !desk.raf) desk.raf = requestAnimationFrame(deskDraw); });
 // Positions opening or closing (strategy list reloads) re-draw the streams.
 setInterval(() => { if (page !== "desk" || document.hidden) return; const k = dkOpen().map((s) => s.id).join(); if (k !== desk.key) { desk.key = k; deskLayout(); deskTimeline(); deskSankey(); deskPaint(); } }, 5000);

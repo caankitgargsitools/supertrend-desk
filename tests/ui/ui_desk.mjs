@@ -48,6 +48,7 @@ await p.route(/supabase\.co/, (r) => {
 });
 await p.addInitScript(([uid, email]) => {
   const exp = Math.floor(Date.now() / 1000) + 3600;
+  if (!sessionStorage.getItem("dkOneSet")) { localStorage.setItem("deskOne", "0"); sessionStorage.setItem("dkOneSet", "1"); } // the stacked layout first; one screen is checked at the end
   localStorage.setItem("sb-umryzxusbdttbcshkajt-auth-token", JSON.stringify({ access_token: "x.eyJleHAiOjk5OTk5OTk5OTl9.y", token_type: "bearer", expires_in: 3600, expires_at: exp, refresh_token: "r", user: { id: uid, email, aud: "authenticated", role: "authenticated" } }));
 }, [A, me.email]);
 await p.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
@@ -79,7 +80,7 @@ const cv = await p.evaluate(() => ({ n: dkCvp.pts.length, est: dkCvp.pts.filter(
 if (!(cv.est > 0 && cv.rec === 48 && cv.now)) fail("capital vs profit series", cv);
 if (!/Capital deployed/.test(await p.textContent("#dk_cvp_read"))) fail("read-out");
 await p.click('#dk_cvp_tab [data-v="real"]'); if (await p.evaluate(() => dkCvp.tab) !== "real") fail("realised tab");
-const box = await p.locator("#dk_cvp").boundingBox();
+await p.locator("#dk_cvp").scrollIntoViewIfNeeded(); const box = await p.locator("#dk_cvp").boundingBox();
 await p.mouse.move(box.x + box.width * .5, box.y + box.height * .5); await p.waitForTimeout(100);
 if (!/estimated|\d{2}:\d{2}/.test(await p.textContent("#dk_cvp_read"))) fail("hover read-out", await p.textContent("#dk_cvp_read"));
 await p.mouse.move(box.x + box.width * .45, box.y + 60); await p.mouse.down(); await p.mouse.move(box.x + box.width * .8, box.y + 60, { steps: 5 }); await p.mouse.up(); await p.waitForTimeout(400);
@@ -109,9 +110,31 @@ await p.click("#dk_fs"); await p.waitForTimeout(200); await p.click("#dk_fs"); a
 if (await p.evaluate(() => document.querySelector(".dk-flow").classList.contains("full"))) fail("the button closes full screen");
 const sw = await p.evaluate(() => document.documentElement.scrollWidth); if (sw > width + 1) fail("page scrolls sideways", sw);
 await p.screenshot({ path: `desk_${theme}_${width}.png`, fullPage: true });
+// One screen (Papa, 6 Nov 2026): on big screens every panel fits in the window and the left menu is hidden.
+if (width >= 1280) {
+  if (await p.evaluate(() => document.body.classList.contains("dk-one"))) fail("one screen off when switched off");
+  await p.setViewportSize({ width, height: Number(process.argv[4] || 1000) });
+  await p.click("#dk_one"); await p.waitForTimeout(700);
+  const one = await p.evaluate(() => {
+    const vh = innerHeight, vw = innerWidth, ids = [".dk-acctp", ".dk-flow", ".dk-heat", ".dk-cvp", ".dk-tlp", ".dk-skp", ".dk-actp", ".dk-foot", ".dk-top"];
+    const out = ids.map((q) => { const r = document.querySelector(q).getBoundingClientRect(); return { q, top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), h: Math.round(r.height), w: Math.round(r.width) }; });
+    return { on: document.body.classList.contains("dk-one"), bar: getComputedStyle(document.querySelector(".bar")).display, sh: document.documentElement.scrollHeight, vh, vw, out,
+      cv: [desk.W, desk.H], cvp: document.getElementById("dk_cvp").getBoundingClientRect().height, tl: document.getElementById("dk_tl").getAttribute("viewBox"), stored: localStorage.getItem("deskOne") };
+  });
+  if (!one.on || one.bar !== "none" || one.stored !== "1") fail("one screen on, menu hidden, remembered", one);
+  if (one.sh > one.vh + 1) fail("one screen: no page scroll", one);
+  const off = one.out.filter((r) => r.bottom > one.vh + 1 || r.right > one.vw + 1 || r.h < 40 || r.w < 150); if (off.length) fail("one screen: every panel inside the window", off);
+  if (!(one.cv[1] > 200 && one.cvp > 80)) fail("one screen: charts fill their boxes", one);
+  if (process.env.SHOT) await p.screenshot({ path: `${process.env.SHOT}/desk_one_${theme}_${width}.png` });
+  console.log("ok   one screen", JSON.stringify(one.out.map((r) => `${r.q}:${r.w}x${r.h}`)));
+  await p.click("#dk_one"); await p.waitForTimeout(300);
+  if (await p.evaluate(() => document.body.classList.contains("dk-one") || getComputedStyle(document.querySelector(".bar")).display === "none")) fail("Show menu brings the menu back");
+  await p.click("#dk_one"); await p.waitForTimeout(200);
+}
 if (errs.length) fail("page errors", errs);
 await p.click('#dk_tiles [data-dk="g1"]'); await p.waitForTimeout(400);
 if (await p.evaluate(() => page) !== "strat") fail("tile opens the strategy");
 if (await p.evaluate(() => desk.raf)) fail("animation stopped after leaving");
+if (await p.evaluate(() => document.body.classList.contains("dk-one"))) fail("menu back after leaving the Desk");
 console.log("ok desk", theme, width);
 await b.close();
