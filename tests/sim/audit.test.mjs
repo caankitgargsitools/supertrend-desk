@@ -28,3 +28,23 @@ console.log(d[0].issue, d[0].rupee_gap); assert.equal(d[0].issue, null);
 const none = matchTrades([], plans, { daily: false, tf: 75, options: false, today: "2026-10-21" });
 assert.equal(none.length, 3); assert.ok(none.every((t) => /desk did not/.test(t.issue)));
 console.log("ok");
+// 6 Nov 2026: an exit made by hand is a note, not a gap; while the backtest still held that trade its later entries
+// are dropped and the desk's are notes; a paused strategy's later backtest trades are cut.
+const { cutPaused } = await import("./audit.mjs");
+const manual = [
+  { id: 21, side: "LONG", entry_day: "2026-10-28", exit_at: T("2026-10-29", 14, 26), entry_px: 100, exit_px: 110, units: 10, net: 90, exit_why: "Manual exit" },
+  { id: 22, side: "SHORT", entry_day: "2026-10-30", exit_at: T("2026-10-30", 15, 0), entry_px: 120, exit_px: 118, units: 10, net: 15, exit_why: "Trailing stop" },
+];
+const mplans = [
+  plan("LONG", "2026-10-28", 600, "2026-11-02", 600, 100, 130),      // the desk closed this one by hand on the 29th
+  plan("LONG", "2026-11-03", 600, "2026-11-03", 900, 125, 128),      // after the backtest's own exit: a real miss
+];
+const m = matchTrades(manual, mplans, { daily: false, tf: 30, options: false, today: "2026-11-04" });
+for (const t of m) console.log("manual:", t.entry_day, t.side, t.issue);
+assert.match(m.find((t) => t.entry_day === "2026-10-28").issue, /^Note: closed by hand/);
+assert.match(m.find((t) => t.entry_day === "2026-10-30" && t.desk).issue, /^Note: entered after an exit made by hand/);
+assert.match(m.find((t) => t.entry_day === "2026-11-03").issue, /desk did not/);
+const cut = cutPaused(mplans, "2026-10-29 14:26");
+assert.equal(cut.length, 1); assert.equal(cut[0].entryDay, "2026-10-28");
+assert.equal(cutPaused(mplans, null).length, 2);
+console.log("ok manual + paused");

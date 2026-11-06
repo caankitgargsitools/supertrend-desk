@@ -533,6 +533,13 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   strategy / asset, live net to month end and its high-water mark, Shukrana accepted in the month, the rate, the Shukrana
   summary (the monthly statement's figures). `lab_scores(ids)`: lab consistency scores for a client's own strategies
   (the `lab_results_list` view is security-invoker, so clients couldn't read ranks). Test: `tests/sim/morning.test.mjs`.
+- **Self-check corrected (engine v146, `audit.ts`)**: the daily "N strategies with gaps" was mostly an artefact — three
+  SILVERM strategies exited by hand and paused on 29 Oct 14:26 were replayed as if still running (13 "missed" trades a
+  day). Now: a paused strategy is judged only up to the moment it stopped (`cutPaused`: last run or last trade's exit;
+  note "Paused since …"), an exit made by hand (`MANUAL_EXIT`: Manual exit / Exit positions now) is a "Note:" not a gap,
+  and desk entries made while the backtest still held the hand-closed trade are notes too; "Note:" issues don't count
+  toward the verdict. Test: `tests/sim/audit.test.mjs`. Real divergences remaining today are small ("Desk did worse"
+  by 0.3–1% on exits).
 - **Still from the audit, done elsewhere this day**: see the website and strategy entries added below as they land.
 - **Open questions put to Papa 6 Nov 2026 (no answer within a minute → pending, ask again)**: (1) switch the four lab
   jobs (3, 10, 26, 29) back on now that the dispatcher is in and the tick closes stuck runs; (2) revoke the blanket ALL

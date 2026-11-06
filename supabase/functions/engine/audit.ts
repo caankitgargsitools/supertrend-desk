@@ -19,6 +19,10 @@ export type AuditResult = {
   verdict: "ok" | "gap" | "skipped"; note: string; trades: AuditTrade[];
 };
 
+/** A desk exit made by hand (the strategy page's Exit, the bulk "Exit positions now"): the backtest never saw it. */
+export const MANUAL_EXIT = /manual exit|exit positions now|closed by hand|flatten/i;
+/** Issues that start with "Note:" explain a difference without counting it as a gap. */
+const soft = (issue: string | null) => !!issue && /^Note:/.test(issue);
 const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const stamp = (day: string, min: number) => `${day} ${hm(min)}`;
 /** Minutes between two IST "day + minute of day" points. */
@@ -67,14 +71,39 @@ export function matchTrades(desk: DeskRow[], plans: Plan[], opts: { daily: boole
     }
     out.push({ side: p.side, entry_day: p.entryDay, desk: deskInfo, bt, issue, rupee_gap: rupee });
   }
+  // An exit made by hand is not a gap (6 Nov 2026 audit: 19 "strategies with gaps" a day were mostly this). While the
+  // backtest still held that trade, its later entries and the desk's are not comparable either: the backtest's are
+  // dropped, the desk's are kept as notes.
+  const windows: { from: string; to: string }[] = [];
+  for (const t of out) {
+    if (t.desk && t.bt && MANUAL_EXIT.test(t.desk.why)) {
+      if (t.issue) t.issue = `Note: closed by hand at ${t.desk.exit} (the backtest held it until ${t.bt.exit})`;
+      if (t.bt.exit !== "still open" && t.bt.exit > t.desk.exit) windows.push({ from: t.desk.exit, to: t.bt.exit });
+    }
+  }
+  const inWindow = (stamp: string) => windows.some((w) => stamp > w.from && stamp < w.to);
+  for (let i = out.length - 1; i >= 0; i--) {
+    const t = out[i];
+    if (!t.desk && t.bt && inWindow(t.bt.entry)) out.splice(i, 1);
+  }
   for (const d of desk) {
     if (used.has(d.id)) continue;
     const e = ist(Date.parse(d.exit_at) / 1000);
     out.push({ side: d.side, entry_day: d.entry_day, desk: { exit: stamp(e.date, e.min), entry_px: Number(d.entry_px), exit_px: Number(d.exit_px), pts: +((Number(d.exit_px) - Number(d.entry_px)) * (d.side === "LONG" ? 1 : -1)).toFixed(2), net: Math.trunc(Number(d.net)), why: d.exit_why ?? "" },
-      bt: null, issue: "Desk took this trade; the backtest did not", rupee_gap: null });
+      bt: null, issue: inWindow(`${d.entry_day} 23:59`) || inWindow(`${d.entry_day} 00:00`) || windows.some((w) => d.entry_day >= w.from.slice(0, 10) && d.entry_day <= w.to.slice(0, 10))
+        ? "Note: entered after an exit made by hand, while the backtest was still holding its trade (not counted)" : "Desk took this trade; the backtest did not", rupee_gap: null });
   }
   out.sort((a, b) => a.entry_day.localeCompare(b.entry_day));
   return out;
+}
+/**
+ * A paused strategy takes no new entries, so backtest trades entered after it was paused are not gaps: everything after
+ * `pausedAt` ("YYYY-MM-DD HH:mm" IST) is dropped, including an open trade (6 Nov 2026 audit — three SILVERM strategies
+ * exited by hand and paused on 29 Oct were reported with 13 "missed" trades a day).
+ */
+export function cutPaused(plans: Plan[], pausedAt: string | null): Plan[] {
+  if (!pausedAt) return plans;
+  return plans.filter((p) => stamp(p.entryDay, p.entryMin) <= pausedAt);
 }
 
 /** Self-check of one strategy over its trades of the last `days` days. */
@@ -98,7 +127,14 @@ export async function auditStrategy(sb: SupabaseClient, creds: { client: string;
   const lastDay = data.raw.at(-1)?.day ?? data.daily.at(-1)?.day ?? "";
   // The backtest starts flat on the desk's first trade day, as the desk did.
   const from = base.from_day;
-  const plans = simulateRules(s, data, from, today).filter((p) => p.entryDay >= from && p.entryDay <= lastDay);
+  // A paused strategy is judged only up to the moment it stopped taking entries: its last run, or its last trade's exit
+  // (the usual case: "Exit positions now" followed by Pause).
+  let pausedAt: string | null = null;
+  if (!s.active) {
+    const marks = [s.last_run_at ? Date.parse(s.last_run_at) : 0, ...desk.map((d) => Date.parse(d.exit_at))].filter((x) => x > 0);
+    if (marks.length) { const e = ist(Math.max(...marks) / 1000); pausedAt = stamp(e.date, e.min); }
+  }
+  const plans = cutPaused(simulateRules(s, data, from, today).filter((p) => p.entryDay >= from && p.entryDay <= lastDay), pausedAt);
   const deskIn = desk.filter((d) => d.entry_day <= lastDay);
   const trades = matchTrades(deskIn, plans, { daily: !!s.rules.daily, tf: Number(s.timeframe_min) || 15, options: s.trade_type === "OPTIONS", today });
   // The open position: the desk's against the backtest's.
@@ -106,7 +142,7 @@ export async function auditStrategy(sb: SupabaseClient, creds: { client: string;
   const deskOpen = s.position && s.position !== "FLAT" && !!s.live === (mode === "LIVE") ? String(s.position) : "FLAT";
   const btOpenSide = btOpen ? btOpen.side : "FLAT";
   let openNote = "";
-  if (deskOpen !== btOpenSide) {
+  if (deskOpen !== btOpenSide && !pausedAt) {
     openNote = `Open position differs: desk ${deskOpen}, backtest ${btOpenSide}${btOpen ? ` (since ${stamp(btOpen.entryDay, btOpen.entryMin)})` : ""}.`;
   }
   const res = { ...base, from_day: from, to_day: lastDay || today, trades };
@@ -114,7 +150,7 @@ export async function auditStrategy(sb: SupabaseClient, creds: { client: string;
     if (t.desk && t.bt) res.matched++;
     if (!t.desk) res.missed++;
     if (!t.bt) res.extra++;
-    if (t.issue) res.issues++;
+    if (t.issue && !soft(t.issue)) res.issues++;
     if (t.desk) res.desk_pts += t.desk.pts;
     if (t.bt && t.bt.pts != null) res.bt_pts += t.bt.pts;
     if (t.rupee_gap) res.rupee_gap += t.rupee_gap;
@@ -122,6 +158,6 @@ export async function auditStrategy(sb: SupabaseClient, creds: { client: string;
   res.desk_pts = +res.desk_pts.toFixed(2); res.bt_pts = +res.bt_pts.toFixed(2);
   if (openNote) res.issues++;
   res.verdict = res.issues ? "gap" : "ok";
-  res.note = [openNote, lastDay < today ? `Candles stored up to ${lastDay}.` : ""].filter(Boolean).join(" ");
+  res.note = [openNote, pausedAt ? `Paused since ${pausedAt}; later backtest trades not counted.` : "", lastDay < today ? `Candles stored up to ${lastDay}.` : ""].filter(Boolean).join(" ");
   return res;
 }
