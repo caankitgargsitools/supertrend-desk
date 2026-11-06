@@ -262,7 +262,7 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   strategy tiles · capital deployed vs profit over timeline · capital flow (dates, note and Expand hidden); the stats bar
   below. Many open positions (lane < 27 px): each lane's name and amount on one line (`desk.laneH`), the label column
   widens for it; 30+ positions fit from ~900 px tall. Capital deployed vs profit is minute by minute (migration 76:
-  `desk-snapshot` cron every minute, `desk_series` down to 1-minute buckets; 1H and 1D ranges, 1D the default). Timeline / capital flow size to their boxes
+  `desk-snapshot` cron every minute from 6 Nov 13:46 IST, `desk_series` down to 1-minute buckets; 1H and 1D ranges, 1D the default; "1 point = N min" beside the periods, `#dk_cvp_step`). The one-screen cloud is bigger (R up to 45% of the room right of the labels; phones unchanged). Timeline / capital flow size to their boxes
   (`clientHeight`), long asset names shorten with "…" (`dkFit`, full name on hover), narrow boxes get shorter labels.
   Tested in `tests/ui/ui_desk.mjs` (args: theme width [height]; every panel inside the window, no page scroll).
 - **Desk · capital deployed vs profit** (3 Nov 2026, Papa: "a perpetual graph … any time in the past"; migration 70):

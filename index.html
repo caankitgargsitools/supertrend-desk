@@ -918,6 +918,7 @@ body.dk-fs-on { overflow: hidden; }
 /* One-screen desk (Papa, 6 Nov 2026: "fit it in one screen … hide the menu on the left"): on big screens every panel
    sits in one screen-high grid; the left menu is hidden while the Desk is open. Toggle #dk_one (localStorage deskOne). */
 .dk-onebtn { display: none; margin-left: auto; }
+#deskPane .dk-step { text-transform: none; letter-spacing: .02em; color: var(--dk-amber); }
 @media (min-width: 1280px) {
   .dk-onebtn { display: inline-block; }
   .dk-onebtn[aria-pressed="true"] { color: var(--dk-ink); background: var(--dk-amber); border-color: var(--dk-amber); }
@@ -926,7 +927,7 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one .topalert { margin: 8px 8px 0 !important; max-width: none; }
   body.dk-one footer.disclaim { display: none; }
   body.dk-one #deskPane { height: calc(100vh - 16px); min-height: 640px; box-sizing: border-box; overflow: hidden; padding: 8px; gap: 8px;
-    grid-template-columns: 250px minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) auto; }
+    grid-template-columns: 250px minmax(0, 2.4fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) auto; }
   body.dk-one #deskPane .dk-main, body.dk-one #deskPane .dk-low { display: contents; }
   body.dk-one #deskPane .dk-top, body.dk-one #deskPane .dk-modebar, body.dk-one #deskPane .dk-foot { grid-column: 1 / -1; }
   body.dk-one #deskPane .dk-top { padding: 6px 10px; }
@@ -1661,6 +1662,7 @@ body.dk-fs-on { overflow: hidden; }
             <span class="dk-seg" id="dk_cvp_tab" role="group" aria-label="Profit shown"><button type="button" data-v="real" aria-pressed="false">Realised</button><button type="button" data-v="run" aria-pressed="false">Running</button><button type="button" data-v="total" aria-pressed="true">Total</button></span>
             <span class="dk-seg" id="dk_cvp_rng" role="group" aria-label="Period"><button type="button" data-v="1H" aria-pressed="false" title="Last hour, one point a minute">1H</button><button type="button" data-v="1D" aria-pressed="false" title="Last 24 hours, one point a minute">1D</button><button type="button" data-v="1W" aria-pressed="false">1W</button><button type="button" data-v="1M" aria-pressed="true">1M</button><button type="button" data-v="3M" aria-pressed="false">3M</button><button type="button" data-v="1Y" aria-pressed="false">1Y</button><button type="button" data-v="ALL" aria-pressed="false">All</button></span>
             <label class="dk-date">From <input type="date" id="dk_cvp_from"></label><label class="dk-date">To <input type="date" id="dk_cvp_to"></label>
+            <span class="dk-lbl dk-step" id="dk_cvp_step" title="How far apart the points on the chart are"></span>
             <button class="dk-btn" id="dk_cvp_reset" type="button" hidden>Reset zoom</button>
             <button class="dk-btn" id="dk_cvp_big" type="button" aria-pressed="false">Expand</button>
           </span></div>
@@ -7929,7 +7931,7 @@ function deskLayout() {
   else { const m = cv.getContext("2d"), oo = dkOpen(), tight = (desk.H - 60) / Math.max(1, oo.length) < 27; m.font = tight ? "600 9.5px monospace" : "600 11px monospace";
     // Many positions: name and amount share one line, so the column makes room for both.
     const widest = Math.max(80, ...oo.map((s) => m.measureText(dkName(s.underlying) + " L" + (tight ? "  " + dkSgn(Number(s.pos_upnl) || 0) : "")).width));
-    desk.X0 = Math.round(Math.max(138, Math.min(desk.W * (tight ? .36 : .3), widest + 20))); } desk.R = narrow ? Math.max(90, Math.min(desk.H * .4, (desk.W - desk.X0) * .5)) : Math.max(80, Math.min(desk.H * .46, (desk.W - desk.X0) * .36));
+    desk.X0 = Math.round(Math.max(138, Math.min(desk.W * (tight ? .36 : .3), widest + 20))); } desk.R = narrow ? Math.max(90, Math.min(desk.H * .4, (desk.W - desk.X0) * .5)) : Math.max(80, Math.min(desk.H * .46, (desk.W - desk.X0) * (document.body.classList.contains("dk-one") ? .45 : .36))); // one-screen: a bigger cloud (Papa, 6 Nov)
   desk.CX = narrow ? desk.W - desk.R * .95 : desk.W - desk.R - 24; desk.CY = desk.H / 2;
   // Decorative agents (Papa, 3 Nov: "just for decor", no data and no decisions behind them): a column on the right-hand side,
   // below the running P&L box, overlapping the cloud a little.
@@ -8258,7 +8260,9 @@ function deskCvpDraw() {
     if (v != null) { ctx.fillStyle = v >= 0 ? DK_COL.up : DK_COL.down; ctx.beginPath(); ctx.arc(x, ty(v), 3.5, 0, Math.PI * 2); ctx.fill(); }
     ctx.fillStyle = "#5aa8ff"; ctx.beginPath(); ctx.arc(x, tm(hp.m), 3, 0, Math.PI * 2); ctx.fill(); }
   const first = dkCvp.data && dkCvp.data.first;
-  $("dk_cvp_note").textContent = `Shaded = capital deployed (margin of open positions, right scale); line = ${lbl.toLowerCase()} profit after charges (left scale). Recorded every 5 minutes${first ? ` since ${istText(first)}` : " from now on"}; before that the capital deployed is estimated from closed trades (dashed) and running profit wasn't recorded. Drag across the chart to zoom in; pick dates to see any past period.`;
+  { const st = Number(dkCvp.data && dkCvp.data.step_s) || 0, m = Math.round(st / 60);
+    $("dk_cvp_step").textContent = !st ? "" : m < 60 ? `1 point = ${m} min` : m < 1440 ? `1 point = ${+(m / 60).toFixed(1)} h` : `1 point = ${+(m / 1440).toFixed(1)} day`; }
+  $("dk_cvp_note").textContent = `Shaded = capital deployed (margin of open positions, right scale); line = ${lbl.toLowerCase()} profit after charges (left scale). Recorded every minute from 6 Nov 2026, 13:46 (every 5 minutes before that${first ? `, since ${istText(first)}` : ""}); before that the capital deployed is estimated from closed trades (dashed) and running profit wasn't recorded. Drag across the chart to zoom in; pick dates to see any past period.`;
 }
 function deskCvpPaintCtl() {
   $("dk_cvp_tab").querySelectorAll("[data-v]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === dkCvp.tab)));

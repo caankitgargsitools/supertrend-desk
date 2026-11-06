@@ -77,6 +77,7 @@ const after2 = await p.evaluate(() => desk.pool.length); if (!(after2 < after)) 
 // Capital deployed vs profit: estimated part from trades, recorded part from snapshots, live end; tabs, hover, zoom.
 await p.waitForTimeout(400);
 if (await p.evaluate(() => dkCvp.range) !== "1D") fail("per-minute day view is the default");
+if (!/1 point = \d/.test(await p.textContent("#dk_cvp_step"))) fail("the chart says how far apart its points are", await p.textContent("#dk_cvp_step"));
 await p.click('#dk_cvp_rng [data-v="1M"]'); await p.waitForTimeout(500);
 const cv = await p.evaluate(() => ({ n: dkCvp.pts.length, est: dkCvp.pts.filter((x) => x.est).length, rec: dkCvp.pts.filter((x) => !x.est && !x.now).length, now: dkCvp.pts.some((x) => x.now) }));
 if (!(cv.est > 0 && cv.rec === 48 && cv.now)) fail("capital vs profit series", cv);
