@@ -87,6 +87,22 @@ const r = await p.evaluate(() => {
     msg: document.getElementById("formMsg").textContent, lab: !!document.querySelector(`#lab_asset_pop [data-a="KOTAKBANK"]`) && !!document.querySelector(`#lab_asset_pop [data-type="STK"]`) };
 });
 console.log(JSON.stringify(r));
+// Options on stocks and MCX (6 Nov 2026): offered where Dhan lists them; the listed-contract note; a single option only.
+const o = await p.evaluate(() => {
+  const sel = document.getElementById("f_underlying"), tt = document.getElementById("f_trade_type"), optOk = () => !tt.querySelector('option[value="OPTIONS"]').disabled;
+  const out = {};
+  for (const k of ["RELIANCE", "MM", "CRUDEOIL", "GOLD", "ALUMINIUM"]) { sel.value = k; sel.dispatchEvent(new Event("change")); out[k] = optOk(); }
+  sel.value = "RELIANCE"; sel.dispatchEvent(new Event("change")); tt.value = "OPTIONS"; tt.dispatchEvent(new Event("change"));
+  out.hint = !document.getElementById("listedOptHint").hidden;
+  out.structOff = [...document.getElementById("f_structure").options].filter((x) => x.value).every((x) => x.disabled);
+  out.tt = tt.value;
+  sel.value = "NIFTY"; sel.dispatchEvent(new Event("change")); tt.value = "OPTIONS"; tt.dispatchEvent(new Event("change"));
+  out.niftyHint = !document.getElementById("listedOptHint").hidden; out.niftyStruct = [...document.getElementById("f_structure").options].some((x) => x.value && !x.disabled);
+  return out;
+});
+console.log(JSON.stringify(o));
+const okOpt = o.RELIANCE && o.MM && o.CRUDEOIL && o.GOLD && !o.ALUMINIUM && o.hint && o.structOff && o.tt === "OPTIONS" && !o.niftyHint && o.niftyStruct;
+if (!okOpt) { console.log("FAIL options on stocks / MCX", JSON.stringify(o)); process.exit(1); }
 const ok = r.names.length === 33 && r.names.includes("MM") && r.names.includes("TMPV") && r.seg === "NSE_EQ" && r.sec === "2885" && r.instr === "EQUITY" && r.fut === "RELIANCE1!" && r.lot === "500" && r.tt === "FUTURES" && r.flag === "MONTH" && /stock futures/.test(r.msg) && r.lab;
 console.log(ok && !errs.length ? "OK" : "FAIL", errs);
 await b.close(); process.exit(ok && !errs.length ? 0 : 1);

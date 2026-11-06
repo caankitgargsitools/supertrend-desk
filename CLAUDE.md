@@ -362,6 +362,17 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   API 33 from GitHub. Not a Trusted Web Activity (its Google libraries can't be downloaded here), so **phone
   notifications don't work inside the app** (WebView has no web push); Chrome's "Install app" still gets them. The
   signing key isn't in the repo; a rebuild with a new key means uninstalling the old app first.
+- **Options on stocks and MCX** (6 Nov 2026, Papa: points 3 and 4; `listedopts.ts`): stock options (NSE OPTSTK, all 33 stocks)
+  and options on MCX futures (OPTFUT: CRUDEOIL, CRUDEOILM, NATURALGAS, NATGASMINI, GOLD, GOLDM, SILVER, SILVERM, COPPER, ZINC —
+  web `MCX_OPT`; aluminium, lead, nickel, silver micro have none). Contracts come from Dhan's lists, not the option chain:
+  `syncFno` keeps OPTSTK and `syncMcx` OPTFUT (into fno_contracts, seg MCX_COMM) for the two nearest expiries (`nearestTwo`);
+  `sizeEntry` → `pickListed`: next listed expiry (after today with roll_on_expiry), the listed strike nearest the price
+  moved by `strike_offset` in listed strikes (`_strike` → `entryLeg`); `premiumOf` → `findListed` + that contract's LTP;
+  `resolveLeg` sends to the exact OPTSTK / OPTFUT contract (MCX quantity in lots). Single options only (structures refused on
+  stocks / MCX). Stock option backtests: Dhan rolling options with instrument OPTSTK; MCX options can't be backtested (Dhan
+  has no expired MCX options) — the backtest says so. Form: Options enabled for those assets, `#listedOptHint`, structures
+  disabled; picking a stock / MCX asset still defaults to futures. Tests: `tests/sim/stocks.test.mjs`, `tests/sim/safety.test.mjs`
+  "stock option entry", `tests/ui/ui_stocks.mjs`. Paper first; nothing live before the supervised test.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
