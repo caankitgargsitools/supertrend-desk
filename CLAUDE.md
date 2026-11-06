@@ -72,10 +72,11 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   Steps: push the commit, then deploy the wrapper with the new SHA (verify_jwt **false**).
 - Build check: `cd supabase/functions/engine && npx esbuild index.ts --bundle --format=esm --platform=neutral "--external:npm:*" --outfile=/dev/null`
 - Edge runtime limit: about 2 s of CPU per invocation — long work is split (lab instalments, 10-second price runs).
-- Cron jobs (pg_cron, call `public.engine_call(action)`):
-  `tick` every minute (NSE/MCX hours), `tick_crypto` every minute, `prices` every 10 s while any position is open
-  (prices every second inside), `orders` while live orders are worked, `reconcile` every 5 min, `audit` daily 07:40 IST,
-  lab jobs, margins, token check, billing.
+- Cron jobs (pg_cron): since 6 Nov 2026 (migration 81) one job `engine-minute` → `engine_minute()` does the minute work in one
+  session (`tick` in NSE/MCX hours, `tick_crypto`, `orders` while live orders are worked, `push`, `spreads`, the backtest
+  kick, `desk_snapshot`; every 5 min `reconcile` and `pred_feed`); `live-prices` every 10 s in market hours or while a
+  position is open (prices every second inside); `audit` daily 07:40 IST (then `kill`); `desk-health` hourly; lab jobs
+  (paused since 6 Nov), margins, token check, day moves, Shukrana reminder.
 - SQL via the MCP tool: statements containing the words drop/delete are blocked or need approval.
 
 ## Key behaviours (current state)
@@ -493,6 +494,47 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (only while the server reported in the last 30 min). Page: admin tab "Prediction Lab". Watch only; path: accuracy →
   paper trading → live, each with Papa's go. Tests: `predictor/tests/test_predictor.py`, `tests/sim/pred.test.mjs`,
   `tests/ui/ui_pred.mjs`.
+
+## Audit 6 Nov 2026 (five reviews: website code, engine, database, GUI screenshots, strategy rules; reports were in the
+## session scratchpad — findings and what was built are recorded here)
+- **Engine order path (built, engine v144, commit 48ce11d; tests `tests/sim/safety2.test.mjs`)**: `must()` wraps every
+  write on the money path (position after a signal / stop / roll / retry, order state, fills, ledger rows, stop records):
+  three tries, then it throws → `last_error`, the breaker, an alert; a stop whose record couldn't be saved is cancelled
+  again (`stoprec-` alert) so two stops never rest. `finishNow` re-reads the position under `actLocked` before booking and
+  sends nothing if it changed meanwhile (INFO "Skipped: the position changed"). **Partial exits**: `failRow` reads Dhan's
+  fill of a rejected / cancelled exit — the filled part is marked filled, only the rest goes again at market (a new
+  `live_orders` row, same batch), `fixLedger` prices the exit on all its fills; if the rest fails too, `bookPart` books the
+  closed part as a real trade and the position shrinks to what Dhan still holds (`pos_qty`, `pos_lots`, `pos_margin`,
+  `pos_broker.legs`), then `exitFailed` retries as before. Delta: a partly filled exit shrinks the position the same way,
+  and a stop that can't be cancelled before an exit stops the exit (`stopcancel-` alert), like Dhan since 4 Nov.
+  `claimSignal` takes over a PENDING claim older than 2 minutes (a worker killed between claim and send no longer blocks
+  the candle — a square-off reuses the same candle every minute). Split day: `SPAN_CACHE` / `DAILY_CACHE` cleared for the
+  stock when `stock_actions` gets today's row; a failed ex-date check skips that second's stop check (alert `exdate-`).
+  `checkStop` books under `actLocked`; the four `waitUntil` chains catch. Breaker: an account counts as failing only when
+  none of its active strategies has `last_error` null (one bad strategy among quiet ones no longer stops the account).
+  The tick and the price loop read strategies with `pagedRows`. The tick closes a lab run `running` with a lease expired
+  over an hour (`failed`, "engine watchdog"). `live_marks` written only when the price moved or every 15 s (Realtime
+  decoding was 18% of database time); `algo_chart` on a new bar or every 5 min; the per-second loop caches accounts and
+  the admin account for a minute. Self-check: one strategy per call; the kill rule runs after it as action `kill`
+  (3 strategies per call, chained). `selfCall(body)` = the engine calling itself.
+- **Database (migration 81)**: one cron job `engine-minute` → `engine_minute()` runs the minute work in one session
+  (tick in NSE/MCX hours, tick_crypto, orders, push, spreads while the watch lasts, backtest kick, desk_snapshot; every
+  5 min reconcile and pred_feed) — the seven jobs that used to start together at :00 (1, 6, 13, 16, 18, 19, 28, 35, 36)
+  are switched off with `cron.alter_job(active := false)`, not dropped. `live-prices` (job 24) only Mon–Fri 08:55–23:59
+  IST or while a position is open. Job 7 (`deploy-fee-renewals`, retired billing) off. Policies calling `is_owner()` /
+  `auth.uid()` wrapped in `(select …)`. Indexes `lab_results_robust_status_idx`, `algo_backtests_waiting_idx`,
+  `lab_results_promoted_idx`. `trg_strategy_notify` sends one error notification per cause per account per hour (was
+  per strategy). `portal_settings` (dead table) token and secret blanked.
+- **Still from the audit, done elsewhere this day**: see the website and strategy entries added below as they land.
+- **Open questions put to Papa 6 Nov 2026 (no answer within a minute → pending, ask again)**: (1) switch the four lab
+  jobs (3, 10, 26, 29) back on now that the dispatcher is in and the tick closes stuck runs; (2) revoke the blanket ALL
+  grants from anon / authenticated and grant back what the app uses; (3) rebuild the navigation as 5 client entries
+  (Home · Strategies · Marketplace · Money · Settings) + Research and Admin for admins; (4) the DROP / archival batch —
+  superseded lab results' trade payloads to storage files (~250 MB), 7 dead tables (`strategies`, `signals`,
+  `settings`, `strategy_chart`, `lab_robust_bak_1013`, `owner_invite`, `portal_settings`), 15 dead functions, merging
+  the 13 duplicate permissive policy pairs; (5) a mandatory luck test before anything goes live; (6) a hold-to-flatten
+  kill switch on the home screen. Also still open: Lab run 966 was stuck "running" since 07:53 IST — the engine watchdog
+  closes it an hour after its lease; the lab jobs stay off until Papa says.
 
 ## Incident 23 Oct 2026 (state to restore)
 - A daytime lab re-test (3,930 saved strategies) plus per-second price writes used up the database's disk allowance on
