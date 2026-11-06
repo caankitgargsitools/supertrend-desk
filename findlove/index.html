@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Find Love · Lost and found children</title>
+<link rel="icon" type="image/svg+xml" href="/icons/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<style>
+/* Scaffold only (6 Nov 2026). Same colour tokens as the desk so both apps look like one family.
+   No backend calls yet: the screens below run on sample data until the Find Love project is decided. */
+:root {
+  --bg: #f6f8fc; --panel: #ffffff; --ink: #202124; --muted: #5f6368; --line: #dde1e7;
+  --blue: #1a73e8; --blue-soft: #e8f0fe; --red: #d93025; --red-soft: #fce8e6;
+  --yellow: #f9ab00; --yellow-soft: #fef7e0; --green: #188038; --green-soft: #e6f4ea;
+  --rose: #c2185b; --rose-soft: #fce4ec; --chip: #eef0f3; --on-blue: #fff; --r: 12px;
+  --font-ui: "Inter", "Segoe UI", Roboto, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111317; --panel: #1b1d22; --ink: #e8eaed; --muted: #9aa0a6; --line: #30333a;
+  --blue: #8ab4f8; --blue-soft: #1d2c46; --red: #f28b82; --red-soft: #3b2120; --yellow: #fdd663; --yellow-soft: #3a3115;
+  --green: #81c995; --green-soft: #1b3324; --rose: #f48fb1; --rose-soft: #3a1f2b; --chip: #272a30; --on-blue: #0c1a33; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #111317; --panel: #1b1d22; --ink: #e8eaed; --muted: #9aa0a6; --line: #30333a;
+  --blue: #8ab4f8; --blue-soft: #1d2c46; --red: #f28b82; --red-soft: #3b2120; --yellow: #fdd663; --yellow-soft: #3a3115;
+  --green: #81c995; --green-soft: #1b3324; --rose: #f48fb1; --rose-soft: #3a1f2b; --chip: #272a30; --on-blue: #0c1a33; color-scheme: dark; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font-ui); }
+[hidden] { display: none !important; }
+header { position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+header h1 { font-size: 18px; margin: 0; display: flex; gap: 8px; align-items: center; }
+header h1 .heart { color: var(--rose); }
+header .tag { font-size: 12px; color: var(--muted); background: var(--chip); border-radius: 999px; padding: 2px 10px; }
+nav { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+nav button { background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 999px; padding: 6px 14px; cursor: pointer; font: inherit; }
+nav button.on { background: var(--blue); color: var(--on-blue); border-color: var(--blue); }
+main { max-width: 1040px; margin: 0 auto; padding: 16px; }
+.help { background: var(--red-soft); border: 1px solid var(--red); border-radius: var(--r); padding: 12px 16px; margin-bottom: 16px; }
+.help b { color: var(--red); }
+.help a { color: inherit; font-weight: 600; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; margin-bottom: 16px; }
+.card h2 { margin: 0 0 8px; font-size: 17px; }
+.muted { color: var(--muted); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 4px; }
+input, select, textarea { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
+textarea { min-height: 70px; }
+.btn { background: var(--blue); color: var(--on-blue); border: 0; border-radius: 8px; padding: 10px 16px; font: inherit; font-weight: 600; cursor: pointer; }
+.btn.rose { background: var(--rose); color: #fff; }
+.btn.ghost { background: var(--chip); color: var(--ink); }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 14px; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+.chip { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
+.chip.lost { background: var(--red-soft); color: var(--red); } .chip.found { background: var(--green-soft); color: var(--green); }
+.chip.open { background: var(--yellow-soft); color: var(--yellow); } .chip.score { background: var(--blue-soft); color: var(--blue); }
+.bar { height: 6px; background: var(--chip); border-radius: 3px; overflow: hidden; } .bar i { display: block; height: 100%; background: var(--rose); }
+footer { text-align: center; color: var(--muted); font-size: 12px; padding: 24px 16px; }
+@media (max-width: 640px) { th:nth-child(4), td:nth-child(4) { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="heart">♥</span> Find Love</h1>
+  <span class="tag">Lost and found children · scaffold</span>
+  <nav id="nav">
+    <button data-p="home" class="on">Home</button>
+    <button data-p="lost">Report a lost child</button>
+    <button data-p="found">Report a found child</button>
+    <button data-p="match">Matches</button>
+    <button data-p="mine">My reports</button>
+  </nav>
+</header>
+<main>
+  <div class="help">
+    <b>If a child is missing or found right now, call first:</b> Childline <a href="tel:1098">1098</a> (free, 24x7) ·
+    Police <a href="tel:112">112</a> · then file an FIR at the nearest police station and tell the district Child Welfare Committee.
+    Find Love helps you record and match; it never replaces these.
+  </div>
+
+  <section id="p_home">
+    <div class="card">
+      <h2>What Find Love does</h2>
+      <p class="muted">A parent reports a <span class="chip lost">lost</span> child; a volunteer, shelter or police post reports a
+      <span class="chip found">found</span> child. The system puts likely pairs side by side by age, sex, place and time.
+      A verified person checks each pair with the family and the authorities before anything is called a match.</p>
+      <div class="grid">
+        <div class="card"><h2>1 · Report</h2><p class="muted">Description, last seen where and when. Photos stay private.</p></div>
+        <div class="card"><h2>2 · Match</h2><p class="muted">Candidates ranked 0–100. People decide, the code only ranks.</p></div>
+        <div class="card"><h2>3 · Hand over</h2><p class="muted">Every case keeps its FIR, Childline and TrackChild references.</p></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Today</h2>
+      <div class="row" id="stats"></div>
+    </div>
+  </section>
+
+  <section id="p_lost" hidden>
+    <div class="card">
+      <h2>Report a lost child</h2>
+      <p class="muted">Sample form. Nothing is saved yet.</p>
+      <form id="f_lost" class="grid" onsubmit="return fakeSave(event,'lost')">
+        <div><label>Child's name</label><input name="child_name" required></div>
+        <div><label>Sex</label><select name="sex"><option value="M">Boy</option><option value="F">Girl</option><option value="U">Not sure</option></select></div>
+        <div><label>Age (years)</label><input name="age_years" type="number" min="0" max="18" step="0.5" required></div>
+        <div><label>Height (cm)</label><input name="height_cm" type="number"></div>
+        <div><label>Last seen where</label><input name="place" placeholder="Area, landmark, station, city" required></div>
+        <div><label>Last seen when</label><input name="at" type="datetime-local" required></div>
+        <div><label>Clothes</label><input name="clothes"></div>
+        <div><label>Marks, speech, disability</label><input name="marks"></div>
+        <div><label>Languages the child speaks</label><input name="languages"></div>
+        <div><label>FIR number · police station</label><input name="fir" placeholder="FIR 123/2026 · Paharganj"></div>
+        <div style="grid-column:1/-1"><label>Anything else</label><textarea name="note"></textarea></div>
+        <div style="grid-column:1/-1" class="row"><button class="btn rose">Save report</button><span class="muted">A phone check (OTP) comes before the report goes live for matching.</span></div>
+      </form>
+    </div>
+  </section>
+
+  <section id="p_found" hidden>
+    <div class="card">
+      <h2>Report a found child</h2>
+      <p class="muted">Sample form. Nothing is saved yet.</p>
+      <form id="f_found" class="grid" onsubmit="return fakeSave(event,'found')">
+        <div><label>Sex</label><select name="sex"><option value="M">Boy</option><option value="F">Girl</option><option value="U">Not sure</option></select></div>
+        <div><label>Age, best guess (years)</label><input name="age_years" type="number" min="0" max="18" step="0.5" required></div>
+        <div><label>± years</label><input name="age_tol" type="number" min="0.5" max="5" step="0.5" value="2"></div>
+        <div><label>Found where</label><input name="place" required></div>
+        <div><label>Found when</label><input name="at" type="datetime-local" required></div>
+        <div><label>Where the child is now</label><input name="now_at" placeholder="Shelter / police post / with me" required></div>
+        <div><label>Clothes</label><input name="clothes"></div>
+        <div><label>Marks, speech, disability</label><input name="marks"></div>
+        <div><label>Name the child gives (if any)</label><input name="child_name"></div>
+        <div><label>Childline / CWC reference</label><input name="childline_ref"></div>
+        <div style="grid-column:1/-1"><label>Anything else</label><textarea name="note"></textarea></div>
+        <div style="grid-column:1/-1" class="row"><button class="btn">Save report</button><span class="muted">Tell Childline 1098 and the nearest police post first.</span></div>
+      </form>
+    </div>
+  </section>
+
+  <section id="p_match" hidden>
+    <div class="card">
+      <h2>Suggested matches</h2>
+      <p class="muted">Sample data, scored in the browser with the same rules as <code>match.ts</code>. Humans confirm; nothing here is a match until a volunteer marks it so.</p>
+      <table><thead><tr><th>Lost</th><th>Found</th><th>Score</th><th>Why</th><th></th></tr></thead><tbody id="mrows"></tbody></table>
+    </div>
+  </section>
+
+  <section id="p_mine" hidden>
+    <div class="card">
+      <h2>My reports</h2>
+      <p class="muted">Sign-in and saved reports come with the backend. Sample rows below.</p>
+      <table><thead><tr><th>Kind</th><th>Child</th><th>Place · when</th><th>References</th><th>Status</th></tr></thead><tbody id="myrows"></tbody></table>
+    </div>
+  </section>
+</main>
+<footer>Find Love · scaffold · a child's data is never public · authorities first</footer>
+
+<script>
+// Sample cases (no real children). Same scoring as supabase/functions/findlove/match.ts.
+const CASES = [
+  { id: 1, kind: "lost",  child_name: "Aarav", sex: "M", age_years: 6,  age_tol: 1, place: "New Delhi railway station", lat: 28.6428, lon: 77.2197, at: "2026-11-01T10:00:00+05:30", fir: "FIR 214/2026 · Paharganj", status: "open" },
+  { id: 2, kind: "lost",  child_name: "Meera", sex: "F", age_years: 9,  age_tol: 1, place: "Dadar, Mumbai",            lat: 19.0178, lon: 72.8478, at: "2026-10-28T17:30:00+05:30", fir: "FIR 88/2026 · Dadar",      status: "open" },
+  { id: 3, kind: "found", child_name: "",      sex: "M", age_years: 6,  age_tol: 2, place: "Anand Vihar ISBT, Delhi",   lat: 28.6469, lon: 77.3160, at: "2026-11-02T08:00:00+05:30", now_at: "Childline shelter, Anand Vihar", status: "open" },
+  { id: 4, kind: "found", child_name: "",      sex: "F", age_years: 10, age_tol: 2, place: "Kurla station, Mumbai",     lat: 19.0658, lon: 72.8794, at: "2026-10-29T06:10:00+05:30", now_at: "GRP Kurla",             status: "open" },
+  { id: 5, kind: "found", child_name: "",      sex: "U", age_years: 4,  age_tol: 2, place: "Howrah station, Kolkata",   lat: 22.5839, lon: 88.3425, at: "2026-11-03T21:00:00+05:30", now_at: "Childline Howrah",      status: "open" },
+];
+const MAX_KM = 200, MAX_DAYS = 90;
+function km(a, b, c, d) { const r = Math.PI / 180, R = 6371; const x = Math.sin((c - a) * r / 2) ** 2 + Math.cos(a * r) * Math.cos(c * r) * Math.sin((d - b) * r / 2) ** 2; return 2 * R * Math.asin(Math.min(1, Math.sqrt(x))); }
+function score(L, F) {
+  const why = []; let s = 0;
+  if (!L.sex || !F.sex || L.sex === "U" || F.sex === "U") { s += 15; why.push("sex unknown"); } else if (L.sex === F.sex) { s += 30; why.push("same sex"); } else why.push("different sex");
+  const tol = Math.max(L.age_tol || 1, F.age_tol || 1, .5), d = Math.abs(L.age_years - F.age_years); s += Math.max(0, 25 - 10 * d / tol); why.push(d <= tol ? `age within ±${tol}` : `age differs ${d} yr`);
+  const k = km(L.lat, L.lon, F.lat, F.lon); s += Math.max(0, 25 - 25 * k / MAX_KM); why.push(`${k.toFixed(0)} km`);
+  const days = (new Date(F.at) - new Date(L.at)) / 864e5; if (days < 0) why.push("found before lost"); else { s += Math.max(0, 20 - 20 * days / MAX_DAYS); why.push(`${days.toFixed(1)} days after`); }
+  return { s: Math.round(s), why };
+}
+const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const when = (t) => new Date(t).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+function renderMatches() {
+  const rows = [];
+  for (const L of CASES.filter((c) => c.kind === "lost")) for (const F of CASES.filter((c) => c.kind === "found")) { const r = score(L, F); rows.push({ L, F, ...r }); }
+  rows.sort((a, b) => b.s - a.s);
+  document.getElementById("mrows").innerHTML = rows.map((r) => `<tr>
+    <td><span class="chip lost">lost</span> ${esc(r.L.child_name)}, ${r.L.sex === "M" ? "boy" : "girl"} ${r.L.age_years}<br><span class="muted">${esc(r.L.place)} · ${when(r.L.at)}</span></td>
+    <td><span class="chip found">found</span> ${r.F.sex === "M" ? "boy" : r.F.sex === "F" ? "girl" : "child"} ≈${r.F.age_years}<br><span class="muted">${esc(r.F.place)} · ${when(r.F.at)}</span></td>
+    <td><span class="chip score">${r.s}</span><div class="bar"><i style="width:${r.s}%"></i></div></td>
+    <td class="muted">${r.why.map(esc).join(" · ")}</td>
+    <td><button class="btn ghost" onclick="alert('Checking a match needs sign-in and the backend (to come).')">Check</button></td></tr>`).join("");
+}
+function renderMine() {
+  document.getElementById("myrows").innerHTML = CASES.map((c) => `<tr>
+    <td><span class="chip ${c.kind}">${c.kind}</span></td><td>${esc(c.child_name || "(unknown)")} · ${c.sex} · ${c.age_years}</td>
+    <td>${esc(c.place)}<br><span class="muted">${when(c.at)}</span></td><td class="muted">${esc(c.fir || c.now_at || "")}</td><td><span class="chip open">${c.status}</span></td></tr>`).join("");
+}
+function renderStats() {
+  const n = (k) => CASES.filter((c) => c.kind === k && c.status === "open").length;
+  document.getElementById("stats").innerHTML = `<span class="chip lost">${n("lost")} lost open</span><span class="chip found">${n("found")} found open</span><span class="chip score">${n("lost") * n("found")} pairs to check</span><span class="muted">sample data</span>`;
+}
+function fakeSave(e, kind) { e.preventDefault(); alert(`Saved nothing: the ${kind} report form is a scaffold. The backend comes after the project decisions in findlove/README.md.`); return false; }
+function show(p) { for (const s of document.querySelectorAll("main > section")) s.hidden = s.id !== "p_" + p; for (const b of document.querySelectorAll("#nav button")) b.classList.toggle("on", b.dataset.p === p); try { localStorage.setItem("fl_page", p); } catch {} }
+document.getElementById("nav").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) show(b.dataset.p); });
+renderStats(); renderMatches(); renderMine();
+let start = "home"; try { start = localStorage.getItem("fl_page") || "home"; } catch {} if (!document.getElementById("p_" + start)) start = "home"; show(start);
+</script>
+</body>
+</html>

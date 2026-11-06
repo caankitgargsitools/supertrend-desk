@@ -494,6 +494,15 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   paper trading → live, each with Papa's go. Tests: `predictor/tests/test_predictor.py`, `tests/sim/pred.test.mjs`,
   `tests/ui/ui_pred.mjs`.
 
+## Find Love (6 Nov 2026, Papa; `findlove/`, branch `claude/find-love-setup-4trljv`)
+A separate project in this repo: finding abandoned and lost children. **Scaffold only** — purpose, principles (authorities
+first: Childline 1098 / police FIR / CWC / TrackChild; a child's data never public; humans decide matches; no AI on
+children's data without Papa's decision; nothing deleted), a static page (`findlove/index.html`, served at `/findlove`,
+sample data, no backend calls), a **draft, unapplied** migration (`findlove/supabase/migrations/001_findlove_init.sql`,
+schema `findlove`), an edge-function skeleton with pure matching rules (`match.ts`: sex 30 / age 25 / distance 25 / time 20)
+and its test (`cd findlove/tests && node build.mjs && node match.test.mjs`). Details and the open questions are in
+`findlove/README.md`; decide them with Papa before building further. Not wired into the desk app or its database.
+
 ## Incident 23 Oct 2026 (state to restore)
 - A daytime lab re-test (3,930 saved strategies) plus per-second price writes used up the database's disk allowance on
   the smallest Supabase compute (~0.5–1 GB RAM, DB 778 MB, lab_results ~870 MB with toast): API 503s 16:34–17:17 IST,
