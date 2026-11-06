@@ -1270,7 +1270,10 @@ async function tokenCheck(force: boolean, userId?: string) {
   if (userId) q = q.eq("user_id", userId);
   const { data: rows } = await q;
   const out: Record<string, unknown> = {};
-  for (const r of rows ?? []) out[r.user_id] = await tokenCheckOne(force, r).catch((e) => ({ renewed: false, reason: String(e) }));
+  for (const r of rows ?? []) {
+    out[r.user_id] = await tokenCheckOne(force, r).catch((e) => ({ renewed: false, reason: String(e) }));
+    await dataPlanCheck(r.id).catch((e) => console.error("data plan", e));
+  }
   const mine = userId ? out[userId] as Record<string, unknown> | undefined : undefined;
   return userId ? (mine ?? { renewed: false, reason: "no token" }) : { accounts: Object.keys(out).length, results: out };
 }
@@ -1303,6 +1306,42 @@ async function tokenCheckOne(force: boolean, set: { id: number; client_id: strin
     await note(`Renewal failed (${e instanceof Error ? e.message : String(e)}). Retrying next hour.`, { token_expires_at: expIso });
     return { renewed: false, reason: "network" };
   }
+}
+/** Warnings before the Dhan Data API plan ends (Papa, 6 Nov 2026): days left at which the owner is told. */
+export const DATA_WARN_DAYS = [7, 5, 3, 1];
+/** Which warning is due: "off" while Dhan reports the plan inactive, else the smallest step of DATA_WARN_DAYS the days
+ *  left have reached (null when none); `warned` (the last one sent for this validity) stops repeats. */
+export function dataWarnDue(plan: string | null, validity: string | null, today: string, warned: string | null): { key: string; days: number | null } | null {
+  if (plan && !/^active$/i.test(plan)) return warned === "off" ? null : { key: "off", days: null };
+  if (!validity) return null;
+  const days = Math.round((Date.parse(validity) - Date.parse(today)) / 86400000);
+  const step = [...DATA_WARN_DAYS].sort((a, b) => a - b).find((d) => days <= d);
+  if (step == null) return null;
+  const [wv, wd] = String(warned ?? "").split("|");
+  if (wv === validity && Number(wd) <= step) return null;
+  return { key: `${validity}|${step}`, days: Math.max(0, days) };
+}
+async function dataPlanCheck(id: number) {
+  const { data: a } = await sb.from("broker_accounts").select("id, user_id, client_id, access_token, data_warned").eq("id", id).maybeSingle();
+  if (!a?.access_token || !a.client_id) return;
+  const r = await fetch("https://api.dhan.co/v2/profile", { headers: { "access-token": a.access_token, "client-id": a.client_id, Accept: "application/json" }, signal: AbortSignal.timeout(15000) });
+  if (!r.ok) return;
+  const j = await r.json().catch(() => null);
+  if (!j || typeof j.dataPlan !== "string") return;
+  const m = String(j.dataValidity ?? "").match(/^\d{4}-\d{2}-\d{2}/);
+  const validity = m ? m[0] : null;
+  const due = dataWarnDue(j.dataPlan, validity, todayIst(), a.data_warned);
+  // Back to active on a new validity: the warning record restarts for it.
+  const warned = due ? due.key : (a.data_warned === "off" && /^active$/i.test(j.dataPlan) ? null : a.data_warned);
+  await sb.from("broker_accounts").update({ data_plan: j.dataPlan, data_valid_until: validity, data_checked_at: new Date().toISOString(), data_warned: warned }).eq("id", a.id);
+  if (!due) return;
+  const fmt = validity ? new Date(validity + "T00:00:00Z").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "";
+  const where = "Renew it on web.dhan.co → My Profile → DhanHQ Trading APIs → Data APIs.";
+  const title = due.key === "off" ? "Dhan Data API plan is inactive" : due.days! <= 1 ? `Dhan Data API plan ends ${due.days === 0 ? "today" : "tomorrow"} (${fmt})` : `Dhan Data API plan ends in ${due.days} days (${fmt})`;
+  const body = due.key === "off"
+    ? `Dhan reports your Data API plan as inactive: prices and candles are refused, so market strategies can't run (crypto is not affected). ${where}`
+    : `Without it, prices and candles stop and market strategies can't run. ${where}`;
+  await sb.from("notifications").insert({ user_id: a.user_id, kind: "error", url: "/?conn=1", title, body });
 }
 /** Funds in the Dhan account (available balance, margin in use), shown next to the desk's own capital figures. */
 async function refreshFunds(userId: string) {

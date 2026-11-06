@@ -322,6 +322,12 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   batch with his. Used only by the minute tick (`runOne`, the tick's price seed) and the per-second prices; a live
   strategy on shared data is refused ("Connect your own Dhan account … to trade this strategy live"); orders, reconcile,
   broker stops, funds and fills still read the user's own account. Test: `tests/sim/safety.test.mjs` "shared data".
+- **Dhan Data API plan watch** (6 Nov 2026, Papa, after the plan showed "Deactive" at 09:00 and every price request was
+  refused with DH-902 until it was renewed ~10:05; migration 75): the hourly token check (`tokenCheck` → `dataPlanCheck`)
+  reads Dhan's /v2/profile (`dataPlan`, `dataValidity`) per connected account into `broker_accounts.data_plan` /
+  `data_valid_until`, and notifies the owner (kind "error", link `/?conn=1`, pushed to the phone) 7, 5, 3 and 1 day(s)
+  before the plan ends (`DATA_WARN_DAYS`, `dataWarnDue`; a missed day warns at the step reached) and at once when Dhan
+  reports it inactive; `data_warned` = "<validity>|<days>" or "off" stops repeats. Test: `tests/sim/dataplan.test.mjs`.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
