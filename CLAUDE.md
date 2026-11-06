@@ -257,8 +257,12 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 - **Desk · one screen** (6 Nov 2026, Papa: "fit it in one screen … hide the menu on the left"): on screens ≥ 1280 px the
   Desk opens as one screen-high grid (`body.dk-one`, `deskOneApply`; toggle `#dk_one` "One screen" / "Show menu", on by
   default, remembered in localStorage `deskOne`): the left menu is hidden while the Desk is open (`hideNewPanes` removes
-  the class on leaving); row 1 account · profit flow · strategy tiles, row 2 capital deployed vs profit (dates, note and
-  Expand hidden) · timeline · capital flow · activity, then the stats bar. Timeline / capital flow size to their boxes
+  the class on leaving). Layout (rearranged 6 Nov, Papa, 1920×1080 screen: "the nebula is too stretched"): account over
+  activity on the left; the profit flow a tall column in the middle (both rows, ~845 px wide at 1920); on the right
+  strategy tiles · capital deployed vs profit over timeline · capital flow (dates, note and Expand hidden); the stats bar
+  below. Many open positions (lane < 27 px): each lane's name and amount on one line (`desk.laneH`), the label column
+  widens for it; 30+ positions fit from ~900 px tall. Capital deployed vs profit is minute by minute (migration 76:
+  `desk-snapshot` cron every minute, `desk_series` down to 1-minute buckets; 1H and 1D ranges, 1D the default). Timeline / capital flow size to their boxes
   (`clientHeight`), long asset names shorten with "…" (`dkFit`, full name on hover), narrow boxes get shorter labels.
   Tested in `tests/ui/ui_desk.mjs` (args: theme width [height]; every panel inside the window, no page scroll).
 - **Desk · capital deployed vs profit** (3 Nov 2026, Papa: "a perpetual graph … any time in the past"; migration 70):

@@ -76,6 +76,8 @@ await p.waitForTimeout(3500);
 const after2 = await p.evaluate(() => desk.pool.length); if (!(after2 < after)) fail("pool thinner", [after, after2]);
 // Capital deployed vs profit: estimated part from trades, recorded part from snapshots, live end; tabs, hover, zoom.
 await p.waitForTimeout(400);
+if (await p.evaluate(() => dkCvp.range) !== "1D") fail("per-minute day view is the default");
+await p.click('#dk_cvp_rng [data-v="1M"]'); await p.waitForTimeout(500);
 const cv = await p.evaluate(() => ({ n: dkCvp.pts.length, est: dkCvp.pts.filter((x) => x.est).length, rec: dkCvp.pts.filter((x) => !x.est && !x.now).length, now: dkCvp.pts.some((x) => x.now) }));
 if (!(cv.est > 0 && cv.rec === 48 && cv.now)) fail("capital vs profit series", cv);
 if (!/Capital deployed/.test(await p.textContent("#dk_cvp_read"))) fail("read-out");
@@ -127,6 +129,18 @@ if (width >= 1280) {
   if (!(one.cv[1] > 200 && one.cvp > 80)) fail("one screen: charts fill their boxes", one);
   if (process.env.SHOT) await p.screenshot({ path: `${process.env.SHOT}/desk_one_${theme}_${width}.png` });
   console.log("ok   one screen", JSON.stringify(one.out.map((r) => `${r.q}:${r.w}x${r.h}`)));
+  // 30 open positions at once (Papa, 6 Nov): the lanes keep room, the tiles' amounts stay inside the tiles.
+  const many = await p.evaluate(async () => {
+    const U = ["GOLD", "GOLDM", "SILVER", "SILVERM", "CRUDEOIL", "NATURALGAS", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NIFTY", "BANKNIFTY", "MIDCPNIFTY", "FINNIFTY", "SOLUSD"];
+    for (let i = 0; i < 30; i++) state.strategies.push({ ...state.strategies[0], id: "m" + i, name: `Lab #9${i} · Futures · ${U[i % U.length]} daily · many`, underlying: U[i % U.length], position: i % 2 ? "LONG" : "SHORT", pos_lots: 3, pos_upnl: (i % 3 ? 1 : -1) * (123456 + i * 2345678), pos_margin: 500000 + i * 1000, pos_entry_date: "2026-11-01" });
+    renderDesk && (await renderDesk()); await new Promise((r) => setTimeout(r, 600));
+    const tiles = [...document.querySelectorAll("#dk_tiles .dk-tile .p")].filter((x) => x.scrollWidth > x.clientWidth + 1).length;
+    return { lanes: desk.lanes.length, laneH: desk.laneH, X0: desk.X0, W: desk.W, H: desk.H, tilesSpill: tiles, sh: document.documentElement.scrollHeight, vh: innerHeight };
+  });
+  if (many.lanes < 30 || (many.vh >= 900 && many.laneH < 16) || many.tilesSpill || many.sh > many.vh + 1) fail("one screen with 30 open positions", many);
+  if (process.env.SHOT) await p.screenshot({ path: `${process.env.SHOT}/desk_one30_${theme}_${width}.png` });
+  console.log("ok   30 open positions", JSON.stringify(many));
+  await p.evaluate(async () => { state.strategies = state.strategies.filter((x) => !/^m\d+$/.test(x.id)); await renderDesk(); });
   await p.click("#dk_one"); await p.waitForTimeout(300);
   if (await p.evaluate(() => document.body.classList.contains("dk-one") || getComputedStyle(document.querySelector(".bar")).display === "none")) fail("Show menu brings the menu back");
   await p.click("#dk_one"); await p.waitForTimeout(200);

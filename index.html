@@ -926,7 +926,7 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one .topalert { margin: 8px 8px 0 !important; max-width: none; }
   body.dk-one footer.disclaim { display: none; }
   body.dk-one #deskPane { height: calc(100vh - 16px); min-height: 640px; box-sizing: border-box; overflow: hidden; padding: 8px; gap: 8px;
-    grid-template-columns: 250px repeat(3, minmax(0, 1fr)) 290px; grid-template-rows: auto auto minmax(0, 1.4fr) minmax(0, 1fr) auto; }
+    grid-template-columns: 250px minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) auto; }
   body.dk-one #deskPane .dk-main, body.dk-one #deskPane .dk-low { display: contents; }
   body.dk-one #deskPane .dk-top, body.dk-one #deskPane .dk-modebar, body.dk-one #deskPane .dk-foot { grid-column: 1 / -1; }
   body.dk-one #deskPane .dk-top { padding: 6px 10px; }
@@ -936,30 +936,33 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one .dk-acctp .dk-big { font-size: 26px; }
   body.dk-one .dk-acctp .dk-kv { margin-top: 8px; gap: 6px 12px; }
   body.dk-one .dk-acctp .dk-barrow { margin-top: 8px; }
-  body.dk-one .dk-flow { grid-column: 2 / 5; grid-row: 3; padding: 0 !important; }
+  body.dk-one .dk-flow { grid-column: 2; grid-row: 3 / 5; padding: 0 !important; }
   body.dk-one .dk-flow:not(.full) #dk_cv { flex: 1 1 auto; height: auto; min-height: 0; }
   body.dk-one .dk-flowfoot { padding: 4px 10px; }
-  body.dk-one .dk-heat { grid-column: 5; grid-row: 3; }
-  body.dk-one .dk-heat .dk-tiles { max-height: none; flex: 1 1 auto; min-height: 0; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
-  body.dk-one .dk-cvp { grid-column: 1 / 3; grid-row: 4; }
+  body.dk-one .dk-heat { grid-column: 3; grid-row: 3; }
+  body.dk-one .dk-heat .dk-tiles { max-height: none; flex: 1 1 auto; min-height: 0; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
+  body.dk-one .dk-tile .p { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
+  body.dk-one .dk-cvp { grid-column: 4; grid-row: 3; }
   body.dk-one .dk-cvp #dk_cvp { flex: 1 1 auto; height: auto; min-height: 0; }
   body.dk-one .dk-cvp .dk-cvp-read { margin: 0 0 4px; }
   body.dk-one .dk-cvp .dk-cvp-read b { font-size: 13px; }
   body.dk-one #dk_cvp_big { display: none; }
   body.dk-one #dk_cvp_note, body.dk-one .dk-cvp .dk-date { display: none; }
-  body.dk-one .dk-cvp .dk-cvp-read { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; gap: 4px 14px; }
+  body.dk-one .dk-cvp .dk-cvp-read { gap: 2px 12px; }
   body.dk-one .dk-tlp { grid-column: 3; grid-row: 4; }
   body.dk-one .dk-skp { grid-column: 4; grid-row: 4; }
   body.dk-one .dk-tlp .dk-ph > .dk-lbl:last-child, body.dk-one .dk-skp .dk-ph > .dk-lbl:last-child { display: none; }
   body.dk-one .dk-svgbox { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   body.dk-one #dk_tl, body.dk-one #dk_sk { display: block; height: 100%; }
-  body.dk-one .dk-actp { grid-column: 5; grid-row: 4; }
-  body.dk-one .dk-feed { max-height: none; flex: 1 1 auto; min-height: 0; }
-  body.dk-one .dk-feed div { grid-template-columns: 74px minmax(0, 1fr) auto; font-size: 11px; padding: 3px 5px; }
+  body.dk-one .dk-actp { grid-column: 1; grid-row: 4; }
+  body.dk-one .dk-feed { max-height: none; flex: 1 1 auto; min-height: 0; align-content: start; }
+  body.dk-one .dk-foot .dk-v { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body.dk-one .dk-feed div { grid-template-columns: 62px minmax(0, 1fr); font-size: 10.5px; padding: 3px 5px; }
+  body.dk-one .dk-feed div > :last-child { grid-column: 2; }
   body.dk-one #deskPane .dk-foot { margin-left: 0; }
   body.dk-one .dk-foot > div { padding: 5px 10px; }
 }
-@media (min-width: 1280px) and (max-width: 1599px) { body.dk-one #deskPane { grid-template-columns: 220px repeat(3, minmax(0, 1fr)) 250px; } }
+@media (min-width: 1280px) and (max-width: 1599px) { body.dk-one #deskPane { grid-template-columns: 210px minmax(0, 1.7fr) minmax(0, 1fr) minmax(0, 1fr); } }
 </style>
 </head>
 <body>
@@ -1656,7 +1659,7 @@ body.dk-fs-on { overflow: hidden; }
         <div class="dk-ph"><span class="dk-lbl"><b>●</b> Capital deployed vs profit</span>
           <span class="dk-cvp-ctl">
             <span class="dk-seg" id="dk_cvp_tab" role="group" aria-label="Profit shown"><button type="button" data-v="real" aria-pressed="false">Realised</button><button type="button" data-v="run" aria-pressed="false">Running</button><button type="button" data-v="total" aria-pressed="true">Total</button></span>
-            <span class="dk-seg" id="dk_cvp_rng" role="group" aria-label="Period"><button type="button" data-v="1D" aria-pressed="false">1D</button><button type="button" data-v="1W" aria-pressed="false">1W</button><button type="button" data-v="1M" aria-pressed="true">1M</button><button type="button" data-v="3M" aria-pressed="false">3M</button><button type="button" data-v="1Y" aria-pressed="false">1Y</button><button type="button" data-v="ALL" aria-pressed="false">All</button></span>
+            <span class="dk-seg" id="dk_cvp_rng" role="group" aria-label="Period"><button type="button" data-v="1H" aria-pressed="false" title="Last hour, one point a minute">1H</button><button type="button" data-v="1D" aria-pressed="false" title="Last 24 hours, one point a minute">1D</button><button type="button" data-v="1W" aria-pressed="false">1W</button><button type="button" data-v="1M" aria-pressed="true">1M</button><button type="button" data-v="3M" aria-pressed="false">3M</button><button type="button" data-v="1Y" aria-pressed="false">1Y</button><button type="button" data-v="ALL" aria-pressed="false">All</button></span>
             <label class="dk-date">From <input type="date" id="dk_cvp_from"></label><label class="dk-date">To <input type="date" id="dk_cvp_to"></label>
             <button class="dk-btn" id="dk_cvp_reset" type="button" hidden>Reset zoom</button>
             <button class="dk-btn" id="dk_cvp_big" type="button" aria-pressed="false">Expand</button>
@@ -7923,12 +7926,15 @@ function deskLayout() {
   // Phone: shorter labels and a cloud that takes about half the width (Papa, 3 Nov).
   // Phone: the label column is as wide as the longest asset name needs (up to a third of the width); longer names wrap.
   if (narrow) { const m = cv.getContext("2d"); m.font = "600 9.5px monospace"; const widest = Math.max(40, ...dkOpen().map((s) => m.measureText(dkName(s.underlying)).width)); desk.X0 = Math.round(Math.min(desk.W * .34, widest + 14)); }
-  else { const m = cv.getContext("2d"); m.font = "600 11px monospace"; const widest = Math.max(80, ...dkOpen().map((s) => m.measureText(dkName(s.underlying) + " L").width)); desk.X0 = Math.round(Math.max(138, Math.min(desk.W * .3, widest + 20))); } desk.R = narrow ? Math.max(90, Math.min(desk.H * .4, (desk.W - desk.X0) * .5)) : Math.max(80, Math.min(desk.H * .46, (desk.W - desk.X0) * .36));
+  else { const m = cv.getContext("2d"), oo = dkOpen(), tight = (desk.H - 60) / Math.max(1, oo.length) < 27; m.font = tight ? "600 9.5px monospace" : "600 11px monospace";
+    // Many positions: name and amount share one line, so the column makes room for both.
+    const widest = Math.max(80, ...oo.map((s) => m.measureText(dkName(s.underlying) + " L" + (tight ? "  " + dkSgn(Number(s.pos_upnl) || 0) : "")).width));
+    desk.X0 = Math.round(Math.max(138, Math.min(desk.W * (tight ? .36 : .3), widest + 20))); } desk.R = narrow ? Math.max(90, Math.min(desk.H * .4, (desk.W - desk.X0) * .5)) : Math.max(80, Math.min(desk.H * .46, (desk.W - desk.X0) * .36));
   desk.CX = narrow ? desk.W - desk.R * .95 : desk.W - desk.R - 24; desk.CY = desk.H / 2;
   // Decorative agents (Papa, 3 Nov: "just for decor", no data and no decisions behind them): a column on the right-hand side,
   // below the running P&L box, overlapping the cloud a little.
   const top = narrow ? 72 : 30, bottom = 30;
-  const o = dkOpen().slice().sort((a, b) => (Number(b.pos_upnl) || 0) - (Number(a.pos_upnl) || 0)), laneH = (desk.H - top - bottom) / Math.max(1, o.length);
+  const o = dkOpen().slice().sort((a, b) => (Number(b.pos_upnl) || 0) - (Number(a.pos_upnl) || 0)), laneH = (desk.H - top - bottom) / Math.max(1, o.length); desk.laneH = laneH;
   const aTop = 128, aBot = desk.H - 22, aStep = (aBot - aTop) / (DK_AGENTS.length - 1);
   desk.agents = DK_AGENTS.map((a, i) => ({ ...a, x: desk.W - (narrow ? 38 : 62), y: aTop + aStep * i - 6 }));
   desk.links = desk.agents.map(() => o.map(() => ({ ph: Math.random() * Math.PI * 2, f: .35 + Math.random() * .7, run: Math.random() })));
@@ -8039,10 +8045,19 @@ function deskDraw() {
       for (const wd of name.split(" ")) { const t = cur ? cur + " " + wd : wd; if (cur && ctx.measureText(t).width > room) { lines.push(cur); cur = wd; } else cur = t; }
       lines.push(cur);
     }
-    const lh = narrow ? 10 : 12, y0 = L.y - 6 - (lines.length - 1) * lh;
-    lines.forEach((ln, i) => ctx.fillText(ln, X0 - 8, y0 + i * lh));
-    ctx.fillStyle = v >= 0 ? DK_COL.up : DK_COL.down; ctx.font = `500 ${narrow ? 9 : 10.5}px monospace`;
-    ctx.fillText(s.pos_upnl == null ? "–" : dkSgn(v), X0 - 8, L.y + 7);
+    const amt = s.pos_upnl == null ? "–" : dkSgn(v);
+    if (desk.laneH < 27) { // many open positions (Papa, 6 Nov: 30 at once): name and amount on one line, smaller
+      ctx.font = `500 ${narrow ? 8.5 : 9.5}px monospace`; const aw = ctx.measureText(amt).width;
+      ctx.fillStyle = v >= 0 ? DK_COL.up : DK_COL.down; ctx.fillText(amt, X0 - 8, L.y);
+      ctx.fillStyle = DK_COL.text; ctx.font = `600 ${narrow ? 8.5 : 9.5}px monospace`;
+      let nm = name; while (nm.length > 3 && ctx.measureText(nm).width > room - aw - 8) nm = nm.slice(0, -2) + "…";
+      ctx.fillText(nm, X0 - 14 - aw, L.y);
+    } else {
+      const lh = narrow ? 10 : 12, y0 = L.y - 6 - (lines.length - 1) * lh;
+      lines.forEach((ln, i) => ctx.fillText(ln, X0 - 8, y0 + i * lh));
+      ctx.fillStyle = v >= 0 ? DK_COL.up : DK_COL.down; ctx.font = `500 ${narrow ? 9 : 10.5}px monospace`;
+      ctx.fillText(amt, X0 - 8, L.y + 7);
+    }
   }
   if (!desk.lanes.length) { ctx.fillStyle = DK_COL.muted; ctx.textAlign = "left"; ctx.font = "500 12px monospace"; ctx.fillText("No open positions: the streams appear when a strategy enters a trade.", 16, 24); }
   for (const a of desk.amb) { if (!paused) a.t += a.sp; const L = desk.lanes[a.lane]; if (!L) continue; const [x, y] = deskBez(L, Math.min(1, a.t));
@@ -8156,12 +8171,12 @@ function deskSankey() {
 /* ---------- Desk: capital deployed vs realised / running / total profit (Papa, 3 Nov 2026) ----------
    From desk_snapshots (every 5 minutes, kept for good) via desk_series; before the first snapshot the capital deployed is
    estimated from closed trades (entry price × units × today's margin rate) and realised profit from their exits. */
-const dkCvp = { tab: "total", range: "1M", from: null, to: null, zoom: null, data: null, pts: [], span: null, hover: null, drag: null, big: false, at: 0 };
+const dkCvp = { tab: "total", range: "1D", from: null, to: null, zoom: null, data: null, pts: [], span: null, hover: null, drag: null, big: false, at: 0 };
 function deskCvpSpan() {
   const now = Date.now();
   if (dkCvp.zoom) return dkCvp.zoom;
   if (dkCvp.from) return { from: dkCvp.from, to: Math.min(now, dkCvp.to || now) };
-  const d = { "1D": 1, "1W": 7, "1M": 30, "3M": 91, "1Y": 365 }[dkCvp.range];
+  const d = { "1H": 1 / 24, "1D": 1, "1W": 7, "1M": 30, "3M": 91, "1Y": 365 }[dkCvp.range];
   if (d) return { from: now - d * 864e5, to: now };
   const first = Math.min(now - 864e5, ...desk.trades.map((t) => Date.parse((t.entry_day || String(t.exit_at).slice(0, 10)) + "T03:45:00Z")).filter(Number.isFinite));
   return { from: first, to: now };
@@ -8170,7 +8185,7 @@ async function deskCvpLoad() {
   if (page !== "desk") return;
   deskCvpPaintCtl();
   const sp = deskCvpSpan();
-  const r = must(await db.rpc("desk_series", { p_mode: desk.mode, p_from: new Date(sp.from).toISOString(), p_to: new Date(sp.to).toISOString(), p_points: 600 }));
+  const r = must(await db.rpc("desk_series", { p_mode: desk.mode, p_from: new Date(sp.from).toISOString(), p_to: new Date(sp.to).toISOString(), p_points: sp.to - sp.from <= 864e5 + 6e4 ? 1500 : 600 })); // a day or less: one point a minute
   dkCvp.data = r || {}; dkCvp.span = sp; dkCvp.at = Date.now();
   deskCvpBuild(); deskCvpDraw();
 }
