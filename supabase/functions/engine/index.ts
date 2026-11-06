@@ -1582,6 +1582,47 @@ async function chainBacktest(id: number) {
  * normal range (under the worst 1% after 10 trades, the worst 5% after 20), new trades stop and the owner is told.
  * After "Allow new trades again" it is judged only on the trades made since.
  */
+/** Whole rupees with the Indian grouping and a sign: +₹12,340 / −₹1,20,000. */
+const inr = (x: number) => `${x < 0 ? "−" : x > 0 ? "+" : ""}₹${Math.abs(Math.trunc(x)).toLocaleString("en-IN")}`;
+/**
+ * One "Good morning" note per user with active strategies (tag morning-<user>-<day>, so at most one a day): what is
+ * open and how far each stop is, today's booked P&L, expiries today, the Dhan token and data plan, the error breaker,
+ * the kill rule and (admins) new lab passes. The figures come from the SQL function morning_card, which the Home
+ * page's card reads too, so both always say the same.
+ */
+async function morningCards() {
+  const day = todayIst();
+  const { data: owners } = await sb.from("algo_strategies").select("owner_id").eq("archived", false).eq("active", true);
+  const users = [...new Set((owners ?? []).map((r) => String(r.owner_id ?? "")).filter(Boolean))];
+  let sent = 0;
+  for (const u of users) {
+    const tag = `morning-${u}-${day}`;
+    const { data: dup } = await sb.from("notifications").select("id").eq("tag", tag).limit(1);
+    if (dup?.length) continue;
+    const { data: c, error } = await sb.rpc("morning_card", { p_user: u });
+    if (error || !c) { console.error("morning", u, error?.message); continue; }
+    const open = (c.open ?? []) as { name: string; asset: string; live: boolean; side: string; lots: number; upnl: number | null; stop_pct: number | null; expires_today: boolean }[];
+    const run = open.reduce((a, o) => a + (Number(o.upnl) || 0), 0);
+    const parts: string[] = [];
+    parts.push(open.length ? `${open.length} open (${open.filter((o) => o.live).length} live) running ${inr(run)}` : "nothing open");
+    if (open.length) {
+      const noStop = open.filter((o) => o.stop_pct == null).length, near = open.filter((o) => o.stop_pct != null && o.stop_pct < 0.5);
+      parts.push(noStop ? `${noStop} without a stop` : near.length ? `${near.map((o) => o.asset).join(", ")} within 0.5% of the stop` : "stops in place");
+    }
+    parts.push(`booked today ${inr(Number(c.booked_today) || 0)}`);
+    const exp = open.filter((o) => o.expires_today).map((o) => o.asset);
+    if (exp.length) parts.push(`${exp.join(", ")} expire${exp.length === 1 ? "s" : ""} today`);
+    if (c.breaker_halted) parts.push("new trades are stopped (error breaker)");
+    if (Number(c.kills) > 0) parts.push(`${c.kills} stopped by the kill rule`);
+    if (c.token_hours_left != null) parts.push(Number(c.token_hours_left) < 3 ? `Dhan token expires in ${c.token_hours_left} h` : `Dhan token ${Math.round(Number(c.token_hours_left))} h left`);
+    if (c.data_days_left != null && Number(c.data_days_left) <= 7) parts.push(`data plan ${c.data_days_left} day${Number(c.data_days_left) === 1 ? "" : "s"} left`);
+    if (c.new_lab_passes != null && Number(c.new_lab_passes) > 0) parts.push(`${c.new_lab_passes} new lab pass${Number(c.new_lab_passes) === 1 ? "" : "es"}`);
+    const title = `Good morning · ${open.length} open · ${inr(run)} · ${c.active_live ?? 0} live, ${c.active_paper ?? 0} paper`;
+    await sb.rpc("notify_tagged", { p_user: u, p_kind: "morning", p_title: title.slice(0, 120), p_body: parts.join(" · ").slice(0, 400), p_url: "/?home=1", p_strategy: null, p_tag: tag });
+    sent++;
+  }
+  return { sent, users: users.length };
+}
 async function killCheck(offset = 0, perCall = 3) {
   // Three strategies per call (each reads a whole backtest trade list), the rest chain on — a single call used to read
   // every one before the self-check wrote its first row, and the 2-second CPU limit killed both (6 Nov 2026 audit).
@@ -3230,6 +3271,9 @@ Deno.serve(async (req) => {
     EdgeRuntime.waitUntil(runAudit(batch, Number(b.offset) || 0).catch((e) => console.error("audit", e)));
     return Response.json({ action, accepted: true, batch });
   }
+  // The morning card (Papa, 6 Nov 2026 audit "delight" list): at 08:30 IST (engine_minute) one note per user with open
+  // positions and their stops, today's expiries, the token and data plan, the breaker and new lab passes.
+  if (action === "morning") return Response.json({ action, ...(await morningCards()) });
   if (action === "kill") {
     EdgeRuntime.waitUntil(killCheck(Number((body as { offset?: number }).offset) || 0).catch((e) => console.error("kill", e)));
     return Response.json({ action, accepted: true });
