@@ -160,7 +160,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   The cron checks read only the latest `cron.job_run_details` rows by runid (migration 62; the table can't be indexed);
   job history is kept 7 days (cron job 34 `job-history-cleanup`, 02:53 IST, approved by Papa 1 Nov 2026). Check ≈ 0.6 s.
 - **Stock futures** (1 Nov 2026, Papa: "start with stock futures on 10 liquid Nifty 50 stocks"; `stocks.ts`, migration 59):
-  RELIANCE, HDFCBANK, ICICIBANK, INFY, TCS, SBIN, BHARTIARTL, AXISBANK, LT, KOTAKBANK. Like the indices, signals and
+  RELIANCE, HDFCBANK, ICICIBANK, INFY, TCS, SBIN, BHARTIARTL, AXISBANK, LT, KOTAKBANK; **6 Nov 2026 (Papa) 23 more** (33):
+  ITC, HINDUNILVR, BAJFINANCE, BAJAJFINSV, MM (Dhan's "M&M": `DHAN_ALIAS`, mapped in `fnoUnderlying`, since & breaks links /
+  filters), MARUTI, TMPV (Tata Motors passenger vehicles after the demerger), TATASTEEL, JSWSTEEL, SUNPHARMA, TITAN,
+  ADANIENT, ADANIPORTS, NTPC, POWERGRID, ONGC, COALINDIA, HCLTECH, WIPRO, ULTRACEMCO, ASIANPAINT, HDFCLIFE, SBILIFE (ids /
+  lots from Dhan's NSE_FNO list; admin engine action `instr_find` {seg, q, ins} searches a Dhan list). **Sensex 50** index too
+  (6 Nov: Dhan IDX_I 83, BSE F&O SENSEX50, lot 75, step 50, monthly, Thursday). Fixed the same day: order symbols lost
+  digits before "1!" (`/\d*!$/` → `/[1-9]!$/`), so NIFTYNXT501! had resolved to "NIFTYNXT". **Coins** (6 Nov): BNB, ADA,
+  AVAX, LINK, LTC switched on (crypto_assets, synced from Delta); DOGE added but off (thin on Delta India). Like the indices, signals and
   backtests use the share price (Dhan NSE_EQ, instrument EQUITY; no futures premium added) and orders go to the
   near-month stock future (`resolveLeg` → FUTSTK in `fno_contracts`, kept by `syncFno`; quantity = lots × lot size).
   Lot sizes from Dhan's F&O list at every request (`stockLots`), fallbacks in `STOCKS`. Futures only (no stock options;

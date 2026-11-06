@@ -80,6 +80,24 @@ await t("an order for RELIANCE1! goes to the near-month RELIANCE stock future; N
   assert.equal(n.sec, "35001");
   assert.equal(X.brokerQty("NSE_FNO", 2, 500), 1000, "NSE quantity in shares");
 });
+await t("6 Nov: 33 stocks, Dhan's M&M is the desk's MM; Sensex 50 and NIFTYNXT501! / SENSEX501! orders go to their own index futures", async () => {
+  const X = await import("./exec.mjs");
+  assert.equal(S.STOCKS.length, 33); assert.ok(S.isStock("MM") && S.isStock("TMPV") && !S.isStock("M&M"));
+  assert.equal(S.fnoUnderlying("FUTSTK", "", "M&M-Nov2026-FUT"), "MM"); assert.equal(S.fnoUnderlying("FUTSTK", "M&M", ""), "MM");
+  const iso = new Date().toISOString(), today = new Date(Date.now() + 19800000).toISOString().slice(0, 10), later = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  db.fno_contracts = [
+    { seg: "NSE_FNO", sec_id: "61001", underlying: "NIFTYNXT50", instrument: "FUTIDX", expiry: later(20), lot: 25, tick: 0.1, display: "NIFTYNXT50 NOV FUT", synced_at: iso },
+    { seg: "BSE_FNO", sec_id: "62001", underlying: "SENSEX50", instrument: "FUTIDX", expiry: later(20), lot: 75, tick: 0.05, display: "SENSEX50 NOV FUT", synced_at: iso },
+    { seg: "BSE_FNO", sec_id: "62002", underlying: "SENSEX", instrument: "FUTIDX", expiry: later(20), lot: 20, tick: 0.05, display: "SENSEX NOV FUT", synced_at: iso },
+    { seg: "NSE_FNO", sec_id: "61002", underlying: "MM", instrument: "FUTSTK", expiry: later(20), lot: 200, tick: 0.1, display: "M&M NOV FUT", synced_at: iso },
+  ];
+  const nx = await X.resolveLeg(sb, { client: "c", token: "t" }, { exchange: "NSE", lot_size: 25 }, { exchange: "NSE", symbol: "NIFTYNXT501!", instrument: "FUT" }, today);
+  assert.equal(nx.sec, "61001", "the 50 in the name is kept (was cut to NIFTYNXT)");
+  const sx = await X.resolveLeg(sb, { client: "c", token: "t" }, { exchange: "BSE", lot_size: 75 }, { exchange: "BSE", symbol: "SENSEX501!", instrument: "FUT" }, today);
+  assert.equal(sx.sec, "62001"); assert.equal(sx.seg, "BSE_FNO");
+  const mm = await X.resolveLeg(sb, { client: "c", token: "t" }, { exchange: "NSE", lot_size: 200 }, { exchange: "NSE", symbol: "MM1!", instrument: "FUT" }, today);
+  assert.equal(mm.sec, "61002");
+});
 await t("Dhan's F&O list: the desk's stock futures are kept (underlying from the trading symbol when the column is empty), other stocks skipped", async () => {
   const X = await import("./exec.mjs");
   const exp = new Date(Date.now() + 25 * 86400000).toISOString().slice(0, 10);

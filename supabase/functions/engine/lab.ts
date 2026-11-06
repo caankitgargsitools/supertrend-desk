@@ -38,6 +38,7 @@ export const LAB_ASSETS: Record<string, LabAsset> = Object.fromEntries([
   IDX("NIFTYNXT50", "Nifty Next 50", "38", "NSE", 100, 2, 25, "MONTH"),
   IDX("SENSEX", "Sensex", "51", "BSE", 100, 4, 20, "WEEK"),
   IDX("BANKEX", "Bankex", "69", "BSE", 100, 4, 30, "MONTH"),
+  IDX("SENSEX50", "Sensex 50", "83", "BSE", 50, 4, 75, "MONTH"), // 6 Nov 2026, Papa (Dhan: index 83, BSE F&O symbol SENSEX50, lot 75)
   MCX("GOLD", "Gold", 100), MCX("GOLDM", "Gold Mini", 10), MCX("GOLDTEN", "Gold Ten", 1), MCX("GOLDGUINEA", "Gold Guinea", 1),
   MCX("GOLDPETAL", "Gold Petal", 1), MCX("SILVER", "Silver", 30), MCX("SILVERM", "Silver Mini", 5), MCX("SILVERMIC", "Silver Micro", 1),
   MCX("CRUDEOIL", "Crude Oil", 100), MCX("CRUDEOILM", "Crude Oil Mini", 10), MCX("NATURALGAS", "Natural Gas", 1250),

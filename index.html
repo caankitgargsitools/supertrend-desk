@@ -1911,6 +1911,7 @@ const PRESETS = {
   NIFTYNXT50: IDX("38", "NIFTYNXT50", "NSE", 100, 2, 25, "MONTH", "Nifty Next 50"),
   SENSEX: IDX("51", "SENSEX", "BSE", 100, 4, 20, "WEEK", "Sensex"),
   BANKEX: IDX("69", "BANKEX", "BSE", 100, 4, 30, "MONTH", "Bankex"),
+  SENSEX50: IDX("83", "SENSEX50", "BSE", 50, 4, 75, "MONTH", "Sensex 50"),
   GOLD: MCX("GOLD", "Gold (1 kg, ₹/10 g)", 100, "Bullion (MCX)"),
   GOLDM: MCX("GOLDM", "Gold Mini (100 g)", 10, "Bullion (MCX)"),
   GOLDTEN: MCX("GOLDTEN", "Gold Ten (10 g)", 1, "Bullion (MCX)"),
@@ -5925,7 +5926,7 @@ async function openLabDetailPublic(id) {
 /* ---------- variation runs ---------- */
 const VAR_KINDS = [["settings", "Small steps on each indicator setting (lengths ±1/±2/±10%, levels ±2/±5)"], ["assets", "Other assets"], ["timeframes", "Other decision timeframes"], ["stops", "Stop loss & target settings"], ["trailing", "Profit trailing (trailing stops)"], ["indicators", "Other indicator combinations"], ["tweaks", "Random tweaks (one or two settings, session, entry style)"]];
 const VAR_STOCK = Object.keys(PRESETS).filter((k) => PRESETS[k].stock);
-const VAR_INDEX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX"], VAR_MCX = ["GOLD", "GOLDM", "SILVER", "SILVERM", "SILVERMIC", "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "COPPER", "ZINC", "ZINCMINI", "ALUMINIUM", "ALUMINI", "LEAD", "LEADMINI", "NICKEL"];
+const VAR_INDEX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX", "SENSEX50"], VAR_MCX = ["GOLD", "GOLDM", "SILVER", "SILVERM", "SILVERMIC", "CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI", "COPPER", "ZINC", "ZINCMINI", "ALUMINIUM", "ALUMINI", "LEAD", "LEADMINI", "NICKEL"];
 /** Form to ask the lab to test a strategy many more ways. src: { labId } or { strategyId }, plus asset and daily (null = unknown). */
 function variationForm(box, src) {
   // Every asset for every strategy: indices and MCX commodities alike.

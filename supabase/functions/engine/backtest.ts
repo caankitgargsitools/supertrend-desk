@@ -38,7 +38,7 @@ export type ChargeRates = {
  */
 export const SLIPPAGE: Record<string, { fut: number; opt: number }> = {
   NIFTY: { fut: 0.0001, opt: 0.005 }, BANKNIFTY: { fut: 0.00015, opt: 0.005 }, SENSEX: { fut: 0.00015, opt: 0.005 },
-  FINNIFTY: { fut: 0.00025, opt: 0.01 }, MIDCPNIFTY: { fut: 0.0004, opt: 0.02 }, NIFTYNXT50: { fut: 0.0005, opt: 0.02 }, BANKEX: { fut: 0.0005, opt: 0.02 },
+  FINNIFTY: { fut: 0.00025, opt: 0.01 }, MIDCPNIFTY: { fut: 0.0004, opt: 0.02 }, NIFTYNXT50: { fut: 0.0005, opt: 0.02 }, BANKEX: { fut: 0.0005, opt: 0.02 }, SENSEX50: { fut: 0.0008, opt: 0.03 }, // thin market (6 Nov 2026)
   GOLD: { fut: 0.0001, opt: 0.01 }, GOLDM: { fut: 0.00015, opt: 0.01 }, GOLDTEN: { fut: 0.0003, opt: 0.01 }, GOLDGUINEA: { fut: 0.0003, opt: 0.01 }, GOLDPETAL: { fut: 0.0003, opt: 0.01 },
   SILVER: { fut: 0.00015, opt: 0.01 }, SILVERM: { fut: 0.0002, opt: 0.01 }, SILVERMIC: { fut: 0.0003, opt: 0.01 },
   CRUDEOIL: { fut: 0.0002, opt: 0.01 }, CRUDEOILM: { fut: 0.0003, opt: 0.01 }, NATURALGAS: { fut: 0.0003, opt: 0.015 }, NATGASMINI: { fut: 0.0004, opt: 0.015 },

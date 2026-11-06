@@ -19,7 +19,7 @@ export function matches(ref: string, p: Pos): boolean {
     return pt === typ && Math.abs(num(p.drvStrikePrice) - num(strike)) < 0.01 && String(p.drvExpiryDate ?? "").slice(0, 10) === exp
       && ts.startsWith(String(sym).toUpperCase());
   }
-  const fs = String(sym).toUpperCase().replace(/\d*!$/, "");
+  const fs = String(sym).toUpperCase().replace(/[1-9]!$/, "");
   const ot = String(p.drvOptionType ?? "").toUpperCase();
   return (ts === fs || (ts.startsWith(fs.split(/[-\s]/)[0]) && /FUT/.test(ts))) && !/^(CALL|PUT|CE|PE)/.test(ot);
 }

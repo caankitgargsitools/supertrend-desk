@@ -2824,7 +2824,7 @@ async function breakerAfterTick(ok: Set<string>, err: Map<string, string>, known
 }
 /* ---------- positional futures across their expiry: roll the day before (Papa, 4 Nov 2026) ---------- */
 /** The futures symbol the contract lists use ("GOLD1!" → GOLD). */
-const futSym = (s: Strategy) => String(s.futures_symbol ?? "").replace(/\d*!$/, "").toUpperCase() || String(s.underlying);
+const futSym = (s: Strategy) => String(s.futures_symbol ?? "").replace(/[1-9]!$/, "").toUpperCase() || String(s.underlying);
 /** Expiry of the first futures contract after a day (MCX: expiring after it; NSE / BSE: on or after it, as resolveLeg picks). */
 async function futExpiryAfter(s: Strategy, onDate: string, strict = false): Promise<string | null> {
   if (String(s.exchange).toUpperCase() === "MCX" || isCommodity(String(s.data_segment))) {

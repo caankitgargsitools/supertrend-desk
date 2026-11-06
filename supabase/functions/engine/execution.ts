@@ -194,7 +194,7 @@ export async function dhanLtp(c: Creds, seg: string, sec: string): Promise<numbe
 
 /* ---------------------------------------------------------------- contracts (security ids, lot sizes, ticks) */
 
-const FNO_UNDERLYINGS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX"];
+const FNO_UNDERLYINGS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX", "SENSEX50"];
 /** Downloads Dhan's F&O instrument lists (NSE and BSE) and keeps the index futures and options, and the desk's stock futures, of the next 4 months. */
 export async function syncFno(sb: SupabaseClient, c: Creds): Promise<number> {
   const until = new Date(Date.now() + 125 * 86400000).toISOString().slice(0, 10);
@@ -239,7 +239,7 @@ export type Resolved = { sec: string; seg: string; lot: number; tick: number; la
 export async function resolveLeg(sb: SupabaseClient, c: Creds, s: Record<string, any>, leg: Record<string, any>, onDate: string): Promise<Resolved> {
   const exch = String(leg.exchange ?? s.exchange ?? "NSE").toUpperCase();
   const instr = String(leg.instrument ?? "").toUpperCase();
-  const symbol = String(leg.symbol ?? "").replace(/\d*!$/, "").toUpperCase();
+  const symbol = String(leg.symbol ?? "").replace(/[1-9]!$/, "").toUpperCase();
   if (exch === "MCX") {
     const pick = async () => (await sb.from("mcx_contracts").select("sec_id, display, expiry, lot, tick").eq("underlying", symbol || String(s.underlying))
       .gt("expiry", onDate).order("expiry").limit(1)).data?.[0];
