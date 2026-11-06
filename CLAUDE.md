@@ -525,6 +525,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   `auth.uid()` wrapped in `(select …)`. Indexes `lab_results_robust_status_idx`, `algo_backtests_waiting_idx`,
   `lab_results_promoted_idx`. `trg_strategy_notify` sends one error notification per cause per account per hour (was
   per strategy). `portal_settings` (dead table) token and secret blanked.
+- **Morning card (migration 82, engine v145)**: SQL `morning_card(p_user)` (open positions with entry / now / stop and the
+  stop's distance in %, today's booked P&L, expiries today, active live / paper, kill-rule count, Dhan token hours left,
+  data plan days left, breaker, admins' lab passes of the last 24 h) feeds both the engine action `morning` — one note
+  per user with active strategies at 08:30 IST from `engine_minute()`, kind "morning", tag `morning-<user>-<day>`, link
+  `/?home=1` — and the Home card the website reads. `client_statement(p_user, p_month)`: a month's trades by mode /
+  strategy / asset, live net to month end and its high-water mark, Shukrana accepted in the month, the rate, the Shukrana
+  summary (the monthly statement's figures). `lab_scores(ids)`: lab consistency scores for a client's own strategies
+  (the `lab_results_list` view is security-invoker, so clients couldn't read ranks). Test: `tests/sim/morning.test.mjs`.
 - **Still from the audit, done elsewhere this day**: see the website and strategy entries added below as they land.
 - **Open questions put to Papa 6 Nov 2026 (no answer within a minute → pending, ask again)**: (1) switch the four lab
   jobs (3, 10, 26, 29) back on now that the dispatcher is in and the tick closes stuck runs; (2) revoke the blanket ALL
