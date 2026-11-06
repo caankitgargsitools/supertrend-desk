@@ -848,6 +848,14 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-brand h2 { font: 700 18px/1 var(--font-data); letter-spacing: .12em; margin: 0; color: var(--dk-text); }
 .dk-brand small { display: block; color: var(--dk-muted); font: 500 10.5px var(--font-data); letter-spacing: .06em; margin-top: 3px; }
 .dk-quotes { display: flex; flex-wrap: wrap; gap: 3px 4px; justify-content: flex-start; align-content: center; align-items: center; min-width: 0; }
+.dk-qwrap { position: relative; min-width: 0; align-self: center; }
+.dk-qtog { display: none; }
+/* Phones (Papa, 6 Nov 2026): the strip folds to one row, "All ▾" opens every quote, "Less ▴" folds it again (remembered). */
+@media (max-width: 760px) {
+  .dk-qtog { display: inline-block; position: absolute; top: 0; right: 0; padding: 2px 7px; font-size: 10px; }
+  .dk-qwrap.folded .dk-quotes { max-height: 21px; overflow: hidden; padding-right: 58px; }
+  .dk-qwrap:not(.folded) .dk-quotes { padding-right: 58px; }
+}
 .dk-qg { font: 700 9px var(--font-data); letter-spacing: .12em; text-transform: uppercase; color: var(--dk-amber); margin: 0 2px 0 6px; }
 .dk-qg:first-child { margin-left: 0; }
 .dk-q { display: inline-flex; align-items: baseline; gap: 5px; padding: 2px 6px; border-radius: 4px; background: var(--dk-panel2); border: 1px solid var(--dk-line); font: 500 11px var(--font-data); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -867,7 +875,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-modebar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .dk-main { display: grid; grid-template-columns: 270px minmax(0, 1fr) 290px; gap: 12px; align-items: start; }
 @media (max-width: 1560px) { .dk-main { grid-template-columns: 260px minmax(0, 1fr); } .dk-heat { grid-column: 1 / -1; } .dk-heat .dk-tiles { max-height: none; } }
-@media (max-width: 760px) { .dk-main { grid-template-columns: minmax(0, 1fr); } .dk-top { grid-template-columns: 1fr auto; } .dk-quotes { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; } }
+@media (max-width: 760px) { .dk-main { grid-template-columns: minmax(0, 1fr); } .dk-top { grid-template-columns: 1fr auto; } .dk-qwrap { grid-column: 1 / -1; grid-row: 2; } .dk-quotes { justify-content: flex-start; } }
 .dk-big { font: 600 32px/1.05 var(--font-data); margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
 .dk-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-top: 12px; }
 .dk-v { font: 600 15px var(--font-data); font-variant-numeric: tabular-nums; color: var(--dk-text); }
@@ -942,7 +950,8 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one #deskPane .dk-modebar { position: absolute; top: 14px; left: 260px; right: 300px; z-index: 2; }
   body.dk-one #deskPane .dk-modebar .seg button { padding-top: 4px; padding-bottom: 4px; }
   /* every tradable asset's quote (≈60): the full width under the title and clock, so it takes fewer rows */
-  body.dk-one #deskPane .dk-quotes { grid-column: 1 / -1; grid-row: 2; gap: 3px; }
+  body.dk-one #deskPane .dk-qwrap { grid-column: 1 / -1; grid-row: 2; }
+  body.dk-one #deskPane .dk-quotes { gap: 3px; }
   body.dk-one #deskPane .dk-q { padding: 1px 5px; gap: 4px; font-size: 10.5px; }
   body.dk-one #deskPane .dk-q b { font-size: 10px; }
   body.dk-one #deskPane .dk-panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 8px 10px; }
@@ -979,6 +988,10 @@ body.dk-fs-on { overflow: hidden; }
 }
 @media (min-width: 1280px) and (max-width: 1599px) { body.dk-one #deskPane { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.7fr) 210px; } }
 /* Show password (Papa, 6 Nov 2026: a client typing on a phone got "wrong email or password"): an eye button inside the field. */
+/* Admin › User activity: compact cells that wrap (Papa: "don't make it too bulky") */
+#aa_table td, #aa_table th { white-space: normal; vertical-align: top; }
+#aa_table td:first-child { max-width: 260px; }
+#aa_table td .hint { font-size: 11.5px; }
 .pwbox { position: relative; display: block; }
 .pwbox input { width: 100%; padding-right: 44px; box-sizing: border-box; }
 .pwbox .eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 36px; height: 32px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); cursor: pointer; border-radius: 8px; }
@@ -1648,7 +1661,7 @@ body.dk-fs-on { overflow: hidden; }
     <section id="deskPane" hidden>
       <header class="dk-top">
         <div class="dk-brand"><div class="dk-logo">AG</div><div><h2>DESK</h2><small id="dk_sub"></small></div></div>
-        <div class="dk-quotes" id="dk_quotes" aria-label="Prices now and change today"></div>
+        <div class="dk-qwrap" id="dk_qwrap"><div class="dk-quotes" id="dk_quotes" aria-label="Prices now and change today"></div><button class="dk-btn dk-qtog" id="dk_qtog" type="button" aria-expanded="false" aria-controls="dk_quotes">All ▾</button></div>
         <div class="dk-clock"><div class="dk-t" id="dk_clock">--:--:--</div><div class="dk-mk" id="dk_mk"></div></div>
       </header>
       <div class="dk-modebar"><div class="seg" id="dk_mode" role="group" aria-label="Mode"><button type="button" data-m="LIVE" aria-pressed="false">Live</button><button type="button" data-m="PAPER" aria-pressed="true">Paper</button></div><span class="dk-lbl" id="dk_note"></span><button class="dk-btn dk-onebtn" id="dk_one" type="button" aria-pressed="false" title="Fit the whole desk on one screen and hide the menu">One screen</button></div>
@@ -1811,6 +1824,7 @@ body.dk-fs-on { overflow: hidden; }
       <div class="head"><h2>Admin</h2></div>
       <div class="subtabs" id="ad_tabs" style="margin-top:12px">
         <button class="btn small" data-t="users" aria-pressed="true" type="button">Users</button>
+        <button class="btn small" data-t="activity" type="button">User activity</button>
         <button class="btn small" data-t="recharges" type="button">Recharge requests</button>
         <button class="btn small" data-t="shukrana" type="button">Shukrana</button>
         <button class="btn small" data-t="billing" type="button">Billing settings</button>
@@ -1839,6 +1853,11 @@ body.dk-fs-on { overflow: hidden; }
         <div class="scroll"><table class="big-table"><thead><tr><th>When</th><th>User</th><th class="n">Amount</th><th>Reference</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody id="ar_body"></tbody></table></div>
       </div>
       <div id="ad_shukrana" hidden></div>
+      <div id="ad_activity" hidden>
+        <p class="hint" id="aa_note" style="margin:8px 0">Each user's last 24 hours. Active time counts the 5-minute spells the app was open on their screen (recorded from 6 Nov 2026). Capital = the capital set on their Capital page; in use = margin of open positions. P&amp;L after charges, hidden trades left out.</p>
+        <div class="formbar" style="margin:0 0 8px"><button class="btn small" id="aa_refresh" type="button">Refresh</button><span class="hint" id="aa_sum"></span></div>
+        <div class="scroll"><table class="big-table" id="aa_table"><thead><tr><th>User</th><th class="n">Active 24 h</th><th class="n">Capital</th><th class="n">Live</th><th class="n">Paper</th><th class="n">Trades 24 h</th><th>Status</th></tr></thead><tbody id="aa_body"></tbody></table></div>
+      </div>
       <div id="ad_billing" hidden>
         <form id="ab_form" novalidate>
           <div class="grid">
@@ -6980,6 +6999,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) { po
    and every 30 seconds while the app stays open. The thin bar at the top shows while it loads; unsaved settings are kept. */
 let lastRefresh = 0, refreshBusy = false;
 async function refreshAll() {
+  touchPresence();
   if (refreshBusy || !me || !deskUser || pending || btPoll) return;
   refreshBusy = true;
   try {
@@ -9223,14 +9243,49 @@ async function loadAdminUsers() { if (isAdmin()) adminUsers = must(await db.rpc(
 async function loadAdmin() {
   await loadAdminUsers();
   $("ad_tabs").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.t === ad.tab ? "true" : "false"));
-  $("ad_users").hidden = ad.tab !== "users"; $("ad_recharges").hidden = ad.tab !== "recharges"; $("ad_billing").hidden = ad.tab !== "billing"; $("ad_shukrana").hidden = ad.tab !== "shukrana";
+  $("ad_users").hidden = ad.tab !== "users"; $("ad_activity").hidden = ad.tab !== "activity"; $("ad_recharges").hidden = ad.tab !== "recharges"; $("ad_billing").hidden = ad.tab !== "billing"; $("ad_shukrana").hidden = ad.tab !== "shukrana";
   if (ad.tab === "shukrana") await loadShukranaAdmin();
+  if (ad.tab === "activity") await loadActivity();
   if (ad.tab === "users") renderUsers();
   if (ad.tab === "recharges") await loadRecharges();
   if (ad.tab === "billing") await loadBilling();
 }
 $("ad_tabs").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { ad.tab = b.dataset.t; loadAdmin().catch((e) => toast(errorText(e))); }));
 const today0 = () => istDate(0);
+/* ---------- Admin › User activity (Papa, 6 Nov 2026) ---------- */
+const hrsMin = (m) => { m = Math.round(Number(m) || 0); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} m`; };
+const agoText = (iso) => { if (!iso) return "never"; const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 2 ? "now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ago` : `${Math.floor(m / 1440)} d ago`; };
+async function loadActivity() {
+  const rows = must(await db.rpc("admin_activity")) || [];
+  const cls = (v) => Number(v) > 0 ? "pos-num" : Number(v) < 0 ? "neg-num" : "";
+  // One cell per mode: strategies (open) and money in use, then booked and running P&L; sorts by booked + running.
+  const mode = (u, m) => { const n = Number(u[m + "_n"]) || 0, open = Number(u[m + "_open"]) || 0, used = Number(u[m + "_used"]) || 0, real = Number(u[m + "_real"]) || 0, run = Number(u[m + "_unreal"]) || 0;
+    return `<td class="n" data-v="${real + run}"><div>${n} strateg${n === 1 ? "y" : "ies"}${open ? ` · ${open} open` : ""}${used ? ` · ${esc(rupees(used))} in use` : ""}</div>
+      <div class="hint">booked <span class="${cls(real)}">${esc(rupees(real))}</span> · running <span class="${cls(run)}">${esc(rupees(run))}</span></div></td>`; };
+  $("aa_body").innerHTML = rows.length ? rows.map((u) => `<tr>
+    <td><b>${esc(u.full_name || u.email)}</b><div class="hint">${esc(u.email)} · seen ${esc(agoText(u.last_seen))}${u.last_sign_in_at ? ` · signed in ${esc(agoText(u.last_sign_in_at))}` : ""}</div></td>
+    <td class="n" data-v="${Number(u.active_min) || 0}">${Number(u.active_min) ? esc(hrsMin(u.active_min)) : "–"}</td>
+    <td class="n" data-v="${Number(u.capital) || 0}">${Number(u.capital) ? esc(rupees(u.capital)) : "–"}</td>
+    ${mode(u, "live")}${mode(u, "paper")}
+    <td class="n" data-v="${Number(u.trades_24h) || 0}">${Number(u.trades_24h) || 0}</td>
+    <td>${u.status === "active" ? "" : `<span class="chip">${esc(u.status)}</span> `}${u.role === "admin" ? '<span class="chip">admin</span> ' : ""}${u.dhan_ok ? '<span class="chip green">Dhan ✓</span>' : '<span class="chip yellow">no Dhan</span>'}${u.halted ? ' <span class="chip red">new trades stopped</span>' : ""}</td></tr>`).join("")
+    : '<tr><td colspan="7" class="hint">No users.</td></tr>';
+  const on = rows.filter((u) => Number(u.active_min) > 0).length, sum = (k) => rows.reduce((a, u) => a + (Number(u[k]) || 0), 0);
+  $("aa_sum").textContent = `${rows.length} users · ${on} active in the last 24 h · live P&L ${rupees(sum("live_real") + sum("live_unreal"))} · paper P&L ${rupees(sum("paper_real") + sum("paper_unreal"))} (booked + running)`;
+  makeSortable($("aa_table"));
+}
+function dkQFold(open) {
+  const w = $("dk_qwrap"); if (!w) return;
+  w.classList.toggle("folded", !open);
+  $("dk_qtog").setAttribute("aria-expanded", String(open)); $("dk_qtog").textContent = open ? "Less ▴" : "All ▾";
+}
+try { dkQFold(localStorage.getItem("dkQOpen") === "1"); } catch { dkQFold(false); }
+$("dk_qtog").addEventListener("click", () => { const open = $("dk_qwrap").classList.contains("folded"); dkQFold(open); try { localStorage.setItem("dkQOpen", open ? "1" : "0"); } catch { /* private window */ } });
+$("aa_refresh").addEventListener("click", (e) => run(e.currentTarget, () => loadActivity()));
+/** Presence for Admin › User activity: a 5-minute mark while the app is on screen (one tiny write at most every 5 min). */
+let presenceAt = 0;
+function touchPresence() { if (!me || document.hidden || Date.now() - presenceAt < 290000) return; presenceAt = Date.now(); db.rpc("touch_presence").then(() => {}, () => { presenceAt = 0; }); }
+setInterval(touchPresence, 60000); document.addEventListener("visibilitychange", touchPresence);
 function renderUsers() {
   const cols = [["email", "Login"], ["full_name", "Name"], ["phone", "Phone"], ["status", "Status"], ["trial_until", "Trial till"], ["balance", "Wallet", "num"], ["strategies", "Strategies", "int"],
     ["live", "Live", "int"], ["live_net", "Live P&L", "num"], ["fees_paid", "Fees paid", "num"], ["broker_ok", "Dhan"], ["pending", "Recharges waiting", "int"], ["created_at", "Joined", "when"]];

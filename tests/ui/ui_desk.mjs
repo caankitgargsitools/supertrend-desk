@@ -100,6 +100,16 @@ if (!process.env.MANYQ && (q.length !== 8 || !/^Nifty 50 22,935\.5 ▲ 0\.59%$/.
 if (await p.evaluate(() => getComputedStyle(document.getElementById("dk_quotes")).animationName !== "none")) fail("quotes don't scroll");
 res.live_prices[0].px = 22950; res.live_prices[0].at = new Date().toISOString();
 await p.waitForFunction(() => document.querySelector('#dk_quotes [data-a="NIFTY"]').classList.contains("fu"), null, { timeout: 5000 }).catch(() => fail("a rising price flashes green"));
+// Phones (Papa, 6 Nov): the strip folds to one row; "All ▾" opens it, "Less ▴" folds it again.
+if (width <= 760) {
+  const h0 = await p.evaluate(() => document.getElementById("dk_quotes").getBoundingClientRect().height);
+  if (!(h0 <= 24) || !(await p.isVisible("#dk_qtog")) || (await p.textContent("#dk_qtog")).trim() !== "All ▾") fail("folded to one row on a phone", h0);
+  await p.click("#dk_qtog"); await p.waitForTimeout(150);
+  const h1 = await p.evaluate(() => document.getElementById("dk_quotes").getBoundingClientRect().height);
+  if (!(h1 > 30) || (await p.textContent("#dk_qtog")).trim() !== "Less ▴" || (await p.evaluate(() => localStorage.getItem("dkQOpen"))) !== "1") fail("opens to every quote", h1);
+  await p.click("#dk_qtog"); await p.waitForTimeout(150);
+  if (!(await p.evaluate(() => document.getElementById("dk_quotes").getBoundingClientRect().height <= 24))) fail("folds again");
+} else if (await p.isVisible("#dk_qtog")) fail("no fold button on a big screen");
 if (await p.evaluate(() => dkCvp.range) !== "1D") fail("per-minute day view is the default");
 if (!/1 point = \d/.test(await p.textContent("#dk_cvp_step"))) fail("the chart says how far apart its points are", await p.textContent("#dk_cvp_step"));
 await p.click('#dk_cvp_rng [data-v="1M"]'); await p.waitForTimeout(500);

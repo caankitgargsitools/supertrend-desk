@@ -353,6 +353,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   `data_valid_until`, and notifies the owner (kind "error", link `/?conn=1`, pushed to the phone) 7, 5, 3 and 1 day(s)
   before the plan ends (`DATA_WARN_DAYS`, `dataWarnDue`; a missed day warns at the step reached) and at once when Dhan
   reports it inactive; `data_warned` = "<validity>|<days>" or "off" stops repeats. Test: `tests/sim/dataplan.test.mjs`.
+- **Admin › User activity** (6 Nov 2026, Papa; migration 78): tab `#ad_activity` (`loadActivity`, SQL `admin_activity()`, admins
+  only): per user — active time in the last 24 h (5-minute presence marks: the app calls `touch_presence()` at most every
+  5 min while on screen, `touchPresence`, table `user_presence`, counted from 6 Nov 2026; Supabase's auth audit log is empty),
+  last seen / last sign-in, capital (Capital page), Live and Paper cells (active strategies, open, margin in use, booked P&L via
+  `ledger_net_user`, running P&L = sum of `pos_upnl`), closed trades in 24 h, Dhan connected, error-breaker stop. 7 columns,
+  wrapping cells; a summary line. Test: `tests/ui/ui_activity.mjs` (args: theme width).
+- **Desk quotes on phones** (6 Nov 2026, Papa): folded to one row by default; "All ▾" / "Less ▴" (`#dk_qtog`, `dkQFold`,
+  localStorage `dkQOpen`); big screens unchanged. Tested in `tests/ui/ui_desk.mjs`.
 - **Show password** (6 Nov 2026, Papa, after a client's phone sign-in failed twice with "wrong email or password" while the
   same password worked on another device): an eye button inside the sign-in password and the two new-password fields
   (`input[data-eye]` → `.pwbox` / `.eye`; hidden again on submit); never on the broker key fields. Test:
