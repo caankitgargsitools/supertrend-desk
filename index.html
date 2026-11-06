@@ -847,12 +847,14 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-logo { width: 30px; height: 30px; border-radius: 5px; background: var(--dk-panel2); border: 1px solid var(--dk-line); display: grid; place-items: center; font: 700 12px var(--font-data); color: var(--dk-amber); }
 .dk-brand h2 { font: 700 18px/1 var(--font-data); letter-spacing: .12em; margin: 0; color: var(--dk-text); }
 .dk-brand small { display: block; color: var(--dk-muted); font: 500 10.5px var(--font-data); letter-spacing: .06em; margin-top: 3px; }
-.dk-quotes { display: flex; flex-wrap: wrap; gap: 4px 6px; justify-content: center; align-content: center; min-width: 0; }
-.dk-q { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 8px; border-radius: 4px; background: var(--dk-panel2); border: 1px solid var(--dk-line); font: 500 11.5px var(--font-data); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.dk-q b { font: 600 11px var(--font-ui); color: var(--dk-muted); }
+.dk-quotes { display: flex; flex-wrap: wrap; gap: 3px 4px; justify-content: flex-start; align-content: center; align-items: center; min-width: 0; }
+.dk-qg { font: 700 9px var(--font-data); letter-spacing: .12em; text-transform: uppercase; color: var(--dk-amber); margin: 0 2px 0 6px; }
+.dk-qg:first-child { margin-left: 0; }
+.dk-q { display: inline-flex; align-items: baseline; gap: 5px; padding: 2px 6px; border-radius: 4px; background: var(--dk-panel2); border: 1px solid var(--dk-line); font: 500 11px var(--font-data); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dk-q b { font: 600 10.5px var(--font-ui); color: var(--dk-muted); }
 .dk-q i { font-style: normal; }
 .dk-q .px { color: var(--dk-text); font-weight: 600; }
-.dk-q .ch { font-size: 11px; font-weight: 600; }
+.dk-q .ch { font-size: 10.5px; font-weight: 600; }
 .dk-q.fu { animation: dkqup .9s ease-out; } .dk-q.fd { animation: dkqdn .9s ease-out; }
 @keyframes dkqup { 0% { background: rgba(46,212,127,.55); border-color: var(--dk-up); box-shadow: 0 0 12px rgba(46,212,127,.6); } 100% { background: var(--dk-panel2); border-color: var(--dk-line); box-shadow: none; } }
 @keyframes dkqdn { 0% { background: rgba(255,92,108,.55); border-color: var(--dk-down); box-shadow: 0 0 12px rgba(255,92,108,.6); } 100% { background: var(--dk-panel2); border-color: var(--dk-line); box-shadow: none; } }
@@ -934,7 +936,15 @@ body.dk-fs-on { overflow: hidden; }
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2.4fr) 250px; grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) auto; }
   body.dk-one #deskPane .dk-main, body.dk-one #deskPane .dk-low { display: contents; }
   body.dk-one #deskPane .dk-top, body.dk-one #deskPane .dk-modebar, body.dk-one #deskPane .dk-foot { grid-column: 1 / -1; }
-  body.dk-one #deskPane .dk-top { padding: 6px 10px; }
+  body.dk-one #deskPane .dk-top { padding: 6px 10px; row-gap: 5px; }
+  /* the Live / Paper switch and "Show menu" sit in the title row's empty middle (one row less) */
+  body.dk-one #deskPane { position: relative; }
+  body.dk-one #deskPane .dk-modebar { position: absolute; top: 14px; left: 260px; right: 300px; z-index: 2; }
+  body.dk-one #deskPane .dk-modebar .seg button { padding-top: 4px; padding-bottom: 4px; }
+  /* every tradable asset's quote (≈60): the full width under the title and clock, so it takes fewer rows */
+  body.dk-one #deskPane .dk-quotes { grid-column: 1 / -1; grid-row: 2; gap: 3px; }
+  body.dk-one #deskPane .dk-q { padding: 1px 5px; gap: 4px; font-size: 10.5px; }
+  body.dk-one #deskPane .dk-q b { font-size: 10px; }
   body.dk-one #deskPane .dk-panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 8px 10px; }
   body.dk-one #deskPane .dk-ph { margin-bottom: 4px; }
   body.dk-one .dk-acctp { grid-column: 4; grid-row: 3; overflow: auto !important; }
@@ -964,7 +974,7 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one .dk-foot .dk-v { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   body.dk-one .dk-feed div { grid-template-columns: 62px minmax(0, 1fr); font-size: 10.5px; padding: 3px 5px; }
   body.dk-one .dk-feed div > :last-child { grid-column: 2; }
-  body.dk-one #deskPane .dk-foot { margin-left: 0; }
+  body.dk-one #deskPane .dk-foot { margin-left: 0; grid-row: 5; }
   body.dk-one .dk-foot > div { padding: 5px 10px; }
 }
 @media (min-width: 1280px) and (max-width: 1599px) { body.dk-one #deskPane { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.7fr) 210px; } }
@@ -7961,11 +7971,10 @@ async function deskQuotes() {
     if (!dkQ.refAt || Date.now() - dkQ.refAt > 300e3) { dkQ.ref = (await db.from("ticker_ref").select("seg, sec, asset, prev_close")).data || []; dkQ.refAt = Date.now(); }
     const px = (await db.from("live_prices").select("seg, sec, px, at")).data || [];
     const pmap = new Map(px.map((r) => [`${r.seg}|${r.sec}`, r]));
-    const mine = new Set([...DK_Q_FIXED, ...myStrats().filter((x) => !x.archived && x.active).map((x) => String(x.underlying))]);
-    // One chip per asset: of its contracts, the one with the freshest price.
+    // Every tradable asset the engine quotes (Papa, 6 Nov 2026: "add the new assets"): one chip per asset, of its
+    // contracts the one with the freshest price.
     const by = new Map();
     for (const r of dkQ.ref) {
-      if (!mine.has(r.asset)) continue;
       const p = pmap.get(`${r.seg}|${r.sec}`); if (!p) continue;
       const cur = by.get(r.asset); if (!cur || Date.parse(p.at) > Date.parse(cur.p.at)) by.set(r.asset, { r, p });
     }
@@ -7974,7 +7983,11 @@ async function deskQuotes() {
     const key = list.map((x) => x.r.asset).join();
     if (box.dataset.k !== key) {
       box.dataset.k = key;
-      box.innerHTML = list.length ? list.map((x) => `<span class="dk-q" data-a="${esc(x.r.asset)}"><b>${esc(dkName(x.r.asset))}</b><i class="px"></i><i class="ch"></i></span>`).join("") : '<span class="dk-lbl">Prices appear when the markets open.</span>';
+      const GROUP = ["Indices", "MCX", "Stocks", "Crypto"];
+      // Stocks by their NSE symbol (short); the rest by name. A small label starts each group.
+      box.innerHTML = list.length ? list.map((x, i) => { const k = dkQKind(x.r.seg), lab = i === 0 || dkQKind(list[i - 1].r.seg) !== k ? `<span class="dk-qg">${GROUP[k]}</span>` : "";
+        return `${lab}<span class="dk-q" data-a="${esc(x.r.asset)}"><b>${esc(k === 2 ? x.r.asset : dkName(x.r.asset))}</b><i class="px"></i><i class="ch"></i></span>`; }).join("")
+        : '<span class="dk-lbl">Prices appear when the markets open.</span>';
     }
     for (const x of list) {
       const el = box.querySelector(`[data-a="${CSS.escape(x.r.asset)}"]`); if (!el) continue;

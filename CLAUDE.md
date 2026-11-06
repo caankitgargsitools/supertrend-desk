@@ -268,11 +268,13 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   left so the account is on the right): capital deployed vs profit over capital flow · strategy tiles over timeline ·
   the profit flow, a tall column over both rows (~845 px wide at 1920) · account over activity; the stats bar below
   (dates, note and Expand of the capital chart hidden). **Quotes strip** in the top bar (replaces the scrolling feed;
-  migration 77): Nifty 50, Sensex, Bank Nifty, Fin Nifty, Midcap Nifty, then every asset the account's active strategies trade (MCX, stocks,
-  coins), price and % today vs the previous close, a chip flashes green / red when its price moves (`deskQuotes`, every
+  migration 77): **every tradable asset** (6 Nov, Papa: "add the new assets"): all indices (Nifty 50, Sensex, Bank Nifty, Fin
+  Nifty, Midcap first), one quote per MCX commodity (`TICKER_MCX`, big contracts), all 33 stocks (by NSE symbol), every coin, plus
+  anything else an active strategy trades; grouped with labels (Indices / MCX / Stocks / Crypto, `.dk-qg`); in one-screen the
+  quotes take the full width under the title (≈5 rows) and the Live / Paper switch sits in the title row; price and % today vs the previous close, a chip flashes green / red when its price moves (`deskQuotes`, every
   3 s from `live_prices`; `ticker_ref` = asset per contract + previous close, engine `tickerRefresh` with action
-  `day_moves` and hourly in the token check for new assets, action `ticker`; the per-second prices also fetch these
-  indices, `TICKER_FIXED`). Many open positions (lane < 27 px): each lane's name and amount on one line (`desk.laneH`), the label column
+  `day_moves` and hourly in the token check for new assets, action `ticker`; the per-second prices also fetch the
+  fixed indices every round, `TICKER_FIXED`, and the rest of `ticker_ref` every 5th round in the same batched requests). Many open positions (lane < 27 px): each lane's name and amount on one line (`desk.laneH`), the label column
   widens for it; 30+ positions fit from ~900 px tall. Capital deployed vs profit is minute by minute (migration 76:
   `desk-snapshot` cron every minute from 6 Nov 13:46 IST, `desk_series` down to 1-minute buckets; 1H and 1D ranges, 1D the default; "1 point = N min" beside the periods, `#dk_cvp_step`). The one-screen cloud is bigger (R up to 45% of the room right of the labels; phones unchanged). Timeline / capital flow size to their boxes
   (`clientHeight`), long asset names shorten with "…" (`dkFit`, full name on hover), narrow boxes get shorter labels.

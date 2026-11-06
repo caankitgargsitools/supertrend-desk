@@ -1338,11 +1338,21 @@ async function tokenCheckOne(force: boolean, set: { id: number; client_id: strin
  *  done today. The per-second prices also fetch these indices (`TICKER_FIXED`). */
 export const TICKER_FIXED = [{ seg: "IDX_I", sec: "13", asset: "NIFTY" }, { seg: "IDX_I", sec: "51", asset: "SENSEX" }, { seg: "IDX_I", sec: "25", asset: "BANKNIFTY" },
   { seg: "IDX_I", sec: "27", asset: "FINNIFTY" }, { seg: "IDX_I", sec: "442", asset: "MIDCPNIFTY" }]; // Fin Nifty and Bank Nifty: Papa, 6 Nov
+/** Every tradable asset in the quotes strip (Papa, 6 Nov 2026: "add the new assets"): all indices, all stocks, every coin,
+ *  and one quote per MCX commodity (the big contract; its mini moves with it). */
+export const TICKER_MCX = ["GOLD", "SILVER", "CRUDEOIL", "NATURALGAS", "COPPER", "ZINC", "LEAD", "ALUMINIUM", "NICKEL"];
+const tickerWatch = () => Object.values(LAB_ASSETS).filter((a) => !a.commodity || TICKER_MCX.includes(a.key))
+  .map((a) => ({ seg: a.seg, sec: a.sec, asset: a.key, instr: a.instr }));
 async function tickerRefresh(missing: boolean) {
   const today = todayIst(), adm = await adminAccount(sb), creds = credsOf(adm);
   const { data: rows } = await sb.from("algo_strategies").select("underlying, data_segment, data_security_id, data_instrument").eq("archived", false).eq("active", true).eq("is_master", false);
   const items = new Map<string, { seg: string; sec: string; asset: string; instr: string }>();
   for (const f of TICKER_FIXED) items.set(`${f.seg}|${f.sec}`, { ...f, instr: "INDEX" });
+  for (const w of tickerWatch()) {
+    let sec = w.sec;
+    if (isCommodity(w.seg) && !/^\d+$/.test(sec)) sec = (await dataSecurity(sb, creds, w.seg, sec, today).catch(() => ({ sec: "" }))).sec;
+    if (sec && !items.has(`${w.seg}|${sec}`)) items.set(`${w.seg}|${sec}`, { ...w, sec });
+  }
   for (const r of rows ?? []) {
     const seg = String(r.data_segment); let sec = String(r.data_security_id);
     if (isCommodity(seg) && !/^\d+$/.test(sec)) sec = (await dataSecurity(sb, creds, seg, sec, today).catch(() => ({ sec: "" }))).sec;
@@ -1628,6 +1638,7 @@ function inSessionNow(seg: string) {
   const nowI = ist(Date.now() / 1000), sess = tradingSession(seg, nowI.date);
   return nowI.min >= sess.open && nowI.min <= sess.close;
 }
+let tickerTicks = 0; const tickerRefs: { at: number; rows: { seg: string; sec: string }[] } = { at: 0, rows: [] };
 async function pricesTick(rows: Strategy[]) {
   const nowI = ist(Date.now() / 1000), today = nowI.date;
   const at = nowIso(); // the round's start: of two overlapping rounds, the later-started one's prices are the newer
@@ -1636,7 +1647,7 @@ async function pricesTick(rows: Strategy[]) {
   const bySeg = new Map<string, Record<string, string[]>>(); // owner -> seg -> secs
   const coins = new Set<string>();
   const want = new Map<string, { s: Strategy; key: string }>();
-  const add = (owner: string, seg: string, sec: string) => { const m = bySeg.get(owner) ?? {}; (m[seg] ??= []).push(sec); bySeg.set(owner, m); };
+  const add = (owner: string, seg: string, sec: string) => { const m = bySeg.get(owner) ?? {}; const l = (m[seg] ??= []); if (!l.includes(sec)) l.push(sec); bySeg.set(owner, m); };
   await Promise.all(rows.map(async (s) => {
     const seg = String(s.data_segment);
     if (!s.owner_id) return;
@@ -1661,6 +1672,15 @@ async function pricesTick(rows: Strategy[]) {
   // Live orders being worked: their own contracts (the order manager chases them with these prices).
   // The Desk's quotes strip: the fixed indices, in the admin's batched request (no extra Dhan call).
   if (inSessionNow("IDX_I")) { const adm = await adminAccount(sb).catch(() => null); if (adm?.dhan_access_token) for (const f of TICKER_FIXED) add(adm.user_id, f.seg, f.sec); }
+  // The rest of the strip (every stock, MCX commodity and coin): every 5th round, in the same batched requests.
+  if ((tickerTicks = (tickerTicks + 1) % 5) === 0) {
+    const adm = await adminAccount(sb).catch(() => null);
+    if (!tickerRefs.at || Date.now() - tickerRefs.at > 300000) { const { data } = await sb.from("ticker_ref").select("seg, sec"); tickerRefs.rows = data ?? []; tickerRefs.at = Date.now(); }
+    for (const r of tickerRefs.rows) {
+      if (r.seg === "DELTA") coins.add(String(r.sec));
+      else if (adm?.dhan_access_token && inSessionNow(String(r.seg))) add(adm.user_id, String(r.seg), String(r.sec));
+    }
+  }
   const { data: work } = await sb.from("live_orders").select("user_id, seg, sec").eq("broker", "DHAN").in("state", ["queued", "working"]);
   for (const w of work ?? []) add(w.user_id, w.seg, String(w.sec));
   const px = new Map<string, number>();

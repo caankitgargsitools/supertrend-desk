@@ -39,6 +39,17 @@ const res = {
     .map(([seg, sec, px]) => ({ seg, sec, px, at: new Date().toISOString() })),
   "algo_trades": [40000, -12000, 5500].map((net, i) => ({ id: i + 1, strategy_id: ["g1", "sol", "cu"][i], user_id: A, side: "SHORT", mode: "PAPER", net, exit_at: new Date(Date.now() - (i + 1) * 86400000).toISOString(), exit_why: "Trailing stop (gap)", lots: 1 })),
 };
+// MANYQ=1: the full strip as on the live desk (8 indices, 9 MCX, 33 stocks, 9 coins) for a screenshot.
+if (process.env.MANYQ) {
+  const idx = [["38", "NIFTYNXT50"], ["69", "BANKEX"], ["83", "SENSEX50"], ["25", "BANKNIFTY"]], mcx = ["CRUDEOIL", "NATURALGAS", "ZINC", "LEAD", "ALUMINIUM", "NICKEL"];
+  const stk = ["RELIANCE", "HDFCBANK", "ICICIBANK", "INFY", "TCS", "SBIN", "BHARTIARTL", "AXISBANK", "LT", "KOTAKBANK", "ITC", "HINDUNILVR", "BAJFINANCE", "BAJAJFINSV", "MM", "MARUTI", "TMPV", "TATASTEEL", "JSWSTEEL", "SUNPHARMA", "TITAN", "ADANIENT", "ADANIPORTS", "NTPC", "POWERGRID", "ONGC", "COALINDIA", "HCLTECH", "WIPRO", "ULTRACEMCO", "ASIANPAINT", "HDFCLIFE", "SBILIFE"];
+  const coins = ["BTCUSD", "ETHUSD", "XRPUSD", "BNBUSD", "ADAUSD", "AVAXUSD", "LINKUSD", "LTCUSD"];
+  const add = (seg, sec, asset, pc, px) => { res.ticker_ref.push({ seg, sec, asset, prev_close: pc }); res.live_prices.push({ seg, sec, px, at: new Date().toISOString() }); };
+  idx.forEach(([sec, a], i) => add("IDX_I", sec, a, 50000 + i * 100, 50100 + i * 230));
+  mcx.forEach((a, i) => add("MCX_COMM", String(700 + i), a, 1000 + i * 50, 1000 + i * 57));
+  stk.forEach((a, i) => add("NSE_EQ", String(900 + i), a, 1000 + i * 37, 1000 + i * 37 + (i % 3 - 1) * 9.5));
+  coins.forEach((a, i) => add("DELTA", a, a, 100 + i * 3, 100 + i * 3.1));
+}
 const writes = [];
 await p.route(/supabase\.co/, (r) => {
   const u = r.request().url().replace(/^.*supabase\.co/, ""), meth = r.request().method();
@@ -80,10 +91,12 @@ await p.waitForTimeout(3500);
 const after2 = await p.evaluate(() => desk.pool.length); if (!(after2 < after)) fail("pool thinner", [after, after2]);
 // Capital deployed vs profit: estimated part from trades, recorded part from snapshots, live end; tabs, hover, zoom.
 await p.waitForTimeout(400);
-// Quotes strip (Papa, 6 Nov): still, the three indices first, then this account's assets (not Silver: nothing trades it), % today.
+// Quotes strip (Papa, 6 Nov): still, every tradable asset the engine quotes (Silver too, though nothing trades it), grouped, % today.
 await p.waitForTimeout(3500);
 const q = await p.$$eval("#dk_quotes .dk-q", (x) => x.map((e) => [...e.children].map((c) => c.textContent).join(" ")));
-if (q.length !== 7 || !/^Nifty 50 22,935\.5 ▲ 0\.59%$/.test(q[0]) || !/^Sensex .*▼ 0\.53%$/.test(q[1]) || !/^Fin Nifty 26,130 ▲ 0\.50%$/.test(q[2]) || !/Midcap/.test(q[3]) || q.some((t) => /Silver/.test(t)) || !/SOLUSD.*▼ 2\.52%/.test(q[6])) fail("quotes strip", q);
+const grp = await p.$$eval("#dk_quotes .dk-qg", (x) => x.map((e) => e.textContent));
+if (!process.env.MANYQ && (q.length !== 8 || !/^Nifty 50 22,935\.5 ▲ 0\.59%$/.test(q[0]) || !/^Sensex .*▼ 0\.53%$/.test(q[1]) || !/^Fin Nifty 26,130 ▲ 0\.50%$/.test(q[2]) || !/Midcap/.test(q[3])
+  || !/^Copper/.test(q[4]) || !/^Gold/.test(q[5]) || !/^Silver 91,000 ▲ 1\.11%$/.test(q[6]) || !/SOLUSD.*▼ 2\.52%/.test(q[7]) || grp.join() !== "Indices,MCX,Crypto")) fail("quotes strip: every tradable asset, grouped", { q, grp });
 if (await p.evaluate(() => getComputedStyle(document.getElementById("dk_quotes")).animationName !== "none")) fail("quotes don't scroll");
 res.live_prices[0].px = 22950; res.live_prices[0].at = new Date().toISOString();
 await p.waitForFunction(() => document.querySelector('#dk_quotes [data-a="NIFTY"]').classList.contains("fu"), null, { timeout: 5000 }).catch(() => fail("a rising price flashes green"));
@@ -149,7 +162,7 @@ if (width >= 1280) {
     const tiles = [...document.querySelectorAll("#dk_tiles .dk-tile .p")].filter((x) => x.scrollWidth > x.clientWidth + 1).length;
     return { lanes: desk.lanes.length, laneH: desk.laneH, X0: desk.X0, W: desk.W, H: desk.H, tilesSpill: tiles, sh: document.documentElement.scrollHeight, vh: innerHeight };
   });
-  if (many.lanes < 30 || (many.vh >= 900 && many.laneH < 16) || many.tilesSpill || many.sh > many.vh + 1) fail("one screen with 30 open positions", many);
+  if (many.lanes < 30 || (many.vh >= 900 && many.laneH < 15) || many.tilesSpill || many.sh > many.vh + 1) fail("one screen with 30 open positions", many);
   if (process.env.SHOT) await p.screenshot({ path: `${process.env.SHOT}/desk_one30_${theme}_${width}.png` });
   console.log("ok   30 open positions", JSON.stringify(many));
   await p.evaluate(async () => { state.strategies = state.strategies.filter((x) => !/^m\d+$/.test(x.id)); await renderDesk(); });
