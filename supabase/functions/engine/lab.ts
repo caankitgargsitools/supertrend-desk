@@ -7,13 +7,13 @@
 // Each step runs in a short instalment (Supabase allows ~2 s of computing per call) and chains to the next.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { Dhan, DhanBusyError, type OptBar } from "./dhan.ts";
-import { type Acc, type BtParams, type ChargeRates, type MBar, newAcc, type OptStore, slippageFor, type Plan, priceBatch, simulateRules, type SimData } from "./backtest.ts";
-import { addDays, type DayBar, isCrypto, ist, sessionFor } from "./logic.ts";
+import { type Acc, type BtParams, type ChargeRates, type MBar, newAcc, type OptStore, slippageFor, type Plan, priceBatch, regimeStats, type RegimeStats, simulateRules, type SimData } from "./backtest.ts";
+import { addDays, type DayBar, isCrypto, ist, type Raw, sessionFor, setMarketEvents } from "./logic.ts";
 import { describeCond, HAS_WEIGHTS, type Cond, type Rules, validateRules } from "./rules.ts";
 import { dataSecurity } from "./instruments.ts";
 import { describeRisk, type Risk } from "./risk.ts";
 import { loadMarginRates, type MarginRate, refreshMargins } from "./margins.ts";
-import { readCandles, saveCandles } from "./candles.ts";
+import { type CandleSet, readCandles, saveCandles } from "./candles.ts";
 import { deflatedSharpe, median, pbo } from "./stats.ts";
 import { closesFor, pValue, randomEntries, shuffledData } from "./noise.ts";
 export { readCandles, saveCandles };
@@ -26,7 +26,22 @@ export type LabAsset = {
   step?: number; wd?: number; flag?: "WEEK" | "MONTH"; crypto?: boolean; stock?: boolean;
   /** Listed options to price (indices only). */
   options?: boolean;
+  /** false = a data-only series (India VIX): its candles are kept for the rules, but it never becomes a strategy. */
+  tradable?: boolean;
 };
+/**
+ * Data-only series (6 Nov 2026): downloaded and stored like an index, read by the rules, never a strategy — kept out of
+ * LAB_ASSETS so the ticker, the Prediction Lab and the margin check (which walk that list) don't pick them up.
+ * India VIX: Dhan index 21.
+ */
+export const VIX_KEY = "INDIAVIX";
+export const DATA_ASSETS: Record<string, LabAsset> = {
+  [VIX_KEY]: { key: VIX_KEY, name: "India VIX", seg: "IDX_I", sec: "21", instr: "INDEX", exchange: "NSE", lot: 0, commodity: false, tradable: false },
+};
+/** An asset the lab keeps candles for: tradable or data-only. */
+export const assetDef = (key: string): LabAsset | undefined => LAB_ASSETS[key] ?? DATA_ASSETS[key];
+/** Assets the lab may write strategies for (unknown keys and data-only series left out). */
+export const tradableAssets = (keys: string[]) => keys.filter((k) => LAB_ASSETS[k] && LAB_ASSETS[k].tradable !== false);
 const IDX = (key: string, name: string, sec: string, exchange: string, step: number, wd: number, lot: number, flag: "WEEK" | "MONTH"): LabAsset =>
   ({ key, name, seg: "IDX_I", sec, instr: "INDEX", exchange, lot, commodity: false, step, wd, flag, options: true });
 const MCX = (key: string, name: string, lot: number): LabAsset => ({ key, name, seg: "MCX_COMM", sec: key, instr: "FUTCOM", exchange: "MCX", lot, commodity: true });
@@ -107,13 +122,20 @@ for (const [a, b] of [["up", "down"], ["turns_up", "turns_down"], ["green", "red
   ["cross_above_signal", "cross_below_signal"], ["hist_pos", "hist_neg"], ["above_zero", "below_zero"], ["close_above_upper", "close_below_lower"],
   ["cross_above_upper", "cross_below_lower"], ["price_above_mid", "price_below_mid"], ["plus_above_minus", "minus_above_plus"], ["above_pdh", "below_pdl"],
   ["cross_above_pdh", "cross_below_pdl"], ["above_orh", "below_orl"], ["cross_above_orh", "cross_below_orl"], ["bull_sweep", "bear_sweep"],
-  ["new_high", "new_low"], ["above_mid", "below_mid"], ["btc_up", "btc_down"], ["has_buy", "has_sell"]]) { MIRROR[a] = b; MIRROR[b] = a; }
+  ["new_high", "new_low"], ["above_mid", "below_mid"], ["btc_up", "btc_down"], ["has_buy", "has_sell"],
+  // 6 Nov 2026: open interest (a rising OI stays a rising OI on both sides; only the build-up pair swaps)
+  ["oi_up_price_up", "oi_up_price_down"],
+  // 6 Nov 2026: pivots, Fibonacci, gaps, Keltner (cpr_* / gap_filled / gap_held / squeeze* / RANGE / VIX / CAL are the same on both sides)
+  ["above_pp", "below_pp"], ["cross_up_pp", "cross_down_pp"], ["above_r1", "below_s1"], ["cross_up_r1", "cross_down_s1"],
+  ["pullback_to_382", "rally_to_382"], ["pullback_to_50", "rally_to_50"], ["pullback_to_618", "rally_to_618"], ["in_zone_bull", "in_zone_bear"], ["broke_up_786", "broke_down_786"],
+  ["gap_up_gt", "gap_dn_gt"], ["above_upper", "below_lower"],
+  ["rsi_bull_div", "rsi_bear_div"], ["macd_bull_div", "macd_bear_div"]]) { MIRROR[a] = b; MIRROR[b] = a; }
 
 /** The same condition for the other direction (RSI 60 ↔ 40; ADX and ATR are non-directional and stay as they are). */
 export function mirror(c: Cond): Cond {
   if (c.ind === "ADX" || c.ind === "ATR") return c.op in MIRROR ? { ...c, op: MIRROR[c.op] } : { ...c };
-  // Volatility and time filters work the same for both directions.
-  if (c.ind === "VOL" || c.ind === "TIME") return { ...c };
+  // Volatility, time, calendar, VIX and candle-range filters work the same for both directions.
+  if (c.ind === "VOL" || c.ind === "TIME" || c.ind === "CAL" || c.ind === "VIX" || c.ind === "RANGE") return { ...c };
   // Funding (contrarian): longs when funding is low (crowd short) ↔ shorts when it is high (crowd long).
   if (c.ind === "FUND") return { ...c, op: c.op === "lt" ? "gt" : "lt", v: +(0.02 - Number(c.v ?? 0)).toFixed(4) };
   if (c.ind === "RSI") {
@@ -123,13 +145,18 @@ export function mirror(c: Cond): Cond {
   return { ...c, op: MIRROR[c.op] ?? c.op };
 }
 
-type Tpl = (r: R) => Omit<Cond, "tf">;
+type Tpl = (r: R, a?: LabAsset) => Omit<Cond, "tf">;
 // Parameter ranges the generator draws from (wide on purpose: the walk-forward check weeds out lucky settings).
 const ST_ATR = [7, 10, 12, 14, 20], ST_FAC = [1.5, 2, 2.5, 3, 3.5, 4];
 const EMA_LEN = [9, 13, 20, 34, 50, 100, 200], EMA_PAIRS = [[5, 13], [9, 21], [13, 34], [20, 50], [50, 100], [50, 200]];
 const RSI_LEN = [7, 9, 14, 21], BB_MULT = [1.5, 2, 2.5], ADX_LEN = [10, 14, 20];
 const st = (r: R) => ({ atr: pick(r, ST_ATR), factor: pick(r, ST_FAC) });
-const STATE: [Tpl, boolean][] = [ // [template, intraday only]
+/** Swing-detector settings for the Fibonacci / divergence conditions (zigzag k×ATR twice as often as n-bar fractals). */
+const swingP = (r: R) => { const mode = pick(r, [0, 0, 1]); return { mode, k: pick(r, [1.5, 2, 2.5, 3]), n: pick(r, [3, 5, 8]) }; };
+/** Every template: [template, intraday only, (optional) which assets it suits]. */
+type TplRow = [Tpl, boolean, ((a: LabAsset) => boolean)?];
+const isIndex = (a: LabAsset) => a.seg === "IDX_I";
+const STATE: TplRow[] = [ // [template, intraday only]
   [(r) => ({ ind: "ST", p: st(r), op: "up" }), false],
   [() => ({ ind: "HA", op: "green" }), false],
   [(r) => ({ ind: "EMA", p: { len: pick(r, EMA_LEN) }, op: "price_above" }), false],
@@ -141,8 +168,14 @@ const STATE: [Tpl, boolean][] = [ // [template, intraday only]
   [(r) => ({ ind: "RSI", p: { len: pick(r, RSI_LEN) }, op: "gt", v: pick(r, [50, 55, 60]) }), false],
   [() => ({ ind: "VWAP", op: "price_above" }), true],
   [() => ({ ind: "PDHL", op: "above_pdh" }), true],
+  // 6 Nov 2026 (audit): Donchian, pivots, Keltner and gaps join the index / MCX / stock generator.
+  [(r) => ({ ind: "DON", p: { len: pick(r, [20, 30, 55]) }, op: "above_mid" }), false],
+  [(r) => ({ ind: "PIV", p: { src: pick(r, [0, 0, 1]), kind: pick(r, [0, 0, 1]) }, op: "above_pp" }), false],
+  [(r) => ({ ind: "PIV", p: { src: 0, kind: pick(r, [0, 1]) }, op: "above_r1" }), true],
+  [(r) => ({ ind: "KC", p: { len: 20, k: pick(r, [1.5, 2]) }, op: "above_upper" }), false],
+  [(r) => ({ ind: "GAP", p: { k: pick(r, [0.5, 1, 1.5]) }, op: "gap_up_gt" }), true],
 ];
-const EVENT: [Tpl, boolean][] = [
+const EVENT: TplRow[] = [
   [(r) => ({ ind: "ST", p: st(r), op: "turns_up" }), false],
   [() => ({ ind: "HA", op: "turns_green" }), false],
   [(r) => ({ ind: "EMA", p: { len: pick(r, [9, 13, 20, 34, 50]) }, op: "price_cross_above" }), false],
@@ -154,14 +187,40 @@ const EVENT: [Tpl, boolean][] = [
   [() => ({ ind: "PDHL", op: "cross_above_pdh" }), true],
   [() => ({ ind: "VWAP", op: "price_cross_above" }), true],
   [(r) => ({ ind: "SWEEP", p: sweepP(r, false), op: "bull_sweep" }), false],
+  // 6 Nov 2026 (audit): breakouts, pivot crosses, squeeze releases, Fibonacci pullbacks, gap fades, divergences.
+  [(r) => ({ ind: "DON", p: { len: pick(r, [10, 20, 55]) }, op: "new_high" }), false],
+  [(r) => ({ ind: "PIV", p: { src: 0, kind: pick(r, [0, 0, 1]) }, op: "cross_up_r1" }), true],
+  [(r) => ({ ind: "KC", p: { len: 20, k: 1.5, mult: pick(r, [2, 2.5]) }, op: "squeeze_release" }), false],
+  [(r) => ({ ind: "FIB", p: { ...swingP(r), tol: pick(r, [0.1, 0.2, 0.3]) }, op: pick(r, ["pullback_to_382", "pullback_to_50", "pullback_to_618"]) }), false],
+  [(r) => ({ ind: "GAP", p: { k: pick(r, [1, 1.5, 2]) }, op: "gap_dn_gt" }), true], // a long after a gap down = a gap fade (its mirror fades gaps up)
+  [(r) => ({ ind: "DIV", p: { ...swingP(r), ...(r() < 0.6 ? { len: pick(r, RSI_LEN) } : { fast: 12, slow: 26, sig: 9 }), within: pick(r, [1, 3, 5]) }, op: "" }), false],
 ];
+/** The divergence template's op depends on which indicator its parameters name. */
+const fixDiv = (c: Omit<Cond, "tf">) => c.ind === "DIV" && !c.op ? { ...c, op: c.p?.len ? "rsi_bull_div" : "macd_bull_div" } : c;
+/** Conditions true for both directions at once (a squeeze, a narrow range, a filled gap …): never the only condition. */
+const NONDIR = new Set(["squeeze", "squeeze_release", "nr_n", "inside_bar", "gap_filled", "gap_held", "cpr_narrow", "cpr_wide", "range_gt_atr", "range_lt_atr", "high_vol", "low_vol", "in_hours", "not_expiry_day", "is_expiry_day", "turn_of_month", "event_day", "vix_gt", "vix_lt", "vix_rising", "vix_pctile_gt", "vix_pctile_lt", "bandwidth_pctile_lt", "bandwidth_pctile_gt"]);
 /** Liquidity-sweep settings: swing look-back, how long the signal stays alive, and (intraday) swing or previous-day levels. */
 const sweepP = (r: R, daily: boolean) => ({ len: pick(r, [5, 10, 20, 30, 50]), within: pick(r, [1, 1, 2, 3]), src: daily ? 0 : pick(r, [0, 0, 1]) });
-const FILTER: Tpl[] = [
-  (r) => ({ ind: "RSI", p: { len: pick(r, RSI_LEN) }, op: "gt", v: pick(r, [50, 55, 60]) }),
-  (r) => ({ ind: "ADX", p: { len: pick(r, ADX_LEN) }, op: "gt", v: pick(r, [18, 20, 25, 30]) }),
-  (r) => ({ ind: "RSI", p: { len: 14 }, op: "lt", v: pick(r, [70, 75, 80]) }),
+const FILTER: TplRow[] = [
+  [(r) => ({ ind: "RSI", p: { len: pick(r, RSI_LEN) }, op: "gt", v: pick(r, [50, 55, 60]) }), false],
+  [(r) => ({ ind: "ADX", p: { len: pick(r, ADX_LEN) }, op: "gt", v: pick(r, [18, 20, 25, 30]) }), false],
+  [(r) => ({ ind: "RSI", p: { len: 14 }, op: "lt", v: pick(r, [70, 75, 80]) }), false],
+  // 6 Nov 2026 (audit): volatility regime, time of day, range setups, squeezes, a narrow CPR, the calendar, India VIX.
+  [(r) => ({ ind: "VOL", p: { len: pick(r, [10, 20, 30]), look: pick(r, [120, 250]) }, op: pick(r, ["low_vol", "high_vol"]) }), false],
+  [(r) => ({ ind: "TIME", p: { from: pick(r, [9, 10, 11]), to: pick(r, [13, 14, 15]) }, op: "in_hours" }), true],
+  [(r) => ({ ind: "RANGE", p: { n: pick(r, [4, 7]) }, op: pick(r, ["nr_n", "inside_bar"]) }), false],
+  [(r) => ({ ind: "BB", p: { len: 20, mult: 2, pct: pick(r, [10, 20, 30]), look: 250 }, op: "bandwidth_pctile_lt" }), false],
+  [(r) => ({ ind: "PIV", p: { k: pick(r, [0.4, 0.5, 0.6]) }, op: "cpr_narrow" }), true],
+  [(r, a) => ({ ind: "CAL", p: { wd: a?.wd ?? 2, monthly: a?.flag === "WEEK" ? 0 : 1 }, op: pick(r, ["not_expiry_day", "not_expiry_day", "is_expiry_day"]) }), false, (a) => !a.commodity && !a.crypto],
+  [(r) => ({ ind: "CAL", p: { a: pick(r, [1, 2]), b: pick(r, [2, 3]) }, op: "turn_of_month" }), false, (a) => !a.commodity && !a.crypto],
+  [(r) => ({ ind: "VIX", p: { look: 250 }, op: pick(r, ["vix_lt", "vix_gt", "vix_pctile_lt", "vix_pctile_gt"]), v: 0 }), false, isIndex],
 ];
+/** The VIX filter's level follows its op: a VIX level (12–22) or a percentile (20–80). */
+const fixVix = (r: R, c: Omit<Cond, "tf">) => c.ind === "VIX" ? { ...c, v: /pctile/.test(c.op) ? pick(r, [20, 30, 50, 70, 80]) : pick(r, [12, 14, 16, 18, 20, 22]) } : c;
+/** A filter / state / event drawn for an asset, with the follow-ups the template needs. */
+const draw = (r: R, rows: TplRow[], a: LabAsset): Omit<Cond, "tf"> => fixVix(r, fixDiv(pick(r, rows)[0](r, a)));
+/** Templates allowed for an asset and decision style. */
+const okRows = (xs: TplRow[], daily: boolean, a: LabAsset) => xs.filter(([, intra, only]) => !(daily && intra) && (!only || only(a)));
 
 export type LabConfig = Record<string, any>;
 
@@ -177,7 +236,11 @@ function randomRisk(r: R, daily: boolean, intraday: boolean, capital: number): R
   return risk;
 }
 
-/** One random strategy for an asset. Index strategies are intraday-candle based (85%) or once-a-day; commodities once-a-day. */
+/**
+ * One random strategy for an asset. Index and stock strategies are intraday-candle based (85%) or once-a-day; MCX ones
+ * once-a-day (70%) or on intraday candles (30%; 6 Nov 2026 — their 5-minute history is a year or so deep, judged by the
+ * quarter rule).
+ */
 export function generate(assetKey: string, seed: number, capital = 500000, hasPct = 8): LabConfig {
   const a = LAB_ASSETS[assetKey];
   // A set share of new strategies (lab_settings.ha_strength_pct, default 8%) trade on Heikin Ashi strength.
@@ -185,8 +248,8 @@ export function generate(assetKey: string, seed: number, capital = 500000, hasPc
   if (a.crypto) return generateCrypto(a, seed, capital);
   const r = rng(seed);
   const cr = !!a.crypto;
-  const daily = a.commodity || r() < (cr ? 0.3 : 0.15);
-  const okTpl = (xs: [Tpl, boolean][]) => xs.filter(([, intra]) => !(daily && intra)).map(([t]) => t);
+  const daily = a.commodity ? r() < 0.7 : r() < 0.15;
+  const okTpl = (xs: TplRow[]) => okRows(xs, daily, a);
   const tf = daily ? 375 : pick(r, cr ? [15, 15, 30, 30, 45, 60, 60, 120, 240] : [5, 10, 15, 15, 25, 30, 30, 45, 60, 75, 125]);
   const higher = daily ? [] : (cr ? [30, 60, 120, 240] : [15, 25, 30, 60, 75, 125]).filter((x) => x > tf && x % 5 === 0 && x !== tf).map(String).concat(["D"]);
   const ctf = (base: boolean) => daily ? "D" : base ? "base" : pick(r, higher);
@@ -195,40 +258,45 @@ export function generate(assetKey: string, seed: number, capital = 500000, hasPc
   const style = sr < 0.2 ? "reversion" : sr < 0.45 ? "sweep" : "trend";
   const conds: Cond[] = [];
   let exitLong: Cond[] = [];
+  const dup = (c: Cond) => conds.some((x) => x.ind === c.ind && x.tf === c.tf);
   if (style === "sweep") {
     // Liquidity sweep: buy after price runs the stops below a swing low (or yesterday's low) and closes back above it;
     // often only in the direction of the higher-timeframe trend.
     const primary: Cond = { ind: "SWEEP", tf: ctf(true), p: sweepP(r, daily), op: "bull_sweep" };
     conds.push(primary);
-    if (r() < 0.6) conds.push({ ...pick(r, okTpl(STATE))(r), tf: daily ? "D" : (higher.length ? pick(r, higher) : "base") } as Cond);
-    if (r() < 0.3) { const f = { ...pick(r, FILTER)(r), tf: ctf(true) } as Cond; if (!conds.some((x) => x.ind === f.ind && x.tf === f.tf)) conds.push(f); }
+    if (r() < 0.6) conds.push({ ...draw(r, okTpl(STATE), a), tf: daily ? "D" : (higher.length ? pick(r, higher) : "base") } as Cond);
+    if (r() < 0.3) { const f = { ...draw(r, okTpl(FILTER), a), tf: ctf(true) } as Cond; if (!dup(f)) conds.push(f); }
     const ex = r();
     if (ex < 0.45) exitLong = [{ ...primary, op: "bear_sweep" }];
-    else if (ex < 0.75) exitLong = [mirror({ ...pick(r, okTpl(STATE))(r), tf: ctf(true) } as Cond)];
+    else if (ex < 0.75) exitLong = [mirror({ ...draw(r, okTpl(STATE), a), tf: ctf(true) } as Cond)];
   } else if (style === "reversion") {
     // Oversold bounce: buy when RSI recovers from below a low level; take profit when RSI is strong again.
     const len = pick(r, RSI_LEN);
     conds.push({ ind: "RSI", tf: ctf(true), p: { len }, op: "cross_above", v: pick(r, [20, 25, 30, 35]) });
     if (r() < 0.5) conds.push({ ind: "ADX", tf: ctf(true), p: { len: pick(r, ADX_LEN) }, op: "lt", v: pick(r, [20, 25, 30]) });
-    if (r() < 0.4) conds.push({ ...pick(r, okTpl(STATE))(r), tf: ctf(false) } as Cond);
+    if (r() < 0.4) conds.push({ ...draw(r, okTpl(STATE), a), tf: ctf(false) } as Cond);
     exitLong = [r() < 0.6 ? { ind: "RSI", tf: ctf(true), p: { len }, op: "gt", v: pick(r, [50, 55, 60, 70]) } : { ind: "BB", tf: ctf(true), p: { len: 20, mult: 2 }, op: "price_above_mid" }];
   } else {
     const event = r() < 0.55;
-    const primary = { ...(event ? pick(r, okTpl(EVENT)) : pick(r, okTpl(STATE)))(r), tf: ctf(true) } as Cond;
+    const primary = { ...draw(r, okTpl(event ? EVENT : STATE), a), tf: ctf(true) } as Cond;
     conds.push(primary);
-    const nF = pick(r, [0, 1, 1, 2]);
+    // A condition that is true for both sides at once (a squeeze release, a gap filled …) must come with a direction.
+    const nF = NONDIR.has(primary.op) ? pick(r, [1, 1, 2]) : pick(r, [0, 1, 1, 2]);
     for (let i = 0; i < nF; i++) {
-      const c = (r() < 0.6 && (daily || higher.length))
-        ? { ...pick(r, okTpl(STATE))(r), tf: daily ? "D" : pick(r, higher) } as Cond
-        : { ...pick(r, FILTER)(r), tf: ctf(true) } as Cond;
-      if ((c.ind === "VWAP" || c.ind === "ORB") && c.tf === "D") continue;
-      if (conds.some((x) => x.ind === c.ind && x.tf === c.tf)) continue;
+      const wantState = (i === 0 && NONDIR.has(primary.op)) || (r() < 0.6 && (daily || higher.length));
+      const c = wantState
+        ? { ...draw(r, okTpl(STATE), a), tf: daily ? "D" : (higher.length ? pick(r, higher) : "base") } as Cond
+        : { ...draw(r, okTpl(FILTER), a), tf: ctf(true) } as Cond;
+      if ((c.ind === "VWAP" || c.ind === "ORB" || c.ind === "GAP") && c.tf === "D") continue;
+      if (dup(c)) continue;
       conds.push(c);
     }
     const ex = r();
-    if (ex < 0.35 && event) exitLong = [mirror({ ...pick(r, okTpl(STATE))(r), tf: ctf(true) } as Cond)];
-    else if (ex < 0.65) exitLong = [event ? mirror({ ...pick(r, okTpl(STATE))(r), tf: ctf(true) } as Cond) : mirror(primary)];
+    if (ex < 0.35 && event) exitLong = [mirror({ ...draw(r, okTpl(STATE), a), tf: ctf(true) } as Cond)];
+    else if (ex < 0.65) exitLong = [event ? mirror({ ...draw(r, okTpl(STATE), a), tf: ctf(true) } as Cond) : mirror(primary)];
   }
+  // A Fibonacci pullback entry is tried half the time as a resting limit order at the level (the backtester's LEVEL fill).
+  const fibFill = !daily && conds.some((c) => c.ind === "FIB") && r() < 0.5;
   const dir = r();
   const direction = dir < 0.6 ? "BOTH" : dir < 0.85 ? "LONG_ONLY" : "SHORT_ONLY";
   // A one-sided strategy whose entry is a one-candle event needs explicit exits (otherwise it would exit a candle later).
@@ -236,12 +304,12 @@ export function generate(assetKey: string, seed: number, capital = 500000, hasPc
   // Heikin Ashi candles make the Heikin Ashi colour condition meaningless; use normal candles there.
   const hasHA = [...conds, ...exitLong].some((c) => c.ind === "HA");
   const rules: Rules = {
-    long: { mode: "ALL", conds }, short: { mode: "ALL", conds: conds.map(mirror) },
+    long: { mode: "ALL", conds, ...(fibFill ? { fill: "LEVEL" as const } : {}) }, short: { mode: "ALL", conds: conds.map(mirror), ...(fibFill ? { fill: "LEVEL" as const } : {}) },
     exitLong: { mode: "ANY", conds: exitLong }, exitShort: { mode: "ANY", conds: exitLong.map(mirror) },
     ...(daily ? { daily: true } : {}), ...(candles === "HA" && !hasHA ? { candles: "HA" as const } : {}),
   };
   if (direction === "LONG_ONLY") rules.short = { mode: "ALL", conds: [] };
-  if (direction === "SHORT_ONLY") { rules.short = { mode: "ALL", conds: conds.map(mirror) }; rules.long = { mode: "ALL", conds: [] }; }
+  if (direction === "SHORT_ONLY") { rules.short = { mode: "ALL", conds: conds.map(mirror), ...(fibFill ? { fill: "LEVEL" as const } : {}) }; rules.long = { mode: "ALL", conds: [] }; }
   const intraday = !daily && r() < 0.7;
   const cfg: LabConfig = {
     strategy_kind: "RULES", underlying: a.key, data_security_id: a.sec, data_segment: a.seg, data_instrument: a.instr,
@@ -429,6 +497,8 @@ export function generateCrypto(a: LabAsset, seed: number, capital = 500000): Lab
 const NEAR: Record<string, number[]> = {
   atr: ST_ATR, factor: ST_FAC, len: [5, 7, 9, 10, 13, 14, 20, 21, 30, 34, 50, 100, 200], len2: [13, 21, 34, 50, 100, 200],
   mult: BB_MULT, mins: [15, 30, 45, 60], fast: [5, 8, 12], slow: [21, 26, 35], sig: [5, 9], within: [1, 2, 3, 5],
+  // 6 Nov 2026: swing threshold (×ATR) / fractal width, Fibonacci tolerance (×ATR), bandwidth percentile, gap size (×ATR)
+  k: [0.5, 1, 1.5, 2, 2.5, 3], n: [3, 5, 7, 8, 10], tol: [0.1, 0.15, 0.2, 0.3], pct: [10, 15, 20, 30], look: [120, 250, 500],
 };
 /** The next value up or down in a list (never the value itself). */
 const neighbour = (xs: number[], v: number, r: R) => {
@@ -515,17 +585,17 @@ export function settingVariants(parent: LabConfig): LabConfig[] {
   const out: LabConfig[] = [];
   const sets = (["long", "short", "exitLong", "exitShort"] as const).filter((k) => parent.rules[k]?.conds?.length);
   const seenCond = new Set<string>();
-  const INT = new Set(["len", "len2", "atr", "fast", "slow", "sig", "mins", "within", "look"]);
+  const INT = new Set(["len", "len2", "atr", "fast", "slow", "sig", "mins", "within", "look", "n", "pct"]);
   for (const k of sets) for (const c of parent.rules[k].conds as Cond[]) {
-    if (c.ind === "TIME" || c.ind === "FUND") continue; // a clock window or funding level isn't a setting to nudge
+    if (c.ind === "TIME" || c.ind === "FUND" || c.ind === "CAL") continue; // a clock window, funding level or calendar isn't a setting to nudge
     const key = `${c.ind}|${c.tf}|${JSON.stringify(c.p ?? {})}`;
     if (seenCond.has(key)) continue;
     seenCond.add(key);
     const same = (x: Cond) => x.ind === c.ind && x.tf === c.tf && JSON.stringify(x.p ?? {}) === JSON.stringify(c.p ?? {});
     for (const [pk, pv] of Object.entries(c.p ?? {})) {
-      if (pk === "src") continue;
+      if (pk === "src" || pk === "kind" || pk === "mode") continue; // choices, not settings
       const v0 = Number(pv);
-      const steps = pk === "w" ? [0, 1, 2, 3].filter((x) => x !== v0) : pk === "doji" ? [5, 10, 15, 20].filter((x) => x !== v0) : INT.has(pk)
+      const steps = pk === "w" ? [0, 1, 2, 3].filter((x) => x !== v0) : pk === "doji" ? [5, 10, 15, 20].filter((x) => x !== v0) : pk === "tol" ? [0.1, 0.15, 0.2, 0.3].filter((x) => x !== v0) : INT.has(pk)
         ? [...new Set([v0 - 2, v0 - 1, v0 + 1, v0 + 2, Math.round(v0 * 0.9), Math.round(v0 * 1.1)])].filter((x) => x !== v0 && x >= (pk === "within" ? 1 : 2) && x <= 300)
         : [v0 - 0.5, v0 - 0.25, v0 + 0.25, v0 + 0.5].map((x) => +x.toFixed(2)).filter((x) => x > 0);
       for (const nv of steps) {
@@ -554,7 +624,7 @@ export function settingVariants(parent: LabConfig): LabConfig[] {
   return out;
 }
 export const EXPLORE_KINDS: ExploreKind[] = ["settings", "assets", "timeframes", "stops", "trailing", "indicators", "tweaks"];
-const INTRA_ONLY = new Set(["VWAP", "ORB"]);
+const INTRA_ONLY = new Set(["VWAP", "ORB", "GAP"]);
 const condsOf = (cfg: LabConfig): Cond[] => (["long", "short", "exitLong", "exitShort"] as const).flatMap((k) => cfg.rules?.[k]?.conds ?? []);
 /**
  * Same rules on another asset. Intraday strategies can move to MCX too (5-minute MCX candles go back as far as the
@@ -562,7 +632,7 @@ const condsOf = (cfg: LabConfig): Cond[] => (["long", "short", "exitLong", "exit
  */
 export function transfer(parent: LabConfig, key: string): LabConfig | null {
   const a = LAB_ASSETS[key];
-  if (!a || key === parent.underlying) return null;
+  if (!a || key === parent.underlying || a.tradable === false) return null;
   const daily = !!parent.rules?.daily;
   const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
   Object.assign(cfg, { underlying: a.key, data_security_id: a.sec, data_segment: a.seg, data_instrument: a.instr, exchange: a.exchange, dhan_symbol: a.key,
@@ -641,9 +711,9 @@ export function recombine(parent: LabConfig, seed: number): LabConfig | null {
   const conds: Cond[] = cfg.rules[side].conds;
   const tf = cfg.timeframe_min;
   const higher = daily ? ["D"] : (LAB_ASSETS[cfg.underlying]?.crypto ? [30, 60, 120, 240] : [15, 25, 30, 60, 75, 125]).filter((x) => x > tf).map(String).concat(["D"]);
-  const okState = STATE.filter(([, intra]) => !(daily && intra)).map(([t]) => t);
+  const a = LAB_ASSETS[cfg.underlying] ?? { key: cfg.underlying, seg: String(cfg.data_segment ?? ""), commodity: cfg.data_segment === "MCX_COMM", crypto: cfg.data_segment === "DELTA" } as LabAsset;
   const fresh = (): Cond => {
-    const c = r() < 0.55 ? { ...pick(r, okState)(r), tf: pick(r, higher) } as Cond : { ...pick(r, FILTER)(r), tf: daily ? "D" : "base" } as Cond;
+    const c = r() < 0.55 ? { ...draw(r, okRows(STATE, daily, a), a), tf: pick(r, higher) } as Cond : { ...draw(r, okRows(FILTER, daily, a), a), tf: daily ? "D" : "base" } as Cond;
     return c;
   };
   const what = r();
@@ -754,6 +824,7 @@ export type LabMetrics = {
   full: PeriodStats; train: PeriodStats; test: PeriodStats; months: { m: string; net: number; n: number }[];
   pos_months: number; months_n: number; train_pos_months: number; train_months_n: number; score: number; passed: boolean; why: string[];
   margin_lot?: number | null; ret_margin?: number | null; margin_max?: number | null; margin_pct?: number | null; margin_src?: string;
+  regimes?: RegimeStats | null;
 };
 /** Walk-forward scoring: score from the training months only; "passed" also needs a profitable, untouched test period. */
 export function labMetrics(trades: T[], from: string, split: string, to: string, daily: boolean): LabMetrics {
@@ -781,12 +852,27 @@ export function labMetrics(trades: T[], from: string, split: string, to: string,
 }
 
 /* ---------- candle cache ---------- */
-type Col = { t: number[]; o: number[]; h: number[]; l: number[]; c: number[]; v?: number[] };
-const toCol = (rows: { t: number; o: number; h: number; l: number; c: number; v?: number }[], withV: boolean): Col => ({
+/**
+ * Candle files hold columns t/o/h/l/c plus, since 6 Nov 2026, v (volume: every asset, so the session VWAP is really
+ * volume-weighted where the exchange reports volume — indices carry none and stay time-weighted) and oi (open interest,
+ * only where Dhan reports it: the near-month futures the MCX candles come from; index and share candles have none).
+ * Older files without v / oi keep working: a missing v reads as zeros, a missing oi as "unknown" (OI rules stay false).
+ */
+export type Col = { t: number[]; o: number[]; h: number[]; l: number[]; c: number[]; v?: number[]; oi?: number[] };
+export const toCol = (rows: { t: number; o: number; h: number; l: number; c: number; v?: number; oi?: number }[], withV: boolean): Col => ({
   t: rows.map((r) => r.t), o: rows.map((r) => r.o), h: rows.map((r) => r.h), l: rows.map((r) => r.l), c: rows.map((r) => r.c),
   ...(withV ? { v: rows.map((r) => r.v ?? 0) } : {}),
+  ...(withV && rows.some((r) => Number(r.oi) > 0) ? { oi: rows.map((r) => r.oi ?? 0) } : {}),
 });
-export const fromCol = (c: Col) => c.t.map((t, i) => ({ t, o: c.o[i], h: c.h[i], l: c.l[i], c: c.c[i], v: c.v ? c.v[i] : 0 }));
+export const fromCol = (c: Col): Raw[] => {
+  const out: Raw[] = new Array(c.t.length);
+  for (let i = 0; i < c.t.length; i++) {
+    const r: Raw = { t: c.t[i], o: c.o[i], h: c.h[i], l: c.l[i], c: c.c[i], v: c.v ? c.v[i] : 0 };
+    if (c.oi) r.oi = c.oi[i];
+    out[i] = r;
+  }
+  return out;
+};
 export const WARM_DAYS = 150, YEAR_DAYS = 365;
 /**
  * The vault: the most recent months are held back from everything that picks or tunes strategies (generation, the
@@ -803,7 +889,8 @@ export function preVault(win: { from: string; split: string; to: string }, cfg: 
 
 /** Bring an asset's cached candles up to date (5-minute candles for indices, daily candles for every asset). */
 export async function refreshAsset(sb: SupabaseClient, creds: { client: string; token: string }, key: string, today: string, freshHours = 0) {
-  const a = LAB_ASSETS[key];
+  const a = assetDef(key);
+  if (!a) throw new Error(`Unknown asset ${key}`);
   if (freshHours > 0) {
     // Back-to-back runs (around-the-clock mode) reuse candles fetched in the last few hours.
     const { data: d } = await sb.from("lab_candles").select("updated_at").eq("asset", key).eq("kind", "D").maybeSingle();
@@ -816,11 +903,11 @@ export async function refreshAsset(sb: SupabaseClient, creds: { client: string; 
   // 11 years of daily candles: the year-by-year test covers 10 years (plus warm-up for the indicators).
   const daily = await dhan.daily(sec, a.seg, a.instr, addDays(today, -4100), addDays(today, 1));
   const jumps = { d: a.stock ? findSplits(daily) : [], i: [] as { day: string; factor: number }[] };
-  await saveCandles(sb, { asset: key, kind: "D", from_day: daily[0]?.day ?? today, to_day: daily.at(-1)?.day ?? today, bars: toCol(daily, false) });
+  await saveCandles(sb, { asset: key, kind: "D", from_day: daily[0]?.day ?? today, to_day: daily.at(-1)?.day ?? today, bars: toCol(daily, true) });
   const want = addDays(today, -(YEAR_DAYS + WARM_DAYS));
   if (a.commodity) return refreshMcxIntraday(sb, dhan, a, today, want);
   const cached = (await readCandles(sb, key, ["I5"], true))[0];
-  const map = new Map<number, { t: number; o: number; h: number; l: number; c: number }>();
+  const map = new Map<number, Raw>();
   let start = want;
   if (cached && cached.from_day <= addDays(want, 5)) {
     for (const r of fromCol(cached.bars)) map.set(r.t, r);
@@ -832,7 +919,7 @@ export async function refreshAsset(sb: SupabaseClient, creds: { client: string; 
   }
   const lo = Date.parse(`${want}T00:00:00+05:30`) / 1000;
   const rows = [...map.values()].filter((r) => r.t >= lo).sort((x, y) => x.t - y.t);
-  await saveCandles(sb, { asset: key, kind: "I5", from_day: ist(rows[0]?.t ?? lo).date, to_day: ist(rows.at(-1)?.t ?? lo).date, bars: toCol(rows, false) });
+  await saveCandles(sb, { asset: key, kind: "I5", from_day: ist(rows[0]?.t ?? lo).date, to_day: ist(rows.at(-1)?.t ?? lo).date, bars: toCol(rows, true) });
   if (a.stock) jumps.i.push(...findSplits(daysOf(rows)));
   jumps.i.push(...await refreshYearChunks(sb, dhan, a, today));
   if (a.stock) await saveStockActions(sb, key, jumps.d, jumps.i, {
@@ -850,14 +937,14 @@ async function refreshYearChunks(sb: SupabaseClient, dhan: Dhan, a: LabAsset, to
   for (let y = y0; y <= y1; y++) {
     if (got.has(`I5Y:${y}`)) continue;
     const from = `${y}-01-01` < first ? first : `${y}-01-01`, to = `${y}-12-31`;
-    const map = new Map<number, { t: number; o: number; h: number; l: number; c: number }>();
+    const map = new Map<number, Raw>();
     for (let s = from; s <= to; s = addDays(s, 86)) {
       const z = addDays(s, 85) < to ? addDays(s, 85) : to;
       for (const r of await dhan.intraday(a.sec, a.seg, a.instr, 5, `${s} 09:00:00`, `${z} 23:59:00`)) map.set(r.t, r);
     }
     const rows = [...map.values()].sort((x, z) => x.t - z.t);
     if (!rows.length) continue;
-    await saveCandles(sb, { asset: a.key, kind: `I5Y:${y}`, from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, false) });
+    await saveCandles(sb, { asset: a.key, kind: `I5Y:${y}`, from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, true) });
     if (a.stock) found.push(...findSplits(daysOf(rows)));
   }
   return found;
@@ -879,7 +966,7 @@ async function refreshCrypto(sb: SupabaseClient, a: LabAsset, today: string) {
   const inSess = (t: number) => { const p = ist(t), ss = sessionFor(a.seg, p.date); return p.min >= ss.open && p.min < ss.close; };
   const want = addDays(today, -(YEAR_DAYS + WARM_DAYS));
   const cached = (await readCandles(sb, a.key, ["I5"]))[0];
-  const map = new Map<number, { t: number; o: number; h: number; l: number; c: number; v?: number }>();
+  const map = new Map<number, Raw>();
   let start = want;
   if (cached && cached.from_day <= addDays(want, 5)) { for (const r of fromCol(cached.bars)) map.set(r.t, r); start = addDays(cached.to_day, -2); }
   for (const r of await cryptoIntraday(a.sec, 15, `${start} 00:00:00`, `${today} 23:59:00`)) if (inSess(r.t)) map.set(r.t, r);
@@ -909,16 +996,16 @@ async function refreshCrypto(sb: SupabaseClient, a: LabAsset, today: string) {
  */
 async function refreshMcxIntraday(sb: SupabaseClient, dhan: Dhan, a: LabAsset, today: string, want: string) {
   const cached = (await readCandles(sb, a.key, ["I5"]))[0];
-  const map = new Map<number, { t: number; o: number; h: number; l: number; c: number }>();
+  const map = new Map<number, Raw>();
   let start = want;
   if (cached) { for (const r of fromCol(cached.bars)) map.set(r.t, r); start = addDays(cached.to_day, -3); }
   const { data: cons } = await sb.from("mcx_contracts").select("sec_id, expiry").eq("underlying", a.sec).gt("expiry", start).order("expiry").limit(cached ? 2 : 3);
   if (!cons?.length) return;
   // Each contract's candles by day.
-  const per: { expiry: string; days: Map<string, { t: number; o: number; h: number; l: number; c: number }[]> }[] = [];
+  const per: { expiry: string; days: Map<string, Raw[]> }[] = [];
   let firstErr: unknown = null, got = 0;
   for (const c of cons) {
-    const days = new Map<string, { t: number; o: number; h: number; l: number; c: number }[]>();
+    const days = new Map<string, Raw[]>();
     const end = c.expiry < today ? c.expiry : today;
     for (let s = start; s <= end; s = addDays(s, 86)) {
       const z = addDays(s, 85) < end ? addDays(s, 85) : end;
@@ -951,7 +1038,20 @@ async function refreshMcxIntraday(sb: SupabaseClient, dhan: Dhan, a: LabAsset, t
   const lo = Date.parse(`${want}T00:00:00+05:30`) / 1000;
   const rows = [...map.values()].filter((r) => r.t >= lo).sort((x, y) => x.t - y.t);
   if (!rows.length) return;
-  await saveCandles(sb, { asset: a.key, kind: "I5", from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, false) });
+  await saveCandles(sb, { asset: a.key, kind: "I5", from_day: ist(rows[0].t).date, to_day: ist(rows.at(-1)!.t).date, bars: toCol(rows, true) });
+}
+
+/**
+ * Market-event days (table market_events: RBI / Fed / budget days …) for the calendar rule "event_day", read once a day
+ * into logic.ts's engine-wide set. A missing table or an error leaves the set as it was (empty = no events).
+ */
+const EVENTS_MEMO = { at: 0 };
+export async function loadMarketEvents(sb: SupabaseClient, maxAgeMs = 86400000) {
+  if (Date.now() - EVENTS_MEMO.at < maxAgeMs) return;
+  EVENTS_MEMO.at = Date.now();
+  const { data, error } = await sb.from("market_events").select("day");
+  if (error) { console.error("market_events", error.message); return; }
+  setMarketEvents((data ?? []).map((r) => String(r.day)));
 }
 
 /** Cached candles in the shape the simulator wants. */
@@ -979,6 +1079,13 @@ export async function loadAsset(sb: SupabaseClient, key: string, long = false): 
   }
   if (parts.length > 1) { raw.sort((x, y) => x.t - y.t); for (const arr of byDay.values()) arr.sort((x, y) => x.t - y.t); }
   const out: SimData = { raw, byDay, daily };
+  // India VIX for every Dhan asset (a rule input: a fear gauge for indices, stocks and MCX alike), when its candles exist.
+  if (!a.crypto && key !== VIX_KEY) {
+    const vx = await readCandles(sb, VIX_KEY, ["D", "I5"]).catch(() => [] as CandleSet[]);
+    const vd = vx.find((r) => r.kind === "D"), vi = vx.find((r) => r.kind === "I5");
+    if (vd) out.vix = fromCol(vd.bars).map((r) => ({ ...r, day: ist(r.t).date }));
+    if (vi) out.vixRaw = fromCol(vi.bars).filter((r) => { const p = ist(r.t), ss = sessionFor("IDX_I", p.date); return p.min >= ss.open && p.min < ss.close; });
+  }
   if (a.crypto) {
     // Crypto extras: Delta's daily funding rates, and Bitcoin's daily candles for the "Bitcoin trend" filter on other coins.
     const f = rows?.find((r) => r.kind === "F")?.bars as { d?: string[]; r?: number[] } | undefined;
@@ -1010,6 +1117,11 @@ export async function cachedAsset(sb: SupabaseClient, key: string, long = false)
     const { data: b } = await sb.from("lab_candles").select("updated_at").eq("asset", "BTCUSD").eq("kind", "D").maybeSingle();
     sig += `|BTC@${b?.updated_at ?? ""}`;
   }
+  if (!LAB_ASSETS[key]?.crypto && key !== VIX_KEY) {
+    const { data: vx } = await sb.from("lab_candles").select("kind, updated_at").eq("asset", VIX_KEY).in("kind", ["D", "I5"]);
+    sig += `|VIX@${(vx ?? []).map((m) => `${m.kind}@${m.updated_at}`).sort().join(",")}`;
+  }
+  await loadMarketEvents(sb);
   const hit = ASSET_CACHE.get(ck);
   if (hit && hit.sig === sig) { hit.used = Date.now(); cacheStats.hits++; return hit.data; }
   const data = await loadAsset(sb, key, long);
@@ -1037,6 +1149,8 @@ export async function screenOne(cfg: LabConfig, data: SimData, memo: Map<string,
   const base = labMetrics(trades as T[], win.from, win.split, win.to, !!cfg.rules.daily);
   // Margin for every trade at its own entry price; with no trades, at the last close.
   const metrics = withTradeMargins(base, cfg, "FUT", trades, rates, data.daily.at(-1)?.c ?? 0);
+  // Which regimes the money came from (VIX tercile, ADX trend / flat, above / below the 200-day average).
+  metrics.regimes = regimeStats(trades as { entry: string; net: number }[], data.daily, data.vix, memo);
   return { metrics, trades };
 }
 
@@ -1163,7 +1277,7 @@ export async function labStart(sb: SupabaseClient, manual: boolean, trigger?: st
   const today = ist(Date.now() / 1000).date;
   const from = addDays(today, -YEAR_DAYS), split = addDays(today, -92);
   const settings = focus
-    ? { ...set, focus: true, assets: focus.assets!.filter((k) => LAB_ASSETS[k]), per_night: Math.max(10, Math.min(1000, Number(focus.n) || 300)) }
+    ? { ...set, focus: true, assets: tradableAssets(focus.assets!), per_night: Math.max(10, Math.min(1000, Number(focus.n) || 300)) }
     : { ...set, focus: undefined };
   if (focus) await sb.from("lab_settings").update({ focus: null }).eq("id", 1);
   if (trigger === "retest") await sb.from("lab_settings").update({ retest_until_done: true }).eq("id", 1);
@@ -1231,9 +1345,9 @@ export async function labNext(sb: SupabaseClient): Promise<number | null> {
   const parentAsset = String(q.config?.underlying ?? "");
   const daily = !!q.config?.rules?.daily;
   const wantAssets: string[] = (q.kinds ?? []).includes("assets")
-    ? ((q.assets?.length ? q.assets : set.assets) ?? []).filter((k: string) => LAB_ASSETS[k])
+    ? tradableAssets(((q.assets?.length ? q.assets : set.assets) ?? []) as string[])
     : [];
-  const assets = [...new Set([parentAsset, ...wantAssets])].filter((k) => LAB_ASSETS[k]);
+  const assets = tradableAssets([...new Set([parentAsset, ...wantAssets])]);
   if (!assets.length) { await sb.from("lab_requests").update({ status: "failed", error: "This strategy's asset isn't one the lab can test.", finished_at: new Date().toISOString() }).eq("id", q.id); return null; }
   const today = ist(Date.now() / 1000).date;
   const { data: run, error } = await sb.from("lab_runs").insert({
@@ -1299,8 +1413,10 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
   let more = true;
   try {
     if (!ctx.creds.client || !ctx.creds.token) throw new Error("Add your Dhan client ID and access token under Dhan connection.");
-    const assets: string[] = (set.assets ?? []).filter((k: string) => LAB_ASSETS[k]);
+    const assets: string[] = tradableAssets((set.assets ?? []) as string[]);
     if (!assets.length) throw new Error("Pick at least one asset in the lab settings.");
+    // Candles are also kept for India VIX whenever a Dhan asset is in the run (a rule input, never a strategy).
+    const dataAssets = assets.some((k) => !LAB_ASSETS[k].crypto) ? [...assets, VIX_KEY] : assets;
     const win = { from: String(run.from_day), split: String(run.split_day), to: String(run.to_day) };
 
     if (run.trigger === "robust" && !(await labQuiet(sb))) {
@@ -1321,17 +1437,17 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
         const n = await refreshMargins(sb, ctx.creds, assets.map((k) => LAB_ASSETS[k]).filter((a) => !a.crypto));
         counts.margins_checked = n || -1; await patch({ counts });
       }
-      while (i < assets.length && Date.now() - ctx.started < WALL_BUDGET - 20000) {
-        await patch({ progress: `Updating candles: ${LAB_ASSETS[assets[i]].name} (${i + 1} of ${assets.length})` });
+      while (i < dataAssets.length && Date.now() - ctx.started < WALL_BUDGET - 20000) {
+        await patch({ progress: `Updating candles: ${assetDef(dataAssets[i])!.name} (${i + 1} of ${dataAssets.length})` });
         // One asset's candles not coming back (Dhan hiccups, mostly early in the morning) doesn't stop the run: it is
         // tried once more, then that asset carries on with the candles already saved and the run goes on.
         try {
-          await refreshAsset(sb, ctx.creds, assets[i], win.to, run.trigger === "continuous" || run.trigger === "retest" ? 6 : 0);
+          await refreshAsset(sb, ctx.creds, dataAssets[i], win.to, run.trigger === "continuous" || run.trigger === "retest" ? 6 : 0);
         } catch (e1) {
           await new Promise((r) => setTimeout(r, 3000));
-          try { await refreshAsset(sb, ctx.creds, assets[i], win.to, run.trigger === "continuous" || run.trigger === "retest" ? 6 : 0); }
+          try { await refreshAsset(sb, ctx.creds, dataAssets[i], win.to, run.trigger === "continuous" || run.trigger === "retest" ? 6 : 0); }
           catch (e2) {
-            const msg = `${LAB_ASSETS[assets[i]].name}: ${String(e2 instanceof Error ? e2.message : e2).slice(0, 160)}`;
+            const msg = `${assetDef(dataAssets[i])!.name}: ${String(e2 instanceof Error ? e2.message : e2).slice(0, 160)}`;
             counts.stale = [...(Array.isArray(counts.stale) ? counts.stale : []), msg].slice(-10);
             await patch({ counts });
             console.error("lab candles", msg);
@@ -1339,8 +1455,8 @@ export async function labStep(ctx: Ctx): Promise<boolean> {
         }
         i++;
       }
-      if (i >= assets.length) await refreshCryptoMargins(sb, assets.filter((k) => LAB_ASSETS[k]?.crypto));
-      await patch(i < assets.length ? { cursor: i } : { cursor: 0, phase: "generate", progress: "Writing tonight's strategies" });
+      if (i >= dataAssets.length) await refreshCryptoMargins(sb, assets.filter((k) => LAB_ASSETS[k]?.crypto));
+      await patch(i < dataAssets.length ? { cursor: i } : { cursor: 0, phase: "generate", progress: "Writing tonight's strategies" });
     } else if (run.phase === "generate") {
       const carried = await generatePhase(sb, run, assets, win);
       await patch({ phase: "screen", progress: carried ? `Backtesting strategies (${carried} carried over from stopped runs)` : "Backtesting strategies",
@@ -1435,14 +1551,11 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   // A re-test run writes nothing new: when the queue is empty it simply ends.
   if (run.trigger === "retest") return carried;
   const since = new Date(Date.now() - 14 * 86400000).toISOString();
-  const { data: recent } = await sb.from("lab_results").select("fingerprint").gte("created_at", since).limit(20000);
-  const seen = new Set((recent ?? []).map((x) => x.fingerprint));
-  // Strategies already tried and failed are never written again.
-  for (let from = 0; ; from += 1000) {
-    const { data: tried } = await sb.from("lab_tried").select("fingerprint").range(from, from + 999);
-    for (const x of tried ?? []) seen.add(x.fingerprint);
-    if (!tried || tried.length < 1000 || from > 400000) break;
-  }
+  // Every row (the database answers at most 1,000 a request): strategies tested in the last 14 days aren't written again.
+  const recent = await pagedRows((a, b) => sb.from("lab_results").select("id, fingerprint").gte("created_at", since).order("id").range(a, b));
+  const seen = new Set(recent.map((x) => x.fingerprint));
+  // Strategies already tried and failed are never written again: looked up by fingerprint for the candidates drawn below
+  // (triedOf), instead of reading the whole lab_tried table (hundreds of thousands of rows) every run.
   // Champions: the best strategies of the last 30 days are re-tested every night on the rolling year.
   const { data: champs } = await sb.from("lab_results").select("fingerprint, config, score").eq("passed", true)
     .gte("created_at", new Date(Date.now() - 30 * 86400000).toISOString()).order("score", { ascending: false }).limit(300);
@@ -1450,8 +1563,8 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   // Earlier winners are re-tested once a day on the latest candles, and only at night (23:30–08:30 IST); the rest of
   // every run goes to new strategies and variations. A focused run is new strategies only.
   const nm = ist(Date.now() / 1000).min, night = nm >= 23 * 60 + 30 || nm < 8 * 60 + 30;
-  const { data: fresh } = await sb.from("lab_results").select("fingerprint").gte("created_at", new Date(Date.now() - 20 * 3600000).toISOString()).limit(20000);
-  const champSeen = new Set<string>(), testedToday = new Set((fresh ?? []).map((x) => x.fingerprint));
+  const fresh = await pagedRows((a, b) => sb.from("lab_results").select("id, fingerprint").gte("created_at", new Date(Date.now() - 20 * 3600000).toISOString()).order("id").range(a, b));
+  const champSeen = new Set<string>(), testedToday = new Set(fresh.map((x) => x.fingerprint));
   for (const c of (night && !set.focus) ? champs ?? [] : []) {
     if (testedToday.has(c.fingerprint)) continue;
     if (champSeen.size >= 25 || champSeen.has(c.fingerprint) || !assets.includes(c.config?.underlying)) continue;
@@ -1464,11 +1577,11 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   // other stop / target / trailing-stop settings, other indicator combinations and setting tweaks. A strategy that keeps
   // passing night after night gets more of these tries, so the strongest ideas are tested hardest.
   const since30 = new Date(Date.now() - 30 * 86400000).toISOString();
-  const { data: parents } = await sb.from("lab_results").select("id, fingerprint, config, score").eq("passed", true)
-    .gte("created_at", since30).order("score", { ascending: false }).limit(2000);
-  const { data: passHist } = await sb.from("lab_results").select("fingerprint").eq("passed", true).gte("created_at", since30).limit(20000);
+  const parents = await pagedRows((a, b) => sb.from("lab_results").select("id, fingerprint, config, score").eq("passed", true)
+    .gte("created_at", since30).order("score", { ascending: false }).order("id").range(a, b), 3000);
+  const passHist = await pagedRows((a, b) => sb.from("lab_results").select("id, fingerprint").eq("passed", true).gte("created_at", since30).order("id").range(a, b));
   const passes = new Map<string, number>();
-  for (const x of passHist ?? []) passes.set(x.fingerprint, (passes.get(x.fingerprint) ?? 0) + 1);
+  for (const x of passHist) passes.set(x.fingerprint, (passes.get(x.fingerprint) ?? 0) + 1);
   // Parents from as many different ideas as possible: at most 2 per family (same asset, indicators and conditions),
   // so one strong idea can't take over every run with tiny variations of itself.
   const famOf = (c: LabConfig) => { const sig = (x?: { conds?: Cond[] }) => (x?.conds ?? []).map((q) => `${q.ind}:${q.op}`).sort().join("+") || "-";
@@ -1486,6 +1599,7 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   const weight = pool.map((p, i) => Math.sqrt(passes.get(p.fingerprint) ?? 1) * (1 + (pool.length - i) / pool.length));
   const wTot = weight.reduce((a, b) => a + b, 0) || 1;
   let nMade = 0;
+  const kidRows: Record<string, unknown>[] = [];
   pool.forEach((parent, i) => {
     const want = Math.max(1, Math.round((nVar * weight[i]) / wTot));
     if (nMade >= nVar) return;
@@ -1493,26 +1607,37 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
     const kids = explore(parent.config, { n: Math.min(want, nVar - nMade), kinds: EXPLORE_KINDS, assets, seed, capital, seen });
     for (const cfg of kids) {
       cfg.lab_note = `${cfg.lab_note} (from lab strategy #${parent.id}, passed ${passes.get(parent.fingerprint) ?? 1} night${(passes.get(parent.fingerprint) ?? 1) === 1 ? "" : "s"})`;
-      rows.push({ run_id: run.id, asset: cfg.underlying, mode: cfg.rules.daily ? "DAILY" : "INTRADAY", label: labelFor(cfg), fingerprint: fingerprint(cfg), champion: false, config: cfg, stage: "pending" });
+      kidRows.push({ run_id: run.id, asset: cfg.underlying, mode: cfg.rules.daily ? "DAILY" : "INTRADAY", label: labelFor(cfg), fingerprint: fingerprint(cfg), champion: false, config: cfg, stage: "pending" });
       nMade++;
     }
   });
+  // Variations already tried and failed are dropped (looked up by fingerprint).
+  const triedKids = await triedOf(sb, kidRows.map((r) => String(r.fingerprint)));
+  rows.push(...kidRows.filter((r) => !triedKids.has(String(r.fingerprint))));
   // New strategies, shared between assets: indices (option variants too) and coins get twice a commodity's or stock's share.
   const w = assets.map((k) => LAB_ASSETS[k].options || LAB_ASSETS[k].crypto ? 2 : 1), wsum = w.reduce((a, b) => a + b, 0);
   const nNew = Math.max(0, n - nMade);
-  assets.forEach((k, i) => {
-    const want = nNew ? Math.max(1, Math.round((nNew * w[i]) / wsum)) : 0;
-    let made = 0, tries = 0;
-    while (made < want && tries < want * 5) {
-      tries++; seed = (seed + 7919) >>> 0;
-      let cfg: LabConfig;
-      try { cfg = generate(k, seed, capital, Number(run.settings?.ha_strength_pct ?? 8)); } catch { continue; }
-      const fp = fingerprint(cfg);
-      if (seen.has(fp)) continue;
-      seen.add(fp); made++;
-      rows.push({ run_id: run.id, asset: k, mode: cfg.rules.daily ? "DAILY" : "INTRADAY", label: labelFor(cfg), fingerprint: fp, champion: false, config: cfg, stage: "pending" });
+  for (let i = 0; i < assets.length; i++) {
+    const k = assets[i], want = nNew ? Math.max(1, Math.round((nNew * w[i]) / wsum)) : 0;
+    let made = 0;
+    // Draw in rounds: the drawn fingerprints are checked against lab_tried in one request per 200, the tried ones dropped,
+    // and the round repeated (at most 4 times) until the asset's share is filled.
+    for (let round = 0; round < 4 && made < want; round++) {
+      const batch: Record<string, unknown>[] = [];
+      for (let tries = 0; batch.length < want - made && tries < (want - made) * 5; tries++) {
+        seed = (seed + 7919) >>> 0;
+        let cfg: LabConfig;
+        try { cfg = generate(k, seed, capital, Number(run.settings?.ha_strength_pct ?? 8)); } catch { continue; }
+        const fp = fingerprint(cfg);
+        if (seen.has(fp)) continue;
+        seen.add(fp);
+        batch.push({ run_id: run.id, asset: k, mode: cfg.rules.daily ? "DAILY" : "INTRADAY", label: labelFor(cfg), fingerprint: fp, champion: false, config: cfg, stage: "pending" });
+      }
+      if (!batch.length) break;
+      const tried = await triedOf(sb, batch.map((r) => String(r.fingerprint)));
+      for (const r of batch) if (!tried.has(String(r.fingerprint))) { rows.push(r); made++; }
     }
-  });
+  }
   for (let i = 0; i < rows.length; i += 200) {
     const { error } = await sb.from("lab_results").insert(rows.slice(i, i + 200));
     if (error) throw new Error(error.message);
@@ -1563,12 +1688,22 @@ type Forgettable = { id: number; fingerprint: string; asset: string; label?: str
 const keepable = (r: { starred?: boolean; promoted_id?: unknown; request_id?: unknown; refresh?: boolean }) => !r.starred && !r.promoted_id && !r.request_id && !r.refresh;
 /** Strategies (fingerprints) that someone has on their desk: their re-test results are always kept, pass or fail. */
 async function deskFingerprints(sb: SupabaseClient): Promise<Set<string>> {
-  const { data: st } = await sb.from("algo_strategies").select("lab_id").not("lab_id", "is", null).eq("is_master", false).limit(5000);
-  const ids = [...new Set((st ?? []).map((x) => Number(x.lab_id)))];
+  const st = await pagedRows((a, b) => sb.from("algo_strategies").select("id, lab_id").not("lab_id", "is", null).eq("is_master", false).order("id").range(a, b));
+  const ids = [...new Set(st.map((x) => Number(x.lab_id)))];
   const out = new Set<string>();
   for (let i = 0; i < ids.length; i += 300) {
     const { data } = await sb.from("lab_results").select("fingerprint").in("id", ids.slice(i, i + 300));
     for (const x of data ?? []) if (x.fingerprint) out.add(x.fingerprint);
+  }
+  return out;
+}
+/** Which of these fingerprints lab_tried already holds (strategies tried and failed), looked up 200 at a time. */
+export async function triedOf(sb: SupabaseClient, fps: string[]): Promise<Set<string>> {
+  const out = new Set<string>(), list = [...new Set(fps)];
+  for (let i = 0; i < list.length; i += 200) {
+    const { data, error } = await sb.from("lab_tried").select("fingerprint").in("fingerprint", list.slice(i, i + 200));
+    if (error) throw new Error(error.message);
+    for (const x of data ?? []) out.add(String(x.fingerprint));
   }
   return out;
 }
@@ -1632,7 +1767,7 @@ export function robustChecks(cfg: LabConfig, haveD: Set<string>, haveI5: Set<str
   // Other assets: the same family first (indices for an index strategy, commodities for a commodity one, coins for a
   // coin), up to 6.
   const roots = new Set([assetRoot(cfg.underlying)]);
-  const pool = Object.keys(LAB_ASSETS).filter((k) => { const r = assetRoot(k); if (roots.has(r) || !haveD.has(k) || !(daily || haveI5.has(k))) return false; roots.add(r); return true; })
+  const pool = tradableAssets(Object.keys(LAB_ASSETS)).filter((k) => { const r = assetRoot(k); if (roots.has(r) || !haveD.has(k) || !(daily || haveI5.has(k))) return false; roots.add(r); return true; })
     .sort((a, b) => Number(clsOf(LAB_ASSETS[a]) !== clsOf(me)) - Number(clsOf(LAB_ASSETS[b]) !== clsOf(me)));
   for (const k of pool) {
     if (out.filter((c) => c.kind === "asset").length >= 6) break;
@@ -1813,7 +1948,7 @@ export function robustVerdict(cfg: LabConfig, checks: { kind: string; asset: str
   }
   const quality = qualityScore(yrs, allTrades, { okA, nA: assets.length, okT, nT: tfs.length },
     { stepsOk: stepList.filter((x) => x.ok).length, stepsN: stepList.length, twoWay: cfg.direction === "BOTH", capital: 500000 });
-  const consistency = consistencyScore(yrs, allTrades, quarters);
+  const consistency = consistencyScore(yrs, allTrades, quarters, plateau);
   return { passed: why.length === 0, why, consistency, strict, self, bh, vs_bh: vsBh, risk_vs_bh: riskVsBh, assets: { ok: okA, n: assets.length, list: assets },
     tfs: { ok: okT, n: tfs.length, list: tfs }, years: { ok: okY, n: yrs.length, list: yrs }, vault, luck, plateau, top_cut: topCut, noise, random: rnd, needs_stage2: needsStage2, rev: strict ? 4 : 5, ...(quarters ? { quarters: { ok: quarters.filter((x) => x.ok).length, n: quarters.length, list: quarters } } : {}), steps: { ok: stepList.filter((x) => x.ok).length, n: stepList.length, list: stepList }, quality, daily, checked_at: new Date().toISOString() };
 }
@@ -1958,15 +2093,22 @@ export function qualityScore(
  *                  half: how even the yearly profits are (1 ÷ (1 + spread ÷ average))
  *  return ÷ drawdown 15 – yearly net ÷ worst drawdown (1.5 or more = full)
  *  worst year 15 – full if no year lost; losing a whole average year's profit = 0
+ * Parameter plateau (6 Nov 2026, audit; only when at least 3 nearby-setting results exist — the strict checks or a
+ * variation run): a soft 0–10 component, half the share of nearby settings that made money, half the typical
+ * neighbour's net ÷ the strategy's own (a result that lives on one exact setting scores low). The other weights then
+ * scale to 90 (years 22.5, quarters 22.5, smoothness 18, return ÷ drawdown 13.5, worst year 13.5), so scores stay 0–100
+ * and comparable with strategies that have no plateau figures.
  */
 export function consistencyScore(
   yrs: { y: number; net: number; ok: boolean }[],
   trades: { exit: string; net: number }[],
   quarters: { ok: boolean }[] | null = null,
+  plateau: { ok: number; n: number; median: number | null; self: number | null } | null = null,
 ) {
   const n = yrs.length;
   if (n < 1 || !trades.length) return null;
   const clamp = (x: number) => Math.max(0, Math.min(1, x));
+  const usePl = !!plateau && plateau.n >= 3, W = usePl ? 0.9 : 1;
   const yearShare = quarters && n < 3 ? quarters.filter((q) => q.ok).length / quarters.length : yrs.filter((y) => y.ok).length / n;
   const qs = new Map<string, number>(), ms = new Map<string, number>();
   let eq = 0, peak = 0, dd = 0;
@@ -1998,11 +2140,17 @@ export function consistencyScore(
   const cv = mean > 0 ? Math.sqrt(nets.reduce((a, x) => a + (x - mean) ** 2, 0) / n) / mean : 9;
   const smooth = slope > 0 ? 0.5 * r2 + 0.5 / (1 + cv) : 0;
   const worstPart = worst >= 0 ? 1 : mean > 0 ? clamp(1 + worst / mean) : 0;
-  const pts = (w: number, x: number) => +(w * clamp(x)).toFixed(1);
-  const parts = { years: pts(25, yearShare), quarters: pts(25, qShare), smooth: pts(20, smooth), return_dd: pts(15, rdd / 1.5), worst_year: pts(15, worstPart) };
+  const pts = (w: number, x: number) => +(w * W * clamp(x)).toFixed(1);
+  const parts: Record<string, number> = { years: pts(25, yearShare), quarters: pts(25, qShare), smooth: pts(20, smooth), return_dd: pts(15, rdd / 1.5), worst_year: pts(15, worstPart) };
+  if (usePl) {
+    const okShare = plateau!.ok / plateau!.n;
+    const typical = plateau!.self != null && plateau!.self > 0 && plateau!.median != null ? clamp(plateau!.median / plateau!.self) : 0;
+    parts.plateau = +(10 * (0.5 * okShare + 0.5 * typical)).toFixed(1);
+  }
   const score = +Object.values(parts).reduce((a, b) => a + b, 0).toFixed(1);
   return { score, parts, years_share: +(yearShare * 100).toFixed(0), quarters_ok: qVals.filter((x) => x > 0).length, quarters_n: qVals.length,
-    r2: +r2.toFixed(2), cv: +cv.toFixed(2), return_dd: +rdd.toFixed(2), worst_year: Math.trunc(worst), avg_year: Math.trunc(mean), per_year: Math.trunc(perYear), max_dd: Math.trunc(dd) };
+    r2: +r2.toFixed(2), cv: +cv.toFixed(2), return_dd: +rdd.toFixed(2), worst_year: Math.trunc(worst), avg_year: Math.trunc(mean), per_year: Math.trunc(perYear), max_dd: Math.trunc(dd),
+    ...(usePl ? { plateau: { ok: plateau!.ok, n: plateau!.n, median: plateau!.median, self: plateau!.self } } : {}) };
 }
 async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: string; to: string }, patch: (f: Record<string, unknown>) => unknown): Promise<boolean> {
   const { sb } = ctx;
@@ -2182,9 +2330,9 @@ async function robustPhase(ctx: Ctx, run: Run, win: { from: string; split: strin
  * results of every fresh try: how often the best of one half of the months lands in the bottom half of the other.
  */
 async function overfitGauge(sb: SupabaseClient, runId: number) {
-  const { data } = await sb.from("lab_months").select("asset, mode, nets").eq("run_id", runId).limit(5000);
+  const data = await pagedRows((a, b) => sb.from("lab_months").select("id, asset, mode, nets").eq("run_id", runId).order("id").range(a, b));
   const groups = new Map<string, number[][]>();
-  for (const r of data ?? []) { const k = `${r.asset}|${r.mode}`; const g = groups.get(k) ?? []; g.push((r.nets ?? []).map(Number)); groups.set(k, g); }
+  for (const r of data) { const k = `${r.asset}|${r.mode}`; const g = groups.get(k) ?? []; g.push((r.nets ?? []).map(Number)); groups.set(k, g); }
   const rows: Record<string, unknown>[] = [];
   for (const [k, g] of groups) {
     const len = Math.min(...g.map((x) => x.length));
@@ -2402,11 +2550,9 @@ export async function adoptLeftovers(sb: SupabaseClient, run: Run, assets: strin
   // A focused run keeps to its own assets; any other run takes leftovers of every asset the lab knows (their candles are
   // already stored), so a strategy never waits because its asset was later unticked.
   const focused = run.settings?.focus === true, want = new Set(assets);
-  const { data: rows, error } = await sb.from("lab_results").select("id, run_id, asset, stage").eq("stage", "pending")
-    .neq("run_id", run.id).order("id").limit(5000);
-  // A failed look-up must not quietly skip the leftovers: fail this instalment so it is retried.
-  if (error) throw new Error(`Couldn't look up unfinished strategies: ${error.message}`);
-  if (!rows?.length) return 0;
+  // A failed look-up must not quietly skip the leftovers: pagedRows throws, so this instalment fails and is retried.
+  const rows = await pagedRows((a, b) => sb.from("lab_results").select("id, run_id, asset, stage").eq("stage", "pending").neq("run_id", run.id).order("id").range(a, b), 20000);
+  if (!rows.length) return 0;
   const runIds = [...new Set(rows.map((r) => r.run_id))];
   const { data: live, error: e2 } = await sb.from("lab_runs").select("id").in("id", runIds).eq("status", "running");
   if (e2) throw new Error(`Couldn't look up unfinished strategies: ${e2.message}`);
@@ -2504,6 +2650,116 @@ export async function labReverdict(sb: SupabaseClient, limit = 50): Promise<{ do
   }
   const { count } = await sb.from("lab_results").select("id", { count: "exact", head: true }).eq("basic_passed", true).eq("robust_status", "done").is("superseded_by", null).or("robust->>rev.is.null,robust->>rev.neq.5");
   return { done, passed, flipped, left: count ?? 0 };
+}
+
+/* ---------- walk-forward: the stitched out-of-sample curve of "trading the lab's picks" (6 Nov 2026, audit) ---------- */
+/**
+ * Every calendar quarter, the pool of an asset and mode is re-ranked by the consistency score on the trades BEFORE that
+ * quarter, the top k are picked, and only the NEXT quarter's result is recorded (equal weight, 1 lot each, the mean of
+ * the k). Stitched together, the quarters give the honest estimate of what "trading the lab's picks" would have earned,
+ * against the pool's average quarter (does the ranking pick better than the pool?). Honest caveat: the pool is every
+ * strategy the lab has fully tested and kept (passed at some time, or on a desk / starred) — survivors — so the level of
+ * the curve is optimistic; the comparison with the pool average is the meaningful part.
+ * Instalment-safe: one (asset, mode) group per call, the quarter cursor saved in lab_walkforward between calls; a group
+ * is recomputed when its row is older than maxAgeDays. The lead wires the router action and a cron (daily at night).
+ */
+export const WF_K = 3, WF_POOL = 120, WF_MIN_TRADES = 20;
+type WfQuarter = { q: string; from: string; to: string; picked: number[]; net: number; pool_avg: number; n_pool: number };
+const quarterOf = (day: string) => `${day.slice(0, 4)}Q${Math.floor((Number(day.slice(5, 7)) - 1) / 3) + 1}`;
+const quarterStart = (q: string) => `${q.slice(0, 4)}-${String((Number(q.slice(5)) - 1) * 3 + 1).padStart(2, "0")}-01`;
+const nextQuarter = (q: string) => { const y = Number(q.slice(0, 4)), n = Number(q.slice(5)); return n === 4 ? `${y + 1}Q1` : `${y}Q${n + 1}`; };
+/** Yearly nets of the trades before `from` (year 1 = the 12 months ending at `from`), as far back as the trades go. */
+export function yearsBefore(trades: { exit: string; net: number }[], from: string): { y: number; net: number; ok: boolean }[] {
+  const first = trades[0]?.exit.slice(0, 10); if (!first) return [];
+  const out: { y: number; net: number; ok: boolean }[] = [];
+  for (let y = 1; y <= 10; y++) {
+    const hi = addDays(from, -365 * (y - 1)), lo = addDays(hi, -365);
+    if (lo < addDays(first, -60)) break;
+    const net = trades.reduce((a, t) => { const d = t.exit.slice(0, 10); return d >= lo && d < hi ? a + (Number(t.net) || 0) : a; }, 0);
+    out.push({ y, net: Math.trunc(net), ok: net > 0 });
+  }
+  return out;
+}
+/** The quarters of one group: ranked on the trades before each quarter, the next quarter recorded. Pure, for tests. */
+export function walkForward(pool: { id: number; trades: { exit: string; net: number }[] }[], k: number, fromCursor = 0, deadline = () => false): { quarters: WfQuarter[]; cursor: number; finished: boolean; list: string[] } {
+  const firsts = pool.map((p) => p.trades[0]?.exit.slice(0, 10)).filter((x): x is string => !!x).sort();
+  const lasts = pool.map((p) => p.trades.at(-1)?.exit.slice(0, 10)).filter((x): x is string => !!x).sort();
+  if (!firsts.length) return { quarters: [], cursor: 0, finished: true, list: [] };
+  // Quarters from two years after the earliest trade (8 quarters of history to rank on) to the last quarter the data covers in full.
+  const list: string[] = [];
+  const lastQ = quarterOf(lasts[lasts.length - 1]);
+  for (let q = nextQuarter(quarterOf(addDays(firsts[0], 730))); q < lastQ; q = nextQuarter(q)) list.push(q);
+  const quarters: WfQuarter[] = [];
+  let i = fromCursor;
+  for (; i < list.length; i++) {
+    if (deadline()) return { quarters, cursor: i, finished: false, list };
+    const q = list[i], from = quarterStart(q), to = quarterStart(nextQuarter(q));
+    const scored: { id: number; score: number; qNet: number }[] = [];
+    for (const p of pool) {
+      const before = p.trades.filter((t) => t.exit.slice(0, 10) < from);
+      if (before.length < WF_MIN_TRADES || before[0].exit.slice(0, 10) > addDays(from, -730)) continue;
+      const yrs = yearsBefore(before, from);
+      const c = consistencyScore(yrs, before);
+      if (!c) continue;
+      const qNet = p.trades.reduce((a, t) => { const d = t.exit.slice(0, 10); return d >= from && d < to ? a + (Number(t.net) || 0) : a; }, 0);
+      scored.push({ id: p.id, score: c.score, qNet });
+    }
+    if (scored.length < k + 1) continue;
+    scored.sort((a, b) => b.score - a.score || a.id - b.id);
+    const picked = scored.slice(0, k);
+    quarters.push({ q, from, to, picked: picked.map((x) => x.id), net: Math.trunc(picked.reduce((a, x) => a + x.qNet, 0) / k),
+      pool_avg: Math.trunc(scored.reduce((a, x) => a + x.qNet, 0) / scored.length), n_pool: scored.length });
+  }
+  return { quarters, cursor: i, finished: true, list };
+}
+export function wfSummary(quarters: WfQuarter[]) {
+  let eq = 0, peak = 0, dd = 0; const curve: number[] = [];
+  for (const q of quarters) { eq += q.net; peak = Math.max(peak, eq); dd = Math.max(dd, peak - eq); curve.push(eq); }
+  const poolNet = quarters.reduce((a, q) => a + q.pool_avg, 0);
+  return { quarters: quarters.length, stitched_net: Math.trunc(eq), pool_net: Math.trunc(poolNet), max_dd: Math.trunc(dd),
+    beat_pool: quarters.filter((q) => q.net > q.pool_avg).length, positive: quarters.filter((q) => q.net > 0).length, curve,
+    from: quarters[0]?.from ?? null, to: quarters.at(-1)?.to ?? null };
+}
+export async function labWalkForward(sb: SupabaseClient, opts: { budgetMs?: number; maxAgeDays?: number; k?: number } = {}): Promise<Record<string, unknown>> {
+  const k = opts.k ?? WF_K, budget = opts.budgetMs ?? CPU_BUDGET, maxAge = (opts.maxAgeDays ?? 7) * 86400000;
+  const t0 = performance.now();
+  // 1. The groups: every fully tested strategy that kept its trades (small columns only).
+  const light = await pagedRows((a, b) => sb.from("lab_results").select("id, asset, mode, cons:robust->consistency->score").eq("robust_status", "done").is("superseded_by", null)
+    .not("trades_long", "is", null).order("id").range(a, b), 30000);
+  const groups = new Map<string, { id: number; cons: number }[]>();
+  for (const r of light as any[]) { const key = `${r.asset}|${r.mode ?? "INTRADAY"}`; if (!groups.has(key)) groups.set(key, []); groups.get(key)!.push({ id: Number(r.id), cons: Number(r.cons ?? 0) }); }
+  const { data: rows } = await sb.from("lab_walkforward").select("*").eq("k", k);
+  const state = new Map((rows ?? []).map((g: any) => [`${g.asset}|${g.mode}`, g]));
+  // 2. One piece of work: a group half done first, then one never computed, then the stalest beyond maxAge.
+  let pick: { key: string; row: any } | null = null, rank = 9, at = "";
+  for (const [key, ids] of groups) {
+    if (ids.length < k + 1) continue;
+    const row = state.get(key);
+    const r = row?.state === "working" ? 0 : !row ? 1 : Date.now() - Date.parse(row.computed_at ?? 0) > maxAge ? 2 : 9;
+    const when = String(row?.computed_at ?? "");
+    if (r < rank || (r === rank && r === 2 && when < at)) { pick = { key, row }; rank = r; at = when; }
+  }
+  if (!pick) return { idle: true, groups: groups.size };
+  const [asset, mode] = pick.key.split("|");
+  // 3. The pool: the best WF_POOL by today's consistency (so a huge group stays inside the budget), trades 20 at a time.
+  const ids = groups.get(pick.key)!.sort((a, b) => b.cons - a.cons || a.id - b.id).slice(0, WF_POOL).map((x) => x.id).sort((a, b) => a - b);
+  const pool: { id: number; trades: { exit: string; net: number }[] }[] = [];
+  for (let i = 0; i < ids.length; i += 20) {
+    const { data, error } = await sb.from("lab_results").select("id, trades_long").in("id", ids.slice(i, i + 20));
+    if (error) throw new Error(error.message);
+    for (const r of (data ?? []) as any[]) { const tr = unpackTrades(r.trades_long).sort((a, b) => a.exit.localeCompare(b.exit)); if (tr.length >= WF_MIN_TRADES) pool.push({ id: Number(r.id), trades: tr }); }
+  }
+  const fresh = !pick.row || pick.row.state !== "working";
+  const prev: WfQuarter[] = fresh ? [] : (pick.row.quarters ?? []), cursor = fresh ? 0 : Number(pick.row.cursor ?? 0);
+  const loop0 = performance.now();
+  const res = walkForward(pool, k, cursor, () => performance.now() - loop0 > budget);
+  const quarters = [...prev, ...res.quarters];
+  const now = new Date().toISOString();
+  const row = { asset, mode, k, state: res.finished ? "done" : "working", cursor: res.finished ? 0 : res.cursor, pool: pool.length, quarters,
+    summary: res.finished ? wfSummary(quarters) : null, computed_at: res.finished ? now : (pick.row?.computed_at ?? null), updated_at: now };
+  const { error } = await sb.from("lab_walkforward").upsert(row, { onConflict: "asset,mode,k" });
+  if (error) throw new Error(error.message);
+  return { asset, mode, k, pool: pool.length, quarters: quarters.length, finished: res.finished, cursor: res.cursor, ms: Math.round(performance.now() - t0) };
 }
 
 /**

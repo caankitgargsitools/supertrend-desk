@@ -540,6 +540,11 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   and desk entries made while the backtest still held the hand-closed trade are notes too; "Note:" issues don't count
   toward the verdict. Test: `tests/sim/audit.test.mjs`. Real divergences remaining today are small ("Desk did worse"
   by 0.3–1% on exits).
+- **Trade story and slippage (migration 85)**: `trade_story(p_trade)` — one closed trade's entry and exit signals (what
+  fired, when, the decision delay), the broker orders of each leg, fill prices beside the desk's own (slippage in points
+  and rupees; positive = worse for the trader); `slippage_summary(p_user)` — per strategy, live fills' slippage against
+  the signal prices (legs, average, worst, rupee total). Both for the owner or an admin; the website shows them as the
+  Trades tab's "Story ▸" and a Slippage card (closes the open item "slippage column + per-strategy slippage summary").
 - **Still from the audit, done elsewhere this day**: see the website and strategy entries added below as they land.
 - **Open questions put to Papa 6 Nov 2026 (no answer within a minute → pending, ask again)**: (1) switch the four lab
   jobs (3, 10, 26, 29) back on now that the dispatcher is in and the tick closes stuck runs; (2) revoke the blanket ALL
@@ -548,7 +553,11 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   superseded lab results' trade payloads to storage files (~250 MB), 7 dead tables (`strategies`, `signals`,
   `settings`, `strategy_chart`, `lab_robust_bak_1013`, `owner_invite`, `portal_settings`), 15 dead functions, merging
   the 13 duplicate permissive policy pairs; (5) a mandatory luck test before anything goes live; (6) a hold-to-flatten
-  kill switch on the home screen. Also still open: Lab run 966 was stuck "running" since 07:53 IST — the engine watchdog
+  kill switch on the home screen; (7) **signal lag** (22–32 s on Dhan assets in market hours, 3–7 s on crypto at night):
+  every distinct asset / timeframe is one Dhan candle request paced 210 ms apart on the one shared token, and the
+  per-second quote loop shares that token — the two ways out are Dhan's WebSocket feed (Papa: not now) or building the
+  minute candles from the desk's own per-second prices (`price_bars`, as `owncandles.ts` does when Dhan refuses) at the
+  cost of candles that differ slightly from Dhan's; Papa to choose. Also still open: Lab run 966 was stuck "running" since 07:53 IST — the engine watchdog
   closes it an hour after its lease; the lab jobs stay off until Papa says.
 
 ## Incident 23 Oct 2026 (state to restore)

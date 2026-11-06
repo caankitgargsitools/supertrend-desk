@@ -4,7 +4,8 @@ export const IST_OFFSET = 19800; // seconds (+05:30)
 export const OPEN_MIN = 555; // 09:15
 export const CLOSE_MIN = 930; // 15:30
 
-export type Raw = { t: number; o: number; h: number; l: number; c: number; v?: number };
+/** A candle. v: volume (0 where the source has none, e.g. an index); oi: open interest at the candle's end (futures only). */
+export type Raw = { t: number; o: number; h: number; l: number; c: number; v?: number; oi?: number };
 export type Bar = Raw & { day: string; startMin: number; endMin: number; endT: number; lastBaseStart: number };
 
 export function ist(epochSec: number) {
@@ -98,11 +99,13 @@ export function aggregate(raw: Raw[], tf: number, seg = "IDX_I"): Bar[] {
       const endMin = Math.min(sess.close, startMin + tf);
       const t = b.t - (p.min - startMin) * 60;
       cur = { t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v ?? 0, day: p.date, startMin, endMin, endT: t + (endMin - startMin) * 60, lastBaseStart: b.t };
+      if (b.oi != null) cur.oi = b.oi;
     } else if (cur) {
       cur.h = Math.max(cur.h, b.h);
       cur.l = Math.min(cur.l, b.l);
       cur.c = b.c;
       cur.v = (cur.v ?? 0) + (b.v ?? 0);
+      if (b.oi != null) cur.oi = b.oi; // open interest is a level, not a flow: the candle's OI is its last base candle's
       cur.lastBaseStart = b.t;
     }
   }
@@ -171,6 +174,34 @@ export function nextMonthlyExpiry(todayIst: { y: number; m: number; d: number },
   return todayIst.m === 12 ? lastOf(todayIst.y + 1, 1) : lastOf(todayIst.y, todayIst.m + 1);
 }
 
+/* Market events (table market_events: day, name — RBI / Fed / budget days and the like), loaded by the engine with a
+   one-day memo (lab.ts loadMarketEvents) for the calendar rule "event_day". Empty = no events known. */
+const MARKET_EVENTS = new Set<string>();
+export function setMarketEvents(days: string[]) { MARKET_EVENTS.clear(); for (const d of days) MARKET_EVENTS.add(String(d).slice(0, 10)); }
+export const marketEvents = () => MARKET_EVENTS;
+
+/**
+ * The next expiry on or after a date under the backtester's own expiry rule (weekly on `weekday`, with Nifty's
+ * Thursday → Tuesday change, or the last `weekday` of the month). Holidays moving an expiry a day earlier are not known.
+ */
+export function nextExpiryFrom(day: string, underlying: string, weekday: number, monthly: boolean): string {
+  const [y, m, d] = day.split("-").map(Number);
+  const wd = weekdayOf(day);
+  if (monthly) return nextMonthlyExpiry({ y, m, d }, weekday, false);
+  return nextExpiry({ y, m, d, wd }, weeklyExpiryWeekday(underlying, day, weekday), false);
+}
+/** Trading days (Mon–Fri, minus the exchange holidays the engine knows) strictly after `day` up to the end of its month. */
+export function tradingDaysLeftInMonth(day: string, seg: string): number {
+  let n = 0;
+  for (let d = addDays(day, 1); d.slice(0, 7) === day.slice(0, 7); d = addDays(d, 1)) {
+    const wd = weekdayOf(d);
+    if (wd === 0 || wd === 6) continue;
+    if (!isCrypto(seg) && tradingSession(seg, d).open >= 1440) continue;
+    n++;
+  }
+  return n;
+}
+
 /** Is this date a monthly expiry day (the last such weekday of its month)? */
 export function isLastWeekdayOfMonth(date: string, weekday: number): boolean {
   const [y, m, d] = date.split("-").map(Number);
@@ -194,7 +225,7 @@ export function strikeFor(close: number, step: number, offset: number, optType: 
   return optType === "CE" ? atm + offset * step : atm - offset * step;
 }
 
-export type DayBar = { t: number; o: number; h: number; l: number; c: number; v?: number; day: string };
+export type DayBar = { t: number; o: number; h: number; l: number; c: number; v?: number; oi?: number; day: string };
 
 /** Calendar arithmetic on YYYY-MM-DD strings. */
 export function addDays(date: string, n: number): string {

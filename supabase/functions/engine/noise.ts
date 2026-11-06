@@ -35,7 +35,7 @@ export function shuffledData(data: SimData, daily: boolean, seed: number): SimDa
     shuffle(shapes, rnd);
     const out: DayBar[] = [d[0]];
     for (let i = 1; i < d.length; i++) out.push({ ...d[i], ...fromShape(out[i - 1].c, shapes[i - 1]), v: d[i].v });
-    return { raw: [], byDay: new Map(), daily: out, btc: data.btc, funding: data.funding };
+    return { ...data, raw: [], byDay: new Map(), daily: out };
   }
   const raw = data.raw;
   if (raw.length < 2) return data;
@@ -52,7 +52,8 @@ export function shuffledData(data: SimData, daily: boolean, seed: number): SimDa
   const first = out[0].day, built = new Map<string, DayBar>();
   for (const [day, bs] of byDay) built.set(day, { t: Date.parse(`${day}T00:00:00+05:30`) / 1000, o: bs[0].o, h: Math.max(...bs.map((b) => b.h)), l: Math.min(...bs.map((b) => b.l)), c: bs[bs.length - 1].c, v: 0, day });
   const dailyOut = data.daily.filter((x) => x.day < first).concat([...built.values()].sort((a, b) => a.t - b.t));
-  return { raw: out, byDay, daily: dailyOut, btc: data.btc, funding: data.funding };
+  // The extra series (Bitcoin, funding, VIX, events) stay real: only this asset's candles are shuffled.
+  return { ...data, raw: out, byDay, daily: dailyOut };
 }
 
 /** Share of the runs (with the real one counted in) that did at least as well as the real result: the p-value. */

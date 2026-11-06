@@ -91,17 +91,19 @@ await p.evaluate(() => { const t0 = lab.rows[0]; lab.rows = [7001, 7002, 7003, 7
 const phone = width < 761, LROW = (i) => phone ? `#lab_cards .lcd:nth-child(${i}) .cmpBtn` : `#lab_body tr:nth-child(${i}) .cmpBtn`;
 for (const i of [1, 2, 3]) await p.click(LROW(i));
 const t1 = await p.evaluate(() => ({ n: cmpList.length, tray: !document.getElementById("cmpTray").hidden, chips: document.querySelectorAll("#cmpTray .cmpchip").length, on: document.querySelectorAll("#lab_body .cmpBtn.on, #lab_cards .cmpBtn.on").length, detail: !document.getElementById("lab_detail").hidden, badge: document.getElementById("nav_cmp_n").textContent }));
-if (t1.n !== 3 || !t1.tray || t1.chips !== 3 || t1.on !== 3 || t1.detail || t1.badge !== "3") fail("lab add", t1);
+// Phones carry the count on the Compare tab of the bottom bar instead of a tray (H1, 6 Nov 2026).
+if (t1.n !== 3 || (phone ? t1.tray : !t1.tray || t1.chips !== 3) || t1.on !== 3 || t1.detail || t1.badge !== "3") fail("lab add", t1);
 await p.evaluate(() => showPage("list")); await p.waitForTimeout(500);
 if (!phone) { await p.evaluate(() => { lpView = "full"; renderList(); }); }
-await p.click(phone ? "#lp_cards .lpc:nth-child(1) .cmpBtn" : "#lp_body tr:nth-child(1) .cmpBtn");
+await p.click(phone ? "#lp_cards .lpc .cmpBtn" : "#lp_body tr.pick .cmpBtn"); // the first strategy (group headers sit above the rows since 6 Nov 2026)
 await p.evaluate(() => showPage("lab")); await p.waitForTimeout(900);
 await p.evaluate(() => { const t0 = lab.rows[0]; lab.rows = [7004].map((id) => ({ ...t0, id, label: "Lab strategy " + id, fingerprint: "f" + id, family: "fm" + id, twin_of: null })); lab.per = 0; renderLabTable(); });
 await p.click(LROW(1));
 const t2 = await p.evaluate(() => ({ n: cmpList.length, toast: document.getElementById("toast").textContent, slots: cmpList.map((x) => x.c).join("") }));
 if (t2.n !== 4 || !/up to 4/.test(t2.toast) || t2.slots !== "1234") fail("max 4", t2);
-// Remove the 2nd from the tray: the others keep their colours.
-await p.locator("#cmpTray .cmpchip").nth(1).locator(".x").click();
+// Remove the 2nd (from the tray; on a phone from the Compare page's cards): the others keep their colours.
+if (phone) { await p.evaluate(() => showPage("cmp")); await p.waitForTimeout(900); await p.locator("#cmp_cards .cmpcard").nth(1).locator(".x").click(); }
+else await p.locator("#cmpTray .cmpchip").nth(1).locator(".x").click();
 const slots = await p.evaluate(() => cmpList.map((x) => x.c).join(""));
 if (slots !== "134") fail("colour follows the strategy", slots);
 await p.click(LROW(1));

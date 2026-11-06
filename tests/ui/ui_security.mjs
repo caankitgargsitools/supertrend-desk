@@ -79,9 +79,11 @@ const dir = "./";
 const fail = (m, x) => { console.log("FAIL", m, JSON.stringify(x ?? "")); process.exit(1); };
 await p.waitForTimeout(800);
 await p.waitForTimeout(800);
+// The option type of the open position is put on the strategy page as text (it used to be a chip in the hidden rail).
+await p.evaluate(() => openStrat("s1")); await p.waitForTimeout(800);
 const r = await p.evaluate(() => ({ pwn: window.__pwn ?? null, imgs: document.querySelectorAll('img[src="x"]').length,
-  esc: esc(`<a href='x'>"&`), chip: [...document.querySelectorAll(".chip")].map((c) => c.textContent).find((t) => /Holding/.test(t)) || "" }));
+  esc: esc(`<a href='x'>"&`), pos: (document.getElementById("st_pos") || {}).textContent || "" }));
 console.log(JSON.stringify(r));
-const ok = r.pwn === null && r.imgs === 0 && r.esc === "&lt;a href=&#39;x&#39;&gt;&quot;&amp;" && /<img/.test(r.chip);
+const ok = r.pwn === null && r.imgs === 0 && r.esc === "&lt;a href=&#39;x&#39;&gt;&quot;&amp;" && /<img/.test(r.pos);
 console.log(ok && !errs.length ? "OK" : "FAIL", errs);
 await b.close(); process.exit(ok && !errs.length ? 0 : 1);

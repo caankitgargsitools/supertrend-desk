@@ -14,6 +14,16 @@ const refused = (e: unknown) => /HTTP 400\b|DH-905/.test(e instanceof Error ? e.
 /** Dhan was temporarily unavailable (timeouts, 5xx, rate limits) — worth retrying later, unlike a bad token. */
 export class DhanBusyError extends Error {}
 
+/**
+ * The open-interest column of a chart answer (6 Nov 2026: `oi: true` on both chart calls), only when Dhan sent one with
+ * a non-zero value somewhere: indices and shares have no open interest, and their all-zero column is left out so the
+ * stored candle files don't grow for nothing.
+ */
+const oiCol = (j: any): number[] | null => {
+  const a = j?.open_interest;
+  return Array.isArray(a) && a.some((x: unknown) => Number(x) > 0) ? (a as number[]) : null;
+};
+
 /** Per-tick sharing of market-data answers: strategies on the same asset reuse one request (set by the tick loop). */
 type Memo = Map<string, Promise<any>>;
 /** Pacing per access token, shared by every Dhan object (strategies run side by side within one tick). */
@@ -121,7 +131,7 @@ export class Dhan {
     let j: any;
     try {
       j = await this.post("/charts/intraday", {
-        securityId: String(sec), exchangeSegment: seg, instrument: instr, interval: String(interval), oi: false, fromDate, toDate,
+        securityId: String(sec), exchangeSegment: seg, instrument: instr, interval: String(interval), oi: true, fromDate, toDate,
       });
     } catch (e) {
       const own = this.useOwn && Dhan.own && refused(e) ? await Dhan.own.intraday(String(sec), seg, interval, fromDate, toDate).catch(() => null) : null;
@@ -130,7 +140,8 @@ export class Dhan {
     }
     const ts: number[] = j.timestamp ?? [];
     const shift = normaliseTimestamps(ts, seg);
-    const rows = ts.map((t, i) => ({ t: t + shift, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0) }));
+    const oi = oiCol(j);
+    const rows: Raw[] = ts.map((t, i) => ({ t: t + shift, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0), ...(oi ? { oi: +(oi[i] ?? 0) } : {}) }));
     const stk = this.adjust ? stockOfSec(seg, sec) : null;
     return stk ? adjustRows(rows, actionsFor(stk), "i") : rows;
   }
@@ -142,7 +153,7 @@ export class Dhan {
     let j: any;
     try {
       j = await this.post("/charts/historical", {
-        securityId: String(sec), exchangeSegment: seg, instrument: instr, expiryCode: 0, oi: false, fromDate, toDate,
+        securityId: String(sec), exchangeSegment: seg, instrument: instr, expiryCode: 0, oi: true, fromDate, toDate,
       });
     } catch (e) {
       const own = this.useOwn && Dhan.own && refused(e) ? await Dhan.own.daily(String(sec), seg, fromDate, toDate).catch(() => null) : null;
@@ -150,7 +161,8 @@ export class Dhan {
       throw e;
     }
     const ts: number[] = j.timestamp ?? [];
-    const rows = ts.map((t, i) => ({ t, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0), day: ist(t).date }))
+    const oi = oiCol(j);
+    const rows: DayBar[] = ts.map((t, i) => ({ t, o: +j.open[i], h: +j.high[i], l: +j.low[i], c: +j.close[i], v: +(j.volume?.[i] ?? 0), ...(oi ? { oi: +(oi[i] ?? 0) } : {}), day: ist(t).date }))
       .sort((a, b) => a.t - b.t);
     const stk = this.adjust ? stockOfSec(seg, sec) : null;
     return stk ? adjustRows(rows, actionsFor(stk), "d") : rows;

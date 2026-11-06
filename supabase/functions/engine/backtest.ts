@@ -10,9 +10,9 @@ import {
   addDays, aggregate, type Bar, type DayBar, dayMinutes, isCommodity, isCrypto, isLastWeekdayOfMonth, isStockSeg, ist, minToTime, partialDay, type Raw,
   sessionFor, signalSeries, strikeFor, supertrend, timeToMin, weekdayOf, weeklyExpiryWeekday,
 } from "./logic.ts";
-import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, type Signals, validateRules, warmBarsFor } from "./rules.ts";
-import { atr as atrSeries } from "./indicators.ts";
-import { hasLevels, normaliseRisk, type RiskHit, riskInit, riskScan, type RiskState } from "./risk.ts";
+import { allConds, decide, describeCond, ruleSets, RuleBook, rulesUse, ruleTimeframes, type Signals, swingParamsOf, swingSizes, validateRules, warmBarsFor } from "./rules.ts";
+import { adx as adxSeries, atr as atrSeries, sma as smaSeries } from "./indicators.ts";
+import { hasLevels, needsSwing, normaliseRisk, type RiskHit, riskInit, riskScan, type RiskState } from "./risk.ts";
 import { lotsFor, marginPerLot, normaliseSizing } from "./sizing.ts";
 import { STOCKS } from "./stocks.ts";
 
@@ -234,6 +234,14 @@ export async function planBacktest(
       if (cs.some((c) => c.ind === "BTC") && s.underlying !== "BTCUSD") ext.btc = await cryptoDaily("BTCUSD", addDays(p.from, -800), addDays(p.to, 1));
       if (cs.some((c) => c.ind === "FUND")) ext.funding = await cryptoFunding(String(s.underlying), addDays(p.from, -3), addDays(p.to, 1));
     }
+    // India VIX conditions (6 Nov 2026): its daily candles, and its 5-minute candles when a VIX condition is intraday.
+    if (rulesUse(rules!, "VIX") && !isCrypto(seg)) {
+      await progress("Downloading India VIX");
+      ext.vix = await dhan.daily(VIX_SEC.sec, VIX_SEC.seg, VIX_SEC.instr, addDays(p.from, -800), addDays(p.to, 1));
+      if (allConds(rules!).some((c) => c.ind === "VIX" && c.tf !== "D" && c.tf !== "W")) {
+        ext.vixRaw = await intradayRange(dhan, { data_security_id: VIX_SEC.sec, data_segment: VIX_SEC.seg, data_instrument: VIX_SEC.instr }, 5, addDays(p.from, -warm), fetchTo, async () => {});
+      }
+    }
     plans.push(...simulateRules(s, { raw, byDay, daily, ...ext }, p.from, p.to));
   } else if (kind !== "TIMED") {
     const sigName = kind === "HA" ? "Heikin Ashi" : "Supertrend";
@@ -408,8 +416,50 @@ export async function planBacktest(
   return { plans, calls: dhan.calls, notes };
 }
 
-/** Candle data a condition strategy is simulated on. */
-export type SimData = { raw: MBar[]; byDay: Map<string, MBar[]>; daily: DayBar[]; btc?: DayBar[]; funding?: Map<string, number> };
+/**
+ * Candle data a condition strategy is simulated on. vix / vixRaw: India VIX daily and 5-minute candles (VIX conditions);
+ * events: market-event days (calendar conditions; else the engine-wide set).
+ */
+export type SimData = { raw: MBar[]; byDay: Map<string, MBar[]>; daily: DayBar[]; btc?: DayBar[]; funding?: Map<string, number>; vix?: DayBar[]; vixRaw?: Raw[]; events?: Set<string> };
+/** The rule book's extra series for a strategy: the crypto series, VIX, events and the strategy's own expiry rule. */
+export function ruleExt(s: Record<string, any>, data: SimData) {
+  return { btc: data.btc, funding: data.funding, vix: data.vix, vixRaw: data.vixRaw, events: data.events,
+    expiry: { weekday: Number(s.expiry_weekday) || 4, monthly: s.expiry_flag === "MONTH", underlying: String(s.underlying ?? "") } };
+}
+/** India VIX on Dhan: index segment, security id 21. */
+export const VIX_SEC = { sec: "21", seg: "IDX_I", instr: "INDEX" };
+
+/**
+ * Regime-conditional results (6 Nov 2026, audit): each trade is filed under the regime of the day before its entry —
+ * India VIX tercile over the trailing 250 VIX closes (when VIX candles exist), daily ADX(14) trend (> 25) / flat (< 20) /
+ * in between, and the daily close above / below its 200-day average — so a strategy that made all its money in one
+ * regime is visible. memo: the daily indicator series shared between strategies on the same candles.
+ */
+export type RegimeStats = { vix: Record<"low" | "mid" | "high", { n: number; net: number }> | null; adx: Record<"trend" | "mid" | "flat", { n: number; net: number }>; trend: Record<"up" | "down", { n: number; net: number }> };
+export function regimeStats(trades: { entry: string; net: number }[], daily: DayBar[], vix?: DayBar[], memo?: Map<string, unknown>): RegimeStats | null {
+  if (!daily.length || !trades.length) return null;
+  const M = <T>(k: string, f: () => T): T => { if (!memo) return f(); if (!memo.has(k)) memo.set(k, f()); return memo.get(k) as T; };
+  const adx14 = M(`REG|${daily.length}|${daily[0].t}|ADX14`, () => adxSeries(daily, 14).adx);
+  const sma200 = M(`REG|${daily.length}|${daily[0].t}|SMA200`, () => smaSeries(daily.map((d) => d.c), 200));
+  // VIX terciles: the 33rd / 67th percentile of the trailing 250 closes, at each VIX day.
+  const vt = vix?.length ? M(`REG|VIX|${vix.length}|${vix[0].t}`, () => {
+    const lo = new Array<number>(vix.length).fill(NaN), hi = new Array<number>(vix.length).fill(NaN);
+    for (let i = 60; i < vix.length; i++) { const w = vix.slice(Math.max(0, i - 250), i).map((d) => d.c).sort((a, b) => a - b); lo[i] = w[Math.floor(w.length / 3)]; hi[i] = w[Math.floor((2 * w.length) / 3)]; }
+    return { lo, hi };
+  }) : null;
+  const prevIdx = (src: { day: string }[], day: string) => { let a = 0, b = src.length - 1, j = -1; while (a <= b) { const m = (a + b) >> 1; if (src[m].day < day) { j = m; a = m + 1; } else b = m - 1; } return j; };
+  const cell = () => ({ n: 0, net: 0 });
+  const out: RegimeStats = { vix: vt ? { low: cell(), mid: cell(), high: cell() } : null, adx: { trend: cell(), mid: cell(), flat: cell() }, trend: { up: cell(), down: cell() } };
+  const add = (c: { n: number; net: number }, v: number) => { c.n++; c.net += v; };
+  for (const t of trades) {
+    const day = String(t.entry).slice(0, 10), v = Math.trunc(Number(t.net) || 0);
+    const j = prevIdx(daily, day); if (j < 0) continue;
+    const a = adx14[j]; if (!isNaN(a)) add(a > 25 ? out.adx.trend : a < 20 ? out.adx.flat : out.adx.mid, v);
+    const s = sma200[j]; if (!isNaN(s)) add(daily[j].c > s ? out.trend.up : out.trend.down, v);
+    if (vt && out.vix) { const k = prevIdx(vix!, day); if (k >= 0 && !isNaN(vt.lo[k])) add(vix![k].c <= vt.lo[k] ? out.vix.low : vix![k].c >= vt.hi[k] ? out.vix.high : out.vix.mid, v); }
+  }
+  return out;
+}
 
 /**
  * Every trade a condition strategy would have made between `from` and `to` (pure: no network).
@@ -443,7 +493,7 @@ export function simulateRules(s: Record<string, any>, data: SimData, from: strin
 
   if (rules.daily) {
     const days = data.daily;
-    const book = new RuleBook(rules, s.timeframe_min, new Map(), days, data.byDay as any, seg, cache, { btc: data.btc, funding: data.funding });
+    const book = new RuleBook(rules, s.timeframe_min, new Map(), days, data.byDay as any, seg, cache, ruleExt(s, data));
     const openT = (day: string) => Date.parse(`${day}T00:00:00+05:30`) / 1000 + sessionFor(seg, day).open * 60 + 60;
     const close = (d: DayBar, why: string, px: number, atClose = false) => {
       if (!pos) return;
@@ -451,6 +501,7 @@ export function simulateRules(s: Record<string, any>, data: SimData, from: strin
       pos.rk = undefined; plans.push(pos); pos = null;
     };
     const dATR = levels ? M(`D|ATR${atrLen}`, () => atrSeries(days, atrLen)) : [];
+    const dSW = levels && needsSwing(risk) ? M(`D|SW${JSON.stringify(swingParamsOf(rules))}`, () => swingSizes(days, swingParamsOf(rules))) : null;
     // A stop or target inside a completed day: the daily candle's range after the entry (time of day unknown).
     const scanDay = (d: DayBar) => {
       if (!pos?.rk) return;
@@ -469,7 +520,7 @@ export function simulateRules(s: Record<string, any>, data: SimData, from: strin
       if (dc.exit) close(d, dc.why, d.o);
       if (dc.enter && !pos) {
         pos = mkPlan(dc.enter, d.day, sessionFor(seg, d.day).open, d.o, `${dc.why}: ${label(dc.enter === "LONG" ? "long" : "short")}`); pos.fillIn = d.o;
-        if (levels) pos.rk = riskInit(risk, dc.enter === "LONG" ? 1 : -1, d.o, dATR[i - 1], d.t);
+        if (levels) pos.rk = riskInit(risk, dc.enter === "LONG" ? 1 : -1, d.o, dATR[i - 1], d.t, dSW ? dSW[i - 1] : 0);
       }
       prev = now; last = d;
     }
@@ -482,7 +533,7 @@ export function simulateRules(s: Record<string, any>, data: SimData, from: strin
   const nowSec = Date.now() / 1000;
   const frames = new Map<number, Bar[]>();
   for (const tf of tfs.intraday) frames.set(tf, M(`frame|${tf}`, () => aggregate(data.raw, tf, seg).filter((b) => b.endT <= nowSec)));
-  const book = new RuleBook(rules, s.timeframe_min, frames, data.daily, data.byDay as any, seg, cache, { btc: data.btc, funding: data.funding });
+  const book = new RuleBook(rules, s.timeframe_min, frames, data.daily, data.byDay as any, seg, cache, ruleExt(s, data));
   const bars = frames.get(s.timeframe_min)!;
   const ss = timeToMin(String(s.session_start)), le = timeToMin(String(s.last_entry)), sq = timeToMin(String(s.square_off));
   const close = (day: string, min: number, why: string, px?: number) => {
@@ -491,6 +542,14 @@ export function simulateRules(s: Record<string, any>, data: SimData, from: strin
     pos.rk = undefined; plans.push(pos); pos = null;
   };
   const tfATR = levels ? M(`${s.timeframe_min}|ATR${atrLen}`, () => atrSeries(bars, atrLen)) : [];
+  const tfSW = levels && needsSwing(risk) ? M(`${s.timeframe_min}|SW${JSON.stringify(swingParamsOf(rules))}`, () => swingSizes(bars, swingParamsOf(rules))) : null;
+  // Limit-at-level entries (RuleSet.fill = "LEVEL", 6 Nov 2026): the entry decided at a candle's close rests as a limit
+  // order at the condition's level for the next candle, fills there if that candle trades through the level (a gap
+  // through it fills at the open), else at that candle's close. The base candles inside the next candle decide the fill
+  // and its minute, like the breakout trigger. For intraday strategies the order dies with the day.
+  type PendingLevel = { side: Side; level: number; valid: number; why: string };
+  let pending: PendingLevel | null = null;
+  const base = data.raw.length > 1 ? Math.max(1, Math.round((data.raw[1].t - data.raw[0].t) / 60)) : 5;
   let lastDay = "";
   for (let i = 1; i < bars.length; i++) {
     const b = bars[i];
@@ -502,6 +561,26 @@ export function simulateRules(s: Record<string, any>, data: SimData, from: strin
       if (hit) close(b.day, ist(hit.t).min, hit.why, hit.px);
     }
     if (pos && s.intraday && b.endMin >= sq) close(pos.entryDay, sq, "Square-off");
+    if (pending && s.intraday && b.day !== bars[i - 1].day) pending = null;
+    let filledAtClose = false;
+    if (pending && pending.valid === i && !pos) {
+      const pd = pending, long = pd.side === "LONG";
+      const rows = (data.byDay.get(b.day) ?? []).filter((r) => r.min >= b.startMin && r.min < b.endMin && (!s.intraday || r.min < sq));
+      const hit = rows.find((r) => long ? r.l <= pd.level : r.h >= pd.level);
+      if (hit) {
+        const px = long ? Math.min(hit.o, pd.level) : Math.max(hit.o, pd.level);
+        pos = mkPlan(pd.side, b.day, hit.min, px, `${pd.why} (limit at ${+pd.level.toFixed(2)} filled)`); pos.fillIn = px;
+        if (levels) pos.rk = riskInit(risk, long ? 1 : -1, px, tfATR[i - 1], hit.t + base * 60, tfSW ? tfSW[i - 1] : 0);
+        const rest = rows.filter((r) => r.t >= hit.t + base * 60);
+        if (pos.rk) { const h2 = riskScan(pos.rk, rest); if (h2) close(b.day, ist(h2.t).min, h2.why, h2.px); }
+      } else if (rows.length) {
+        // Not reached: filled at this candle's close instead (priced like every close fill, one candle later than the signal).
+        pos = mkPlan(pd.side, b.day, b.endMin, b.c, `${pd.why} (limit at ${+pd.level.toFixed(2)} not reached; filled at the close)`);
+        if (levels) pos.rk = riskInit(risk, long ? 1 : -1, b.c, tfATR[i], b.endT, tfSW ? tfSW[i] : 0);
+        filledAtClose = true;
+      }
+      pending = null;
+    } else if (pending && pending.valid < i) pending = null;
     if (b.day < from) continue;
     lastDay = b.day;
     if (prev === null) prev = book.at(bars[i - 1].endT);
@@ -509,12 +588,19 @@ export function simulateRules(s: Record<string, any>, data: SimData, from: strin
     // Crypto never closes: a positional crypto strategy also decides on the candle that ends at midnight.
     const allDay = isCrypto(seg) && !s.intraday;
     const inWindow = b.endMin >= ss && (allDay || b.endMin < le) && (!s.intraday || b.endMin < sq) && (allDay || b.endMin < sessionFor(seg, b.day).close);
-    if (inWindow) {
+    if (inWindow && !filledAtClose) {
       const dc = decide(pos ? pos.side : "FLAT", now, prev, cfg);
       if (dc.exit) close(b.day, b.endMin, dc.why);
       if (dc.enter && !pos) {
-        pos = mkPlan(dc.enter, b.day, b.endMin, b.c, `${dc.why}: ${label(dc.enter === "LONG" ? "long" : "short")}`);
-        if (levels) pos.rk = riskInit(risk, dc.enter === "LONG" ? 1 : -1, b.c, tfATR[i], b.endT);
+        const set = dc.enter === "LONG" ? rules.long : rules.short;
+        const lv = set?.fill === "LEVEL" ? book.levelFor(dc.enter === "LONG" ? "long" : "short", b.endT) : null;
+        const why = `${dc.why}: ${label(dc.enter === "LONG" ? "long" : "short")}`;
+        // A limit at the level only makes sense when the level is a better price than the close.
+        if (lv != null && (dc.enter === "LONG" ? lv < b.c : lv > b.c)) pending = { side: dc.enter, level: lv, valid: i + 1, why };
+        else {
+          pos = mkPlan(dc.enter, b.day, b.endMin, b.c, why);
+          if (levels) pos.rk = riskInit(risk, dc.enter === "LONG" ? 1 : -1, b.c, tfATR[i], b.endT, tfSW ? tfSW[i] : 0);
+        }
       }
     }
     prev = now;

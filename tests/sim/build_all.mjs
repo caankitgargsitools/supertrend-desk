@@ -16,4 +16,10 @@ await one("ideas.ts", "ideas.mjs");
 await one("prediction.ts", "pred.mjs");
 await one("sizing.ts", "sizing.mjs");
 await one("margins.ts", "margins.mjs");
+// Pure parts used by the strategy-research tests (6 Nov 2026): rules, indicators, calendar maths, the backtester, risk.
+await one("rules.ts", "rules.mjs");
+await one("indicators.ts", "indicators.mjs");
+await one("logic.ts", "logic.mjs");
+await one("backtest.ts", "backtest.mjs");
+await one("risk.ts", "risk.mjs");
 console.log("built parts");

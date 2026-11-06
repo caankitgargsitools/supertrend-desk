@@ -11,6 +11,7 @@ import { newAcc, type Plan, priceBatch, type SimData, slippageFor, slipped, trad
 import { DhanBusyError } from "./dhan.ts";
 import type { SLeg } from "./structures.ts";
 import { CRYPTO } from "./crypto.ts";
+import { STOCK_KEYS } from "./stocks.ts";
 import { assetRoot, cachedAsset, dbStore, labParams, labQuiet, LAB_ASSETS, type LabConfig, pagedRows, readCandles, saveCandles, screenOne, TOKEN_ERR } from "./lab.ts";
 import { loadMarginRates } from "./margins.ts";
 import { deflatedSharpe, median } from "./stats.ts";
@@ -33,6 +34,8 @@ export type IdeaSetting = { key: string; label: string; p: Record<string, number
 export type IdeaDef = {
   key: string; order: number; name: string; why: string; kind: "rules" | "custom" | "options" | "combo" | "later"; source?: "research" | "generated";
   universe: string[]; daily: boolean; settings: IdeaSetting[]; note?: string;
+  /** Risk per position as a share of the capital (default RISK_PCT): stock futures need more than 0.2% to reach one lot. */
+  risk?: number;
 };
 const S = (key: string, label: string, p: Record<string, number | string>): IdeaSetting => ({ key, label, p });
 
@@ -238,6 +241,24 @@ export async function loadIdeaDefs(sb: SupabaseClient) {
 const C = (ind: string, tf: string, p: Record<string, number>, op: string, v?: number): Cond => ({ ind, tf, p, op, ...(v != null ? { v } : {}) });
 const set = (conds: Cond[], mode: "ALL" | "ANY" = "ALL") => ({ mode, conds });
 IDEAS.push(...wellKnownIdeas());
+/**
+ * Cross-sectional momentum on the 33 stock futures (6 Nov 2026, audit step 10; Jegadeesh & Titman 1993, documented on
+ * Indian stocks): every 21 trading days rank the stocks by their return over the look-back skipping the latest month,
+ * long the top k (short the bottom k where the setting says so), one position per stock sized by the daily ATR
+ * (`pickContracts` / `sizeLots`) at 0.5% of the capital each (a stock future's lot is bigger than a 0.2% budget allows).
+ */
+IDEAS.push({
+  key: "stockmom", order: 18, kind: "custom", daily: true, universe: STOCK_KEYS, source: "research", risk: 0.005,
+  name: "Cross-sectional momentum on stock futures",
+  why: "Among stocks, the ones that rose most over the past 3–12 months tend to keep beating the ones that rose least for a few months (Jegadeesh & Titman 1993; Sehgal & Balakrishnan on India). Ranked monthly, skipping the latest month (its reversal), long the leaders and, in some settings, short the laggards.",
+  note: "Signals on the share price (as the lab does), traded as the near-month stock future; charges and slippage of every entry and exit, monthly rebalance. Lot sizes make each position a sizeable bet: the risk per position is 0.5% of the capital.",
+  settings: [
+    S("lb126-k5-ls", "6-month momentum (skip the last month), long the top 5, short the bottom 5", { lb: 126, skip: 21, k: 5, shortK: 5 }),
+    S("lb126-k5-long", "6-month momentum, long the top 5 only", { lb: 126, skip: 21, k: 5, shortK: 0 }),
+    S("lb252-k3-ls", "12-month momentum, long the top 3, short the bottom 3", { lb: 252, skip: 21, k: 3, shortK: 3 }),
+    S("lb63-k5-ls", "3-month momentum, long the top 5, short the bottom 5", { lb: 63, skip: 21, k: 5, shortK: 5 }),
+  ],
+});
 RUNTIME = [...IDEAS];
 
 /** A lab strategy config for one asset (futures, both directions, one lot, no stop unless the rules exit). */
@@ -408,6 +429,15 @@ export type DailySet = Record<string, DayBar[]>;
  * comes), with slippage and charges only when a position really opens or closes; everything is closed on the last day.
  */
 export function relStrengthTrades(daily: DailySet, p: { lb: number; k: number }, contracts: Map<string, string>): LegTrades {
+  return momentumTrades(daily, { lb: p.lb, skip: 0, k: p.k, shortK: p.k }, contracts);
+}
+/**
+ * Cross-sectional momentum, the general form (6 Nov 2026): every 21 trading days rank the contracts by their return from
+ * `lb` days ago to `skip` days ago (skip = 21 leaves out the latest month), long the top k and short the bottom shortK
+ * (0 = long only). Each holding period between two rebalances is booked as its own trade (so the months show the profit
+ * as it comes), with slippage and charges only when a position really opens or closes; everything is closed on the last day.
+ */
+export function momentumTrades(daily: DailySet, p: { lb: number; skip: number; k: number; shortK: number }, contracts: Map<string, string>): LegTrades {
   const keys = [...contracts.values()].filter((k) => daily[k]?.length);
   const idx = new Map(keys.map((k) => [k, new Map(daily[k].map((d, i) => [d.day, i]))]));
   const cal = [...new Set(keys.flatMap((k) => daily[k].map((d) => d.day)))].sort();
@@ -422,14 +452,15 @@ export function relStrengthTrades(daily: DailySet, p: { lb: number; k: number },
     if (closing) open.delete(k); else open.set(k, { ...o, day, px, ch: 0, slip: 0 });
   };
   const pxAt = (k: string, day: string) => { const i = idx.get(k)!.get(day); return i == null ? null : daily[k][i].c; };
+  const skip = Math.max(0, Math.trunc(p.skip ?? 0)), shortK = Math.max(0, Math.trunc(p.shortK ?? p.k));
   for (let d = p.lb; d < cal.length; d += 21) {
-    const day = cal[d], past = cal[d - p.lb];
+    const day = cal[d], past = cal[d - p.lb], ref = cal[d - skip];
     const ranked = keys.map((k) => {
-      const now = pxAt(k, day), then = pxAt(k, past);
-      return now == null || then == null ? null : { k, px: now, r: now / then - 1 };
+      const now = pxAt(k, day), then = pxAt(k, past), late = skip ? pxAt(k, ref) : now;
+      return now == null || then == null || late == null ? null : { k, px: now, r: late / then - 1 };
     }).filter((x): x is { k: string; px: number; r: number } => !!x).sort((a, b) => b.r - a.r);
-    if (ranked.length < 2 * p.k + 1) continue;
-    const want = new Map<string, "LONG" | "SHORT">([...ranked.slice(0, p.k).map((x) => [x.k, "LONG"] as const), ...ranked.slice(-p.k).map((x) => [x.k, "SHORT"] as const)]);
+    if (ranked.length < p.k + shortK + 1) continue;
+    const want = new Map<string, "LONG" | "SHORT">([...ranked.slice(0, p.k).map((x) => [x.k, "LONG"] as const), ...(shortK ? ranked.slice(-shortK).map((x) => [x.k, "SHORT"] as const) : [])]);
     const pxOf = new Map(ranked.map((x) => [x.k, x.px]));
     for (const k of [...open.keys()]) if (pxOf.has(k)) book(k, day, pxOf.get(k)!, want.get(k) !== open.get(k)!.side);
     for (const [k, side] of want) if (!open.has(k)) { const s = sideCost(k, pxOf.get(k)!, side === "LONG", day); open.set(k, { side, day, px: s.fill, ch: s.ch, slip: s.slip }); }
@@ -1034,9 +1065,9 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
   const waiting = new Set(left.map((l) => l.try_id));
   let combined = 0;
   for (const t of mine.filter((x) => x.status === "running" && !waiting.has(x.id))) {
-    const { data: legs } = await sb.from("idea_legs").select("asset, result, config").eq("try_id", t.id).eq("kind", "real").limit(2000);
+    const legs = await pagedRows((a, b) => sb.from("idea_legs").select("id, asset, result, config").eq("try_id", t.id).eq("kind", "real").order("id").range(a, b));
     const result = idea.kind === "combo" ? combineCombo((legs ?? []) as any[], t.setting as any, { today, capital })
-      : combineTry((legs ?? []) as { asset: string; result: LegResult }[], { today, capital });
+      : combineTry((legs ?? []) as { asset: string; result: LegResult }[], { today, capital, risk: idea.risk });
     await sb.from("idea_tries").update({ status: "combined", result }).eq("id", t.id);
     t.status = "combined"; (t as any).result = result; combined++;
   }
@@ -1162,6 +1193,9 @@ async function runLeg(sb: SupabaseClient, leg: Leg, memo: Map<string, unknown>, 
     if (idea.key === "relstrength") {
       const contracts = pickContracts(Object.keys(daily), atrMed, capital * RISK_PCT);
       t = relStrengthTrades(daily, c.p as { lb: number; k: number }, contracts);
+    } else if (idea.key === "stockmom") {
+      const contracts = pickContracts(Object.keys(daily), atrMed, capital * (idea.risk ?? RISK_PCT));
+      t = momentumTrades(daily, c.p as { lb: number; skip: number; k: number; shortK: number }, contracts);
     } else if (idea.key === "season") {
       t = emptyTrades();
       for (const [k, d] of Object.entries(daily)) { const x = seasonTrades(k, d.slice(20), c.p as any); for (const f of Object.keys(t) as (keyof LegTrades)[]) (t[f] as any[]).push(...(x[f] as any[])); }
@@ -1180,7 +1214,7 @@ async function runLeg(sb: SupabaseClient, leg: Leg, memo: Map<string, unknown>, 
     t.a = t.e.map((e, i) => { const x = atrBy.get(t.k[i]); return x ? Math.trunc(before(x.days, x.m, e.slice(0, 10)) ?? 0) : 0; });
     const firsts = Object.values(daily).map((d) => d[0]?.day).filter(Boolean).sort();
     const firstTrade = [...t.e].sort()[0]?.slice(0, 10) ?? null;
-    const first = idea.key === "funding" ? firstTrade : firsts[0] ? addDays(firsts[0], idea.key === "relstrength" ? 380 : 30) : null;
+    const first = idea.key === "funding" ? firstTrade : firsts[0] ? addDays(firsts[0], idea.key === "relstrength" || idea.key === "stockmom" ? 400 : 30) : null;
     return { n: t.n.length, first, last: today, atr_med: atrMed, t };
   }
   const daily = !!leg.config.rules?.daily, a = LAB_ASSETS[leg.asset];
@@ -1214,7 +1248,7 @@ async function queueStage2(sb: SupabaseClient, idea: IdeaDef, t: { id: number; r
     await sb.from("idea_tries").update({ status: "done", verdict: { ...v, passed: true, why: [], stage2: { applies: false, why } }, done_at: new Date().toISOString() }).eq("id", t.id);
     return;
   }
-  const { data: real } = await sb.from("idea_legs").select("asset, win_from, win_to, config").eq("try_id", t.id).eq("kind", "real").limit(2000);
+  const real = await pagedRows((a, b) => sb.from("idea_legs").select("id, asset, win_from, win_to, config").eq("try_id", t.id).eq("kind", "real").order("id").range(a, b));
   // Combined portfolios: each part's chosen contracts; option legs stay real in every run (option prices can't be shuffled).
   const chosenOf = (l: any) => new Set(Object.values((l.config?.part != null ? t.result.parts?.[Number(l.config.part)]?.contracts : t.result.contracts) ?? {}));
   const base = (real ?? []).filter((l) => !isOptionLeg(l.config) && (l.asset === "*" || chosenOf(l).has(l.asset)));
@@ -1240,7 +1274,7 @@ async function noiseLeg(sb: SupabaseClient, leg: Leg, memo: Map<string, unknown>
 
 /** The random-entry test of a finalist: its own trades (before the vault) at random dates of their assets, 1,000 times. */
 async function randomLeg(sb: SupabaseClient, leg: Leg, idea: IdeaDef, tr: TryResult) {
-  const { data: legs } = await sb.from("idea_legs").select("asset, result, config").eq("try_id", leg.try_id).eq("kind", "real").limit(2000);
+  const legs = await pagedRows((a, b) => sb.from("idea_legs").select("id, asset, result, config").eq("try_id", leg.try_id).eq("kind", "real").order("id").range(a, b));
   const byAsset = new Map<string, { e: number; x: number; dir: number; w: number }[]>();
   const sec = (s: string) => Date.parse(`${s.slice(0, 10)}T${s.length > 10 ? s.slice(11, 16) : "09:15"}:00+05:30`) / 1000;
   for (const l of legs ?? []) {

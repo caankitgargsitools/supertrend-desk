@@ -66,8 +66,13 @@ await t("a new strategy passes → its group is re-checked, new finds notified t
   assert.ok(out.some((r) => r.finished && r.newOnes > 0), JSON.stringify(out));
   assert.equal(db.lab_combos.find((c) => c.key === "2:101+102").first_seen, before);
   assert.ok(db.lab_combos.some((c) => c.ids.includes(106) && c.current));
-  assert.ok(db.notifications.length >= 1 && db.notifications.every((n) => n.user_id === "admin1" && n.kind === "lab"));
-  assert.match(db.notifications[0].title, /new (pair|three)s? that lessen the drawdown · GOLDM daily/);
+  // 6 Nov 2026: one notification per run (the digest when every group is up to date), never one per asset and timeframe.
+  assert.equal(db.notifications.length, 1, "exactly one digest for the run");
+  assert.ok(db.notifications.every((n) => n.user_id === "admin1" && n.kind === "lab"));
+  assert.match(db.notifications[0].title, /^\d+ new combinations? that lessen the drawdown across 1 asset$/);
+  assert.match(db.notifications[0].body, /GOLDM \d+/);
+  const digest = db.lab_combo_groups.find((g) => g.asset === "*");
+  assert.ok(digest && digest.state === "digest" && digest.found >= 1, "the digest row remembers the time and count");
 });
 await t("a member no longer passes → its combinations marked not current, never deleted", async () => {
   const n0 = db.lab_combos.length;

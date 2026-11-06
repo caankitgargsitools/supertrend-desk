@@ -26,3 +26,8 @@ tests/sim/*.png
 tests/ui/node_modules
 tests/sim/instr.mjs
 tests/sim/listedopts.mjs
+tests/sim/backtest.mjs
+tests/sim/indicators.mjs
+tests/sim/logic.mjs
+tests/sim/risk.mjs
+tests/sim/rules.mjs

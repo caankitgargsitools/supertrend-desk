@@ -4,7 +4,7 @@
 import webpush from "npm:web-push@3.6.7";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { Dhan } from "./dhan.ts";
-import { type ChargeRates, newAcc, planBacktest, priceBatch, summarize, tradeCharges, validateParams, type Acc, type Plan } from "./backtest.ts";
+import { type ChargeRates, newAcc, planBacktest, priceBatch, summarize, tradeCharges, validateParams, VIX_SEC, type Acc, type Plan } from "./backtest.ts";
 import { runSpreads } from "./spreads.ts";
 import { fixedLotsFit, lotsFor, marginPerLot, moveLots, normaliseSizing } from "./sizing.ts";
 import {
@@ -12,10 +12,10 @@ import {
   pickBaseInterval, sessionFor, setHolidays, signalSeries, strikeFor, supertrend, timeToMin, tradingSession,
 } from "./logic.ts";
 import { dataSecurity, syncMcx } from "./instruments.ts";
-import { decide, describeCond, ruleSets, RuleBook, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
+import { allConds, decide, describeCond, type RuleExt, ruleSets, RuleBook, rulesUse, ruleTimeframes, validateRules, warmBarsFor } from "./rules.ts";
 import { atr as atrSeries } from "./indicators.ts";
 import { effectiveStop, hasLevels, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
-import { fromCol, LAB_ASSETS, labNext, labOptStep, labReverdict, labStart, labStep, loadCryptoAssets, pagedRows, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
+import { fromCol, LAB_ASSETS, labNext, labOptStep, labReverdict, labStart, labStep, loadCryptoAssets, loadMarketEvents, pagedRows, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
 import { runCombos } from "./combos.ts";
 import { contractsFor, CRYPTO, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaCancel, deltaOrderChecked, deltaOrderState, deltaPositions, deltaStop, deltaStopMove, niceLot } from "./crypto.ts";
 import {
@@ -1160,7 +1160,7 @@ async function rulesData(s: Strategy, dhan: Dhan, nowSec: number) {
     const p = ist(r.t);
     const a = baseByDay.get(p.date) ?? []; a.push({ min: p.min, h: r.h, l: r.l }); baseByDay.set(p.date, a);
   }
-  return { rules, book: new RuleBook(rules, s.timeframe_min, frames, daily, baseByDay, seg, undefined, await cryptoExt(s, rules, today)), bars: frames.get(s.timeframe_min)! };
+  return { rules, book: new RuleBook(rules, s.timeframe_min, frames, daily, baseByDay, seg, undefined, await rulesExt(s, rules, dhan, today)), bars: frames.get(s.timeframe_min)! };
 }
 /** Completed daily candles before today; they don't change during the day, so they are fetched once a day. */
 const DAILY_CACHE = new Map<string, { day: string; from: string; rows: DayBar[] }>();
@@ -1173,12 +1173,25 @@ async function dailyBefore(dhan: Dhan, s: Strategy, days: number, today: string)
   return rows;
 }
 /** Crypto rules that read Bitcoin's trend or the funding rate get those series (other strategies: none). */
-async function cryptoExt(s: Strategy, rules: ReturnType<typeof validateRules>, today: string) {
-  if (!isCrypto(String(s.data_segment))) return undefined;
-  const cs = [rules.long, rules.short, rules.exitLong, rules.exitShort].flatMap((x) => x?.conds ?? []);
-  const ext: { btc?: DayBar[]; funding?: Map<string, number> } = {};
-  if (cs.some((c) => c.ind === "BTC") && s.underlying !== "BTCUSD") ext.btc = (await cryptoDaily("BTCUSD", addDays(today, -500), addDays(today, 1))).filter((d) => d.day < today);
-  if (cs.some((c) => c.ind === "FUND")) ext.funding = await cryptoFunding(String(s.underlying), addDays(today, -10), addDays(today, 1));
+/**
+ * The rule book's extra series for a live strategy (the backtester's ruleExt, live): Bitcoin's trend and the funding
+ * rate for coins; India VIX when the rules read it (daily up to yesterday, today's 5-minute candles for intraday VIX
+ * conditions; Dhan's per-tick memo makes it one request for every strategy); the engine-wide market-event days
+ * (table market_events, read once a day) for calendar rules; and the strategy's own expiry rule.
+ */
+async function rulesExt(s: Strategy, rules: ReturnType<typeof validateRules>, dhan: Dhan, today: string): Promise<RuleExt> {
+  const cr = isCrypto(String(s.data_segment));
+  const ext: RuleExt = { expiry: { weekday: Number(s.expiry_weekday) || 4, monthly: s.expiry_flag === "MONTH", underlying: String(s.underlying ?? "") } };
+  if (cr) {
+    if (rulesUse(rules, "BTC") && s.underlying !== "BTCUSD") ext.btc = (await cryptoDaily("BTCUSD", addDays(today, -500), addDays(today, 1))).filter((d) => d.day < today);
+    if (rulesUse(rules, "FUND")) ext.funding = await cryptoFunding(String(s.underlying), addDays(today, -10), addDays(today, 1));
+  } else if (rulesUse(rules, "VIX")) {
+    ext.vix = (await dhan.daily(VIX_SEC.sec, VIX_SEC.seg, VIX_SEC.instr, addDays(today, -400), addDays(today, 1))).filter((d) => d.day < today);
+    if (allConds(rules).some((c) => c.ind === "VIX" && c.tf !== "D" && c.tf !== "W")) {
+      ext.vixRaw = await dhan.intraday(VIX_SEC.sec, VIX_SEC.seg, VIX_SEC.instr, 5, `${addDays(today, -10)} 09:00:00`, fmtIst(Date.now() / 1000 + 120, true));
+    }
+  }
+  if (rulesUse(rules, "CAL")) await loadMarketEvents(sb).catch((e) => console.error("market events", e));
   return ext;
 }
 
@@ -1189,7 +1202,7 @@ async function processRulesDaily(s: Strategy, set: Settings, action: string) {
   const nowSec = Date.now() / 1000, now = ist(nowSec), seg = String(s.data_segment);
   const days = await dailyBefore(dhan, s, Math.ceil(warmBarsFor(rules) * 1.5), now.date);
   if (days.length < 3) throw new Error(`Only ${days.length} daily candles came back from Dhan.`);
-  const book = new RuleBook(rules, s.timeframe_min, new Map(), days, new Map(), seg, undefined, await cryptoExt(s, rules, now.date));
+  const book = new RuleBook(rules, s.timeframe_min, new Map(), days, new Map(), seg, undefined, await rulesExt(s, rules, dhan, now.date));
   const openT = (day: string) => Date.parse(`${day}T00:00:00+05:30`) / 1000 + sessionFor(seg, day).open * 60 + 60;
   const last = days[days.length - 1];
   const sig = book.at(openT(now.date)), prev = book.at(openT(last.day));

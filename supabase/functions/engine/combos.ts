@@ -7,7 +7,9 @@
 // in lab_combo_groups.cursor). Combinations that lessen the drawdown (opposite sides at least 20% of the time they are
 // in a trade together, and a better profit ÷ biggest fall than every member alone) are kept in lab_combos with the time
 // they were first seen; ones that no longer qualify are marked not current (never deleted). After the first full check
-// of a group (the starting point), newly found ones are notified to the admins. The rules mirror the page's comboEval.
+// of a group (the starting point), newly found ones are notified to the admins — since 6 Nov 2026 as ONE notification
+// per run (when every group is up to date: "N new combinations that lessen the drawdown across M assets"), not one per
+// asset and timeframe (Papa had 315 lab notifications in a week). The rules mirror the page's comboEval.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 export const COMBO_MIN_OPP = 20;
@@ -123,6 +125,46 @@ export const comboKey = (size: number, ids: number[]) => `${size}:${[...ids].sor
 function hash(s: string): string { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
 const fin = (v: number) => (Number.isFinite(v) ? +v.toFixed(4) : null);
 
+/** The meta row of lab_combo_groups that remembers when the admins were last told about new finds. */
+const DIGEST = { asset: "*", tf: "*", size: 0 };
+/**
+ * One notification per run, sent when every group is up to date (nothing left to check): the combinations first seen
+ * since the last digest and after their group's starting point, counted across assets. The first digest only marks the
+ * time (nothing is "new" before a starting point). Returns what it did, for the engine's log.
+ */
+export async function comboDigest(sb: SupabaseClient, state: Map<string, any>): Promise<Record<string, unknown>> {
+  const meta = state.get(`${DIGEST.asset}|${DIGEST.tf}|${DIGEST.size}`);
+  const now = new Date().toISOString();
+  const save = (found: number) => sb.from("lab_combo_groups").upsert({ ...DIGEST, sig: null, cursor: 0, pass_started: null, state: "digest", done_at: now, baseline_at: meta?.baseline_at ?? now,
+    members: null, families: null, checked: null, found, updated_at: now }, { onConflict: "asset,tf,size" }).then(() => {});
+  // Only groups that have finished a pass count as up to date; a digest waits while any is still working.
+  if ([...state.values()].some((g: any) => g.state === "working")) return { digest: "waiting" };
+  if (!meta?.done_at) { await save(0); return { digest: "started" }; }
+  const since = String(meta.done_at);
+  const rows: { asset: string; tf: string; size: number; first_seen: string }[] = [];
+  for (let from = 0; from < 20000; from += 1000) {
+    const { data, error } = await sb.from("lab_combos").select("asset, tf, size, first_seen").eq("current", true).gt("first_seen", since).order("first_seen").range(from, from + 999);
+    if (error) throw new Error(error.message);
+    rows.push(...((data ?? []) as any[])); if ((data ?? []).length < 1000) break;
+  }
+  // New = first seen after its group's starting point (the first full pass of a group is the baseline, not news).
+  const fresh = rows.filter((r) => { const g = state.get(`${r.asset}|${r.tf}|${r.size}`); return g?.baseline_at && String(r.first_seen) > String(g.baseline_at); });
+  const n = fresh.length;
+  if (!n) { await save(0); return { digest: "nothing new" }; }
+  const byAsset = new Map<string, number>();
+  for (const r of fresh) byAsset.set(r.asset, (byAsset.get(r.asset) ?? 0) + 1);
+  const assets = [...byAsset.entries()].sort((a, b) => b[1] - a[1]);
+  const pairs = fresh.filter((r) => r.size === 2).length, threes = n - pairs;
+  const { data: admins } = await sb.from("profiles").select("user_id").eq("role", "admin");
+  const list = assets.slice(0, 8).map(([a, k]) => `${a} ${k}`).join(", ") + (assets.length > 8 ? ` and ${assets.length - 8} more` : "");
+  for (const u of (admins ?? []).map((a: any) => a.user_id)) await sb.rpc("notify_tagged", { p_user: u, p_kind: "lab",
+    p_title: `${n} new combination${n === 1 ? "" : "s"} that lessen the drawdown across ${assets.length} asset${assets.length === 1 ? "" : "s"}`,
+    p_body: `The Combinations check found ${pairs} new pair${pairs === 1 ? "" : "s"} and ${threes} new three${threes === 1 ? "" : "s"} of passed strategies (${list}) that are on opposite sides at least ${COMBO_MIN_OPP}% of the time together and have a better profit ÷ biggest fall than each one alone. Backtest figures: worth paper trading, not proven.`,
+    p_url: "/?combo=1", p_strategy: null, p_tag: `combos-digest-${now}` });
+  await save(n);
+  return { digest: "sent", new: n, assets: assets.length };
+}
+
 /** One instalment of background checking. */
 export async function runCombos(sb: SupabaseClient, budgetMs = 900): Promise<Record<string, unknown>> {
   const t0 = Date.now();
@@ -148,7 +190,7 @@ export async function runCombos(sb: SupabaseClient, budgetMs = 900): Promise<Rec
     const at = String(row?.updated_at ?? "");
     if (rank < Number(pref[0]) || (rank === pref[0] && rank === 2 && at < String(pref[1]))) { pick = { asset, tf, size, sig, row }; pref = [rank, at]; }
   }
-  if (!pick) return { idle: true, groups: groups.size };
+  if (!pick) return { idle: true, groups: groups.size, ...(await comboDigest(sb, state)) };
   const { asset, tf, size } = pick;
   // A pass in progress always runs to its end, even when the group's list changed meanwhile (busy groups such as Gold
   // daily get new strategies every few lab runs and would otherwise restart for ever); it keeps the signature it
@@ -210,12 +252,9 @@ export async function runCombos(sb: SupabaseClient, budgetMs = 900): Promise<Rec
     // The pass is complete: anything of this group not seen in it no longer qualifies (kept, marked not current).
     await sb.from("lab_combos").update({ current: false }).eq("asset", asset).eq("tf", tf).eq("size", size).eq("current", true).lt("checked_at", g.pass_started);
     if (g.baseline_at) {
+      // Counted for the result only; the admins hear about new finds once per run, in comboDigest.
       const { count } = await sb.from("lab_combos").select("key", { count: "exact", head: true }).eq("asset", asset).eq("tf", tf).eq("size", size).eq("current", true).gte("first_seen", g.pass_started);
       newOnes = count ?? 0;
-      if (newOnes) for (const u of adminIds) await sb.rpc("notify_tagged", { p_user: u, p_kind: "lab",
-        p_title: `${newOnes} new ${size === 2 ? "pair" : "three"}${newOnes === 1 ? "" : "s"} that lessen the drawdown · ${asset} ${tf === "D" ? "daily" : tf + "-minute"}`,
-        p_body: `The Combinations tab found ${newOnes} new combination${newOnes === 1 ? "" : "s"} of passed strategies on ${asset} (${tf === "D" ? "daily" : tf + "-minute"}) that are on opposite sides at least ${COMBO_MIN_OPP}% of the time together and have a better profit ÷ biggest fall than each one alone. Backtest figures: worth paper trading, not proven.`,
-        p_url: "/?combo=1", p_strategy: null, p_tag: `combos-${asset}-${tf}-${size}-${g.pass_started}` });
     } else g.baseline_at = new Date().toISOString();
     g.state = "done"; g.done_at = new Date().toISOString(); g.cursor = 0;
   }

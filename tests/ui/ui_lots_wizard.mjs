@@ -7,7 +7,7 @@ const ctx = await b.newContext({ viewport: { width, height: 900 }, colorScheme: 
 const p = await ctx.newPage();
 const errs = [];
 p.on("pageerror", (e) => { errs.push(e.message); console.log("PAGEERR", e.message); });
-const A = "22222222-2222-2222-2222-222222222222", now = new Date().toISOString();
+const A = "22222222-2222-2222-2222-222222222222", U = "11111111-1111-1111-1111-111111111111", now = new Date().toISOString();
 const base = { data_instrument: "FUTCOM", timeframe_min: 1440, strategy_kind: "RULES", trade_type: "FUTURES", direction: "BOTH", lots: 1, qty_mode: "LOTS", product_type: "M", exchange: "MCX",
   option_side: "BUY", leg_template_opt: "{}", leg_template_fut: "{}", position: "FLAT", archived: false, created_at: now, owner_id: A, active: true, live: false, intraday: false };
 const S = (id, u, seg, lot, dd, extra = {}) => ({ ...base, id, name: `Lab #${id} · Futures · ${u} daily · test rule`, underlying: u, data_segment: seg, data_security_id: u, futures_symbol: u, lot_size: lot,
@@ -30,7 +30,9 @@ const res = {
   "rpc/whoami": me, "rpc/broker_status": { broker: "DHAN", has_token: true, token_tail: "abcd", has_url: true, url_host: "x", has_secret: true },
   "rpc/my_capital": { capital: 10000000, since: null, deploy_pct: 60, live_net: 0, paper_net: 0, live_used: 0, paper_used: 0, funds: {} },
   "algo_strategies": strategies, "lab_margins": rates,
-  "algo_trades": [100000, -300000, 50000, -200000].map((net, i) => ({ id: i + 1, strategy_id: "x", user_id: A, mode: "PAPER", net, exit_at: `202${i}-03-01T10:00:00Z`, contract: "X", lots: 1 })),
+  // The admin's own closed trades belong to the archived "x"; every other strategy carries the same four trades as a client's rows
+  // (the trade store is read once and filtered per strategy since 6 Nov 2026, so each strategy needs rows of its own).
+  "algo_trades": [["x", A], ["g1", U], ["g2", U], ["gm", U], ["cu", U], ["sol", U], ["mid", U], ["nodd", U]].flatMap(([sid, uid], k) => [100000, -300000, 50000, -200000].map((net, i) => ({ id: k * 4 + i + 1, strategy_id: sid, user_id: uid, mode: "PAPER", net, exit_at: `202${i}-03-01T10:00:00Z`, contract: "X", lots: 1 }))),
 };
 const writes = [];
 await p.route(/supabase\.co/, (r) => {
@@ -52,10 +54,13 @@ await p.goto("http://localhost:8765/index.html"); await p.waitForTimeout(1500);
 const fail = (m, x) => { console.log("FAIL", m, JSON.stringify(x ?? "")); process.exit(1); };
 await p.evaluate(() => openCap()); await p.waitForTimeout(800);
 await p.click('#cap_mode [data-m="PAPER"]'); await p.waitForTimeout(800);
-// Drawdown check: each strategy (desk trades, same list) falls ₹4.5L = 4.5%; all 7 together ₹31.5L = 31.5% → limit 50%.
+// The wizard prefills capital + booked P&L (₹96.5L here); the lot figures below are worked out from a round ₹1 crore typed in.
+await p.fill("#lw_cap", "10000000"); await p.dispatchEvent("#lw_cap", "input"); await p.waitForTimeout(200);
+// Drawdown check: each strategy (its own trades) falls ₹4.5L = 4.7% of the capital now (₹96.5L = capital + booked P&L, the same figure
+// as the Capital tile since 6 Nov 2026); all 7 together ₹31.5L = 32.6% → limit 50%.
 await p.waitForSelector("#cap_dd_use", { timeout: 8000 }).catch(() => fail("no drawdown suggestion", null));
 const dd = await p.textContent("#cap_dd");
-if (!/31\.5%/.test(dd) || !/4\.5%/.test(dd) || !/Use 50%/.test(dd)) fail("drawdown figures", dd.slice(0, 600));
+if (!/32\.6%/.test(dd) || !/4\.7%/.test(dd) || !/Use 50%/.test(dd)) fail("drawdown figures", dd.slice(0, 600));
 await p.click("#cap_dd_use"); if (await p.inputValue("#cap_deploy") !== "50") fail("use suggestion");
 // The capital tile says it includes archived strategies' trades (all the mocked trades belong to archived "x").
 if (!/includes −₹3,50,000 from archived/.test(await p.textContent("#cap_stats"))) fail("archived note", await p.textContent("#cap_stats"));
