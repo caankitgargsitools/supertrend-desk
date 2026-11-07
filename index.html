@@ -1469,7 +1469,7 @@ body.dk-fs-on { overflow: hidden; }
       </section>
       <section class="card" id="cap_sec_strats">
         <h3 style="font-size:15px;margin:0 0 8px">Strategies</h3>
-        <div class="scroll"><table><thead><tr><th>Strategy</th><th>Status</th><th>Position</th><th class="n">Money in use</th><th>Lots</th><th class="n">Next trade (lots)</th><th class="n">Profit / loss</th></tr></thead><tbody id="cap_body"></tbody></table></div>
+        <div class="scroll"><table><thead><tr><th>Strategy</th><th>Status</th><th>Position</th><th class="n">Margin in use</th><th>Lots</th><th class="n">Next trade (lots)</th><th class="n">Profit / loss</th></tr></thead><tbody id="cap_body"></tbody></table></div>
         <p class="hint" id="cap_rates" style="margin:8px 0 0"></p>
         <p class="hint adv" style="margin:8px 0 0">Capital held: margin for futures and option writing (contract value × margin %), premium paid for option buying, estimated at entry. “Next entry” uses the last price; option buying is sized at entry from the live premium.</p>
       </section>
@@ -4624,14 +4624,14 @@ async function capDd(st) {
   box.innerHTML = `<h4>Drawdown check · ${live ? "live" : "paper"} strategies</h4>
     <p class="hint" style="margin:0">How far your ${have.length} active ${live ? "live" : "paper"} strateg${have.length === 1 ? "y has" : "ies have"} fallen from a peak, at the lots each trades now, as a share of your capital now (${rupees(equity)}). From each strategy's Strategy Lab backtest, or its own desk trades when it has no backtest.</p>
     <div class="stats" style="margin-top:10px">
-      ${tile("Worst fall, all together", togPct == null ? (tog ? rupeesShort(tog.dd) : "–") : pTxt(togPct), "", tog ? `${rupeesShort(tog.dd)} · ${yr(from)} → ${yr(to)}${shortCommon ? " (all history)" : ""}` : "no trades yet", "--red")}
+      ${tile("Worst fall, all together", togPct == null ? (tog ? rupees(tog.dd) : "–") : pTxt(togPct), "", tog ? `${rupees(tog.dd)} · ${yr(from)} → ${yr(to)}${shortCommon ? " (all history)" : ""}` : "no trades yet", "--red")}
       ${tile("Average strategy's worst fall", pTxt(avgPct), "", "each one alone, over all its years", "--yellow")}
       ${tile("Worst single strategy", pTxt(maxSingle), "", have.length ? have.reduce((a, r) => r.all.dd > a.all.dd ? r : a).s.name.split(" · ")[0] : "–")}
       ${tile("If every worst fall came at once", pTxt(sumPct), "", "very unlikely; the upper bound", "--line")}
-      ${tile("Margin if all are in a trade", pTxt(pc(marginAll)), "", rupeesShort(marginAll), "--blue")}
+      ${tile("Margin if all are in a trade", pTxt(pc(marginAll)), "", rupees(marginAll), "--blue")}
     </div>
     ${sug != null ? `<p class="dd-sug hint" style="margin-top:10px">You could allow up to <b>${sug}%</b> for “Never use more than” and still keep 1.5 × the worst fall (${pTxt(basis)}${maxSingle > togPct ? ", the worst single strategy" : ", all together"}) free; <b>${Number(st.deploy_pct) || 60}%</b> is saved.${pc(marginAll) != null && pc(marginAll) > sug ? ` All strategies in a trade at once need ${pTxt(pc(marginAll))}: above that, some entries would wait for room.` : ""} <button class="btn small" type="button" id="cap_dd_use">Use ${sug}%</button></p>` : ""}
-    <details><summary>Each strategy</summary><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Strategy</th><th class="n">Lots</th><th class="n">Worst fall (all its years)</th><th class="n">% of capital</th><th class="n">Worst fall ${yr(from).slice(0, 4)}→</th><th>From</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.s.name.split(" · ")[0])} <span class="hint">${esc(r.s.underlying)}</span></td><td class="n mono">${r.lots}${r.auto ? " (auto)" : ""}</td><td class="n mono">${r.all ? rupeesShort(r.all.dd) : "–"}</td><td class="n mono">${r.all ? pTxt(pc(r.all.dd)) : "–"}</td><td class="n mono">${r.common ? rupeesShort(r.common.dd) : "–"}</td><td class="hint">${esc(r.src)}${r.tr.length ? ` · ${yr(r.tr[0].t).slice(0, 4)}–${yr(r.tr.at(-1).t).slice(0, 4)}` : ""}</td></tr>`).join("")}</tbody></table></div>
+    <details><summary>Each strategy</summary><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Strategy</th><th class="n">Lots</th><th class="n">Worst fall (all its years)</th><th class="n">% of capital</th><th class="n">Worst fall ${yr(from).slice(0, 4)}→</th><th>From</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.s.name.split(" · ")[0])} <span class="hint">${esc(r.s.underlying)}</span></td><td class="n mono">${r.lots}${r.auto ? " (auto)" : ""}</td><td class="n mono">${r.all ? rupees(r.all.dd) : "–"}</td><td class="n mono">${r.all ? pTxt(pc(r.all.dd)) : "–"}</td><td class="n mono">${r.common ? rupees(r.common.dd) : "–"}</td><td class="hint">${esc(r.src)}${r.tr.length ? ` · ${yr(r.tr[0].t).slice(0, 4)}–${yr(r.tr.at(-1).t).slice(0, 4)}` : ""}</td></tr>`).join("")}</tbody></table></div>
     <p class="hint" style="margin:6px 0 0">Backtest falls are history, not a limit: a real fall can be deeper. Strategies on automatic lots are counted at their saved lots. Change the lots with the wizard below and this check follows.</p></details>`;
   const b = $("cap_dd_use"); if (b) b.onclick = () => { $("cap_deploy").value = String(sug); $("cap_msg").textContent = `Limit set to ${sug}% — press Save to keep it.`; $("cap_deploy").focus(); };
 }
@@ -4701,22 +4701,22 @@ function lwRender() {
   const zero = sized.filter((r) => !r.lots).length, over = used > limit;
   $("lw_modeTxt").textContent = live ? "live" : "paper";
   const savedPct = Number(cap.status && cap.status.deploy_pct) || 60;
-  $("lw_capWords").innerHTML = capAmt ? esc(`${rupeesShort(capAmt)} · margin may use up to ${rupeesShort(limit)} at once. Prefilled with your capital plus ${live ? "live" : "paper"} profit / loss and your saved limit (${savedPct}%).`)
+  $("lw_capWords").innerHTML = capAmt ? esc(`${rupees(capAmt)} · margin may use up to ${rupees(limit)} at once. Prefilled with your capital plus ${live ? "live" : "paper"} profit / loss and your saved limit (${savedPct}%).`)
     + (capPct > savedPct ? ` <b style="color:var(--red)">Above your saved limit of ${savedPct}%.</b>` : "") : "Enter the capital.";
   $("lw_capPct").style.borderColor = capPct > savedPct ? "var(--red)" : "";
   $("lw_riskBox").hidden = lw.method !== "risk";
   $("lw_moveBox").hidden = !byMove;
   const days = sized.filter((r) => r.lots > 0 && r.day).map((r) => r.day);
-  $("lw_moveTxt").textContent = byMove && target ? `Target ${rupeesShort(target)} each${Number($("lw_moveAmt").value) > 0 ? "" : " (the most your limit allows)"}; whole lots make it ${days.length ? `${rupeesShort(Math.min(...days))}–${rupeesShort(Math.max(...days))}` : "–"}.` : "";
+  $("lw_moveTxt").textContent = byMove && target ? `Target ${rupees(target)} each${Number($("lw_moveAmt").value) > 0 ? "" : " (the most your limit allows)"}; whole lots make it ${days.length ? `${rupees(Math.min(...days))}–${rupees(Math.max(...days))}` : "–"}.` : "";
   document.querySelectorAll("#lw_methods [data-lwm]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lwm === lw.method)));
-  $("lw_tiles").innerHTML = tile("Margin needed", rupeesShort(used), "", `${capAmt ? Math.round(used / capAmt * 100) : 0}% of capital · ${lots} lots`, over ? "--red" : "--blue")
-    + tile("Left free", rupeesShort(Math.max(0, capAmt - used)), "", over ? `above your ${capPct}% limit` : `limit ${capPct}% = ${rupeesShort(limit)}`, over ? "--red" : "--green")
+  $("lw_tiles").innerHTML = tile("Margin needed", rupees(used), "", `${capAmt ? Math.round(used / capAmt * 100) : 0}% of capital · ${lots} lots`, over ? "--red" : "--blue")
+    + tile("Left free", rupees(Math.max(0, capAmt - used)), "", over ? `above your ${capPct}% limit` : `limit ${capPct}% = ${rupees(limit)}`, over ? "--red" : "--green")
     + tile("Strategies trading", `${sized.length - zero} / ${on.length}`, "", zero ? `${zero} get 0 lots` : "all get at least 1 lot", zero ? "--yellow" : "--line")
-    + (byMove ? tile("Each on a typical day", target ? `≈ ${rupeesShort(target)}` : "–", "", days.length ? `${days.length} strategies · whole lots: ${rupeesShort(Math.min(...days))}–${rupeesShort(Math.max(...days))}` : "no strategy sized", "--green")
-      : tile("Worst falls added up", rupeesShort(fall), "", `${capAmt ? (fall / capAmt * 100).toFixed(1) : 0}% of capital if all hit at once`));
+    + (byMove ? tile("Each on a typical day", target ? `≈ ${rupees(target)}` : "–", "", days.length ? `${days.length} strategies · whole lots: ${rupees(Math.min(...days))}–${rupees(Math.max(...days))}` : "no strategy sized", "--green")
+      : tile("Worst falls added up", rupees(fall), "", `${capAmt ? (fall / capAmt * 100).toFixed(1) : 0}% of capital if all hit at once`));
   $("lw_fill").style.width = `${capAmt ? Math.min(100, used / capAmt * 100) : 0}%`; $("lw_fill").style.background = over ? "var(--red)" : "var(--blue)";
   $("lw_capLine").style.left = `${capPct}%`;
-  $("lw_meterTxt").textContent = `${rupeesShort(used)} of ${rupeesShort(capAmt)} in margin (yellow line: your ${capPct}% limit).`;
+  $("lw_meterTxt").textContent = `${rupees(used)} of ${rupees(capAmt)} in margin (yellow line: your ${capPct}% limit).`;
   const pctCol = lw.method === "pct", nCol = pctCol ? 8 : 7;
   $("lw_tbl").tHead.innerHTML = `<tr><th>Strategy</th>${pctCol ? '<th class="n">Share %</th>' : ""}<th class="n">Now</th><th class="n">Margin / lot</th><th class="n">${byMove ? "Typical day / lot" : "Worst fall / lot"}</th><th class="n">New lots</th><th class="n">Margin blocked</th><th class="n">${byMove ? "Typical day at these lots" : "Worst fall at these lots"}</th></tr>`;
   const groups = new Map(); for (const r of all) { if (!groups.has(r.s.underlying)) groups.set(r.s.underlying, []); groups.get(r.s.underlying).push(r); }
@@ -4730,21 +4730,21 @@ function lwRender() {
       const note = r.margin == null ? "options: size in its settings" : r.why;
       body += `<tr class="${r.on ? "" : "off"}"><td class="nm"><label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" data-lwpick="${s.id}" ${r.on ? "checked" : ""} ${tOff || r.margin == null ? "disabled" : ""} style="margin-top:3px"><span style="min-width:0;display:block;color:inherit;font-size:13px;white-space:normal"><b>${esc(s.name.split(" · ")[0])}</b>${z ? ' <span class="chip red" style="display:inline">0 lots</span>' : ""}${s.position !== "FLAT" ? ` <span class="chip" style="display:inline">${s.position === "LONG" ? "Long" : "Short"} ${s.pos_lots || ""}</span>` : ""}<span>${esc(s.name.split(" · ").slice(2).join(" · ") || s.name)}${note ? ` — ${esc(note)}` : ""}</span></span></label></td>`
         + (pctCol ? `<td class="n"><input class="pct" type="number" min="0" max="100" step="0.5" data-lwpct="${s.id}" value="${r.on ? (lw.pct[s.id] || 0) : 0}" ${r.on ? "" : "disabled"}></td>` : "")
-        + `<td class="n mono">${esc(now)}</td><td class="n mono">${r.margin != null ? rupeesShort(r.margin) : "–"}</td><td class="n mono">${byMove ? (r.move ? `${rupeesShort(r.move)}<div class="hint sm">${(Number(cap.rates[s.underlying].day_move) * 100).toFixed(2)}% a day</div>` : "–") : r.dd ? rupeesShort(r.dd) : "–"}</td>`
-        + `<td class="n lots ${z ? "z" : ""}">${r.on && r.lots != null ? r.lots : "–"}</td><td class="n mono">${r.on && r.lots != null ? rupeesShort(r.used) : "–"}</td><td class="n mono">${byMove ? (r.on && r.day != null && r.lots ? rupeesShort(r.day) : "–") : r.on && r.fall != null ? rupeesShort(r.fall) : "–"}</td></tr>`;
+        + `<td class="n mono">${esc(now)}</td><td class="n mono">${r.margin != null ? rupees(r.margin) : "–"}</td><td class="n mono">${byMove ? (r.move ? `${rupees(r.move)}<div class="hint sm">${(Number(cap.rates[s.underlying].day_move) * 100).toFixed(2)}% a day</div>` : "–") : r.dd ? rupees(r.dd) : "–"}</td>`
+        + `<td class="n lots ${z ? "z" : ""}">${r.on && r.lots != null ? r.lots : "–"}</td><td class="n mono">${r.on && r.lots != null ? rupees(r.used) : "–"}</td><td class="n mono">${byMove ? (r.on && r.day != null && r.lots ? rupees(r.day) : "–") : r.on && r.fall != null ? rupees(r.fall) : "–"}</td></tr>`;
     }
   }
   $("lw_tbl").tBodies[0].innerHTML = body || `<tr><td colspan="${nCol}" class="hint">No ${live ? "live" : "paper"} strategies.</td></tr>`;
   const pctSum = on.reduce((a, r) => a + (lw.pct[r.s.id] || 0), 0);
-  $("lw_tbl").tFoot.innerHTML = `<tr><td><b>Total · ${on.length} strategies</b></td>${pctCol ? `<td class="n mono" style="color:${Math.abs(pctSum - 100) > 0.5 ? "var(--red)" : "inherit"}">${pctSum.toFixed(1)}%</td>` : ""}<td></td><td></td><td></td><td class="n lots">${lots}</td><td class="n mono"><b>${rupeesShort(used)}</b></td><td class="n mono"><b>${rupeesShort(fall)}</b></td></tr>`;
+  $("lw_tbl").tFoot.innerHTML = `<tr><td><b>Total · ${on.length} strategies</b></td>${pctCol ? `<td class="n mono" style="color:${Math.abs(pctSum - 100) > 0.5 ? "var(--red)" : "inherit"}">${pctSum.toFixed(1)}%</td>` : ""}<td></td><td></td><td></td><td class="n lots">${lots}</td><td class="n mono"><b>${rupees(used)}</b></td><td class="n mono"><b>${rupees(fall)}</b></td></tr>`;
   const byA = new Map(); for (const r of sized) byA.set(r.s.underlying, (byA.get(r.s.underlying) || 0) + r.used);
   const top = Math.max(1, ...byA.values());
-  $("lw_assets").innerHTML = [...byA].sort((a, b) => b[1] - a[1]).map(([u, v]) => `<div class="lw-a"><span>${esc(lwName(u))}</span><span class="b"><i class="${capAmt && v / capAmt > .25 ? "hot" : ""}" style="width:${v / top * 100}%"></i></span><span class="v">${rupeesShort(v)}${capAmt ? ` · ${Math.round(v / capAmt * 100)}%` : ""}</span></div>`).join("") || '<p class="hint">Nothing ticked.</p>';
+  $("lw_assets").innerHTML = [...byA].sort((a, b) => b[1] - a[1]).map(([u, v]) => `<div class="lw-a"><span>${esc(lwName(u))}</span><span class="b"><i class="${capAmt && v / capAmt > .25 ? "hot" : ""}" style="width:${v / top * 100}%"></i></span><span class="v">${rupees(v)}${capAmt ? ` · ${Math.round(v / capAmt * 100)}%` : ""}</span></div>`).join("") || '<p class="hint">Nothing ticked.</p>';
   const notes = [];
   const saved = Number(cap.status && cap.status.deploy_pct) || 60;
   if (capPct > saved) notes.push(["err", `${capPct}% here is above your saved limit of ${saved}% (“Never use more than” at the top of this page). Strategies on automatic lots stop new entries above ${saved}%, so plan with ${saved}% or raise the saved limit first.`]);
-  else if (used > capAmt * saved / 100) notes.push(["err", `Margin needed (${rupeesShort(used)}) is above your saved limit of ${saved}% (${rupeesShort(capAmt * saved / 100)}).`]);
-  if (over) notes.push(["err", `Margin needed (${rupeesShort(used)}) is above your ${capPct}% limit (${rupeesShort(limit)}). Lower the lots or the share, or raise the limit.`]);
+  else if (used > capAmt * saved / 100) notes.push(["err", `Margin needed (${rupees(used)}) is above your saved limit of ${saved}% (${rupees(capAmt * saved / 100)}).`]);
+  if (over) notes.push(["err", `Margin needed (${rupees(used)}) is above your ${capPct}% limit (${rupees(limit)}). Lower the lots or the share, or raise the limit.`]);
   for (const [u, v] of byA) if (capAmt && v / capAmt > .25) notes.push(["warn", `${lwName(u)} alone would block ${Math.round(v / capAmt * 100)}% of the capital when all its strategies are in a trade.`]);
   if (zero) notes.push(["warn", `${zero} strateg${zero === 1 ? "y gets" : "ies get"} 0 lots (${[...new Set(sized.filter((r) => !r.lots).map((r) => lwName(r.s.underlying)))].join(", ")}). Apply leaves ${zero === 1 ? "it" : "them"} as they are now; pause ${zero === 1 ? "it" : "them"} yourself, or move to a smaller contract (e.g. Gold Mini).`]);
   const noMove = on.filter((r) => byMove && !r.move).length;
@@ -9216,11 +9216,11 @@ function renderList() {
     tr.append(ck);
     for (const [k, , f, t] of cols) {
       const td = document.createElement("td"); const v = f(s);
-      if (k === "name") { td.className = "nm"; td.textContent = v; td.title = s.name; td.insertAdjacentHTML("beforeend", rankHTML(ranks.get(s.id)) + " " + cmpBtnHTML("desk", s.id, s.name)); if (s.lab_status === "failed") { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Failed lab test"; e.title = s.lab_note || "Its lab result did not pass the tougher test"; td.append(e); } if (s.last_error) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Error"; td.append(e); } if (s.kill_at) { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Kill rule"; e.title = s.kill_note || "New trades stopped: far worse than its backtest"; td.append(e); } if (s.exec_state === "working") { const e = document.createElement("span"); e.className = "chip yellow"; e.style.marginLeft = "6px"; e.textContent = "Order working"; e.title = "A live order is being worked at the broker (checked every 15 seconds)"; td.append(e); } if (s.exec_state === "exit_retry") { const e = document.createElement("span"); e.className = "chip red"; e.style.marginLeft = "6px"; e.textContent = "Exit retrying"; e.title = EXIT_RETRY_TIP; td.append(e); } }
+      if (k === "name") { td.className = "nm"; td.textContent = v; td.title = s.name; td.insertAdjacentHTML("beforeend", rankHTML(ranks.get(s.id)) + " " + cmpBtnHTML("desk", s.id, s.name)); td.insertAdjacentHTML("beforeend", " " + chips(s, "flags")); }
       else if (t === "sasset") {
         const tf = hideRules(s) ? "" : cxStratTf(s) === "D" ? "Daily" : `${cxStratTf(s)} min`;
         td.className = "nm"; td.title = s.name;
-        td.innerHTML = `<b>${esc(assetLabel(s.underlying))}</b>${rankHTML(ranks.get(s.id))}${s.last_error ? ' <span class="chip red">Error</span>' : ""}${s.kill_at ? ' <span class="chip red">Kill rule</span>' : ""}${s.exec_state === "working" ? ' <span class="chip yellow">Order working</span>' : ""}${s.exec_state === "exit_retry" ? ` <span class="chip red" title="${EXIT_RETRY_TIP}">Exit retrying</span>` : ""}<div class="hint sm">${esc(String(s.name || "").split(" · ")[0])}${tf ? ` · ${esc(tf)}` : ""}</div>`;
+        td.innerHTML = `<b>${esc(assetLabel(s.underlying))}</b>${rankHTML(ranks.get(s.id))} ${chips(s, "flags")}<div class="hint sm">${esc(String(s.name || "").split(" · ")[0])}${tf ? ` · ${esc(tf)}` : ""}</div>`;
       }
       else if (t === "side") { td.className = "wr"; td.innerHTML = (s.position === "LONG" ? '<span class="chip green">Long</span>' : s.position === "SHORT" ? '<span class="chip red">Short</span>' : '<span class="hint">Flat</span>') + (s.position !== "FLAT" ? `<div data-smeter="${esc(s.id)}">${stopMeterHTML(s)}</div>` : ""); }
       else if (t === "lots") { td.className = "n"; td.innerHTML = s.position !== "FLAT" ? `<b>${esc(String(s.pos_lots ?? "–"))}</b>` : `<span class="hint" title="${s.sizing && s.sizing.mode === "MOVE" ? `Follows the asset's typical day's move (${rupees(s.sizing.move_amt)} a day): the next entry may use a little more or fewer` : "Lots the next entry will use"}">${esc(s.sizing && s.sizing.mode === "AUTO" ? "auto" : (s.sizing && s.sizing.mode === "MOVE" ? "≈" : "") + String(s.lots ?? "–"))} next</span>`; }
@@ -9228,7 +9228,7 @@ function renderList() {
       else if (t === "int") { td.className = "n"; td.textContent = String(v); }
       else if (t === "wrap") { td.className = "wr"; td.textContent = v; }
       else if (t === "setup") { td.className = "wr"; td.innerHTML = `${esc(instName(s))}<div class="hint sm">${esc(hideRules(s) ? "–" : cxStratTf(s) === "D" ? "Daily" : `${cxStratTf(s)} min`)} · ${esc(s.is_master ? (s.listing_id ? "Marketplace copy" : "Lab copy") : s.locked ? "Bought" : hideRules(s) ? "–" : kindName(s))}</div>`; }
-      else if (t === "state") { td.className = "wr"; td.innerHTML = `${s.archived ? '<span class="chip">Archived</span>' : s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>'} ${s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>'}`; }
+      else if (t === "state") { td.className = "wr"; td.innerHTML = chips(s, "state"); }
       else if (t === "pos") { td.className = "wr"; td.innerHTML = s.position === "FLAT" ? '<span class="hint">Flat</span>' : `<b>${esc(v)}</b><div class="hint sm" data-ltp="${s.id}">${posPriceText(s)}</div>`; }
       else if (t === "upnl") { td.className = "n"; td.dataset.upnl = s.id; td.innerHTML = upnlHtml(s); }
       else if (t === "booked") { const a = pnl.get(s.id) || {}; td.className = "n " + (v > 0 ? "pos-num" : v < 0 ? "neg-num" : ""); td.innerHTML = `${a.n ? rupees(v) : "–"}${a.n ? `<div class="hint sm">${s.live ? "live" : "paper"}</div>` : ""}`; td.title = `Closed trades after charges · live ${rupees(a.live || 0)} · paper ${rupees(a.paper || 0)}`; }
@@ -9278,7 +9278,7 @@ function renderListCards(cols, rows) {
   $("lp_sum").innerHTML = `<div class="t"><span class="k">Running P&amp;L</span><span class="v" id="lp_sum_upnl">${listRunTotalHtml(rows)}</span></div>
     <div class="t"><span class="k">Booked P&amp;L</span><span class="v ${cls(booked)}">${rupees(booked)}</span><span class="s">${rows.reduce((a, s) => a + (p(s).n || 0), 0)} closed trades${(() => { const P = bookOf("PAPER"), L = bookOf("LIVE"); return P.arch || L.arch ? ` · account ${rupees(P.net + L.net)} incl. archived` : ""; })()}</span></div>
     <div class="t"><span class="k">In a trade</span><span class="v">${nOpen} <small style="font-size:13px;font-weight:600;color:var(--muted)">of ${open.length}</small></span><span class="s">${open.filter((s) => s.active).length} active · ${open.filter((s) => s.live).length} live</span></div>
-    <div class="t"><span class="k">Margin in use</span><span class="v">${rupeesShort(dep)}</span><span class="s">needs ${rupeesShort(req)} for all</span></div>`;
+    <div class="t"><span class="k">Margin in use</span><span class="v">${rupees(dep)}</span><span class="s">needs ${rupees(req)} for all</span></div>`;
   box.innerHTML = rows.length ? "" : '<p class="hint">No strategies match.</p>';
   const ranks = renderList.ranks || new Map(), groups = renderList.groups;
   const cardEl = (s) => {
@@ -9287,12 +9287,12 @@ function renderListCards(cols, rows) {
     const el = document.createElement("div"); el.className = "lpc" + (s.position !== "FLAT" ? " open" : "") + (lsel.has(s.id) ? " sel" : ""); el.tabIndex = 0;
     el.innerHTML = `<div class="top"><div class="nm"></div>${cmpBtnHTML("desk", s.id, s.name)}<input type="checkbox" class="ck" aria-label="Select" ${lsel.has(s.id) ? "checked" : ""}></div>
       <div class="sub">${esc(assetLabel(s.underlying))} · ${esc(instName(s))}${tf ? ` · ${esc(tf)}` : ""}${rankHTML(ranks.get(s.id))}</div>
-      <div class="chips">${s.archived ? '<span class="chip">Archived</span>' : s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>'}${s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>'}${s.lab_status === "failed" ? `<span class="chip red" title="${esc(s.lab_note || "")}">Failed lab test</span>` : ""}${s.last_error ? '<span class="chip red">Error</span>' : ""}${s.kill_at ? '<span class="chip red">Kill rule</span>' : ""}${s.exec_state === "working" ? '<span class="chip yellow" title="A live order is being worked at the broker (checked every 15 seconds)">Order working</span>' : ""}${s.exec_state === "exit_retry" ? `<span class="chip red" title="${EXIT_RETRY_TIP}">Exit retrying</span>` : ""}</div>
+      <div class="chips">${chips(s)}</div>
       <div class="pos"><div><div class="side ${side}">${s.position === "FLAT" ? "Flat" : `${s.position === "LONG" ? "Long" : "Short"}${s.pos_lots ? ` · ${s.pos_lots} lot${s.pos_lots === 1 ? "" : "s"}` : ""}`}</div>${s.position === "FLAT" ? '<div class="px">Waiting for a signal</div>' : `<div class="px" data-ltp="${s.id}">${posPriceText(s)}</div>`}</div>
         ${s.position === "FLAT" ? "" : `<div data-upnl="${s.id}">${upnlHtml(s)}</div>`}</div>${s.position === "FLAT" ? "" : `<div data-smeter="${esc(s.id)}">${stopMeterHTML(s)}</div>`}
-      <div class="mini"><div><span class="k">Booked</span><span class="v ${cls(s.live ? a.live : a.paper)}">${a.n ? rupeesShort(s.live ? (a.live || 0) : (a.paper || 0)) : "–"}</span></div>
+      <div class="mini"><div><span class="k">Booked</span><span class="v ${cls(s.live ? a.live : a.paper)}">${a.n ? rupees(s.live ? (a.live || 0) : (a.paper || 0)) : "–"}</span></div>
         <div><span class="k">Trades · win</span><span class="v">${a.n ? `${a.n} · ${pct(a.wins / a.n * 100)}` : "0"}</span></div>
-        <div><span class="k">Margin</span><span class="v">${(() => { const v = marginDeployed(s) || marginRequired(s).v; return v ? rupeesShort(v) : "–"; })()}</span></div>
+        <div><span class="k">Margin</span><span class="v">${(() => { const v = marginDeployed(s) || marginRequired(s).v; return v ? rupees(v) : "–"; })()}</span></div>
         <div><span class="k">Last trade</span><span class="v">${a.last ? esc(fmtDate(a.last).replace(/,.*$/, "")) : "–"}</span></div></div>`;
     el.querySelector(".nm").textContent = String(s.name || "").replace(/^Lab #(\d+) · (Futures|Option buying|Option writing) · /, "#$1 · ");
     const ck = el.querySelector(".ck");
@@ -9619,7 +9619,7 @@ async function loadWallet() {
 let statement = null;
 function stmtRows(list, nameKey) {
   const rows = Array.isArray(list) ? list : [];
-  return rows.map((r) => ({ name: r[nameKey] ?? r.name ?? r.asset ?? r.strategy ?? "–", mode: r.mode || "", trades: r.trades ?? r.n ?? 0, wins: r.wins ?? 0, gross: r.gross ?? 0, costs: r.costs ?? 0, net: r.net ?? 0 }));
+  return rows.map((r) => ({ name: nameKey === "asset" ? assetLabel(r.asset || r.name) : (r[nameKey] ?? r.name ?? r.asset ?? r.strategy ?? "–"), mode: r.mode || "", trades: r.trades ?? r.n ?? 0, wins: r.wins ?? 0, gross: r.gross ?? 0, costs: r.costs ?? 0, net: r.net ?? 0 }));
 }
 function renderStatement(st) {
   const box = $("wl_statement"); if (!box) return;
