@@ -397,7 +397,9 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   has no expired MCX options) — the backtest says so. Form: Options enabled for those assets, `#listedOptHint`, structures
   disabled; picking a stock / MCX asset still defaults to futures. Tests: `tests/sim/stocks.test.mjs`, `tests/sim/safety.test.mjs`
   "stock option entry", `tests/ui/ui_stocks.mjs`. Paper first; nothing live before the supervised test.
-- Holidays: `market_holidays` table + `tradingSession` in logic.ts.
+- Holidays: `market_holidays` table + `tradingSession` in logic.ts. Muhurat trading (special evening session, often on a Sunday): not traded and
+  not watched — Papa, 7 Nov 2026, for the 8 Nov 2026 session ("let it pass"); the engine treats it as closed. A "special
+  session" row (date, exchange, open / close) would be needed to watch stops in one.
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
 - Totals (`ledger_net_user`, `ledger_net`, `admin_users`) exclude hidden trades.
