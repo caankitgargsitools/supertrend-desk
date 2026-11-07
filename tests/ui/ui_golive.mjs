@@ -29,6 +29,16 @@ if (await p.$("#cf_live")) fail("no typed LIVE once a strategy has been live");
 if (await p.$eval("#cf_yes", (b) => b.disabled)) fail("Go live enabled");
 if (!(await p.$("#confirmBox .same-asset")) || !/Two live strategies on one asset/.test(await p.textContent("#confirmBox"))) fail("same-asset warning inline");
 await p.click("#cf_no");
+// A strategy with a stop has no "no stop-loss" box; one without needs the tick (Papa, 7 Nov 2026).
+await p.click("#b_live"); await p.waitForSelector("#confirmBox:not([hidden]) .confirm");
+if (await p.$("#cf_nostop")) fail("no stop warning for a strategy with a stop");
+await p.click("#cf_no");
+await p.evaluate(() => { const g2 = stratOf("g2"); g2.risk = { sl: null, tgt: null, trail: null }; });
+await p.click("#b_live"); await p.waitForSelector("#confirmBox:not([hidden]) .confirm");
+if (!(await p.$("#cf_nostop")) || !/No stop-loss/.test(await p.textContent("#confirmBox"))) fail("no-stop warning shown");
+if (!(await p.$eval("#cf_yes", (b) => b.disabled))) fail("Go live disabled until the no-stop tick");
+await p.check("#cf_nostop"); if (await p.$eval("#cf_yes", (b) => b.disabled)) fail("enabled after the tick");
+await p.click("#cf_no");
 // The bulk Go live carries the same table.
 await p.evaluate(() => { showPage("list"); lsel.add("n1"); renderList(); }); await p.waitForTimeout(400);
 await p.click('#lp_bulk [data-bulk="live"]'); await p.waitForSelector("#confirmBox:not([hidden]) .confirm");

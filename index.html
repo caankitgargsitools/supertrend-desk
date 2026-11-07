@@ -3954,13 +3954,32 @@ function goLiveSummary(list) {
   };
   return `<div class="scroll" style="margin:8px 0"><table class="mini golive"><thead><tr><th>Asset</th><th>Lots</th><th class="n">Margin</th><th>Stop</th><th>Expiry / roll</th></tr></thead><tbody>${list.map(row).join("")}</tbody></table></div><p class="hint" style="margin:0">Margin is today's figure for one entry. Brokerage, exchange and statutory charges apply to every order and come off the Booked P&amp;L.</p>`;
 }
+/**
+ * Going live without a price stop (Papa, 7 Nov 2026, option B): a strategy whose only exits are its rules can run against
+ * the position until its next candle decides (a whole day for a daily one, round the clock on crypto), with no stop order
+ * at the broker. The dialog names them and a tick is needed to go on.
+ */
+const stopOn = (q) => !!q && typeof q === "object" && !!q.type && q.type !== "OFF" && Number(q.value) > 0;
+const hasPriceStop = (s) => !!s.risk && (stopOn(s.risk.sl) || stopOn(s.risk.trail));
+function noStopHTML(list) {
+  const bare = list.filter((s) => !hasPriceStop(s));
+  if (!bare.length) return "";
+  const daily = bare.some((s) => Number(s.timeframe_min) >= 375 || (s.rules && s.rules.daily));
+  return `<div class="banner warn" style="margin-top:10px"><b>⚠ No stop-loss:</b> ${bare.map((s) => esc(assetLabel(s.underlying)) + " · " + esc(String(s.name || "").split(" · ")[0])).join(", ")}.
+    ${plural(bare.length, "This strategy exits", "These strategies exit")} only when ${bare.length === 1 ? "its" : "their"} rules say so, on a closed candle${daily ? " (once a day for a daily one)" : ""} — nothing caps a sharp move in between, and no stop order rests at the broker.
+    <label class="ck" style="display:flex;gap:8px;align-items:flex-start;margin-top:8px"><input type="checkbox" id="cf_nostop"><span>I understand: go live without a stop-loss.</span></label></div>`;
+}
 /** The first go-live of this account (no strategy is or has been live): LIVE has to be typed. */
 const firstLive = () => !myStrats().some((x) => x.live || x.live_since);
 const liveTypeHTML = () => firstLive() ? `<label class="f" style="margin-top:10px"><span>Your first live strategy — type LIVE to confirm</span><input id="cf_live" autocomplete="off" autocapitalize="characters" placeholder="LIVE"></label>` : "";
 function wireLiveType() {
   const box = $("confirmBox").querySelector(".confirm"); if (box) box.classList.add("wide");
-  const inp = $("cf_live"); if (!inp) return;
-  $("cf_yes").disabled = true; inp.addEventListener("input", () => { $("cf_yes").disabled = inp.value.trim().toUpperCase() !== "LIVE"; }); inp.focus();
+  const inp = $("cf_live"), tick = $("cf_nostop");
+  if (!inp && !tick) return;
+  const check = () => { $("cf_yes").disabled = (!!inp && inp.value.trim().toUpperCase() !== "LIVE") || (!!tick && !tick.checked); };
+  if (inp) inp.addEventListener("input", check);
+  if (tick) tick.addEventListener("change", check);
+  check(); (inp || tick).focus();
 }
 $("b_live").addEventListener("click", () => {
   const s = cur();
@@ -3971,7 +3990,7 @@ $("b_live").addEventListener("click", () => {
   const feeTxt = me && me.role !== "admin" && fee > 0 && !bl.trial_active && !(s.deploy_paid_until && s.deploy_paid_until >= istDate(0))
     ? `<br>A deployment fee of <strong>${rupees(fee)}</strong>${bl.deploy_fee_period === "ONE_TIME" ? " (once)" : " (for the next month)"} will be taken from your wallet.` : "";
   askConfirm((isCrypto(s.data_segment) ? "<strong>Send real orders to Delta Exchange?</strong><br>From the next signal, this strategy places market orders on Delta Exchange India with your API key. Crypto trades round the clock and moves fast; check the paper-mode log first." : "<strong>Send real orders to Dhan?</strong><br>From the next signal, this strategy posts orders to your Dhan webhook, on your own account. Check the paper-mode log first.")
-    + goLiveSummary([s]) + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + feeTxt + sameAssetWarn([s]) + liveTypeHTML(),
+    + goLiveSummary([s]) + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + feeTxt + sameAssetWarn([s]) + noStopHTML([s]) + liveTypeHTML(),
     "Go live", async () => run($("b_live"), async () => { must(await db.rpc("set_live", { p_strategy: s.id, p_live: true })); await loadAll(); await refreshMe(); toast("Live. Real orders will be sent."); }), true);
   wireLiveType();
 });
@@ -9161,7 +9180,7 @@ async function bulkAction(kind) {
       + (paused ? `<br>${paused} of them ${paused === 1 ? "is" : "are"} paused; ${paused === 1 ? "it" : "they"} won't trade until activated.` : "")
       + (skipped ? `<br>${skipped} can't go live yet (${noDhan ? "no Dhan webhook" : "no Delta API key"}) and will be left in paper mode.` : "")
       + (feeN ? `<br>A deployment fee of <strong>${rupees(fee)}</strong> each${bl.deploy_fee_period === "ONE_TIME" ? " (once)" : " (for the next month)"} will be taken from your wallet for ${feeN} of them (${rupees(fee * feeN)} in all).` : "")
-      + goLiveSummary(ready) + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + sameAssetWarn(ready) + liveTypeHTML(),
+      + goLiveSummary(ready) + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + sameAssetWarn(ready) + noStopHTML(ready) + liveTypeHTML(),
       "Go live", async () => run(btn, async () => {
         const bad = [];
         for (const s of ready) { const { error } = await db.rpc("set_live", { p_strategy: s.id, p_live: true }); if (error) bad.push(`${s.name}: ${errorText(error)}`); }

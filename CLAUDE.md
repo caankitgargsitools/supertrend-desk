@@ -620,6 +620,13 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
     card with print CSS, client-side CSV). The rule builder knows OI, PIV, FIB, GAP, RANGE, KC, CAL, VIX, DIV (choice
     drop-downs src / kind / mode / monthly, an "Entry fill" CLOSE / LEVEL select on the Buy / Sell sets, FIB on the target
     type); Lab settings has a market-event days editor (admins). Lab-page cards for regimes / plateau / walk-forward: later.
+- **No stop-loss warning on going live** (Papa, 7 Nov 2026, chose option B over a forced "disaster" stop): the go-live
+  dialog (single and bulk) lists strategies with neither a stop-loss nor a trailing stop (`hasPriceStop`, `noStopHTML`)
+  — they exit only on their rules at a closed candle (once a day for daily ones), nothing caps a move in between and no
+  stop order rests at the broker — and Go live stays disabled until "I understand: go live without a stop-loss" is
+  ticked (`#cf_nostop`, with the typed LIVE when both apply; `wireLiveType`). Test: `tests/ui/ui_golive.mjs`. Same day the
+  morning card's "without a stop" count was fixed to count trailing stops (`eff_stop`, migration 87): 6 of 18 paper
+  positions had no price stop, not 10.
 - **Still open from the audit**: regimes / plateau / walk-forward cards on the Lab page; `regimeStats` in user backtests.
 - **Open questions put to Papa 6 Nov 2026 (no answer within a minute → pending, ask again)**: (1) switch the four lab
   jobs (3, 10, 26, 29) back on now that the dispatcher is in and the tick closes stuck runs; (2) revoke the blanket ALL
