@@ -371,7 +371,8 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   `deskFeedsLoad` / `deskFeedsPaint` / `feedState`): green and bouncing while the feed is within its own rhythm — prices and
   stops 20 s, order manager 150 s, broker match 420 s (Papa: a 5-minute check stays green until the next is due) — amber
   up to 2.5× that, then red and blinking (bars move unevenly: every 450 ms new heights from the feed's current pattern — random, wave, climb, burst — switched every 3–8 s; 42 px tall, bright green (Papa: taller, brighter, slower), `dkPulseTick`; amber slower and lower); grey when it has nothing to do (market shut, no open position; the loop runs only
-  then). Hover: when it last worked, and "no live orders / strategy" when the job runs with nothing to do. Tested in
+  then). Hover: when it last worked, and "no live orders / strategy" when the job runs with nothing to do. Since 7 Nov 2026 (migration 88)
+  the order manager and broker match bars read the `engine-minute` dispatcher's runs (jobs 18 / 19 are off). Tested in
   `tests/ui/ui_desk.mjs`.
 - **Desk quotes on phones** (6 Nov 2026, Papa): folded to one row by default; "All ▾" / "Less ▴" (`#dk_qtog`, `dkQFold`,
   localStorage `dkQOpen`); big screens unchanged. Tested in `tests/ui/ui_desk.mjs`.
