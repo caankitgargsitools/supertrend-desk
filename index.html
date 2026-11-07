@@ -445,6 +445,20 @@ details.raw code { display: block; white-space: pre-wrap; word-break: break-all;
 /* Footer declarations folded to one line after acceptance (M11) */
 .disclaim summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; padding: 10px 0 0; border-top: 1px solid var(--line); }
 .disclaim summary::-webkit-details-marker { display: none; } .disclaim details .box { border-top: 0; padding-top: 8px; }
+/* Trade story (6 Nov 2026) */
+.storybox td { background: var(--panel-2); white-space: normal; }
+.story { padding: 6px 4px; font-size: 12.5px; } .storyl { margin: 0; padding-left: 18px; display: grid; gap: 4px; } .storyl li .chip { vertical-align: middle; }
+.tcard .storybox, .storybox.storybox { margin-top: 4px; }
+/* Monthly statement print (6 Nov 2026) */
+@media print { body * { visibility: hidden; } #stmt, #stmt * { visibility: visible; } #stmt .noprint { display: none !important; } #stmt { position: absolute; left: 0; top: 0; width: 100%; border: 0; box-shadow: none; } }
+/* Home card (6 Nov 2026) */
+.morning { margin-bottom: 14px; border-color: var(--blue); }
+.morning .mstats { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); align-items: center; } .morning .mstats b { font-size: 15px; margin-left: 4px; }
+.morning .mrows { display: grid; gap: 8px; margin-top: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.morning .mrow { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--panel-2); min-width: 0; }
+.morning .mh { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 13px; } .morning .mh .mu { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+.morning .mh a { color: var(--ink); text-decoration: none; } .morning .mh a:hover { color: var(--blue); }
+.morning .mlines { margin: 10px 0 0; padding-left: 18px; font-size: 13px; display: grid; gap: 4px; } .morning .mlines li.warn { color: var(--yellow-ink); }
 /* New-client checklist (H2) */
 .onboard { display: grid; gap: 10px; margin: 0 0 14px; padding: 14px 16px; border: 1px solid var(--blue); border-radius: var(--r); background: var(--blue-soft); }
 .onboard ol { margin: 0; padding-left: 22px; display: grid; gap: 6px; } .onboard li.done { color: var(--muted); text-decoration: line-through; }
@@ -1613,6 +1627,7 @@ body.dk-fs-on { overflow: hidden; }
           <button class="btn small" id="tf_csv" type="button">Download CSV</button>
         </div>
         <div id="tf_stats"></div>
+        <div id="tf_slip" style="margin-top:10px" hidden></div>
         <div id="tf_open" style="margin-top:10px"></div>
         <div id="tf_list" class="tlist" style="margin-top:10px"></div>
         <p class="hint" id="tf_note" style="margin:8px 0 0"></p>
@@ -1627,6 +1642,7 @@ body.dk-fs-on { overflow: hidden; }
         <p class="hint" id="lv_note" style="margin:8px 0 0"></p>
       </div>
       <div id="lp_all_box">
+      <div id="lp_morning" hidden></div>
       <div id="lp_onboard" hidden></div>
       <div class="lp-tools"><div class="seg" id="lp_view" role="group" aria-label="Table view"><button type="button" data-v="simple" aria-pressed="true">Simple</button><button type="button" data-v="full" aria-pressed="false">Detailed</button></div>
         <label class="showtr" title="One group per asset and timeframe, ranked by the Strategy Lab's consistency score"><input type="checkbox" id="lp_group" checked> Group by asset</label>
@@ -1810,9 +1826,11 @@ body.dk-fs-on { overflow: hidden; }
     </section>
 
     <section class="card" id="walletPane" hidden>
-      <div class="head"><h2>Wallet</h2></div>
+      <div class="head"><h2>Wallet</h2>
+        <div class="actions"><label class="f"><span>Month</span><input type="month" id="ws_month" lang="en-IN"></label><button class="btn" id="ws_show" type="button">Monthly statement</button></div></div>
       <div id="wl_stats" style="margin-top:12px"></div>
       <div id="wl_shukrana"></div>
+      <div id="wl_statement" style="margin-top:14px" hidden></div>
       <div class="grid" style="margin-top:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
         <div>
           <h3 style="font-size:16px">Recharge</h3>
@@ -2258,6 +2276,7 @@ async function loadAll() {
   state = { settings, strategies, has_bt: true };
   if (selected && !state.strategies.find((s) => s.id === selected)) { selected = null; if (page === "strat") page = "list"; }
   await loadLabScores().catch(() => {});
+  loadMorning().catch(() => {});
   renderConn();
   if (page === "list") renderList();
   if (page === "strat" && selected) { renderStrategy(); await loadDetail(); } else if (page === "strat") showPage("list");
@@ -2417,8 +2436,13 @@ function stopMeterHTML(s) {
   if (!s || s.position === "FLAT" || s.pos_ltp == null) return "";
   const { stop, tgt } = stopLevel(s), dir = s.position === "LONG" ? 1 : -1;
   const entry = Number(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px), now = Number(s.pos_ltp);
-  if (stop == null || !(entry > 0) || !(now > 0)) return "";
   const units = Number(s.pos_qty) || (Number(s.pos_lots) || 1) * (Number(s.lot_size) || 1);
+  return meterHTML({ entry, now, stop, tgt, dir, units });
+}
+/** The meter itself from plain numbers: entry, the price now, the stop (and target), the side (1 long / −1 short), units held. */
+function meterHTML({ entry, now, stop, tgt, dir, units }) {
+  entry = Number(entry); now = Number(now); stop = stop == null ? null : Number(stop); tgt = tgt == null ? null : Number(tgt); dir = dir === -1 ? -1 : 1; units = Number(units) || 1;
+  if (stop == null || !(entry > 0) || !(now > 0)) return "";
   const dist = (now - stop) * dir, span = Math.max(1e-9, 2 * Math.abs(entry - stop)), at = (v) => Math.max(0, Math.min(100, (v - stop) * dir / span * 100));
   const hit = dist <= 0, txt = hit ? "at the stop" : `${rupees(dist * units)} / ${pct(dist / now * 100, 1)} from the stop`;
   return `<div class="smeter${hit ? " hit" : ""}" title="${esc(`Stop ${fmtNum(stop)} · entry ${fmtNum(entry)} · now ${fmtNum(now)}${tgt != null ? ` · target ${fmtNum(tgt)}` : ""}`)}"><div class="bar"><i class="e" style="left:${at(entry).toFixed(1)}%"></i>${tgt != null ? `<i class="t" style="left:${at(tgt).toFixed(1)}%"></i>` : ""}<b class="n" style="left:${at(now).toFixed(1)}%"></b></div><div class="lbl"><span>SL ${fmtNum(stop)}</span><b>${txt}</b><span>${fmtNum(now)}</span></div></div>`;
@@ -3922,8 +3946,9 @@ function sameAssetWarn(list) {
 /** What going live means for these strategies (H5): asset, lots, today's margin, stop, expiry / roll, the charges note. */
 function goLiveSummary(list) {
   const row = (s) => {
-    const z = s.sizing || {}, lots = z.mode === "MOVE" ? `≈${s.lots || "?"} by the day's move` : z.mode === "AUTO" ? `auto (${z.alloc_pct}% of capital)` : plural(Number(s.lots) || 1, "lot");
-    const m = marginRequired(s), stop = s.risk ? (riskText(s.risk, true) || "none") : "none";
+    const z = s.sizing || {}, m = marginRequired(s), per = perLotToday(s);
+    const lots = z.mode === "MOVE" ? `≈${s.lots || "?"} by the day's move` : z.mode === "AUTO" ? `auto (${z.alloc_pct}% of capital)` : z.mode === "CAPITAL" && Number(s.capital) > 0 ? `${plural((lotsToday(s, per && per.v) ?? Number(s.lots)) || 1, "lot")} from ${rupees(s.capital)} capital` : plural(Number(s.lots) || 1, "lot");
+    const stop = s.risk ? (riskText(s.risk, true) || "none") : "none";
     const exp = isCrypto(s.data_segment) ? "perpetual, no expiry" : s.trade_type === "OPTIONS" ? `${s.expiry_flag === "MONTH" ? "monthly" : "weekly"} expiry · closed on expiry day` : s.intraday ? `squared off daily at ${String(s.square_off || "").slice(0, 5)}` : s.risk && s.risk.roll === false ? "held to expiry (no roll)" : "near month · rolls the day before expiry";
     return `<tr><td>${esc(assetLabel(s.underlying))}<div class="hint sm">${esc(String(s.name || "").split(" · ")[0])}</div></td><td>${esc(lots)}</td><td class="n">${m.v ? `≈ ${rupees(m.v)}` : "–"}</td><td>${esc(stop)}</td><td>${esc(exp)}</td></tr>`;
   };
@@ -6814,19 +6839,66 @@ function statsHtml(st, extra = "") {
 /** A trade table (desktop) and cards (phone). opts.withStrategy: show the strategy and asset columns. openRows: positions still open. */
 function tradesHtml(rows, opts = {}, openRows = []) {
   const ws = !!opts.withStrategy;
-  const head = `<tr><th>Closed (IST)</th><th>Opened</th>${ws ? "<th>Strategy</th><th>Asset</th>" : ""}${opts.withMode ? "<th>Mode</th>" : ""}<th>Side</th><th>Contract</th><th class="n">Lots</th><th class="n">Entry</th><th class="n">Exit</th><th class="n">Gross</th><th class="n">Charges</th><th class="n">Net P&amp;L</th><th>Closed by</th></tr>`;
+  const head = `<tr><th>Closed (IST)</th><th>Opened</th>${ws ? "<th>Strategy</th><th>Asset</th>" : ""}${opts.withMode ? "<th>Mode</th>" : ""}<th>Side</th><th>Contract</th><th class="n">Lots</th><th class="n">Entry</th><th class="n">Exit</th><th class="n">Gross</th><th class="n">Charges</th><th class="n">Net P&amp;L</th><th>Closed by</th><th></th></tr>`;
   const modeChip = (m) => `<span class="chip ${m === "LIVE" ? "red" : "yellow"}">${m === "LIVE" ? "Live" : "Paper"}</span>`;
-  const openTr = openRows.map((s) => `<tr class="openrow"><td><span class="chip blue">Open now</span></td><td>${esc(fmtDay(s.pos_entry_date))}</td>${ws ? `<td><a href="#" data-open="${esc(s.id)}">${esc(s.name)}</a></td><td>${esc(assetOfStrat(s))}</td>` : ""}${opts.withMode ? `<td>${modeChip(s.live ? "LIVE" : "PAPER")}</td>` : ""}<td>${esc(sideTxt(s.position))}</td><td class="hint">${esc(s.trade_type === "OPTIONS" && s.pos_strike ? `${s.dhan_symbol} ${s.pos_strike} ${s.pos_option_type}` : s.futures_symbol || "")}</td><td class="n">${esc(String(s.pos_lots ?? s.lots ?? "–"))}</td><td class="n">${esc(fmtNum(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px))}</td><td class="n"><span data-ltpn="${esc(s.id)}">${esc(fmtNum(s.pos_ltp))}</span><div class="hint sm">last price</div></td><td class="n"></td><td class="n"></td><td class="n" data-upnl="${esc(s.id)}">${upnlHtml(s)}</td><td class="hint">still open</td></tr>`).join("");
-  const body = rows.map((t) => { const s = stratOf(t.strategy_id); return `<tr><td class="when">${esc(fmtDate(t.exit_at))}</td><td>${esc(fmtDay(t.entry_day))}</td>${ws ? `<td>${s ? `<a href="#" data-open="${esc(t.strategy_id)}">${esc(s.name)}</a>` : "–"}</td><td>${esc(assetOfStrat(s))}</td>` : ""}${opts.withMode ? `<td>${modeChip(t.mode)}</td>` : ""}<td>${esc(sideTxt(t.side))}</td><td class="hint">${esc(t.contract || "")}</td><td class="n">${esc(String(t.lots ?? "–"))}</td><td class="n">${esc(fmtNum(t.entry_px))}</td><td class="n">${esc(fmtNum(t.exit_px))}</td><td class="n ${cls(t.gross)}">${esc(rupees(t.gross))}</td><td class="n">${esc(rupees(t.costs))}</td><td class="n ${cls(t.net)}"><b>${esc(rupees(t.net))}</b></td><td title="${esc(t.exit_why || "")}">${esc(closedBy(t.exit_why))}</td></tr>`; }).join("");
+  const openTr = openRows.map((s) => `<tr class="openrow"><td><span class="chip blue">Open now</span></td><td>${esc(fmtDay(s.pos_entry_date))}</td>${ws ? `<td><a href="#" data-open="${esc(s.id)}">${esc(s.name)}</a></td><td>${esc(assetOfStrat(s))}</td>` : ""}${opts.withMode ? `<td>${modeChip(s.live ? "LIVE" : "PAPER")}</td>` : ""}<td>${esc(sideTxt(s.position))}</td><td class="hint">${esc(s.trade_type === "OPTIONS" && s.pos_strike ? `${s.dhan_symbol} ${s.pos_strike} ${s.pos_option_type}` : s.futures_symbol || "")}</td><td class="n">${esc(String(s.pos_lots ?? s.lots ?? "–"))}</td><td class="n">${esc(fmtNum(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px))}</td><td class="n"><span data-ltpn="${esc(s.id)}">${esc(fmtNum(s.pos_ltp))}</span><div class="hint sm">last price</div></td><td class="n"></td><td class="n"></td><td class="n" data-upnl="${esc(s.id)}">${upnlHtml(s)}</td><td class="hint">still open</td><td></td></tr>`).join("");
+  const body = rows.map((t) => { const s = stratOf(t.strategy_id); return `<tr><td class="when">${esc(fmtDate(t.exit_at))}</td><td>${esc(fmtDay(t.entry_day))}</td>${ws ? `<td>${s ? `<a href="#" data-open="${esc(t.strategy_id)}">${esc(s.name)}</a>` : "–"}</td><td>${esc(assetOfStrat(s))}</td>` : ""}${opts.withMode ? `<td>${modeChip(t.mode)}</td>` : ""}<td>${esc(sideTxt(t.side))}</td><td class="hint">${esc(t.contract || "")}</td><td class="n">${esc(String(t.lots ?? "–"))}</td><td class="n">${esc(fmtNum(t.entry_px))}</td><td class="n">${esc(fmtNum(t.exit_px))}</td><td class="n ${cls(t.gross)}">${esc(rupees(t.gross))}</td><td class="n">${esc(rupees(t.costs))}</td><td class="n ${cls(t.net)}"><b>${esc(rupees(t.net))}</b></td><td title="${esc(t.exit_why || "")}">${esc(closedBy(t.exit_why))}</td><td>${storyBtn(t)}</td></tr>`; }).join("");
   const st = stats(rows), span = 2 + (ws ? 2 : 0) + (opts.withMode ? 1 : 0) + 5;
-  const foot = rows.length ? `<tfoot><tr><td colspan="${span}"><b>Total · ${rows.length} trade${rows.length === 1 ? "" : "s"}</b></td><td class="n ${cls(st.gross)}">${esc(rupees(st.gross))}</td><td class="n">${esc(rupees(st.costs))}</td><td class="n ${cls(st.net)}"><b>${esc(rupees(st.net))}</b></td><td></td></tr></tfoot>` : "";
+  const foot = rows.length ? `<tfoot><tr><td colspan="${span}"><b>Total · ${rows.length} trade${rows.length === 1 ? "" : "s"}</b></td><td class="n ${cls(st.gross)}">${esc(rupees(st.gross))}</td><td class="n">${esc(rupees(st.costs))}</td><td class="n ${cls(st.net)}"><b>${esc(rupees(st.net))}</b></td><td></td><td></td></tr></tfoot>` : "";
   const empty = !rows.length && !openRows.length ? `<p class="hint">${esc(opts.empty || "No trades.")}</p>` : "";
   const cards = openRows.map((s) => `<div class="tcard"><div class="r1"><span class="nm">${ws ? `<a href="#" data-open="${esc(s.id)}">${esc(s.name)}</a>` : esc(sideTxt(s.position))}</span><span class="chip blue">Open now</span></div><div class="r1"><span class="hint">${esc(sideTxt(s.position))} · from ${esc(fmtDay(s.pos_entry_date))} · at ${esc(fmtNum(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px))}</span><b data-upnl="${esc(s.id)}">${upnlHtml(s)}</b></div></div>`).join("")
     + rows.map((t) => { const s = stratOf(t.strategy_id); return `<div class="tcard"><div class="r1"><span class="nm">${ws && s ? `<a href="#" data-open="${esc(t.strategy_id)}">${esc(s.name)}</a>` : esc(t.contract || sideTxt(t.side))}</span><b class="${cls(t.net)}">${esc(rupees(t.net))}</b></div>
       <div class="r1"><span class="hint">${esc(sideTxt(t.side))} · ${esc(fmtNum(t.entry_px))} → ${esc(fmtNum(t.exit_px))} · ${esc(String(t.lots ?? ""))} lot${Number(t.lots) === 1 ? "" : "s"}</span>${opts.withMode ? modeChip(t.mode) : ""}</div>
-      <div class="r1"><span class="hint">${esc(fmtDay(t.entry_day))} → ${esc(fmtDate(t.exit_at))}</span><span class="hint">${esc(closedBy(t.exit_why))}</span></div>
+      <div class="r1"><span class="hint">${esc(fmtDay(t.entry_day))} → ${esc(fmtDate(t.exit_at))}</span><span class="hint">${esc(closedBy(t.exit_why))}</span>${storyBtn(t)}</div>
       ${ws ? `<div class="hint">${esc(assetOfStrat(s))} · ${esc(t.contract || "")}</div>` : ""}</div>`; }).join("");
   return `${empty}${rows.length || openRows.length ? `<div class="scroll tdesk" style="max-height:640px;overflow-y:auto"><table class="big-table"><thead>${head}</thead><tbody>${openTr}${body}</tbody>${foot}</table></div><div class="tmob">${cards}</div>` : ""}`;
+}
+/* ---------- Trade story (6 Nov 2026): signal → order → fill → stop → exit as a small timeline, with the slippage, from rpc trade_story ---------- */
+const storyBtn = (t) => t && t.id != null ? `<button type="button" class="btn small story" data-story="${esc(String(t.id))}" aria-expanded="false">Story ▸</button>` : "";
+const storyCache = new Map();
+function storyHTML(st) {
+  if (!st || !st.trade) return '<p class="hint" style="margin:0">No story on record for this trade.</p>';
+  const t = st.trade, s = stratOf(t.strategy_id), paper = t.mode !== "LIVE", out = [];
+  const when = (v) => v ? fmtDate(v) + (/\d{2}:\d{2}:\d{2}/.test(String(v)) ? "" : "") : "–";
+  const sig = (x, what) => x ? `<li><b>${esc(what)} signal</b> · ${esc(when(x.at))}${x.lag_ms != null ? ` · decided ${esc(String(x.lag_ms))} ms after the candle` : ""}${x.price != null ? ` · at ${esc(fmtNum(x.price))}` : ""}${x.description ? `<div class="hint sm">${esc(String(x.description).slice(0, 200))}</div>` : ""}</li>` : "";
+  out.push(sig(st.entry, "Entry"));
+  const ords = Array.isArray(st.orders) ? st.orders : [];
+  const ordLine = (o) => { const [stTxt, c] = ORD_STATE[o.state] || [o.state || "", ""];
+    const px = o.avg_px != null ? `filled ${fmtNum(o.avg_px)}${o.filled_qty != null ? ` × ${o.filled_qty}` : ""}` : o.purpose === "stop" ? `trigger ${fmtNum(o.limit_px ?? o.trigger_px)}` : o.limit_px != null ? `limit ${fmtNum(o.limit_px)}${o.steps ? ` (moved ${o.steps}×)` : ""}` : "market";
+    return `<li><b>${esc(o.purpose === "stop" ? "Stop order" : `${o.side === "BUY" ? "Buy" : "Sell"} order`)}</b> ${esc(String(o.qty ?? ""))} ${esc(o.label || "")} · ${esc(px)}${o.market_retry ? " · went to market" : ""} · <span class="chip ${c}">${esc(stTxt)}</span>${o.broker_order_id ? ` · #${esc(String(o.broker_order_id))}` : ""} · ${esc(when(o.done_at || o.placed_at))}${o.note ? `<div class="hint sm">${esc(String(o.note).slice(0, 160))}</div>` : ""}</li>`; };
+  const entryOrds = ords.filter((o) => o.purpose !== "stop" && (!st.exit || !o.event || !/EXIT|STOP|TARGET|TRAIL|SQUARE|FLATTEN|ROLL/i.test(o.event))), stops = ords.filter((o) => o.purpose === "stop"), exitOrds = ords.filter((o) => o.purpose !== "stop" && !entryOrds.includes(o));
+  entryOrds.forEach((o) => out.push(ordLine(o))); stops.forEach((o) => out.push(ordLine(o)));
+  out.push(sig(st.exit, "Exit"));
+  exitOrds.forEach((o) => out.push(ordLine(o)));
+  if (paper && !ords.length) out.push(`<li><b>Paper trade</b> · priced by the desk at the signal's close${s ? ` on ${esc(assetLabel(s.underlying))}` : ""}; no order went to the broker.</li>`);
+  const sl = st.slippage || {};
+  const slip = sl.rupees != null || sl.total_pts != null ? `<p class="hint" style="margin:6px 0 0"><b>Slippage ${esc(rupees(sl.rupees || 0))}</b>${sl.total_pts != null ? ` (${esc(fmtNum(sl.total_pts))} pts${sl.entry_pts != null || sl.exit_pts != null ? `: entry ${esc(fmtNum(sl.entry_pts ?? 0))}, exit ${esc(fmtNum(sl.exit_pts ?? 0))}` : ""})` : ""} — the broker's fills against the signal prices.</p>` : "";
+  return `<ol class="storyl">${out.filter(Boolean).join("")}</ol>${slip}`;
+}
+async function toggleStory(btn) {
+  const id = btn.dataset.story, host = btn.closest("tr") || btn.closest(".tcard"); if (!host) return;
+  const open = host.nextElementSibling && host.nextElementSibling.classList.contains("storybox");
+  if (open) { host.nextElementSibling.remove(); btn.textContent = "Story ▸"; btn.setAttribute("aria-expanded", "false"); return; }
+  const inTable = host.tagName === "TR", box = document.createElement(inTable ? "tr" : "div"); box.className = "storybox";
+  const cell = inTable ? document.createElement("td") : box; if (inTable) { cell.colSpan = host.children.length; box.append(cell); }
+  cell.innerHTML = '<div class="story"><span class="spin" aria-hidden="true"></span> Reading the trade\'s story…</div>';
+  host.after(box); btn.textContent = "Story ▾"; btn.setAttribute("aria-expanded", "true");
+  try {
+    if (!storyCache.has(id)) storyCache.set(id, await db.rpc("trade_story", { p_trade: Number(id) }).then(must));
+    cell.innerHTML = `<div class="story">${storyHTML(storyCache.get(id))}</div>`;
+  } catch (e) { cell.innerHTML = `<div class="story hint">${esc(errorText(e))}</div>`; }
+}
+document.addEventListener("click", (e) => { const b = e.target.closest("[data-story]"); if (b) { e.preventDefault(); e.stopPropagation(); toggleStory(b); } });
+/* ---------- Slippage card (rpc slippage_summary; live only; hidden when there is nothing) ---------- */
+async function loadSlippage() {
+  const box = $("tf_slip"); if (!box) return;
+  const r = await db.rpc("slippage_summary").then((x) => x.data || null).catch(() => null), rows = r && Array.isArray(r.strategies) ? r.strategies : [];
+  box.hidden = !rows.length; if (!rows.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<details class="xp"><summary><span class="xt">Slippage · live fills against the signal prices</span><span class="hint">${esc(rupees(rows.reduce((a, x) => a + (Number(x.rupees) || 0), 0)))} over ${plural(rows.reduce((a, x) => a + (Number(x.legs) || 0), 0), "leg")}</span></summary><div class="xpb">
+    <div class="scroll"><table class="mini"><thead><tr><th>Strategy</th><th class="n">Legs</th><th class="n">Average (pts)</th><th class="n">Worst (pts)</th><th class="n">₹ in all</th><th>Last</th></tr></thead><tbody>
+    ${rows.map((x) => `<tr><td>${x.strategy_id && stratOf(x.strategy_id) ? `<a href="#" data-open="${esc(x.strategy_id)}">${esc(x.name || "")}</a>` : esc(x.name || "–")}</td><td class="n">${esc(String(x.legs ?? "–"))}</td><td class="n">${esc(fmtNum(x.avg_pts))}</td><td class="n">${esc(fmtNum(x.worst_pts))}</td><td class="n ${cls(-(Number(x.rupees) || 0))}">${esc(rupees(x.rupees))}</td><td class="when">${esc(fmtDate(x.last))}</td></tr>`).join("")}</tbody></table></div>
+    <p class="hint" style="margin:6px 0 0">Points per unit between the signal's price and the broker's fill, positive = worse for you; rupees at the units traded.</p></div></details>`;
+  wireOpenLinks(box);
 }
 function wireOpenLinks(box) { box.querySelectorAll("[data-open]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); openStrat(a.dataset.open); })); }
 
@@ -6834,7 +6906,7 @@ function wireOpenLinks(box) { box.querySelectorAll("[data-open]").forEach((a) =>
 let deskTrades = [];
 async function loadAllTrades() {
   deskTrades = myTrades;
-  fillTradeFilters(); renderAllTrades(); loadAudit().catch(() => {}); loadDhanCheck().catch(() => {});
+  fillTradeFilters(); renderAllTrades(); loadAudit().catch(() => {}); loadDhanCheck().catch(() => {}); loadSlippage().catch(() => {});
 }
 /* daily self-check: every strategy's trades replayed with the backtest engine */
 async function loadAudit() {
@@ -7039,6 +7111,43 @@ function groupInfo(g, ranks, hiddenArch) {
   }
   const booked = g.list.reduce((a, s) => { const p = pnl.get(s.id) || {}; return a + (s.live ? (p.live || 0) : (p.paper || 0)); }, 0);
   return { title, count: parts.join(" · "), tag, booked };
+}
+/* ---------- Home card (6 Nov 2026): the first thing a user sees on the Strategies page — today's open positions with their
+   stop-distance meters, today's Booked P&L, expiries today, and only when they matter: token / data plan running out, the error
+   breaker, kill rules, new lab passes. From rpc morning_card, read with every refresh; notification kind "morning" opens /?home=1. */
+let morning = null;
+async function loadMorning() {
+  if (!me) return;
+  morning = await db.rpc("morning_card").then((r) => r.data || null).catch(() => null);
+  if (page === "list") renderMorning();
+}
+function renderMorning() {
+  const box = $("lp_morning"); if (!box) return;
+  const m = morning; box.hidden = !m;
+  if (!m) { box.innerHTML = ""; return; }
+  const open = Array.isArray(m.open) ? m.open : [];
+  const row = (o) => {
+    const s = stratOf(o.id), live = s ? !!s.live : !!o.live, side = (s ? s.position : o.side) || "";
+    const meter = s && s.position !== "FLAT" ? `<div data-smeter="${esc(s.id)}">${stopMeterHTML(s)}</div>` : meterHTML({ entry: o.entry, now: o.ltp, stop: o.stop, dir: /SHORT/i.test(side) ? -1 : 1, units: (Number(o.lots) || 1) * (s ? Number(s.lot_size) || 1 : 1) });
+    const upnl = s && s.position !== "FLAT" ? `<span data-upnl="${esc(s.id)}">${upnlHtml(s)}</span>` : o.upnl == null ? "–" : `<span class="${cls(o.upnl)}">${rupeesSigned(o.upnl)}</span>`;
+    return `<div class="mrow"><div class="mh"><a href="#" data-open="${esc(o.id)}"><b>${esc(assetLabel(o.asset || (s && s.underlying)))}</b> · ${esc(String(o.name || (s && s.name) || "").split(" · ")[0])}</a> <span class="chip ${live ? "red" : "yellow"}">${live ? "Live" : "Paper"}</span> <span class="chip ${/SHORT/i.test(side) ? "red" : "green"}">${/SHORT/i.test(side) ? "Short" : "Long"} ${plural(Number(o.lots) || 0, "lot")}</span>${o.expires_today ? ' <span class="chip blue" title="This contract expires today">Expires today</span>' : ""}<span class="mu">${upnl}</span></div>
+      <div class="hint sm">in ${fmtNum(o.entry)} · now ${fmtNum(o.ltp)}${o.stop != null ? ` · SL ${fmtNum(o.stop)}` : ""}${o.expiry ? ` · expiry ${esc(fmtDay(o.expiry))}` : ""}</div>${meter}</div>`;
+  };
+  const lines = [];
+  if (m.breaker_halted) lines.push(`<li class="warn"><b>New trades stopped</b> (error breaker)${m.breaker_reason ? `: ${esc(String(m.breaker_reason).slice(0, 120))}` : ""} — "Allow new trades again" at the top.</li>`);
+  if (Number(m.kills) > 0) lines.push(`<li class="warn"><b>${plural(Number(m.kills), "strategy", "strategies")}</b> stopped by the kill rule (new trades off; exits still run).</li>`);
+  if (m.token_hours_left != null && Number(m.token_hours_left) < 24) lines.push(`<li class="${Number(m.token_hours_left) <= 3 ? "warn" : ""}">Dhan token ${Number(m.token_hours_left) <= 0 ? "<b>has expired</b>" : `ends in <b>${Math.max(1, Math.round(Number(m.token_hours_left)))} h</b>`} — it renews itself; paste a new one under Connections if that fails.</li>`);
+  if (m.data_plan && !/active/i.test(String(m.data_plan))) lines.push(`<li class="warn">Dhan Data API plan <b>${esc(String(m.data_plan))}</b> — prices and candles stop until it is renewed.</li>`);
+  else if (m.data_days_left != null && Number(m.data_days_left) <= 7) lines.push(`<li class="${Number(m.data_days_left) <= 3 ? "warn" : ""}">Dhan Data API plan ends in <b>${plural(Math.max(0, Math.round(Number(m.data_days_left))), "day")}</b>${m.data_valid_until ? ` (${esc(fmtDay(m.data_valid_until))})` : ""}.</li>`);
+  const expiring = open.filter((o) => o.expires_today);
+  if (expiring.length) lines.push(`<li><b>${plural(expiring.length, "contract")}</b> expire today: ${expiring.map((o) => esc(assetLabel(o.asset))).join(", ")} — options close at 14:30, futures roll the day before.</li>`);
+  if (Number(m.new_lab_passes) > 0 && isAdmin()) lines.push(`<li>${plural(Number(m.new_lab_passes), "new lab pass", "new lab passes")} since yesterday — <a href="#" data-go="lab">Strategy Lab</a>.</li>`);
+  box.innerHTML = `<section class="card morning"><div class="head"><div><span class="label">Today · ${esc(fmtDay(m.day || Date.now()))}</span><h2 style="font-size:18px">Home</h2></div>
+    <div class="mstats"><span>Booked P&amp;L today <b class="${cls(m.booked_today)}">${rupees(m.booked_today || 0)}</b></span><span>${Number(m.active_live) || 0} live · ${Number(m.active_paper) || 0} paper active</span></div></div>
+    ${open.length ? `<div class="mrows">${open.map(row).join("")}</div>` : '<p class="hint" style="margin:8px 0 0">No open position. Active strategies enter on their next signal.</p>'}
+    ${lines.length ? `<ul class="mlines">${lines.join("")}</ul>` : ""}</section>`;
+  wireOpenLinks(box);
+  box.querySelectorAll("[data-go]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); if (a.dataset.go === "lab") openLab(); }));
 }
 /** A new client's path (H2): shown on the Strategies page while they have no strategy of their own. */
 function renderOnboard() {
@@ -7383,10 +7492,12 @@ function renderOrders() {
   const detail = (g) => {
     if (g.stopLeg) return legHtml(g.stopLeg);
     const legs = ordLegs.get(g.id) || [];
-    if (legs.length) return legs.map(legHtml).join("");
-    const fills = (g.fills || []).filter((f) => f.broker_px != null).map((f) => `${f.leg} filled ${fmtNum(f.broker_px)}`);
+    // The broker's answer in plain words (M7), the raw text behind ▸.
     const broker = isCrypto((stratOf(g.strategy_id) || {}).data_segment) ? "Delta" : "Dhan";
-    return `${ordLegText(g).map((x) => `<div class="hint" style="margin-top:2px">${esc(x)}</div>`).join("")}${fills.length ? `<div class="hint">${esc(fills.join(" · "))}</div>` : ""}${g.mode === "LIVE" && g.response ? `<div class="hint broker">${esc(brokerText(g.response, broker))}<details class="raw"><summary>▸ raw</summary><code>${esc(String(typeof g.response === "string" ? g.response : JSON.stringify(g.response)).slice(0, 600))}</code></details></div>` : ""}`;
+    const resp = g.mode === "LIVE" && g.response ? `<div class="hint broker">${esc(brokerText(g.response, broker))}<details class="raw"><summary>▸ raw</summary><code>${esc(String(typeof g.response === "string" ? g.response : JSON.stringify(g.response)).slice(0, 600))}</code></details></div>` : "";
+    if (legs.length) return legs.map(legHtml).join("") + resp;
+    const fills = (g.fills || []).filter((f) => f.broker_px != null).map((f) => `${f.leg} filled ${fmtNum(f.broker_px)}`);
+    return `${ordLegText(g).map((x) => `<div class="hint" style="margin-top:2px">${esc(x)}</div>`).join("")}${fills.length ? `<div class="hint">${esc(fills.join(" · "))}</div>` : ""}${resp}`;
   };
   const ev = (g) => g.stopLeg ? "Stop order" : ORD_EVENT[g.event] || g.event;
   const head = "<tr><th>Time (IST)</th><th>Strategy</th><th>Asset</th><th>Mode</th><th>Order</th><th class=\"n\">Price at signal</th><th>Orders &amp; broker status</th><th>Status</th></tr>";
@@ -7457,7 +7568,7 @@ async function renderLive() {
     ["asset", "Asset", (r) => esc(assetLabel(r.s.underlying)), () => "", false, () => true],
     ["since", "Live since", (r) => esc(fmtDate(r.since)), () => "", false, () => true, "when"],
     ["booked", "Booked P&L", (r) => lvRs(r.st.net), () => lvRs(totNet), true, () => true],
-    ["open", "Running P&L", (r) => r.open == null ? "–" : lvRs(r.open), () => totOpen ? lvRs(totOpen) : "–", true, (r) => r.open != null],
+    ["open", "Running P&L", (r) => r.open == null ? "–" : upnlHtml(r.s), () => totOpen ? lvRs(totOpen) : "–", true, (r) => r.open != null],
     ["trades", "Trades", (r) => String(r.st.n), () => String(tot.n), true, () => true],
     ["win", "Win %", (r) => pct(r.st.winPct), () => pct(tot.winPct), true, (r) => r.st.n > 0],
     ["dd", "Max drawdown", (r) => ddCell(r.st, r.cap.v), () => ddCell(tot, totCap), true, (r) => r.st.n > 0],
@@ -9142,7 +9253,7 @@ function renderList() {
     tb.append(tr);
     if (!folded) for (const s of g.list) tb.append(rowEl(s));
   }
-  renderOnboard();
+  renderOnboard(); renderMorning();
   $("lp_fold").hidden = !groups || !groups.length;
   if (groups) $("lp_fold").textContent = groups.some((g) => !lpFold.has(g.k)) ? "Fold all" : "Unfold all";
   renderBulkBar();
@@ -9504,6 +9615,45 @@ async function loadWallet() {
   fillRows("wl_txns", txns, "No entries yet.", (t) => [[fmtDate(t.created_at), "when"], [KIND[t.kind] || t.kind], [t.note || "", "hint"], [rupees(t.amount), "n " + (t.amount > 0 ? "pos-num" : "neg-num")]]);
   fillRows("wl_reqs", reqs, "No requests yet.", (r) => [[fmtDate(r.created_at), "when"], [rupees(r.amount), "n"], [r.ref || ""], [r.status === "PENDING" ? "Waiting for the admin" : r.status === "APPROVED" ? "Added" : `Rejected${r.note ? ": " + r.note : ""}`]]);
 }
+/* ---------- Monthly statement (6 Nov 2026): rpc client_statement for the month picked; printable; CSV built here ---------- */
+let statement = null;
+function stmtRows(list, nameKey) {
+  const rows = Array.isArray(list) ? list : [];
+  return rows.map((r) => ({ name: r[nameKey] ?? r.name ?? r.asset ?? r.strategy ?? "–", mode: r.mode || "", trades: r.trades ?? r.n ?? 0, wins: r.wins ?? 0, gross: r.gross ?? 0, costs: r.costs ?? 0, net: r.net ?? 0 }));
+}
+function renderStatement(st) {
+  const box = $("wl_statement"); if (!box) return;
+  statement = st; box.hidden = !st;
+  if (!st) { box.innerHTML = ""; return; }
+  const bm = st.by_mode || {}, modes = ["LIVE", "PAPER"].filter((m) => bm[m]);
+  const modeRow = (m) => { const x = bm[m] || {}; return `<tr><td>${m === "LIVE" ? "Live" : "Paper"}</td><td class="n">${esc(String(x.trades ?? 0))}</td><td class="n">${esc(pct(x.trades ? (x.wins || 0) / x.trades * 100 : null))}</td><td class="n">${esc(rupees(x.gross))}</td><td class="n">${esc(rupees(x.costs))}</td><td class="n ${cls(x.net)}"><b>${esc(rupees(x.net))}</b></td><td class="n">${esc(rupees(x.best))}</td><td class="n">${esc(rupees(x.worst))}</td></tr>`; };
+  const tbl = (title, rows, label) => rows.length ? `<h4 style="margin:12px 0 4px">${esc(title)}</h4><div class="scroll"><table class="mini"><thead><tr><th>${esc(label)}</th>${rows.some((r) => r.mode) ? "<th>Mode</th>" : ""}<th class="n">Trades</th><th class="n">Win %</th><th class="n">Gross</th><th class="n">Charges</th><th class="n">Booked P&amp;L</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(String(r.name))}</td>${rows.some((x) => x.mode) ? `<td>${esc(r.mode)}</td>` : ""}<td class="n">${esc(String(r.trades))}</td><td class="n">${esc(pct(r.trades ? r.wins / r.trades * 100 : null))}</td><td class="n">${esc(rupees(r.gross))}</td><td class="n">${esc(rupees(r.costs))}</td><td class="n ${cls(r.net)}">${esc(rupees(r.net))}</td></tr>`).join("")}</tbody></table></div>` : "";
+  const sk = st.shukrana_rate_pct != null ? `<p style="margin:10px 0 0">Shukrana: rate <b>${esc(String(st.shukrana_rate_pct))}%</b> of new live profit · accepted in this month <b>${esc(rupees(st.shukrana_accepted_in_month || 0))}</b> · standing now <b>${esc(rupees(st.shukrana_now || 0))}</b>${Number(st.shukrana_now) < 0 ? " (owed)" : ""}.</p>` : "";
+  box.innerHTML = `<section class="card statement" id="stmt"><div class="head"><div><span class="label">Monthly statement</span><h3 style="font-size:17px">${esc(fmtDay(st.from))} – ${esc(fmtDay(st.to))}</h3><span class="hint">${esc(me ? me.email : "")} · made ${esc(fmtDate(Date.now()))} IST · whole rupees after charges · hidden trades out</span></div>
+      <div class="actions noprint"><button class="btn small" id="ws_print" type="button">Print</button><button class="btn small" id="ws_csv" type="button">Download CSV</button><button class="btn small" id="ws_close" type="button">Close</button></div></div>
+    <div class="scroll" style="margin-top:10px"><table class="mini"><thead><tr><th>Mode</th><th class="n">Trades</th><th class="n">Win %</th><th class="n">Gross</th><th class="n">Charges</th><th class="n">Booked P&amp;L</th><th class="n">Best</th><th class="n">Worst</th></tr></thead><tbody>${modes.map(modeRow).join("") || '<tr><td colspan="8" class="hint">No closed trades in this month.</td></tr>'}</tbody></table></div>
+    <p style="margin:10px 0 0">Live Booked P&amp;L to the month's end <b class="${cls(st.live_net_to_month_end)}">${esc(rupees(st.live_net_to_month_end || 0))}</b> · its best so far (high-water mark) <b>${esc(rupees(st.live_high_water_mark || 0))}</b> · strategies at the month's end: ${esc(String((st.strategies || {}).live ?? 0))} live, ${esc(String((st.strategies || {}).paper ?? 0))} paper.</p>${sk}
+    ${tbl("By strategy", stmtRows(st.by_strategy, "name"), "Strategy")}${tbl("By asset", stmtRows(st.by_asset, "asset"), "Asset")}
+    <p class="hint" style="margin:10px 0 0">Paper trades are priced by the desk; live trades at the broker's fills where the desk has them. Your contract notes are the final word.</p></section>`;
+  $("ws_print").addEventListener("click", () => window.print());
+  $("ws_close").addEventListener("click", () => renderStatement(null));
+  $("ws_csv").addEventListener("click", () => {
+    const q = (v) => { let x = String(v ?? ""); if (typeof v === "string" && /^[=+\-@\t\r]/.test(x) && !/^-?\d+(\.\d+)?$/.test(x)) x = "'" + x; return `"${x.replace(/"/g, '""')}"`; };
+    const lines = [["Section", "Name", "Mode", "Trades", "Wins", "Gross", "Charges", "Net"].map(q).join(",")];
+    for (const m of modes) { const x = bm[m]; lines.push(["By mode", m, m, x.trades ?? 0, x.wins ?? 0, Math.trunc(x.gross || 0), Math.trunc(x.costs || 0), Math.trunc(x.net || 0)].map(q).join(",")); }
+    for (const r of stmtRows(st.by_strategy, "name")) lines.push(["By strategy", r.name, r.mode, r.trades, r.wins, Math.trunc(r.gross || 0), Math.trunc(r.costs || 0), Math.trunc(r.net || 0)].map(q).join(","));
+    for (const r of stmtRows(st.by_asset, "asset")) lines.push(["By asset", r.name, r.mode, r.trades, r.wins, Math.trunc(r.gross || 0), Math.trunc(r.costs || 0), Math.trunc(r.net || 0)].map(q).join(","));
+    lines.push(["Live net to month end", "", "", "", "", "", "", Math.trunc(st.live_net_to_month_end || 0)].map(q).join(","), ["Live high-water mark", "", "", "", "", "", "", Math.trunc(st.live_high_water_mark || 0)].map(q).join(","));
+    if (st.shukrana_rate_pct != null) lines.push(["Shukrana rate %", st.shukrana_rate_pct, "", "", "", "", "", ""].map(q).join(","), ["Shukrana accepted in month", "", "", "", "", "", "", Math.trunc(st.shukrana_accepted_in_month || 0)].map(q).join(","), ["Shukrana now", "", "", "", "", "", "", Math.trunc(st.shukrana_now || 0)].map(q).join(","));
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv" })); a.download = `statement-${String(st.month || st.from || "").slice(0, 7)}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+}
+$("ws_month").value = istParts().day.slice(0, 7);
+$("ws_show").addEventListener("click", (e) => run(e.currentTarget, async () => {
+  const m = $("ws_month").value; if (!/^\d{4}-\d{2}$/.test(m)) { toast("Pick a month."); return; }
+  renderStatement(must(await db.rpc("client_statement", { p_month: `${m}-01` })));
+  $("wl_statement").scrollIntoView({ block: "start" });
+}));
 /** Rows of plain text cells into a table body. */
 function fillRows(id, rows, empty, cells) { const tb = $(id); tb.innerHTML = rows.length ? "" : `<tr><td colspan="5" class="hint">${empty}</td></tr>`; for (const r of rows) { const tr = document.createElement("tr"); cells(r).forEach(([t, c]) => { const td = document.createElement("td"); td.className = c || ""; td.textContent = t; tr.append(td); }); tb.append(tr); } }
 /** The daily match with Dhan (Trades tab since 6 Nov 2026; it was on the Wallet page). */
@@ -10008,6 +10158,7 @@ function openDeepLink(href) {
     else if (u.searchParams.get("health") && isAdmin()) showPage("health");
     else if (u.searchParams.get("shukrana") && isAdmin()) { ad.tab = "shukrana"; showPage("admin"); }
     else if (u.searchParams.get("conn")) openConn();
+    else if (u.searchParams.get("home")) { showPage("list"); setLpTab("all"); setTimeout(() => { const h = $("lp_morning"); if (h && !h.hidden) h.scrollIntoView({ block: "start" }); }, 400); }
     if (u.search) history.replaceState(null, "", location.pathname + location.hash);
   } catch { /* ignore */ }
 }

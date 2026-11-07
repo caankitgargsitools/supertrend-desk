@@ -89,8 +89,9 @@ if (!(await p.evaluate(() => /Nothing to compare yet/.test(document.getElementBy
 await p.click("#openLab"); await p.waitForTimeout(1200);
 await p.evaluate(() => { const t0 = lab.rows[0]; lab.rows = [7001, 7002, 7003, 7004].map((id, i) => ({ ...t0, id, label: "Lab strategy " + id, fingerprint: "f" + id, family: "fm" + id, twin_of: null })); lab.per = 0; renderLabHead(); renderLabTable(); });
 const phone = width < 761, LROW = (i) => phone ? `#lab_cards .lcd:nth-child(${i}) .cmpBtn` : `#lab_body tr:nth-child(${i}) .cmpBtn`;
-// A handle click: the lab cards re-render while the page settles, which makes a plain selector click flaky on the phone.
-const clickRow = async (i) => { const el = await p.waitForSelector(LROW(i)); await el.scrollIntoViewIfNeeded(); await el.click(); };
+// The click is dispatched on the element itself: the lab cards re-render while the page settles, which makes Playwright's
+// visibility polling flaky on the phone (the DOM is fine; checked 6 Nov 2026).
+const clickRow = async (i) => { await p.waitForSelector(LROW(i), { state: "attached" }); await p.$eval(LROW(i), (b) => { b.scrollIntoView({ block: "center" }); b.click(); }); await p.waitForTimeout(150); };
 for (const i of [1, 2, 3]) await clickRow(i);
 const t1 = await p.evaluate(() => ({ n: cmpList.length, tray: !document.getElementById("cmpTray").hidden, chips: document.querySelectorAll("#cmpTray .cmpchip").length, on: document.querySelectorAll("#lab_body .cmpBtn.on, #lab_cards .cmpBtn.on").length, detail: !document.getElementById("lab_detail").hidden, badge: document.getElementById("nav_cmp_n").textContent }));
 // Phones carry the count on the Compare tab of the bottom bar instead of a tray (H1, 6 Nov 2026).
@@ -110,7 +111,8 @@ const slots = await p.evaluate(() => cmpList.map((x) => x.c).join(""));
 if (slots !== "134") fail("colour follows the strategy", slots);
 await clickRow(1);
 if (await p.evaluate(() => cmpList.map((x) => x.c).join("")) !== "1342") fail("new one takes the free slot");
-await p.click("#cmp_go"); await p.waitForTimeout(1500);
+if (phone) await p.evaluate(() => showPage("cmp")); else await p.click("#cmp_go"); // phones have no tray: the Compare tab opens it
+await p.waitForTimeout(1500);
 const c = await p.evaluate(() => ({ cards: document.querySelectorAll(".cmpcard:not(.add)").length, lines: document.querySelectorAll("#cmp_eq path.ln").length, dd: document.querySelectorAll("#cmp_dd path.ln").length,
   bars: document.querySelectorAll("#cmp_yr rect.kbar").length, rows: document.querySelectorAll(".cmptbl tbody tr:not(.grp)").length, best: document.querySelectorAll(".cmptbl td.best").length, pairs: document.querySelectorAll(".cmppairs .cpair").length,
   rules: document.querySelectorAll(".cmprules .cr").length, shortNote: [...document.querySelectorAll(".cmptbl thead th")].filter((t) => /only \d+ months? of trades/.test(t.textContent)).length, tray: document.getElementById("cmpTray").hidden, side: document.documentElement.scrollWidth > innerWidth + 1 }));
