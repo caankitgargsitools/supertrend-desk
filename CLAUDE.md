@@ -575,7 +575,52 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   every capped lab / ideas read; the whole-table `lab_tried` paging replaced by `triedOf()` fingerprint lookups.
   Combinations notify once per run (`comboDigest`) instead of once per asset / timeframe. Left out on purpose:
   stock-futures OI, per-commodity MCX expiry calendars for CAL, a live resting limit order for LEVEL fills, VIX for crypto.
-- **Still from the audit, done elsewhere this day**: see the website entries added below as they land.
+- **Website (6–7 Nov 2026; UI suite 35 tests × dark 1440 / light 1440 / dark 390, all pass; new tests `tests/ui/ui_group,
+  ui_orders, ui_live_tab, ui_conn, ui_golive, ui_strat_ux, ui_rules, ui_home, ui_story.mjs`, shared mock `tests/ui/_mock.mjs`)**:
+  - **Strategies grouped by asset** (Papa, 6 Nov: "which strategy is live, and is the best one live?"): "Group by asset"
+    tick (default on, localStorage `lpGroup`) + Fold all / Unfold all; a group = underlying · timeframe · futures-or-options
+    (`grpKey`), header row `tr.lpg` (cards `div.lpgd`) with the counts (N strategies · L live · P paper · archived), the
+    group's Running and Booked P&L (live via `[data-grun]`), and a tag — green "best is live" / amber "best isn't live"
+    (title names the best with its score and each live one's rank); ranks = the lab's consistency score via
+    `rpc("lab_scores")` (chunked by 100, cached ≤ 10 min) as a chip "★ 1 of 7" / "3 of 7" / "lab –"; default order inside a
+    group = rank. Lab rows / cards carry "On desk · Live / Paper / Paused" (`labDeskMark`) opening the strategy. Note from
+    the walk-forward (7 Nov): the lab's ranking describes the past; in 12 of 13 asset groups the top-3-by-consistency picks
+    earned less next quarter than the average passed strategy — a basket beats "the best one".
+  - **One store, one vocabulary**: `loadPnl` reads `algo_trades` once per refresh (`TRADE_COLS`) into `allTrades` /
+    `myTrades`; `tradesOf()` feeds Trades, Live, Desk, Capital, the strategy's Trades tab and Compare (4 readers and 2
+    pagers gone); `lab_margins` read once (`loadMargins`); one `stats(rows)` (same-moment steps) replaces `tradeTotals` /
+    `tradeStats` (`cmpStats` builds on it), `pct()`, whole-percent win rates; `rupees()` guards NaN, `equityOf(st, mode)`;
+    `fmtDate` ("06 Nov, 15:49" IST) / `fmtDay`; `istParts(ms)` is the only place with the 5:30 offset (`istMs` parses IST
+    text); `rupeesSigned`, `fmtNum`, the Unicode minus; `lang="en-IN"` on date inputs. Labels, verbatim everywhere:
+    **Running P&L**, **Booked P&L**, **Capital**, **Margin in use**, **Limit** (Desk chart "Capital deployed vs profit" and
+    backtest / marketplace "Net profit" kept). `rupeesShort` stays on the Desk stats and the dense admin research tables.
+  - **Cleanup**: `renderList` no longer calls `renderLive`; `refreshAll` owns the Orders poll; 150 ms debounce on the
+    search box; the hidden strategy rail, dead totals, `marketOpen` / `robCells` / `lit` / `needsUpgrade`, the duplicate
+    resize listener and dead CSS are gone; the two stacked CSS themes collapsed (82 overridden first-theme declarations
+    removed, screenshots pixel-identical); shared `tile()`, `cls()`, `chips(s, which)`, `plural()`; `paintMarks` indexes
+    once per paint and flashes via rAF; `document.hidden` guards on the 6 remaining timers.
+  - **UX**: backtest tab fits a phone; the Compare tray is full only on Strategies / strategy / Lab, a 36 px pill
+    elsewhere, none on Admin / Health / Connections / Wallet / sign-in / phones (badge on the Compare tab); Live tab hides
+    empty columns (≤ 8, "Show every column"); strategy header shows only tiles with values, the Position tile "Long 2 lots ·
+    +₹4,250" with in / now / SL / T and a **stop-distance meter** (`stopMeterHTML`, also on Simple rows, cards and the Home
+    card, live-updated), chart expert fields under "Chart settings"; the form has a sticky save bar ("Unsaved changes" /
+    Discard), lot size read-only from the preset with "override", stop / target / trailing boxes hidden while Off; Orders
+    show `brokerText` ("Dhan accepted" / "Dhan rejected: insufficient margin (DH-905)", raw behind ▸); Trades tab: open
+    positions above the closed list, "Filters (N) ▸", the daily Dhan check moved here; Wallet: Shukrana as one sentence +
+    one number; Marketplace "Edit listing ▸"; one-line footer disclaimer (none on terms / sign-in); Capital in tabs
+    (Capital & limit · Lots wizard · Closed trades) with the suggestion reworded; **go-live dialog** with a summary table
+    (asset · lots · ≈ margin · stop · expiry / roll, charges note, same-asset warning) and a typed LIVE for the account's
+    first go-live (`firstLive`); new client: a 4-step checklist card on the empty Strategies page + "Where do these come
+    from?" link on Connections. Not done: hiding Desk / Compare / Capital for a brand-new client (needs the navigation
+    decision, question 3).
+  - **Home card** (`loadMorning` / `renderMorning` ← `morning_card`, top of Strategies, `?home=1`): open positions with
+    stop meters, Booked P&L today, live / paper counts, expiries today, token / data-plan / breaker / kill / lab-pass lines
+    only when relevant. **Trade story** "Story ▸" (← `trade_story`) on both trade lists, a **Slippage** card
+    (← `slippage_summary`, live only); **Monthly statement** on the Wallet (← `client_statement`: month picker, printable
+    card with print CSS, client-side CSV). The rule builder knows OI, PIV, FIB, GAP, RANGE, KC, CAL, VIX, DIV (choice
+    drop-downs src / kind / mode / monthly, an "Entry fill" CLOSE / LEVEL select on the Buy / Sell sets, FIB on the target
+    type); Lab settings has a market-event days editor (admins). Lab-page cards for regimes / plateau / walk-forward: later.
+- **Still open from the audit**: regimes / plateau / walk-forward cards on the Lab page; `regimeStats` in user backtests.
 - **Open questions put to Papa 6 Nov 2026 (no answer within a minute → pending, ask again)**: (1) switch the four lab
   jobs (3, 10, 26, 29) back on now that the dispatcher is in and the tick closes stuck runs; (2) revoke the blanket ALL
   grants from anon / authenticated and grant back what the app uses; (3) rebuild the navigation as 5 client entries
