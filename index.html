@@ -9921,11 +9921,18 @@ function editUser(u) {
     <h4>Login</h4>
     <p class="hint" data-self hidden style="margin:0">This is your own account. Change your password with “My password” at the top of the page; setting it here would sign you out.</p>
     <div class="grid" data-notself><label class="f"><span>New password (8+ characters)</span><input id="up_pass" autocomplete="off"></label><button class="btn small" id="up_gen" type="button" style="align-self:end">Suggest</button></div>
-    <div class="formbar" data-notself><button class="btn" id="up_go" type="button">Set password</button><button class="btn danger" id="ud_go" type="button">Delete user</button><span class="hint">Delete only works for users with no trades or wallet entries; block the others.</span></div></div>`;
+    <div class="formbar" data-notself><button class="btn" id="up_go" type="button">Set password</button><button class="btn danger" id="ud_go" type="button">Delete user</button><span class="hint">Delete only works for users with no trades or wallet entries; block the others.</span></div>
+    <div data-notself><h4>Welcome message</h4><div id="ue_msg"></div></div></div>`;
   box.querySelector("h3").textContent = `${u.full_name || u.email} · ${u.email}`;
   const f = (k) => box.querySelector(`[data-f="${k}"]`);
   for (const k of ["full_name", "phone", "status", "role", "trial_until", "note"]) f(k).value = u[k] ?? "";
   f("profit_share_pct").value = ""; f("deploy_fee").value = u.deploy_fee ?? ""; f("can_build").value = String(u.can_build !== false);
+  // The first-time message again, to copy later. Passwords are kept only as a one-way hash, so the old one can't be shown:
+  // "Set password" above puts a new one into the message.
+  const ueMsg = (pw) => showLoginBox($("ue_msg"), loginText(u.email, pw, u.full_name, u.trial_until && u.trial_until >= today0() ? u.trial_until : null),
+    pw ? "The new password is shown only now. Send it privately; the user can change it later."
+       : "The password isn't stored anywhere readable (only a one-way hash), so it can't be shown again. To include one, set a new password above.", false);
+  ueMsg(null);
   $("ue_close").addEventListener("click", () => box.innerHTML = "");
   $("ue_save").addEventListener("click", (e) => run(e.currentTarget, async () => {
     const p = { full_name: f("full_name").value.trim(), phone: f("phone").value.trim(), status: f("status").value, role: f("role").value, trial_until: f("trial_until").value,
@@ -9945,8 +9952,7 @@ function editUser(u) {
   $("up_gen").addEventListener("click", () => { $("up_pass").value = genPassword(); });
   $("up_go").addEventListener("click", (e) => run(e.currentTarget, async () => {
     const pw = $("up_pass").value; await fn({ action: "reset_password", user_id: u.user_id, password: pw }); $("up_pass").value = "";
-    const cb = document.createElement("div"); cb.style.marginTop = "10px"; $("au_edit").querySelector(".ued").append(cb);
-    showLoginBox(cb, loginText(u.email, pw, u.full_name, u.trial_until && u.trial_until >= today0() ? u.trial_until : null)); toast("Password set.");
+    ueMsg(pw); $("ue_msg").scrollIntoView({ block: "nearest" }); toast("Password set. The welcome message below now has it.");
   }));
   $("ud_go").addEventListener("click", () => askAdmin(`Delete ${u.email}?`, async () => { await fn({ action: "delete", user_id: u.user_id }); box.innerHTML = ""; toast("User deleted."); await loadAdmin(); }));
   box.scrollIntoView({ block: "nearest" });
@@ -9974,7 +9980,7 @@ function loginText(email, password, name, trial) {
     "",
     `Sign in: ${location.origin}${location.pathname}`,
     `Login (email): ${email}`,
-    `Temporary password: ${password}`,
+    password ? `Temporary password: ${password}` : "Password: the one sent to you earlier (ask me for a new one if you've forgotten it)",
     trial ? `Free trial till: ${trial}` : null,
     "",
     "First steps:",
@@ -9992,14 +9998,14 @@ async function copyText(t) {
   catch { const ta = document.createElement("textarea"); ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.append(ta); ta.select(); let ok = false; try { ok = document.execCommand("copy"); } catch {} ta.remove(); return ok; }
 }
 /** A box with the login details, a Copy button and a WhatsApp share link. */
-function showLoginBox(box, text) {
-  box.innerHTML = `<div class="ued"><strong>Login details to send</strong><pre style="max-width:none;margin:0"></pre>
-    <div class="actions"><button class="btn primary small" type="button" data-c>Copy user login details</button><a class="btn small" target="_blank" rel="noopener" data-w>Send on WhatsApp</a><button class="btn small" type="button" data-x>Done</button></div>
-    <p class="hint" style="margin:0">The password is shown only now. Send it privately; the user can change it later.</p></div>`;
-  box.querySelector("pre").textContent = text;
+function showLoginBox(box, text, note = "The password is shown only now. Send it privately; the user can change it later.", done = true) {
+  box.innerHTML = `<div class="ued"><strong>Login details to send</strong><pre style="max-width:none;margin:0;white-space:pre-wrap"></pre>
+    <div class="actions"><button class="btn primary small" type="button" data-c>Copy user login details</button><a class="btn small" target="_blank" rel="noopener" data-w>Send on WhatsApp</a>${done ? '<button class="btn small" type="button" data-x>Done</button>' : ""}</div>
+    <p class="hint" style="margin:0"></p></div>`;
+  box.querySelector("pre").textContent = text; box.querySelector("p.hint").textContent = note;
   box.querySelector("[data-w]").href = "https://wa.me/?text=" + encodeURIComponent(text);
   box.querySelector("[data-c]").addEventListener("click", async (e) => { const btn = e.currentTarget; const ok = await copyText(text); btn.textContent = ok ? "Copied ✓" : "Select and copy the text above"; toast(ok ? "Login details copied." : "Couldn't copy automatically; select the text and copy it."); });
-  box.querySelector("[data-x]").addEventListener("click", () => box.innerHTML = "");
+  box.querySelector("[data-x]")?.addEventListener("click", () => box.innerHTML = "");
 }
 function genPassword() {
   const a = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789", r = new Uint32Array(10); crypto.getRandomValues(r);

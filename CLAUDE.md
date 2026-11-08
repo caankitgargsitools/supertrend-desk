@@ -376,6 +376,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   `tests/ui/ui_desk.mjs`.
 - **Desk quotes on phones** (6 Nov 2026, Papa): folded to one row by default; "All ▾" / "Less ▴" (`#dk_qtog`, `dkQFold`,
   localStorage `dkQOpen`); big screens unchanged. Tested in `tests/ui/ui_desk.mjs`.
+- **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
+  (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
+  user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
+  "Set password" puts the new one into the same message. Test: `tests/ui/ui_welcome.mjs` (args: theme width).
 - **Show password** (6 Nov 2026, Papa, after a client's phone sign-in failed twice with "wrong email or password" while the
   same password worked on another device): an eye button inside the sign-in password and the two new-password fields
   (`input[data-eye]` → `.pwbox` / `.eye`; hidden again on submit); never on the broker key fields. Test:
