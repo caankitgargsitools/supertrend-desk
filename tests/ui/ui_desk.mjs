@@ -6,17 +6,17 @@ const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" })
 const ctx = await b.newContext({ viewport: { width, height: 900 }, colorScheme: theme });
 const p = await ctx.newPage();
 const errs = [];
-p.on("pageerror", (e) => { errs.push(e.message); console.log("PAGEERR", e.message, (e.stack || "").split("\n").slice(0, 4).join(" / ")); });
+p.on("pageerror", (e) => { errs.push(e.message); console.log("PAGEERR", e.message, (e.stack || "").split("\n").slice(0, 9).join(" / ")); });
 const A = "22222222-2222-2222-2222-222222222222", now = new Date().toISOString();
 const base = { data_instrument: "FUTCOM", timeframe_min: 1440, strategy_kind: "RULES", trade_type: "FUTURES", direction: "BOTH", lots: 1, qty_mode: "LOTS", product_type: "M", exchange: "MCX",
   option_side: "BUY", leg_template_opt: "{}", leg_template_fut: "{}", position: "FLAT", archived: false, created_at: now, owner_id: A, active: true, live: false, intraday: false };
 const S = (id, u, seg, lot, dd, extra = {}) => ({ ...base, id, name: `Lab #${id} · Futures · ${u} daily · test rule`, underlying: u, data_segment: seg, data_security_id: u, futures_symbol: u, lot_size: lot,
   sizing: { mode: "FIXED", dd_per_lot: dd }, ...extra });
 const strategies = [
-  S("g1", "GOLD", "MCX_COMM", 100, 1597170, { position: "SHORT", pos_lots: 1, pos_qty: 1, pos_upnl: 717400, pos_margin: 1342777, pos_ltp: 140222, pos_entry_date: "2026-10-20" }),
-  S("g3", "GOLD", "MCX_COMM", 100, 1597170, { position: "LONG", pos_lots: 1, pos_qty: 1, pos_upnl: -347800, pos_margin: 1337847, pos_ltp: 140222, pos_entry_date: "2026-10-28" }),
-  S("mid2", "MIDCPNIFTY", "IDX_I", 120, 38248, { exchange: "NSE", position: "LONG", pos_lots: 1, pos_qty: 1, pos_upnl: 3726, pos_margin: 191921, pos_ltp: 13366, pos_entry_date: "2026-11-02" }),
-  S("sol2", "SOLUSD", "DELTA", 4400, 44550, { exchange: "DELTA", position: "SHORT", pos_lots: 1, pos_qty: 1, pos_upnl: 8628, pos_margin: 41403, pos_ltp: 92.14, pos_entry_date: "2026-10-31" }),
+  S("g1", "GOLD", "MCX_COMM", 100, 1597170, { position: "SHORT", pos_lots: 1, pos_qty: 1, pos_upnl: 717400, pos_margin: 1342777, pos_ltp: 140222, pos_entry_px: 147396, pos_risk: { dir: -1, stop: 145000, tgt: 138000 }, pos_entry_date: "2026-10-20" }),
+  S("g3", "GOLD", "MCX_COMM", 100, 1597170, { position: "LONG", pos_lots: 1, pos_qty: 1, pos_upnl: -347800, pos_margin: 1337847, pos_ltp: 140222, pos_entry_px: 143700, pos_risk: { dir: 1, stop: 139500 }, pos_entry_date: "2026-10-28" }),
+  S("mid2", "MIDCPNIFTY", "IDX_I", 120, 38248, { exchange: "NSE", position: "LONG", pos_lots: 1, pos_qty: 1, pos_upnl: 3726, pos_margin: 191921, pos_ltp: 13366, pos_entry_px: 13335, pos_entry_date: "2026-11-02" }),
+  S("sol2", "SOLUSD", "DELTA", 4400, 44550, { exchange: "DELTA", position: "SHORT", pos_lots: 1, pos_qty: 1, pos_upnl: 8628, pos_margin: 41403, pos_ltp: 92.14, pos_entry_px: 94.10, pos_entry_date: "2026-10-31" }),
   S("g2", "GOLD", "MCX_COMM", 100, 571957),
   S("gm", "GOLDM", "MCX_COMM", 10, 34438),
   S("cu", "COPPER", "MCX_COMM", 2500, 184130),
@@ -197,6 +197,22 @@ if (width >= 1280) {
   await p.click("#dk_one"); await p.waitForTimeout(300);
   if (await p.evaluate(() => document.body.classList.contains("dk-one") || getComputedStyle(document.querySelector(".bar")).display === "none")) fail("Show menu brings the menu back");
   await p.click("#dk_one"); await p.waitForTimeout(200);
+}
+// Strategies panel: Tiles / Positions (Papa, 8 Nov 2026) — one card per open position with its ladder (stop · entry · now · target).
+await p.click('#dk_heatv [data-v="pos"]'); await p.waitForTimeout(200);
+{
+  const pv = await p.evaluate(() => ({ tilesHidden: document.getElementById("dk_tiles").hidden, cards: document.querySelectorAll("#dk_pos .dk-pc").length, open: dkOpen().length,
+    ladders: document.querySelectorAll("#dk_pos .dk-pc .pladder").length, saved: localStorage.getItem("dkHeat"),
+    over: [...document.querySelectorAll("#dk_pos .dk-pc")].filter((c) => c.scrollWidth > c.clientWidth + 1).length,
+    txt: (document.querySelector("#dk_pos .dk-pc") || {}).textContent || "" }));
+  if (!pv.tilesHidden || !pv.cards || pv.cards !== pv.open || pv.ladders !== pv.cards || pv.saved !== "pos" || pv.over || !/Stop/.test(pv.txt) || !/Entry/.test(pv.txt) || !/Target/.test(pv.txt) || !/Now /.test(pv.txt)) fail("positions view", pv);
+  if (process.env.SHOT) await p.screenshot({ path: `${process.env.SHOT}/desk_pos_${theme}_${width}.png` });
+  const id = await p.getAttribute("#dk_pos .dk-pc", "data-dk");
+  await p.evaluate((sid) => { const s = state.strategies.find((x) => x.id === sid); onMark({ strategy_id: sid, ltp: Number(s.pos_ltp) + 1, upnl: Number(s.pos_upnl) + 1, at: new Date().toISOString() }); }, id); await p.waitForTimeout(300);
+  const want = await p.evaluate((sid) => "Now " + fmtNum(state.strategies.find((x) => x.id === sid).pos_ltp), id);
+  if (await p.textContent(`#dk_pos [data-dk="${id}"] .pl-now`) !== want) fail("positions follow the live price", want);
+  await p.click('#dk_heatv [data-v="tiles"]'); await p.waitForTimeout(150);
+  if (await p.evaluate(() => document.getElementById("dk_tiles").hidden || !document.getElementById("dk_pos").hidden)) fail("back to tiles");
 }
 if (errs.length) fail("page errors", errs);
 await p.click('#dk_tiles [data-dk="g1"]'); await p.waitForTimeout(400);

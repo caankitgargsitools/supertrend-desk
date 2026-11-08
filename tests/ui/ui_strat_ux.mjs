@@ -12,10 +12,10 @@ const pos = (await p.textContent("#st_pos")).replace(/\s+/g, " ").trim();
 if (pos !== "Long 2 lots · +₹4,250") fail("position tile", pos);
 const sub = await p.textContent("#st_pos_sub");
 if (!/in 1,38,100 · now 1,38,500 · SL 1,37,000 · T 1,40,000/.test(sub)) fail("position sub-line", sub);
-const meter = await p.$eval("#st_pos_meter .smeter", (m) => ({ lbl: m.querySelector(".lbl").textContent, dot: m.querySelector("b.n").style.left, tgt: !!m.querySelector("i.t") }));
-if (!/SL 1,37,000/.test(meter.lbl) || !/₹3,00,000 \/ 1\.1% from the stop/.test(meter.lbl) || !meter.tgt) fail("stop meter", meter);
-// 1,500 above the stop on a 2,200-wide bar (twice entry − stop): the dot sits at 68%.
-if (!/^6[78]/.test(meter.dot)) fail("dot position", meter.dot);
+const meter = await p.$eval("#st_pos_meter .pladder", (m) => ({ lbl: m.querySelector(".pl-cells").textContent.replace(/\s+/g, " "), now: m.querySelector(".pl-now").textContent, dot: parseFloat(m.querySelector(".pl-dot").style.left), entry: parseFloat(m.querySelector(".pl-tk:not(.sl):not(.tg)").style.left), sl: parseFloat(m.querySelector(".pl-tk.sl").style.left), tgt: !!m.querySelector(".pl-tk.tg") }));
+if (!/Stop ?1,37,000/.test(meter.lbl) || !/₹3,00,000 · 1\.1% away/.test(meter.lbl) || !/Entry ?1,38,100/.test(meter.lbl) || meter.now !== "Now 1,38,500" || !meter.tgt) fail("position ladder", meter);
+// Profit to the right: stop, then entry, then the price now (a long in profit).
+if (!(meter.sl < meter.entry && meter.entry < meter.dot)) fail("ladder order", meter);
 // Tiles with no value are gone; the rules tile stays.
 const tiles = await p.$$eval("#st_tiles .stat", (t) => t.map((x) => [x.id, x.hidden]));
 if (tiles.find((t) => t[0] === "st_line_t")[1] !== true || tiles.find((t) => t[0] === "st_close_t")[1] !== false || tiles.find((t) => t[0] === "st_trend_t")[1] !== false) fail("tiles shown / hidden", tiles);
@@ -23,7 +23,7 @@ if (tiles.find((t) => t[0] === "st_line_t")[1] !== true || tiles.find((t) => t[0
 if (!(await p.$("details.chartmore #cx_custom"))) fail("chart fields under Chart settings");
 // The live price moves: tile and meter follow.
 await p.evaluate(() => onMark({ strategy_id: "g1", ltp: 137500, upnl: -1200, at: new Date().toISOString() })); await p.waitForTimeout(300);
-if (!/−₹1,200/.test(await p.textContent("#st_pos")) || !/₹1,00,000 \/ 0\.4% from the stop/.test(await p.textContent("#st_pos_meter"))) fail("meter follows the price", await p.textContent("#st_pos_meter"));
+if (!/−₹1,200/.test(await p.textContent("#st_pos")) || !/₹1,00,000 · 0\.4% away/.test(await p.textContent("#st_pos_meter"))) fail("meter follows the price", await p.textContent("#st_pos_meter"));
 // The list's Simple view carries the meter on the open row (desktop) / card (phone).
 await p.evaluate(() => showPage("list")); await p.waitForTimeout(500);
 if (!(await p.$(phone ? "#lp_cards .lpc [data-smeter] .smeter" : "#lp_body tr.pick [data-smeter] .smeter"))) fail("meter in the list");

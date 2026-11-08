@@ -376,6 +376,15 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   `tests/ui/ui_desk.mjs`.
 - **Desk quotes on phones** (6 Nov 2026, Papa): folded to one row by default; "All ▾" / "Less ▴" (`#dk_qtog`, `dkQFold`,
   localStorage `dkQOpen`); big screens unchanged. Tested in `tests/ui/ui_desk.mjs`.
+- **Position ladder** (8 Nov 2026, Papa liked the Home card's meter: "where we entered, our stop, where we are, our target"):
+  `ladderHTML(s)` / `ladder({entry, now, stop, tgt, dir, units})` — one line with profit to the right: entry tick, stop
+  (red; right of the entry once a trailing stop locks in profit), target (green), the price now as a dot labelled "Now …",
+  the move since entry filled green / red; under it Stop · Entry · Target: how far the stop is (₹ and %), what it locks in
+  or loses, % since entry, what the target makes and how far it is ("None" when there's no stop / target). Used on the Home
+  card and the strategy page's Position tile (`data-ladder`, repainted by `paintMarks` with live prices); list rows / cards
+  keep the compact `stopMeterHTML`. **Desk**: the Strategies panel has Tiles / Positions (`#dk_heatv`, localStorage
+  `dkHeat`, `deskPosPaint`): one card per open position of the mode with its ladder; a card opens the strategy. The phone
+  menu bar sits above page content (z-index 60). Tests: `tests/ui/ui_home.mjs`, `ui_strat_ux.mjs`, `ui_desk.mjs`.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");

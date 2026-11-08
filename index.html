@@ -433,6 +433,25 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 .smeter .bar b { position: absolute; top: -4px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: var(--ink); border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--line); }
 .smeter .lbl { display: flex; justify-content: space-between; gap: 8px; margin-top: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .smeter .lbl b { color: var(--ink); font-weight: 600; } .smeter.hit .lbl b { color: var(--red); }
+.smeter .lbl span, .smeter .lbl b { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Position ladder (Papa, 8 Nov 2026): stop · entry · now · target on one line, profit to the right. */
+.pladder { margin-top: 8px; font-variant-numeric: tabular-nums; min-width: 0; }
+.pladder .pl-track { position: relative; height: 34px; }
+.pladder .pl-bar { position: absolute; left: 0; right: 0; bottom: 6px; height: 8px; border-radius: 4px; background: var(--line); }
+.pladder .pl-fill { position: absolute; bottom: 6px; height: 8px; border-radius: 4px; }
+.pladder .pl-fill.up { background: var(--green); } .pladder .pl-fill.dn { background: var(--red); }
+.pladder .pl-tk { position: absolute; bottom: 2px; width: 3px; height: 16px; margin-left: -1.5px; border-radius: 2px; background: var(--muted); }
+.pladder .pl-tk.sl { background: var(--red); } .pladder .pl-tk.tg { background: var(--green); }
+.pladder .pl-dot { position: absolute; bottom: 2px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--ink); border: 3px solid var(--panel); box-shadow: 0 0 0 1px var(--line); }
+.pladder .pl-now { position: absolute; top: 0; transform: translateX(-50%); font-size: 11px; font-weight: 700; color: var(--ink); white-space: nowrap; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; line-height: 16px; }
+.pladder .pl-now.l { transform: none; } .pladder .pl-now.r { transform: translateX(-100%); }
+.pladder .pl-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 6px; font-size: 11px; color: var(--muted); line-height: 1.35; }
+.pladder .pl-cells > div { min-width: 0; overflow-wrap: anywhere; } .pladder .pl-cells > div:nth-child(2) { text-align: center; } .pladder .pl-cells > div:nth-child(3) { text-align: right; }
+.pladder .pl-cells small { display: block; text-transform: uppercase; letter-spacing: .06em; font-size: 9.5px; font-weight: 700; }
+.pladder .pl-cells .sl small { color: var(--red); } .pladder .pl-cells .tg small { color: var(--green); }
+.pladder .pl-cells span { display: block; }
+.pladder .pl-cells b { display: block; color: var(--ink); font-size: 12.5px; font-weight: 700; }
+.pladder .pl-cells .up { color: var(--green); } .pladder .pl-cells .dn { color: var(--red); } .pladder .pl-cells .none { color: var(--yellow-ink); }
 /* Strategy form: the save bar stays in view; lot size read-only unless overridden (M4) */
 #stratBar { position: sticky; bottom: 0; background: var(--panel); padding: 10px 0; border-top: 1px solid var(--line); z-index: 3; }
 @media (max-width: 760px) { #stratBar { bottom: calc(68px + env(safe-area-inset-bottom)); } }
@@ -769,7 +788,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
   body { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
   body:not(.menu-open) #nav { display: flex !important; }
   #nav[hidden] { display: none !important; }
-  #nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; flex-wrap: nowrap; gap: 0; overflow-x: auto; scrollbar-width: none;
+  #nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; display: flex; flex-wrap: nowrap; gap: 0; overflow-x: auto; scrollbar-width: none;
     background: rgba(10,13,20,.92); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-top: 1px solid var(--line); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }
   :root[data-theme="light"] #nav { background: rgba(255,255,255,.94); }
   body.menu-open #nav { display: flex !important; grid-template-columns: none; order: initial; flex-basis: auto; }
@@ -935,6 +954,16 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-tile .s { font: 600 9.5px var(--font-data); color: var(--dk-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dk-tile .p { font: 600 12px var(--font-data); white-space: nowrap; }
 .dk-tile.flat { opacity: .55; }
+/* Desk · Positions (Papa, 8 Nov 2026): the Home card's position ladders inside the Strategies panel. */
+.dk-pos { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; max-height: 560px; overflow: auto; align-content: start;
+  --ink: var(--dk-text); --muted: var(--dk-muted); --line: var(--dk-line); --panel: var(--dk-panel); --panel-2: var(--dk-panel2); --green: var(--dk-up); --red: var(--dk-down); --yellow-ink: var(--dk-amber); }
+.dk-pc { border: 1px solid var(--dk-line); border-radius: 6px; background: var(--dk-panel2); padding: 8px 10px; min-width: 0; cursor: pointer; }
+.dk-pc:hover { border-color: var(--dk-blue); }
+.dk-pc .h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font: 700 12.5px/1.2 var(--font-ui); color: var(--dk-text); }
+.dk-pc .h .s { font: 600 10px var(--font-data); color: var(--dk-muted); }
+.dk-pc .h .sd { font: 700 10px var(--font-data); letter-spacing: .05em; } .dk-pc .h .sd.long { color: var(--dk-up); } .dk-pc .h .sd.short { color: var(--dk-down); }
+.dk-pc .h .v { margin-left: auto; font: 700 13px var(--font-data); } .dk-pc .h .v .hint { display: none; }
+.dk-pc .pladder { margin-top: 4px; } .dk-pc .pladder .pl-cells { font-size: 10.5px; }
 .dk-tile.flash { box-shadow: 0 0 0 1px var(--dk-amber) inset; }
 .dk-low { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; }
 @media (max-width: 1000px) { .dk-low { grid-template-columns: minmax(0, 1fr); } }
@@ -988,6 +1017,7 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one .dk-flow:not(.full) #dk_cv { flex: 1 1 auto; height: auto; min-height: 0; }
   body.dk-one .dk-flowfoot { padding: 4px 10px; }
   body.dk-one .dk-heat { grid-column: 2; grid-row: 3; }
+  body.dk-one .dk-heat .dk-pos { max-height: none; flex: 1 1 auto; min-height: 0; }
   body.dk-one .dk-heat .dk-tiles { max-height: none; flex: 1 1 auto; min-height: 0; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
   body.dk-one .dk-tile .p { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
   body.dk-one .dk-cvp { grid-column: 1; grid-row: 3; }
@@ -1722,8 +1752,9 @@ body.dk-fs-on { overflow: hidden; }
           <div class="dk-flowfoot"><span><span class="dk-up">● gain</span> &nbsp;<span class="dk-down">● loss</span> &nbsp;· live prices, every second while markets are open</span><button class="dk-btn" id="dk_pause" type="button">Pause</button></div>
         </div>
         <div class="dk-panel dk-heat">
-          <div class="dk-ph"><span class="dk-lbl"><b>●</b> Strategies</span><span class="dk-lbl">colour = running P&amp;L</span></div>
+          <div class="dk-ph"><span class="dk-lbl"><b>●</b> Strategies</span><span style="display:inline-flex;gap:8px;align-items:center"><span class="dk-lbl" id="dk_heatnote">colour = running P&amp;L</span><span class="dk-seg" id="dk_heatv" role="group" aria-label="Strategies shown as"><button type="button" data-v="tiles" aria-pressed="true">Tiles</button><button type="button" data-v="pos" aria-pressed="false">Positions</button></span></span></div>
           <div class="dk-tiles" id="dk_tiles"></div>
+          <div class="dk-pos" id="dk_pos" hidden></div>
         </div>
       </div>
       <div class="dk-panel dk-cvp" id="dk_cvp_box">
@@ -2421,7 +2452,7 @@ function renderStratPos(s) {
   const el = $("st_pos"); el.textContent = main;
   if (open && s.pos_upnl != null) el.insertAdjacentHTML("beforeend", ` · <span class="${cls(s.pos_upnl)}" data-upnl-inline="${esc(s.id)}">${rupeesSigned(s.pos_upnl)}</span>`);
   $("st_pos_sub").textContent = sub.join(" · ");
-  const m = $("st_pos_meter"); if (m) { m.innerHTML = stopMeterHTML(s); m.dataset.smeter = s.id; }
+  const m = $("st_pos_meter"); if (m) { m.innerHTML = ladderHTML(s); m.dataset.ladder = s.id; }
 }
 /** Stop-distance meter (Papa, 6 Nov 2026): the stop at the left, the entry in the middle, the price now as the dot; under it
  *  "₹1,240 / 0.5% from the stop". The stop is the one the header shows (fixed or trailing, whichever is nearer). */
@@ -2438,6 +2469,45 @@ function stopMeterHTML(s) {
   const entry = Number(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px), now = Number(s.pos_ltp);
   const units = Number(s.pos_qty) || (Number(s.pos_lots) || 1) * (Number(s.lot_size) || 1);
   return meterHTML({ entry, now, stop, tgt, dir, units });
+}
+/** Position ladder (Papa, 8 Nov 2026: "where we entered, our stop, where we are, our target"): one line with profit to the
+ *  right — the entry tick, the stop (red; right of the entry once a trailing stop has locked in profit), the target (green), the
+ *  price now as the dot with its label above, the move since entry filled green / red; under it Stop · Entry · Target with
+ *  rupees: how far the stop is, what it locks in or loses, what the target makes and how far it is. */
+function ladderHTML(s) {
+  if (!s || s.position === "FLAT" || s.pos_ltp == null) return "";
+  const { stop, tgt } = stopLevel(s);
+  const entry = Number(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px);
+  const units = Number(s.pos_qty) || (Number(s.pos_lots) || 1) * (Number(s.lot_size) || 1);
+  // An option bought gains when its premium rises, whatever the side of the view.
+  const dir = s.trade_type === "OPTIONS" ? (s.pos_option_side === "SELL" ? -1 : 1) : s.position === "LONG" ? 1 : -1;
+  return ladder({ entry, now: Number(s.pos_ltp), stop, tgt, dir, units });
+}
+function ladder({ entry, now, stop, tgt, dir, units }) {
+  entry = Number(entry); now = Number(now); dir = dir === -1 ? -1 : 1; units = Number(units) || 1;
+  stop = stop == null || !Number.isFinite(Number(stop)) ? null : Number(stop); tgt = tgt == null || !Number.isFinite(Number(tgt)) ? null : Number(tgt);
+  if (!(entry > 0) || !(now > 0)) return "";
+  const u = (v) => (v - entry) * dir, pts = [0, u(now)];
+  if (stop != null) pts.push(u(stop)); if (tgt != null) pts.push(u(tgt));
+  let lo = Math.min(...pts), hi = Math.max(...pts); const pad = Math.max(hi - lo, entry * 0.002) * 0.06; lo -= pad; hi += pad;
+  const at = (v) => (u(v) - lo) / (hi - lo) * 100, f = (x) => x.toFixed(2) + "%";
+  const rs = (x) => rupees(Math.abs(x)), away = (v) => `${rs(u(v) - u(now) < 0 ? (u(now) - u(v)) * units : (u(v) - u(now)) * units)} · ${pct(Math.abs(v - now) / now * 100, 1)}`;
+  const a0 = at(entry), an = at(now), up = an >= a0, nowCls = an < 12 ? " l" : an > 88 ? " r" : "";
+  const hit = stop != null && u(now) <= u(stop);
+  const slCell = stop == null ? `<div class="sl"><small>Stop</small><b class="none">None</b><span class="none">exits on its rules only</span></div>`
+    : `<div class="sl"><small>Stop</small><b>${fmtNum(stop)}</b>${hit ? '<span class="dn">reached</span>' : `<span>${away(stop)} away</span>`}<span class="${u(stop) >= 0 ? "up" : "dn"}">${u(stop) >= 0 ? "locks in" : "loses"} ${rs(u(stop) * units)}</span></div>`;
+  const move = u(now) / entry * 100;
+  const inCell = `<div><small>Entry</small><b>${fmtNum(entry)}</b><span class="${move >= 0 ? "up" : "dn"}">${move >= 0 ? "+" : "−"}${Math.abs(move).toFixed(2)}% since</span></div>`;
+  const tgCell = tgt == null ? `<div class="tg"><small>Target</small><b>None</b><span>trails / rules</span></div>`
+    : `<div class="tg"><small>Target</small><b>${fmtNum(tgt)}</b>${u(now) >= u(tgt) ? '<span class="up">reached</span>' : `<span>${away(tgt)} to go</span>`}<span class="up">makes ${rs(u(tgt) * units)}</span></div>`;
+  const title = `Stop ${stop == null ? "none" : fmtNum(stop)} · entry ${fmtNum(entry)} · now ${fmtNum(now)} · target ${tgt == null ? "none" : fmtNum(tgt)}`;
+  return `<div class="pladder" title="${esc(title)}"><div class="pl-track"><div class="pl-bar"></div>`
+    + `<div class="pl-fill ${up ? "up" : "dn"}" style="left:${f(Math.min(a0, an))};width:${f(Math.abs(an - a0))}"></div>`
+    + `<i class="pl-tk" style="left:${f(a0)}" title="Entry ${esc(fmtNum(entry))}"></i>`
+    + (stop != null ? `<i class="pl-tk sl" style="left:${f(at(stop))}" title="Stop ${esc(fmtNum(stop))}"></i>` : "")
+    + (tgt != null ? `<i class="pl-tk tg" style="left:${f(at(tgt))}" title="Target ${esc(fmtNum(tgt))}"></i>` : "")
+    + `<b class="pl-dot" style="left:${f(an)}"></b><span class="pl-now${nowCls}" style="left:${f(an)}">Now ${fmtNum(now)}</span></div>`
+    + `<div class="pl-cells">${slCell}${inCell}${tgCell}</div></div>`;
 }
 /** The meter itself from plain numbers: entry, the price now, the stop (and target), the side (1 long / −1 short), units held. */
 function meterHTML({ entry, now, stop, tgt, dir, units }) {
@@ -3297,7 +3367,7 @@ function tfName(tf) { const t = TFS.find(([v]) => v === tf); return t ? t[1] : `
 
 function warmDays() {
   // 500+ candles of warm-up so the chart's Supertrend matches the engine and the backtester.
-  const bars = Math.max(500, cx.atr * 10);
+  const bars = Math.max(500, (Number(cx.atr) || 10) * 10);
   if (cx.tf === "D") return Math.ceil(bars * 1.5);
   if (cx.tf === "W") return bars * 7;
   return Math.ceil((bars * Number(cx.tf)) / 375 * 1.5) + 3;
@@ -7147,10 +7217,10 @@ function renderMorning() {
   const open = Array.isArray(m.open) ? m.open : [];
   const row = (o) => {
     const s = stratOf(o.id), live = s ? !!s.live : !!o.live, side = (s ? s.position : o.side) || "";
-    const meter = s && s.position !== "FLAT" ? `<div data-smeter="${esc(s.id)}">${stopMeterHTML(s)}</div>` : meterHTML({ entry: o.entry, now: o.ltp, stop: o.stop, dir: /SHORT/i.test(side) ? -1 : 1, units: (Number(o.lots) || 1) * (s ? Number(s.lot_size) || 1 : 1) });
+    const meter = s && s.position !== "FLAT" ? `<div data-ladder="${esc(s.id)}">${ladderHTML(s)}</div>` : ladder({ entry: o.entry, now: o.ltp, stop: o.stop, dir: /SHORT/i.test(side) ? -1 : 1, units: (Number(o.lots) || 1) * (s ? Number(s.lot_size) || 1 : 1) });
     const upnl = s && s.position !== "FLAT" ? `<span data-upnl="${esc(s.id)}">${upnlHtml(s)}</span>` : o.upnl == null ? "–" : `<span class="${cls(o.upnl)}">${rupeesSigned(o.upnl)}</span>`;
     return `<div class="mrow"><div class="mh"><a href="#" data-open="${esc(o.id)}"><b>${esc(assetLabel(o.asset || (s && s.underlying)))}</b> · ${esc(String(o.name || (s && s.name) || "").split(" · ")[0])}</a> <span class="chip ${live ? "red" : "yellow"}">${live ? "Live" : "Paper"}</span> <span class="chip ${/SHORT/i.test(side) ? "red" : "green"}">${/SHORT/i.test(side) ? "Short" : "Long"} ${plural(Number(o.lots) || 0, "lot")}</span>${o.expires_today ? ' <span class="chip blue" title="This contract expires today">Expires today</span>' : ""}<span class="mu">${upnl}</span></div>
-      <div class="hint sm">in ${fmtNum(o.entry)} · now ${fmtNum(o.ltp)}${o.stop != null ? ` · SL ${fmtNum(o.stop)}` : ""}${o.expiry ? ` · expiry ${esc(fmtDay(o.expiry))}` : ""}</div>${meter}</div>`;
+      ${o.expiry ? `<div class="hint sm">expiry ${esc(fmtDay(o.expiry))}</div>` : ""}${meter}</div>`;
   };
   const lines = [];
   if (m.breaker_halted) lines.push(`<li class="warn"><b>New trades stopped</b> (error breaker)${m.breaker_reason ? `: ${esc(String(m.breaker_reason).slice(0, 120))}` : ""} — "Allow new trades again" at the top.</li>`);
@@ -7307,11 +7377,12 @@ function upnlHtml(s) {
 /** Puts the latest prices into every place on screen that shows an open position, with a short flash on change. */
 function paintMarks(prev) {
   // Three passes over the screen per paint (not three per strategy): id → the elements that show that position.
-  const by = new Map(), add = (k) => document.querySelectorAll(`[data-${k}]`).forEach((el) => { const id = el.dataset[k]; if (!by.has(id)) by.set(id, { upnl: [], ltp: [], ltpn: [], smeter: [] }); by.get(id)[k].push(el); });
-  add("upnl"); add("ltp"); add("ltpn"); add("smeter");
+  const by = new Map(), add = (k) => document.querySelectorAll(`[data-${k}]`).forEach((el) => { const id = el.dataset[k]; if (!by.has(id)) by.set(id, { upnl: [], ltp: [], ltpn: [], smeter: [], ladder: [] }); by.get(id)[k].push(el); });
+  add("upnl"); add("ltp"); add("ltpn"); add("smeter"); add("ladder");
   for (const s of state.strategies || []) {
     const els = by.get(s.id); if (!els) continue;
     for (const el of els.smeter) el.innerHTML = stopMeterHTML(s);
+    for (const el of els.ladder) el.innerHTML = ladderHTML(s);
     for (const el of els.upnl) {
       el.innerHTML = upnlHtml(s);
       const p = prev && prev.get(s.id);
@@ -8371,12 +8442,30 @@ function deskPaint() {
     const v = Number(s.pos_upnl) || 0, k = Math.min(1, Math.sqrt(Math.abs(v) / maxAbs)), c = v >= 0 ? "46,212,127" : "255,92,108";
     return `<button type="button" class="dk-tile" data-dk="${s.id}" style="background:rgba(${c},${(.1 + k * .5).toFixed(2)});border-color:rgba(${c},${(.25 + k * .5).toFixed(2)})"><span class="a">${esc(dkName(s.underlying))}</span><span class="s">${esc(dkLabId(s))} · ${s.position} ${esc(String(s.pos_lots ?? ""))}</span><span class="p">${s.pos_upnl == null ? "–" : esc(rupeesSigned(v))}</span></button>`;
   }).join("") || '<p class="dk-lbl">No strategies in this mode.</p>';
+  deskPosPaint(open);
   // feed and ticker
   const closed = desk.trades.slice(0, 40).map((t) => { const x = names.get(t.strategy_id);
     return { time: fmtDate(t.exit_at), what: `${x ? dkName(x.underlying) : "–"} ${String(t.side || "").toLowerCase()} closed · ${String(t.exit_why || "").replace(/\s*\(.*$/, "").slice(0, 40)}`, v: Number(t.net) || 0 }; });
   const rows = [...desk.feed, ...closed].slice(0, 50);
   $("dk_feed").innerHTML = rows.length ? rows.map((f) => `<div><span class="w">${esc(f.time)}</span><span>${esc(f.what)}</span><span class="${f.v >= 0 ? "dk-up" : "dk-down"}">${esc(rupeesSigned(f.v))}</span></div>`).join("") : '<p class="dk-lbl">No activity yet.</p>';
 }
+/** Tiles or Positions in the Strategies panel (localStorage dkHeat). Positions = one card per open position: name, side and
+ *  lots, running P&L, and the ladder (stop · entry · now · target); prices and P&L follow the live marks (paintMarks). */
+function dkHeatView() { try { return localStorage.getItem("dkHeat") === "pos" ? "pos" : "tiles"; } catch { return "tiles"; } }
+function deskPosPaint(open) {
+  const v = dkHeatView(), box = $("dk_pos");
+  $("dk_heatv").querySelectorAll("[data-v]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
+  $("dk_tiles").hidden = v === "pos"; box.hidden = v !== "pos";
+  $("dk_heatnote").textContent = v === "pos" ? `${open.length} open` : "colour = running P&L";
+  if (v !== "pos") return;
+  box.innerHTML = open.slice().sort((a, b) => (Number(b.pos_upnl) || 0) - (Number(a.pos_upnl) || 0)).map((s) => {
+    const lots = Number(s.pos_lots) || 0, sd = s.position === "LONG" ? "long" : "short";
+    return `<div class="dk-pc" data-dk="${esc(s.id)}" role="button" tabindex="0"><div class="h"><span>${esc(dkName(s.underlying))}</span><span class="s">${esc(dkLabId(s))}</span><span class="sd ${sd}">${sd.toUpperCase()}${lots ? ` ${lots} LOT${lots === 1 ? "" : "S"}` : ""}</span><span class="v" data-upnl="${esc(s.id)}">${upnlHtml(s)}</span></div><div data-ladder="${esc(s.id)}">${ladderHTML(s)}</div></div>`;
+  }).join("") || '<p class="dk-lbl">No open position in this mode.</p>';
+}
+$("dk_heatv").addEventListener("click", (e) => { const b = e.target.closest("[data-v]"); if (!b) return; try { localStorage.setItem("dkHeat", b.dataset.v); } catch { /* private window */ } deskPosPaint(dkOpen()); });
+$("dk_pos").addEventListener("click", (e) => { const t = e.target.closest("[data-dk]"); if (t) openStrat(t.dataset.dk); });
+$("dk_pos").addEventListener("keydown", (e) => { const t = e.target.closest("[data-dk]"); if (t && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openStrat(t.dataset.dk); } });
 /* ---------- System feeds (Papa, 6 Nov 2026): pulse bars for Dhan NSE/BSE and MCX prices, Delta prices, the stop watcher,
    the order manager and the broker match. A feed stays green (bars bouncing) until it is overdue for its own rhythm —
    prices and stops every second, the order manager every minute, the broker match every 5 minutes (a 12:00 check keeps it
