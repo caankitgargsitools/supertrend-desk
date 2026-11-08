@@ -402,7 +402,8 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   not watched — Papa, 7 Nov 2026, for the 8 Nov 2026 session ("let it pass"); the engine treats it as closed. A "special
   session" row (date, exchange, open / close) would be needed to watch stops in one. **Bug found 8 Nov 2026**: the engine did
   NOT treat it as closed — `sessionFor` had no weekend rule, and the per-second loop (running while a position is open) priced the
-  Sunday Muhurat session and hit a paper target on two MIDCPNIFTY strategies (trades 109, 110, +₹51.8 lakh at 14:05 IST). Fixed
+  Sunday Muhurat session and hit a paper target on two MIDCPNIFTY strategies (trades 109, 110, +₹51.8 lakh at 14:05 IST); Papa: "leave it as it is" — the two trades stay booked, and MOVE sizing
+  still ignores `max_lots` (Lab #264526's move_amt ₹37 lakh → 137 lots) by his choice). Fixed
   in `tradingSession`: Saturdays / Sundays are closed unless `market_holidays` has a row for the day (engine v149).
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
