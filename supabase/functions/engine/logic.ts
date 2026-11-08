@@ -63,6 +63,10 @@ export function tradingSession(seg: string, date: string): Session {
   const s = sessionFor(seg, date);
   if (isCrypto(seg)) return s;
   const k = `${isCommodity(seg) ? "MCX" : "NSE"}|${date}`;
+  // Saturdays and Sundays are closed (8 Nov 2026: the Muhurat session on a Sunday was priced and a paper target booked,
+  // though Papa had chosen to let it pass). A special weekend session would need its own market_holidays row.
+  const wd = weekdayOf(date);
+  if ((wd === 0 || wd === 6) && !HOLIDAYS.has(k)) return { open: 1440, close: -1 };
   if (!HOLIDAYS.has(k)) return s;
   const o = HOLIDAYS.get(k);
   return o == null ? { open: 1440, close: -1 } : { open: Math.max(s.open, o), close: s.close };

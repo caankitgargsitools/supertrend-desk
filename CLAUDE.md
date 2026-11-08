@@ -400,7 +400,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   "stock option entry", `tests/ui/ui_stocks.mjs`. Paper first; nothing live before the supervised test.
 - Holidays: `market_holidays` table + `tradingSession` in logic.ts. Muhurat trading (special evening session, often on a Sunday): not traded and
   not watched — Papa, 7 Nov 2026, for the 8 Nov 2026 session ("let it pass"); the engine treats it as closed. A "special
-  session" row (date, exchange, open / close) would be needed to watch stops in one.
+  session" row (date, exchange, open / close) would be needed to watch stops in one. **Bug found 8 Nov 2026**: the engine did
+  NOT treat it as closed — `sessionFor` had no weekend rule, and the per-second loop (running while a position is open) priced the
+  Sunday Muhurat session and hit a paper target on two MIDCPNIFTY strategies (trades 109, 110, +₹51.8 lakh at 14:05 IST). Fixed
+  in `tradingSession`: Saturdays / Sundays are closed unless `market_holidays` has a row for the day (engine v149).
 - Daily self-check (`desk_audit`): replays each strategy's last 30 days of trades with the backtest engine and flags
   missed/extra trades, different exits, or the desk > 0.25% worse on price. Shown on the Trades page.
 - Totals (`ledger_net_user`, `ledger_net`, `admin_users`) exclude hidden trades.
