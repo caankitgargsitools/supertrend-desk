@@ -451,6 +451,17 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 .pladder .pl-cells .sl small { color: var(--red); } .pladder .pl-cells .tg small { color: var(--green); }
 .pladder .pl-cells span { display: block; }
 .pladder .pl-cells b { display: block; color: var(--ink); font-size: 12.5px; font-weight: 700; }
+.pladder .pl-fill, .pladder .pl-tk, .pladder .pl-dot, .pladder .pl-now { transition: left .6s ease, width .6s ease; }
+.pladder .pl-tk.moved { animation: plmoved 1.4s ease-out; }
+@keyframes plmoved { 0% { box-shadow: 0 0 0 0 currentColor; transform: scaleY(1.6); } 100% { box-shadow: 0 0 0 6px transparent; transform: none; } }
+.pladder .pl-tk.sl { color: var(--red); } .pladder .pl-tk.tg { color: var(--green); }
+.pladder .pl-bar { overflow: hidden; }
+.pladder.wave .pl-bar::after { content: ""; position: absolute; inset: -2px 0; width: 35%; left: -35%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); border-radius: 4px; animation: plwave 1.2s ease-in-out; }
+.pladder.wave .pl-fill { animation: plpulse 1.2s ease-in-out; }
+@keyframes plwave { to { left: 100%; } }
+@keyframes plpulse { 50% { filter: brightness(1.35); transform: scaleY(1.35); } }
+@media (prefers-reduced-motion: reduce) { .pladder .pl-fill, .pladder .pl-tk, .pladder .pl-dot, .pladder .pl-now { transition: none; } .pladder.wave .pl-bar::after, .pladder.wave .pl-fill, .pladder .pl-tk.moved { animation: none; } }
 .pladder .pl-cells .up { color: var(--green); } .pladder .pl-cells .dn { color: var(--red); } .pladder .pl-cells .none { color: var(--yellow-ink); }
 /* Strategy form: the save bar stays in view; lot size read-only unless overridden (M4) */
 #stratBar { position: sticky; bottom: 0; background: var(--panel); padding: 10px 0; border-top: 1px solid var(--line); z-index: 3; }
@@ -2456,27 +2467,31 @@ function renderStratPos(s) {
 }
 /** Stop-distance meter (Papa, 6 Nov 2026): the stop at the left, the entry in the middle, the price now as the dot; under it
  *  "₹1,240 / 0.5% from the stop". The stop is the one the header shows (fixed or trailing, whichever is nearer). */
-function stopLevel(s) {
+function stopLevel(s, now) {
   const p = s.pos_risk; if (!p || p.dir === undefined || s.position === "FLAT") return { stop: null, tgt: null };
   const d = (q, ref) => q.type === "POINTS" ? q.value : q.type === "PCT" ? ref * q.value / 100 : q.value * (p.trailAtr || 0);
   let stop = p.stop;
-  if (p.trail && p.best != null) { const tr = p.best - p.dir * d(p.trail, p.best); stop = stop == null ? tr : p.dir === 1 ? Math.max(stop, tr) : Math.min(stop, tr); }
+  // The engine moves the best price on its next update; the screen follows the live price in between (never backwards).
+  const best = p.best == null ? null : now > 0 ? (p.dir === 1 ? Math.max(p.best, now) : Math.min(p.best, now)) : p.best;
+  if (p.trail && best != null) { const tr = best - p.dir * d(p.trail, best); stop = stop == null ? tr : p.dir === 1 ? Math.max(stop, tr) : Math.min(stop, tr); }
   return { stop: stop == null ? null : Number(stop), tgt: p.tgt == null ? null : Number(p.tgt) };
 }
 function stopMeterHTML(s) {
   if (!s || s.position === "FLAT" || s.pos_ltp == null) return "";
-  const { stop, tgt } = stopLevel(s), dir = s.position === "LONG" ? 1 : -1;
+  const { stop, tgt } = stopLevel(s, Number(s.pos_ltp)), dir = s.position === "LONG" ? 1 : -1;
   const entry = Number(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px), now = Number(s.pos_ltp);
   const units = Number(s.pos_qty) || (Number(s.pos_lots) || 1) * (Number(s.lot_size) || 1);
   return meterHTML({ entry, now, stop, tgt, dir, units });
 }
-/** Position ladder (Papa, 8 Nov 2026: "where we entered, our stop, where we are, our target"): one line with profit to the
- *  right — the entry tick, the stop (red; right of the entry once a trailing stop has locked in profit), the target (green), the
- *  price now as the dot with its label above, the move since entry filled green / red; under it Stop · Entry · Target with
- *  rupees: how far the stop is, what it locks in or loses, what the target makes and how far it is. */
+/** Position ladder (Papa, 8 Nov 2026: "where we entered, our stop, where we are, our target"). A price scale, lower prices on
+ *  the left (Papa, 9 Nov: a short's target sits at the far left, its stop at the right): the entry tick, the stop (red), the
+ *  target (green), the price now as the dot labelled "Now …", the move since entry filled green in profit / red in loss; under it
+ *  the three figures in the same left-to-right order: how far the stop is (₹ and %), what it locks in or loses, % since entry,
+ *  what the target makes and how far it is ("None" when there's no stop / target). The trailing stop follows the best price
+ *  seen on this screen too, so it moves with the live price between engine updates. */
 function ladderHTML(s) {
   if (!s || s.position === "FLAT" || s.pos_ltp == null) return "";
-  const { stop, tgt } = stopLevel(s);
+  const { stop, tgt } = stopLevel(s, Number(s.pos_ltp));
   const entry = Number(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px);
   const units = Number(s.pos_qty) || (Number(s.pos_lots) || 1) * (Number(s.lot_size) || 1);
   // An option bought gains when its premium rises, whatever the side of the view.
@@ -2487,28 +2502,66 @@ function ladder({ entry, now, stop, tgt, dir, units }) {
   entry = Number(entry); now = Number(now); dir = dir === -1 ? -1 : 1; units = Number(units) || 1;
   stop = stop == null || !Number.isFinite(Number(stop)) ? null : Number(stop); tgt = tgt == null || !Number.isFinite(Number(tgt)) ? null : Number(tgt);
   if (!(entry > 0) || !(now > 0)) return "";
-  const u = (v) => (v - entry) * dir, pts = [0, u(now)];
-  if (stop != null) pts.push(u(stop)); if (tgt != null) pts.push(u(tgt));
+  const gain = (v) => (v - entry) * dir;                       // profit per unit at price v
+  const pts = [entry, now]; if (stop != null) pts.push(stop); if (tgt != null) pts.push(tgt);
   let lo = Math.min(...pts), hi = Math.max(...pts); const pad = Math.max(hi - lo, entry * 0.002) * 0.06; lo -= pad; hi += pad;
-  const at = (v) => (u(v) - lo) / (hi - lo) * 100, f = (x) => x.toFixed(2) + "%";
-  const rs = (x) => rupees(Math.abs(x)), away = (v) => `${rs(u(v) - u(now) < 0 ? (u(now) - u(v)) * units : (u(v) - u(now)) * units)} · ${pct(Math.abs(v - now) / now * 100, 1)}`;
-  const a0 = at(entry), an = at(now), up = an >= a0, nowCls = an < 12 ? " l" : an > 88 ? " r" : "";
-  const hit = stop != null && u(now) <= u(stop);
+  const at = (v) => (v - lo) / (hi - lo) * 100, f = (x) => x.toFixed(2) + "%";
+  const rs = (x) => rupees(Math.abs(x)), away = (v) => `${rs((v - now) * units)} · ${pct(Math.abs(v - now) / now * 100, 1)}`;
+  const a0 = at(entry), an = at(now), inProfit = gain(now) >= 0, nowCls = an < 12 ? " l" : an > 88 ? " r" : "";
+  const hit = stop != null && gain(now) <= gain(stop);
   const slCell = stop == null ? `<div class="sl"><small>Stop</small><b class="none">None</b><span class="none">exits on its rules only</span></div>`
-    : `<div class="sl"><small>Stop</small><b>${fmtNum(stop)}</b>${hit ? '<span class="dn">reached</span>' : `<span>${away(stop)} away</span>`}<span class="${u(stop) >= 0 ? "up" : "dn"}">${u(stop) >= 0 ? "locks in" : "loses"} ${rs(u(stop) * units)}</span></div>`;
-  const move = u(now) / entry * 100;
-  const inCell = `<div><small>Entry</small><b>${fmtNum(entry)}</b><span class="${move >= 0 ? "up" : "dn"}">${move >= 0 ? "+" : "−"}${Math.abs(move).toFixed(2)}% since</span></div>`;
+    : `<div class="sl"><small>Stop</small><b>${fmtNum(stop)}</b>${hit ? '<span class="dn">reached</span>' : `<span>${away(stop)} away</span>`}<span class="${gain(stop) >= 0 ? "up" : "dn"}">${gain(stop) >= 0 ? "locks in" : "loses"} ${rs(gain(stop) * units)}</span></div>`;
+  const move = gain(now) / entry * 100;
+  const inCell = `<div class="en"><small>Entry</small><b>${fmtNum(entry)}</b><span class="${move >= 0 ? "up" : "dn"}">${move >= 0 ? "+" : "−"}${Math.abs(move).toFixed(2)}% since</span></div>`;
   const tgCell = tgt == null ? `<div class="tg"><small>Target</small><b>None</b><span>trails / rules</span></div>`
-    : `<div class="tg"><small>Target</small><b>${fmtNum(tgt)}</b>${u(now) >= u(tgt) ? '<span class="up">reached</span>' : `<span>${away(tgt)} to go</span>`}<span class="up">makes ${rs(u(tgt) * units)}</span></div>`;
-  const title = `Stop ${stop == null ? "none" : fmtNum(stop)} · entry ${fmtNum(entry)} · now ${fmtNum(now)} · target ${tgt == null ? "none" : fmtNum(tgt)}`;
-  return `<div class="pladder" title="${esc(title)}"><div class="pl-track"><div class="pl-bar"></div>`
-    + `<div class="pl-fill ${up ? "up" : "dn"}" style="left:${f(Math.min(a0, an))};width:${f(Math.abs(an - a0))}"></div>`
-    + `<i class="pl-tk" style="left:${f(a0)}" title="Entry ${esc(fmtNum(entry))}"></i>`
+    : `<div class="tg"><small>Target</small><b>${fmtNum(tgt)}</b>${gain(now) >= gain(tgt) ? '<span class="up">reached</span>' : `<span>${away(tgt)} to go</span>`}<span class="up">makes ${rs(gain(tgt) * units)}</span></div>`;
+  // The cells follow the bar: a long reads Stop · Entry · Target, a short Target · Entry · Stop.
+  const cells = dir === 1 ? slCell + inCell + tgCell : tgCell + inCell + slCell;
+  const title = `${dir === 1 ? "Long" : "Short"} · stop ${stop == null ? "none" : fmtNum(stop)} · entry ${fmtNum(entry)} · now ${fmtNum(now)} · target ${tgt == null ? "none" : fmtNum(tgt)}`;
+  return `<div class="pladder ${dir === 1 ? "long" : "short"}" title="${esc(title)}"><div class="pl-track"><div class="pl-bar"></div>`
+    + `<div class="pl-fill ${inProfit ? "up" : "dn"}" style="left:${f(Math.min(a0, an))};width:${f(Math.abs(an - a0))}"></div>`
+    + `<i class="pl-tk en" style="left:${f(a0)}" title="Entry ${esc(fmtNum(entry))}"></i>`
     + (stop != null ? `<i class="pl-tk sl" style="left:${f(at(stop))}" title="Stop ${esc(fmtNum(stop))}"></i>` : "")
     + (tgt != null ? `<i class="pl-tk tg" style="left:${f(at(tgt))}" title="Target ${esc(fmtNum(tgt))}"></i>` : "")
     + `<b class="pl-dot" style="left:${f(an)}"></b><span class="pl-now${nowCls}" style="left:${f(an)}">Now ${fmtNum(now)}</span></div>`
-    + `<div class="pl-cells">${slCell}${inCell}${tgCell}</div></div>`;
+    + `<div class="pl-cells">${cells}</div></div>`;
 }
+/** Repaints a ladder in place (same elements, new positions and figures) so the ticks and the dot glide (CSS transitions) and a
+ *  stop or target that moved flashes, instead of the whole bar being swapped. Falls back to a full swap when the shape changed. */
+function morphLadder(el, html) {
+  const nu = document.createElement("div"); nu.innerHTML = html;
+  const old = el.firstElementChild, fresh = nu.firstElementChild;
+  if (!old || !fresh || old.className.replace(/ wave/, "") !== fresh.className || old.querySelectorAll("*").length !== fresh.querySelectorAll("*").length) { el.innerHTML = html; return; }
+  const a = [old, ...old.querySelectorAll("*")], b = [fresh, ...fresh.querySelectorAll("*")];
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i], y = b[i];
+    if (x.tagName !== y.tagName) { el.innerHTML = html; return; }
+    if (i && x.className.replace(/ moved/, "") !== y.className) x.className = y.className + (x.classList.contains("moved") ? " moved" : "");
+    const st = y.getAttribute("style"); if (st !== x.getAttribute("style")) { if (st == null) x.removeAttribute("style"); else x.setAttribute("style", st); }
+    if (y.title !== x.title) {
+      // A stop or target whose price changed (the tick's title carries it) flashes; an end of the scale may not move on screen.
+      if (/pl-tk (sl|tg)/.test(x.className) && x.title) { x.classList.remove("moved"); void x.offsetWidth; x.classList.add("moved"); }
+      x.title = y.title;
+    }
+    if (!y.children.length && x.textContent !== y.textContent) x.textContent = y.textContent;
+  }
+}
+/** Every 5 s while a ladder is on screen (Papa, 9 Nov): a wave runs along each bar, and the open positions' stop / target /
+ *  trailing state is re-read so a stop or target the engine moved shows at once (prices come every second anyway). */
+let ladderTimer = 0;
+async function ladderPulse() {
+  if (document.hidden) return;
+  const els = [...document.querySelectorAll("[data-ladder]")].filter((e) => e.offsetParent);
+  if (!els.length) return;
+  for (const e of els) { const l = e.firstElementChild; if (l) { l.classList.remove("wave"); void l.offsetWidth; l.classList.add("wave"); } }
+  const ids = [...new Set(els.map((e) => e.dataset.ladder))];
+  try {
+    const { data } = await db.from("algo_strategies").select("id, position, pos_risk, pos_ltp, pos_upnl, pos_ltp_at, pos_qty, pos_lots, pos_entry_px").in("id", ids);
+    for (const r of data || []) { const s = stratOf(r.id); if (s) Object.assign(s, r); }
+    paintMarks(null);
+  } catch { /* the next pulse tries again */ }
+}
+function ladderStart() { if (!ladderTimer) ladderTimer = setInterval(ladderPulse, 5000); }
 /** The meter itself from plain numbers: entry, the price now, the stop (and target), the side (1 long / −1 short), units held. */
 function meterHTML({ entry, now, stop, tgt, dir, units }) {
   entry = Number(entry); now = Number(now); stop = stop == null ? null : Number(stop); tgt = tgt == null ? null : Number(tgt); dir = dir === -1 ? -1 : 1; units = Number(units) || 1;
@@ -7382,7 +7435,7 @@ function paintMarks(prev) {
   for (const s of state.strategies || []) {
     const els = by.get(s.id); if (!els) continue;
     for (const el of els.smeter) el.innerHTML = stopMeterHTML(s);
-    for (const el of els.ladder) el.innerHTML = ladderHTML(s);
+    for (const el of els.ladder) morphLadder(el, ladderHTML(s));
     for (const el of els.upnl) {
       el.innerHTML = upnlHtml(s);
       const p = prev && prev.get(s.id);
@@ -10255,7 +10308,7 @@ async function enterDesk(session) {
   }
   clearInterval(timer);
   timer = setInterval(() => { if (!document.hidden) refreshAll(); }, 30000); // every 30 s while the app is on screen, market open or not
-  pollMarks();
+  pollMarks(); ladderStart();
   loadNotifyCard().catch(() => {});
   lastRefresh = Date.now();
   if (resume) { if (!restorePage(resume)) showPage("list"); }

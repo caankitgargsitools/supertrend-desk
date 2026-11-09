@@ -377,10 +377,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 - **Desk quotes on phones** (6 Nov 2026, Papa): folded to one row by default; "All ▾" / "Less ▴" (`#dk_qtog`, `dkQFold`,
   localStorage `dkQOpen`); big screens unchanged. Tested in `tests/ui/ui_desk.mjs`.
 - **Position ladder** (8 Nov 2026, Papa liked the Home card's meter: "where we entered, our stop, where we are, our target"):
-  `ladderHTML(s)` / `ladder({entry, now, stop, tgt, dir, units})` — one line with profit to the right: entry tick, stop
-  (red; right of the entry once a trailing stop locks in profit), target (green), the price now as a dot labelled "Now …",
-  the move since entry filled green / red; under it Stop · Entry · Target: how far the stop is (₹ and %), what it locks in
-  or loses, % since entry, what the target makes and how far it is ("None" when there's no stop / target). Used on the Home
+  `ladderHTML(s)` / `ladder({entry, now, stop, tgt, dir, units})` — a **price scale, lower prices left** (Papa, 9 Nov: a short
+  reads target · now · entry · stop): entry tick, stop (red), target (green), the price now as a dot labelled "Now …", the
+  move since entry filled green in profit / red in loss; under it the figures in the bar's order (long Stop · Entry · Target,
+  short Target · Entry · Stop): how far the stop is (₹ and %), what it locks in or loses, % since entry, what the target makes
+  and how far it is ("None" when there's no stop / target). `stopLevel(s, now)` moves the trailing stop with the live price
+  between engine updates (never backwards). Repaints morph the same elements (`morphLadder`) so ticks / dot glide (0.6 s);
+  a stop or target whose price changed flashes (`moved`). Every 5 s (`ladderPulse` / `ladderStart`) a wave runs along each
+  visible bar and the open positions' `pos_risk` / price are re-read. Used on the Home
   card and the strategy page's Position tile (`data-ladder`, repainted by `paintMarks` with live prices); list rows / cards
   keep the compact `stopMeterHTML`. **Desk**: the Strategies panel has Tiles / Positions (`#dk_heatv`, localStorage
   `dkHeat`, `deskPosPaint`): one card per open position of the mode with its ladder; a card opens the strategy. The phone
