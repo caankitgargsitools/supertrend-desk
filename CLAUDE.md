@@ -663,8 +663,9 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   every distinct asset / timeframe is one Dhan candle request paced 210 ms apart on the one shared token, and the
   per-second quote loop shares that token — the two ways out are Dhan's WebSocket feed (Papa: not now) or building the
   minute candles from the desk's own per-second prices (`price_bars`, as `owncandles.ts` does when Dhan refuses) at the
-  cost of candles that differ slightly from Dhan's; Papa to choose. Also still open: Lab run 966 was stuck "running" since 07:53 IST — the engine watchdog
-  closes it an hour after its lease; the lab jobs stay off until Papa says.
+  cost of candles that differ slightly from Dhan's; Papa to choose. Lab run 966 (stuck since 6 Nov 07:53 IST) was closed by the engine watchdog. **(1) answered 11 Nov 2026
+  (Papa: "On")**: jobs 3 (watchdog), 10 (lab-next), 26 (ideas-lab), 29 (lab-combos) switched back on; 2 (start), 12 (long tests),
+  15 (options pricing) stay off.
 
 ## Incident 23 Oct 2026 (state to restore)
 - A daytime lab re-test (3,930 saved strategies) plus per-second price writes used up the database's disk allowance on
