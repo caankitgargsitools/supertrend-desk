@@ -22,6 +22,21 @@ await t("pagedRows on fewer than 1,000 rows: one request", async () => {
   const rows = await pagedRows((a, b) => { calls++; return sb.from("idea_legs").select("*").eq("kind", "random").order("id").range(a, b); });
   assert.equal(rows.length, 1); assert.equal(calls, 1);
 });
+// 11 Nov 2026: the Ideas lab stood still from 4 to 11 Nov — its ledger (idea_tries) passed 1,000 rows, registerIdeas read only
+// the first 1,000, took the rest for new settings and its insert hit the unique key on every instalment.
+const { registerIdeas } = await import("./ideas.mjs");
+await t("ideas: a ledger over 1,000 rows registers nothing twice and doesn't throw", async () => {
+  LIMITS.maxRows = Infinity;
+  db.idea_tries = Array.from({ length: 1000 }, (_, i) => ({ id: i + 1, idea: "old-" + i, setting_key: "s", idea_order: 0, status: "done" }));
+  const first = await registerIdeas(sb);
+  assert.ok(first > 0);
+  const n = db.idea_tries.length; assert.ok(n > 1000);
+  db.idea_tries[n - 1].status = "done"; // a finished try must not be put back to planned
+  LIMITS.maxRows = 1000;
+  assert.equal(await registerIdeas(sb), 0);
+  assert.equal(db.idea_tries.length, n);
+  assert.equal(db.idea_tries[n - 1].status, "done");
+});
 LIMITS.maxRows = Infinity;
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);

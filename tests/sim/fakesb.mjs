@@ -8,7 +8,7 @@ class Q {
   constructor(t) { this.t = t; this.f = []; this.op = "select"; this.ord = null; this.lim = null; this.one = null; this.ret = false; }
   select(_cols, opts) { if (this.op !== "select") this.ret = true; if (opts && opts.count) { this.cnt = true; this.head = !!opts.head; } return this; }
   insert(rows) { this.op = "insert"; this.rows = Array.isArray(rows) ? rows : [rows]; return this; }
-  upsert(rows, opts) { this.op = "upsert"; this.rows = Array.isArray(rows) ? rows : [rows]; this.conflict = opts && opts.onConflict ? String(opts.onConflict).split(",").map((x) => x.trim()) : null; return this; }
+  upsert(rows, opts) { this.op = "upsert"; this.rows = Array.isArray(rows) ? rows : [rows]; this.conflict = opts && opts.onConflict ? String(opts.onConflict).split(",").map((x) => x.trim()) : null; this.ignoreDup = !!(opts && opts.ignoreDuplicates); return this; }
   update(v) { this.op = "update"; this.v = v; return this; }
   delete() { this.op = "delete"; return this; }
   eq(k, v) { this.f.push((r) => r[k] === v || (r[k] != null && v != null && String(r[k]) === String(v))); return this; }
@@ -58,11 +58,13 @@ class Q {
           const key = this.conflict ?? PK[this.t];
           const same = key ? (x) => key.every((k) => String(x[k]) === String(row[k])) : (x) => x.sec_id === row.sec_id && x.seg === row.seg;
           const i = tab.findIndex(same);
+          if (i >= 0 && this.ignoreDup) return null; // ON CONFLICT DO NOTHING
           if (i >= 0) { const keep = { ...tab[i] }; tab[i] = { ...keep, ...JSON.parse(JSON.stringify(r)), id: keep.id, created_at: keep.created_at }; return tab[i]; }
         }
         const d = DEFAULTS[this.t]; if (d) for (const [k, f] of Object.entries(d)) if (row[k] === undefined) row[k] = f();
         tab.push(row); return row;
       });
+      out = out.filter(Boolean);
     } else {
       out = tab.filter((r) => this.f.every((f) => f(r)));
       if (this.op === "update") out.forEach((r) => Object.assign(r, JSON.parse(JSON.stringify(this.v))));

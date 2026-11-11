@@ -955,12 +955,14 @@ async function dailyOf(sb: SupabaseClient, key: string): Promise<DayBar[]> {
 
 /** Writes every idea's settings into the ledger (once; later settings are added, never changed). */
 export async function registerIdeas(sb: SupabaseClient) {
-  const { data } = await sb.from("idea_tries").select("idea, setting_key");
-  const have = new Set((data ?? []).map((r) => `${r.idea}|${r.setting_key}`));
+  // Paged: the ledger passed 1,000 rows on 4 Nov 2026 and a single read stops there, so settings beyond it looked new and their
+  // insert hit the unique key every instalment (the Ideas lab stood still from 4 to 11 Nov).
+  const data = await pagedRows<{ idea: string; setting_key: string }>((a, b) => sb.from("idea_tries").select("idea, setting_key").order("id").range(a, b));
+  const have = new Set(data.map((r) => `${r.idea}|${r.setting_key}`));
   const rows = RUNTIME.flatMap((i) => i.settings.filter((s) => !have.has(`${i.key}|${s.key}`)).map((s) => ({
     idea: i.key, idea_order: i.order, setting_key: s.key, label: s.label, setting: s.p, status: i.kind === "later" ? "later" : "planned",
   })));
-  if (rows.length) { const { error } = await sb.from("idea_tries").insert(rows); if (error) throw new Error(error.message); }
+  if (rows.length) { const { error } = await sb.from("idea_tries").upsert(rows, { onConflict: "idea,setting_key", ignoreDuplicates: true }); if (error) throw new Error(error.message); }
   return rows.length;
 }
 
@@ -992,7 +994,7 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
   const made = await generateDaily(sb, today, Number(set.ideas_per_day ?? 20));
   if (made) await loadIdeaDefs(sb);
   await registerIdeas(sb);
-  const { data: tries } = await sb.from("idea_tries").select("id, idea, idea_order, setting_key, setting, status").neq("status", "later").order("idea_order").order("id");
+  const tries = await pagedRows<any>((a, b) => sb.from("idea_tries").select("id, idea, idea_order, setting_key, setting, status").neq("status", "later").order("idea_order").order("id").range(a, b));
   const open = (tries ?? []).filter((t) => t.status !== "done");
   if (!open.length) return { idle: "every idea is done" };
   const idea = ideaByKey(open[0].idea)!;
@@ -1076,7 +1078,8 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
     const { data: full } = await sb.from("idea_tries").select("id, idea, status, result").eq("idea", idea.key);
     const rs = (full ?? []).map((x) => x.result as TryResult).filter(Boolean);
     const eff = effectiveTries(rs.map((r) => r.months));
-    const { data: ledger } = await sb.from("idea_tries").select("idea, status, verdict");
+    // Every try counts toward the luck test's number of tries (a single read stopped at 1,000 rows).
+    const ledger = await pagedRows<any>((x, y) => sb.from("idea_tries").select("idea, status, verdict").order("id").range(x, y));
     const effByIdea: Record<string, number> = { [idea.key]: eff.n };
     for (const r of ledger ?? []) if (r.idea !== idea.key && r.status === "done" && r.verdict?.idea_tries != null) effByIdea[r.idea] = Number(r.verdict.idea_tries);
     const tries = ledgerTries(ledger ?? [], effByIdea);

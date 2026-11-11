@@ -665,7 +665,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   minute candles from the desk's own per-second prices (`price_bars`, as `owncandles.ts` does when Dhan refuses) at the
   cost of candles that differ slightly from Dhan's; Papa to choose. Lab run 966 (stuck since 6 Nov 07:53 IST) was closed by the engine watchdog. **(1) answered 11 Nov 2026
   (Papa: "On")**: jobs 3 (watchdog), 10 (lab-next), 26 (ideas-lab), 29 (lab-combos) switched back on; 2 (start), 12 (long tests),
-  15 (options pricing) stay off.
+  15 (options pricing) stay off. **Found that night**: the Ideas Lab had stood still since 4 Nov — its ledger `idea_tries` passed
+  1,000 rows, `registerIdeas` read only the first 1,000 and its insert hit the unique key every instalment. Fixed (engine
+  v150): `registerIdeas`, the open-tries read and the luck test's ledger read go through `pagedRows`; the insert is an upsert
+  with `ignoreDuplicates`. Test: `tests/sim/pagedrows.test.mjs` "ideas:" (fake upsert honours `ignoreDuplicates`).
 
 ## Incident 23 Oct 2026 (state to restore)
 - A daytime lab re-test (3,930 saved strategies) plus per-second price writes used up the database's disk allowance on
