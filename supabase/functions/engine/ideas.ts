@@ -1031,7 +1031,11 @@ async function ideasWork(sb: SupabaseClient, started: number, creds?: Creds): Pr
     }
   }
   const { data: pend0 } = idea.kind === "options" ? { data: [] as Leg[] } : await sb.from("idea_legs").select("id, try_id, asset, win_from, win_to, config, kind, k").in("try_id", ids).eq("status", "pending").order("asset").order("k").order("id").limit(200);
-  const pend = (pend0 ?? []).filter((l) => !isOptionLeg(l.config) || l.kind !== "real");
+  // A random-entry leg waits for its try's real backtests; leave it out before choosing the asset to run, or it can pick an
+  // asset whose only pending leg is that waiting one and the real legs (other assets) never run (11 Nov 2026: try 136 span
+  // in place, "ran 0", once a second).
+  const realWait = new Set((pend0 ?? []).filter((l) => l.kind === "real").map((l) => l.try_id));
+  const pend = (pend0 ?? []).filter((l) => (!isOptionLeg(l.config) || l.kind !== "real") && !(l.kind === "random" && realWait.has(l.try_id)));
   if (pend?.length) {
     const asset = pend[0].asset;
     const rates = await loadMarginRates(sb);

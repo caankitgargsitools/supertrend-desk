@@ -668,7 +668,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   15 (options pricing) stay off. **Found that night**: the Ideas Lab had stood still since 4 Nov — its ledger `idea_tries` passed
   1,000 rows, `registerIdeas` read only the first 1,000 and its insert hit the unique key every instalment. Fixed (engine
   v150): `registerIdeas`, the open-tries read and the luck test's ledger read go through `pagedRows`; the insert is an upsert
-  with `ignoreDuplicates`. Test: `tests/sim/pagedrows.test.mjs` "ideas:" (fake upsert honours `ignoreDuplicates`).
+  with `ignoreDuplicates`. Test: `tests/sim/pagedrows.test.mjs` "ideas:" (fake upsert honours `ignoreDuplicates`). Then a second stall: try 136's
+  random-entry leg (asset "~", sorted first by the database) was chosen as the asset to run, skipped because its real legs
+  were still pending, and the real legs (other assets) never ran — "ran 0" once a second. Waiting random legs are now left
+  out before the asset is chosen (engine v151).
 
 ## Incident 23 Oct 2026 (state to restore)
 - A daytime lab re-test (3,930 saved strategies) plus per-second price writes used up the database's disk allowance on
