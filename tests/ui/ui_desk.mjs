@@ -96,13 +96,15 @@ const after2 = await p.evaluate(() => desk.pool.length); if (!(after2 < after)) 
 await p.waitForTimeout(400);
 // Quotes strip (Papa, 6 Nov): still, every tradable asset the engine quotes (Silver too, though nothing trades it), grouped, % today.
 await p.waitForTimeout(3500);
-const q = await p.$$eval("#dk_quotes .dk-q", (x) => x.map((e) => [...e.children].map((c) => c.textContent).join(" ")));
-const grp = await p.$$eval("#dk_quotes .dk-qg", (x) => x.map((e) => e.textContent));
+const q = await p.$$eval("#dk_quotes .dk-qset:first-child .dk-q", (x) => x.map((e) => [...e.children].map((c) => c.textContent).join(" ")));
+const grp = await p.$$eval("#dk_quotes .dk-qset:first-child .dk-qg", (x) => x.map((e) => e.textContent));
 if (!process.env.MANYQ && (q.length !== 8 || !/^Nifty 50 22,935\.5 ▲ 0\.59%$/.test(q[0]) || !/^Sensex .*▼ 0\.53%$/.test(q[1]) || !/^Fin Nifty 26,130 ▲ 0\.50%$/.test(q[2]) || !/Midcap/.test(q[3])
   || !/^Copper/.test(q[4]) || !/^Gold/.test(q[5]) || !/^Silver 91,000 ▲ 1\.11%$/.test(q[6]) || !/SOLUSD.*▼ 2\.52%/.test(q[7]) || grp.join() !== "Indices,MCX,Crypto")) fail("quotes strip: every tradable asset, grouped", { q, grp });
-if (await p.evaluate(() => getComputedStyle(document.getElementById("dk_quotes")).animationName !== "none")) fail("quotes don't scroll");
+// One moving line in every view (Papa, 12 Nov): two copies slide left without end.
+const qs = await p.evaluate(() => ({ anim: getComputedStyle(document.querySelector("#dk_quotes .dk-qtrack")).animationName, h: document.getElementById("dk_quotes").getBoundingClientRect().height, sets: document.querySelectorAll("#dk_quotes .dk-qset").length }));
+if (qs.anim !== "dkqscroll" || qs.sets !== 2 || !(qs.h <= 26)) fail("quotes: one moving line", qs);
 res.live_prices[0].px = 22950; res.live_prices[0].at = new Date().toISOString();
-await p.waitForFunction(() => document.querySelector('#dk_quotes [data-a="NIFTY"]').classList.contains("fu"), null, { timeout: 5000 }).catch(() => fail("a rising price flashes green"));
+await p.waitForFunction(() => [...document.querySelectorAll('#dk_quotes [data-a="NIFTY"]')].every((e) => e.classList.contains("fu")), null, { timeout: 5000 }).catch(() => fail("a rising price flashes green"));
 // System feeds (Papa, 6 Nov): pulse bars; a feed stays green until overdue for its own rhythm (broker match: 5 min + 2).
 await p.waitForTimeout(5200);
 const feeds = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll("#dk_feeds .dk-pulse")].map((e) => [e.dataset.f, e.className.replace("dk-pulse ", "")])));
@@ -118,16 +120,7 @@ if (s1[0] === s2[0] || s1[0] === s1[1] || new Set(s2[0].split(",")).size < 2) fa
 feedAge.reconcile = 500; feedAge.crypto = 1;
 await p.waitForFunction(() => /warn/.test(document.querySelector('#dk_feeds [data-f="reconcile"]').className) && /ok/.test(document.querySelector('#dk_feeds [data-f="crypto"]').className), null, { timeout: 9000 })
   .catch(() => fail("overdue broker match turns amber; Delta back to green"));
-// Phones (Papa, 6 Nov): the strip folds to one row; "All ▾" opens it, "Less ▴" folds it again.
-if (width <= 760) {
-  const h0 = await p.evaluate(() => document.getElementById("dk_quotes").getBoundingClientRect().height);
-  if (!(h0 <= 24) || !(await p.isVisible("#dk_qtog")) || (await p.textContent("#dk_qtog")).trim() !== "All ▾") fail("folded to one row on a phone", h0);
-  await p.click("#dk_qtog"); await p.waitForTimeout(150);
-  const h1 = await p.evaluate(() => document.getElementById("dk_quotes").getBoundingClientRect().height);
-  if (!(h1 > 30) || (await p.textContent("#dk_qtog")).trim() !== "Less ▴" || (await p.evaluate(() => localStorage.getItem("dkQOpen"))) !== "1") fail("opens to every quote", h1);
-  await p.click("#dk_qtog"); await p.waitForTimeout(150);
-  if (!(await p.evaluate(() => document.getElementById("dk_quotes").getBoundingClientRect().height <= 24))) fail("folds again");
-} else if (await p.isVisible("#dk_qtog")) fail("no fold button on a big screen");
+if (await p.isVisible("#dk_qtog")) fail("no fold button: the strip is one moving line everywhere");
 if (await p.evaluate(() => dkCvp.range) !== "1D") fail("per-minute day view is the default");
 if (!/1 point = \d/.test(await p.textContent("#dk_cvp_step"))) fail("the chart says how far apart its points are", await p.textContent("#dk_cvp_step"));
 await p.click('#dk_cvp_rng [data-v="1M"]'); await p.waitForTimeout(500);

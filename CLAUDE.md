@@ -378,8 +378,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   then). Hover: when it last worked, and "no live orders / strategy" when the job runs with nothing to do. Since 7 Nov 2026 (migration 88)
   the order manager and broker match bars read the `engine-minute` dispatcher's runs (jobs 18 / 19 are off). Tested in
   `tests/ui/ui_desk.mjs`.
-- **Desk quotes on phones** (6 Nov 2026, Papa): folded to one row by default; "All ▾" / "Less ▴" (`#dk_qtog`, `dkQFold`,
-  localStorage `dkQOpen`); big screens unchanged. Tested in `tests/ui/ui_desk.mjs`.
+- **Desk quotes: one moving line in every view** (12 Nov 2026, Papa; replaces the 6 Nov phone fold and the wrapped rows):
+  `deskQuotes` renders two copies of the chips (`.dk-qtrack` > `.dk-qset` ×2, the second aria-hidden) sliding left without
+  end (`@keyframes dkqscroll`, about 45 px a second via `--dkq-dur`), edges faded, held while hovered / touched; reduced
+  motion → a still line scrollable by hand. Both copies update and flash. `#dk_qtog` hidden. Tested in `tests/ui/ui_desk.mjs`.
 - **Position ladder** (8 Nov 2026, Papa liked the Home card's meter: "where we entered, our stop, where we are, our target"):
   `ladderHTML(s)` / `ladder({entry, now, stop, tgt, dir, units})` — a **price scale, lower prices left** (Papa, 9 Nov: a short
   reads target · now · entry · stop): entry tick, stop (red), target (green), the price now as a dot labelled "Now …", the

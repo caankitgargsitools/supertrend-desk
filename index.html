@@ -892,6 +892,16 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-brand h2 { font: 700 18px/1 var(--font-data); letter-spacing: .12em; margin: 0; color: var(--dk-text); }
 .dk-brand small { display: block; color: var(--dk-muted); font: 500 10.5px var(--font-data); letter-spacing: .06em; margin-top: 3px; }
 .dk-quotes { display: flex; flex-wrap: wrap; gap: 3px 4px; justify-content: flex-start; align-content: center; align-items: center; min-width: 0; }
+/* One moving line (12 Nov 2026, Papa: "a moving one-liner scroll in all views"): two copies of the chips slide left without
+   end; hovering (or touching) holds it; reduced-motion users get a still line they can scroll by hand. */
+#deskPane .dk-quotes { display: block; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; max-height: none !important; padding-right: 0 !important;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
+.dk-qtrack { display: inline-flex; width: max-content; animation: dkqscroll var(--dkq-dur, 120s) linear infinite; will-change: transform; }
+.dk-qset { display: inline-flex; align-items: center; gap: 4px; padding-right: 28px; }
+#deskPane .dk-quotes:hover .dk-qtrack, #deskPane .dk-quotes:active .dk-qtrack { animation-play-state: paused; }
+@keyframes dkqscroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .dk-qtrack { animation: none; } #deskPane .dk-quotes { overflow-x: auto; } .dk-qset[aria-hidden] { display: none; } }
+#deskPane .dk-qtog { display: none !important; }
 .dk-qwrap { position: relative; min-width: 0; align-self: center; }
 /* System feeds (Papa, 6 Nov 2026: "pulse bars … keep coming; red on a break"): one small equalizer per feed. */
 .dk-pulsebox { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--dk-line); }
@@ -8712,22 +8722,22 @@ async function deskQuotes() {
       box.dataset.k = key;
       const GROUP = ["Indices", "MCX", "Stocks", "Crypto"];
       // Stocks by their NSE symbol (short); the rest by name. A small label starts each group.
-      box.innerHTML = list.length ? list.map((x, i) => { const k = dkQKind(x.r.seg), lab = i === 0 || dkQKind(list[i - 1].r.seg) !== k ? `<span class="dk-qg">${GROUP[k]}</span>` : "";
-        return `${lab}<span class="dk-q" data-a="${esc(x.r.asset)}"><b>${esc(k === 2 ? x.r.asset : dkName(x.r.asset))}</b><i class="px"></i><i class="ch"></i></span>`; }).join("")
+      const chips = list.map((x, i) => { const k = dkQKind(x.r.seg), lab = i === 0 || dkQKind(list[i - 1].r.seg) !== k ? `<span class="dk-qg">${GROUP[k]}</span>` : "";
+        return `${lab}<span class="dk-q" data-a="${esc(x.r.asset)}"><b>${esc(k === 2 ? x.r.asset : dkName(x.r.asset))}</b><i class="px"></i><i class="ch"></i></span>`; }).join("");
+      box.innerHTML = list.length ? `<div class="dk-qtrack"><div class="dk-qset">${chips}</div><div class="dk-qset" aria-hidden="true">${chips}</div></div>`
         : '<span class="dk-lbl">Prices appear when the markets open.</span>';
+      // About 45 px a second whatever the number of assets.
+      const set = box.querySelector(".dk-qset"); if (set) box.querySelector(".dk-qtrack").style.setProperty("--dkq-dur", `${Math.max(30, Math.round(set.scrollWidth / 45))}s`);
     }
-    for (const x of list) {
-      const el = box.querySelector(`[data-a="${CSS.escape(x.r.asset)}"]`); if (!el) continue;
+    for (const x of list) { const was = dkQ.last.get(x.r.asset); for (const el of box.querySelectorAll(`[data-a="${CSS.escape(x.r.asset)}"]`)) {
       const v = Number(x.p.px), pc = Number(x.r.prev_close), ch = pc > 0 ? (v / pc - 1) * 100 : null;
       el.querySelector(".px").textContent = v.toLocaleString("en-IN", { maximumFractionDigits: v < 10 ? 4 : 2, minimumFractionDigits: v < 10 ? 2 : 0 });
       const c = el.querySelector(".ch");
       c.textContent = ch == null ? "" : `${ch >= 0 ? "▲" : "▼"} ${Math.abs(ch).toFixed(2)}%`;
       c.className = "ch " + (ch == null ? "" : ch >= 0 ? "dk-up" : "dk-down");
-      const was = dkQ.last.get(x.r.asset);
       if (was != null && v !== was) { el.classList.remove("fu", "fd"); void el.offsetWidth; el.classList.add(v > was ? "fu" : "fd"); }
-      dkQ.last.set(x.r.asset, v);
       el.title = `${dkName(x.r.asset)}: ${el.querySelector(".px").textContent}${pc > 0 ? ` · previous close ${pc.toLocaleString("en-IN")}` : ""}`;
-    }
+    } dkQ.last.set(x.r.asset, Number(x.p.px)); }
   } catch { /* next round */ } finally { dkQ.busy = false; }
 }
 /** A live price move of one open position (from the per-second marks): a dot along its stream. */
