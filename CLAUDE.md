@@ -424,6 +424,9 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   a TEST GOLDM trade — signal → filled → stop at the broker → exit +₹8,450, a few seconds apart; notification rows only,
   once a minute). Checked with a rolled-back transaction on a live GOLDM strategy: entry and exit each ended as one row.
   The Android WebView app still gets no phone notifications (in-app alert works there).
+  Fixed the same day (Papa: "nothing came"): Chrome refuses a notification that is both `silent` and has `vibrate`, so quiet
+  updates and paper trades never showed; silent ones now carry no vibration and a failed show falls back to a plain one.
+  Test `tests/ui/ui_sw_push.mjs` delivers 5 kinds of push to the real `sw.js` (CDP ServiceWorker.deliverPushMessage).
 - **Go-live fixes (12 Nov 2026, Papa: "start building these"; engine v153, migrations 89–90; tests `tests/sim/safety.test.mjs`
   "max lots", "one exchange order", "price band", "F&O ban", "roll: stock futures", "Dhan shows free", `tests/ui/ui_home.mjs`)**:
   (1) Dhan's instrument lists carry `SM_FREEZE_QTY` (per-order limit, the order's own unit: units on NSE / BSE F&O, lots on
