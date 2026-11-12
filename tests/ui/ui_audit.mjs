@@ -76,7 +76,7 @@ console.log("overflow", await p.evaluate(() => document.documentElement.scrollWi
 await (await p.$("#auditBox")).screenshot({ path: "audit_m.png" });
 await p.setViewportSize({ width: 1440, height: 900 });
 await p.evaluate(() => { pollMarks(); }); await p.waitForTimeout(1500);
-console.log("open row", await p.evaluate(() => [...document.querySelectorAll('[data-upnl="s2"]')].map((e) => e.textContent).join(" | ") + " run " + (document.getElementById("tf_runsum")||{}).textContent));
+console.log("open row", await p.evaluate(() => [...document.querySelectorAll('[data-upnl="s2"]')].map((e) => e.textContent).join(" | ") + " run " + (document.querySelector("[data-tfrun]")||{}).textContent));
 await p.evaluate(() => onMark({ strategy_id: "s2", ltp: 101, upnl: 2222, at: new Date().toISOString() })); await p.waitForTimeout(300);
-console.log("after push", await p.evaluate(() => [...document.querySelectorAll('[data-upnl="s2"]')].map((e) => e.textContent).join(" | ") + " run " + document.getElementById("tf_runsum").textContent));
+console.log("after push", await p.evaluate(() => [...document.querySelectorAll('[data-upnl="s2"]')].map((e) => e.textContent).join(" | ") + " run " + document.querySelector("[data-tfrun]").textContent));
 console.log("errors", errs.length); await b.close();

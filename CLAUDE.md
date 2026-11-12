@@ -465,6 +465,18 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   cell is a box (`data-lwlots`, `lw.manual`, blue edge when typed; empty = back to the method's figure); typed rows are
   saved as FIXED lots whatever the method. A last selection worked out from saved MOVE amounts (`derived`) is shown but no
   longer typed into the amount box (the live copies carried their paper ₹37 lakh a day → "Margin required ₹48.22 Cr").
+- **Live and Paper fully separate money (12 Nov 2026, Papa: "my paper capital is 75 lakhs and the live capital is 4 lakhs …
+  no linkage at all"; migration 94)**: `broker_accounts` has its own `paper_capital` / `paper_since` / `paper_deploy_pct` (the
+  original capital / capital_since / deploy_pct are Live's); `my_capital` returns both, `save_mode_capital(p_mode, …)` saves one
+  mode (old `save_my_capital` = Live only). Engine: `sizeEntry` uses `modeAccount(set, live)` (accounts.ts), so a strategy sizes
+  from its own mode's capital, limit and count-from date only (test `safety.test.mjs` "live and paper capital are separate").
+  Error breaker per mode: `risk_state.paper_*` columns, tick keys `<user>|L` / `<user>|P` (`brkKey` / `brkOf`), one paper
+  failure no longer stops live entries or the reverse; `breaker_allow_mode(p_mode)`, one banner per mode. Website: `capView(st,
+  mode)` gives Capital page (form label "Live / Paper trading capital", Save writes the shown mode only), Lots wizard, Desk,
+  strategy form preview and backtests their mode's figures; live and paper money is never added together — Strategies
+  totals row / group headers ("Live … · Paper …", `byModeHtml` / `runByMode`), Trades tab with "Live and paper" (a block per
+  mode), morning card and 08:30 note (`booked_live_today` / `booked_paper_today`, running per mode), Admin › User activity
+  (live and paper capital). The emergency stop's "Paper strategies too" tick stays a choice. Test `tests/ui/ui_capital_modes.mjs`.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");

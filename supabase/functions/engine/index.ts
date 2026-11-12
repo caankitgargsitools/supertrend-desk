@@ -23,7 +23,7 @@ import {
   lotsPerOrder, positionDiff, productOf, resolveLeg, setDhanRpc, type Side, sideOf, stepFor, stopLimit, syncFno, toTick,
 } from "./execution.ts";
 import { loadMarginRates, refreshDayMoves, refreshMargins } from "./margins.ts";
-import { type Account, accountFor, adminAccount, credsOf, dataAccount, dataUid, entryGate, withMasters } from "./accounts.ts";
+import { type Account, accountFor, adminAccount, credsOf, dataAccount, dataUid, entryGate, modeAccount, withMasters } from "./accounts.ts";
 import { billingDay, matches as matchesRef, syncUser } from "./billing.ts";
 import { legsFor, legSign, structMargin, structName, structOf } from "./structures.ts";
 import { auditStrategy } from "./audit.ts";
@@ -347,7 +347,9 @@ async function dhanRate(s: Strategy): Promise<number | null> {
  * Before an entry: reads the option premium (for the ledger, premium stops and option-buying margin) and, when the
  * strategy sizes from capital, works out the lots and rewrites the entry order. Returns false if the entry is skipped.
  */
-async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknown>[], newState: Record<string, any>, entryPx: number, notes: string[]): Promise<boolean> {
+async function sizeEntry(s: Strategy, set0: Settings, legs: Record<string, unknown>[], newState: Record<string, any>, entryPx: number, notes: string[]): Promise<boolean> {
+  // This mode's capital, count-from date and limit only: a paper strategy never sizes from the live capital or the reverse.
+  const set = modeAccount(set0, !!s.live);
   const opt = s.trade_type === "OPTIONS", multi = isMulti(s);
   // A stock in the F&O ban period takes no new positions at the exchange (12 Nov 2026, go-live review): no entry, paper
   // or live, so paper shows what live could do. Exits are allowed and go on as usual.
@@ -1743,14 +1745,16 @@ async function morningCards() {
     const { data: c, error } = await sb.rpc("morning_card", { p_user: u });
     if (error || !c) { console.error("morning", u, error?.message); continue; }
     const open = (c.open ?? []) as { name: string; asset: string; live: boolean; side: string; lots: number; upnl: number | null; stop_pct: number | null; expires_today: boolean }[];
-    const run = open.reduce((a, o) => a + (Number(o.upnl) || 0), 0);
+    // Live and paper kept apart in every figure (12 Nov 2026, Papa: no linkage at all).
+    const runOf = (live: boolean) => open.filter((o) => !!o.live === live).reduce((a, o) => a + (Number(o.upnl) || 0), 0);
+    const nL = open.filter((o) => o.live).length, nP = open.length - nL;
     const parts: string[] = [];
-    parts.push(open.length ? `${open.length} open (${open.filter((o) => o.live).length} live) running ${inr(run)}` : "nothing open");
+    parts.push(open.length ? [nL ? `live: ${nL} open, running ${inr(runOf(true))}` : "live: nothing open", nP ? `paper: ${nP} open, running ${inr(runOf(false))}` : "paper: nothing open"].join("; ") : "nothing open");
     if (open.length) {
       const noStop = open.filter((o) => o.stop_pct == null).length, near = open.filter((o) => o.stop_pct != null && o.stop_pct < 0.5);
       parts.push(noStop ? `${noStop} without a stop` : near.length ? `${near.map((o) => o.asset).join(", ")} within 0.5% of the stop` : "stops in place");
     }
-    parts.push(`booked today ${inr(Number(c.booked_today) || 0)}`);
+    parts.push(c.booked_live_today !== undefined ? `booked today: live ${inr(Number(c.booked_live_today) || 0)}, paper ${inr(Number(c.booked_paper_today) || 0)}` : `booked today ${inr(Number(c.booked_today) || 0)}`);
     const exp = open.filter((o) => o.expires_today).map((o) => o.asset);
     if (exp.length) parts.push(`${exp.join(", ")} expire${exp.length === 1 ? "s" : ""} today`);
     if (c.breaker_halted) parts.push("new trades are stopped (error breaker)");
@@ -1758,7 +1762,7 @@ async function morningCards() {
     if (c.token_hours_left != null) parts.push(Number(c.token_hours_left) < 3 ? `Dhan token expires in ${c.token_hours_left} h` : `Dhan token ${Math.round(Number(c.token_hours_left))} h left`);
     if (c.data_days_left != null && Number(c.data_days_left) <= 7) parts.push(`data plan ${c.data_days_left} day${Number(c.data_days_left) === 1 ? "" : "s"} left`);
     if (c.new_lab_passes != null && Number(c.new_lab_passes) > 0) parts.push(`${c.new_lab_passes} new lab pass${Number(c.new_lab_passes) === 1 ? "" : "es"}`);
-    const title = `Good morning · ${open.length} open · ${inr(run)} · ${c.active_live ?? 0} live, ${c.active_paper ?? 0} paper`;
+    const title = `Good morning · live ${nL} open${nL ? ` ${inr(runOf(true))}` : ""} · paper ${nP} open${nP ? ` ${inr(runOf(false))}` : ""} · ${c.active_live ?? 0} live, ${c.active_paper ?? 0} paper active`;
     await sb.rpc("notify_tagged", { p_user: u, p_kind: "morning", p_title: title.slice(0, 120), p_body: parts.join(" · ").slice(0, 400), p_url: "/?home=1", p_strategy: null, p_tag: tag });
     sent++;
   }
@@ -3210,7 +3214,16 @@ async function reconcile() {
 /* ---------- error circuit breaker per account (Phase 2, 4 Nov 2026; migration 72) ---------- */
 /** Failed minutes in a row (every strategy run of the account failed) before new trades stop for the account. */
 const BREAKER_TICKS = 5;
-type Breaker = { user_id: string; err_ticks: number; last_error: string | null; halted_at: string | null; halt_reason: string | null };
+type Breaker = { user_id: string; err_ticks: number; last_error: string | null; halted_at: string | null; halt_reason: string | null;
+  paper_err_ticks?: number | null; paper_last_error?: string | null; paper_halted_at?: string | null; paper_halt_reason?: string | null };
+/** Live and paper each have their own breaker (12 Nov 2026, Papa: "no linkage at all"; migration 94): the original
+ *  columns are Live's, the paper_ ones Paper's. Keys of the tick's ok / failed sets are "<user>|L" or "<user>|P". */
+const brkKey = (s: { owner_id?: unknown; live?: unknown }) => `${String(s.owner_id)}|${s.live ? "L" : "P"}`;
+function brkOf(b: Breaker | undefined, live: boolean) {
+  if (!b) return { ticks: 0, halted_at: null as string | null, reason: null as string | null };
+  return live ? { ticks: Number(b.err_ticks) || 0, halted_at: b.halted_at ?? null, reason: b.halt_reason ?? null }
+    : { ticks: Number(b.paper_err_ticks) || 0, halted_at: b.paper_halted_at ?? null, reason: b.paper_halt_reason ?? null };
+}
 const tickMode0 = (action: string, body: { strategy_id?: string }) => (action === "tick" || action === "tick_crypto") && !body.strategy_id;
 async function loadBreakers(rows: Strategy[]): Promise<Map<string, Breaker>> {
   const ids = [...new Set(rows.map((x) => String(x.owner_id ?? "")).filter(Boolean))];
@@ -3225,20 +3238,21 @@ async function loadBreakers(rows: Strategy[]): Promise<Map<string, Breaker>> {
  * again" (breaker_allow) clears it. Strategies that were only waiting for their candle don't count either way.
  */
 async function breakerAfterTick(ok: Set<string>, err: Map<string, string>, known: Map<string, Breaker>) {
-  for (const u of new Set([...ok, ...err.keys()])) {
-    const b = known.get(u);
-    if (ok.has(u)) { if (b && b.err_ticks) await sb.from("risk_state").update({ err_ticks: 0, updated_at: nowIso() }).eq("user_id", u); continue; }
+  for (const k of new Set([...ok, ...err.keys()])) {
+    const [u, m] = k.split("|"), live = m === "L", pre = live ? "" : "paper_", word = live ? "live" : "paper";
+    const b = known.get(u), cur = brkOf(b, live);
+    if (ok.has(k)) { if (cur.ticks) await sb.from("risk_state").update({ [pre + "err_ticks"]: 0, updated_at: nowIso() }).eq("user_id", u); continue; }
     // An account counts as failing only when none of its active strategies last ran cleanly (6 Nov 2026 audit: one
     // strategy with a bad contract next to quiet 15-minute ones used to stop the whole account's trades).
-    const { data: fine } = await sb.from("algo_strategies").select("id").eq("owner_id", u).eq("active", true).eq("archived", false).is("last_error", null).limit(1);
+    const { data: fine } = await sb.from("algo_strategies").select("id").eq("owner_id", u).eq("live", live).eq("active", true).eq("archived", false).is("last_error", null).limit(1);
     if (fine?.length) continue;
-    const msg = String(err.get(u) ?? "").slice(0, 300), n = (b?.err_ticks ?? 0) + 1;
-    const halt = n >= BREAKER_TICKS && !b?.halted_at;
-    await sb.from("risk_state").upsert({ user_id: u, err_ticks: n, last_error: msg, updated_at: nowIso(),
-      ...(halt ? { halted_at: nowIso(), halt_reason: msg } : { halted_at: b?.halted_at ?? null, halt_reason: b?.halt_reason ?? null }) }, { onConflict: "user_id" });
-    if (halt) await sb.rpc("notify_tagged", { p_user: u, p_kind: "error", p_title: "New trades stopped: repeated errors",
-      p_body: `Every strategy run of your account failed ${n} minutes in a row (${msg.slice(0, 160)}). New trades are stopped, paper and live; open positions keep their stops and exits. Fix the cause, then tap "Allow new trades again".`.slice(0, 400),
-      p_url: "/", p_strategy: null, p_tag: `breaker-${u}-${todayIst()}` });
+    const msg = String(err.get(k) ?? "").slice(0, 300), n = cur.ticks + 1;
+    const halt = n >= BREAKER_TICKS && !cur.halted_at;
+    await sb.from("risk_state").upsert({ user_id: u, [pre + "err_ticks"]: n, [pre + "last_error"]: msg, updated_at: nowIso(),
+      ...(halt ? { [pre + "halted_at"]: nowIso(), [pre + "halt_reason"]: msg } : { [pre + "halted_at"]: cur.halted_at ?? null, [pre + "halt_reason"]: cur.reason ?? null }) }, { onConflict: "user_id" });
+    if (halt) await sb.rpc("notify_tagged", { p_user: u, p_kind: "error", p_title: `New ${word} trades stopped: repeated errors`,
+      p_body: `Every ${word} strategy run of your account failed ${n} minutes in a row (${msg.slice(0, 160)}). New ${word} trades are stopped (${live ? "paper" : "live"} is not affected); open positions keep their stops and exits. Fix the cause, then tap "Allow new trades again".`.slice(0, 400),
+      p_url: "/", p_strategy: null, p_tag: `breaker-${word}-${u}-${todayIst()}` });
   }
 }
 /* ---------- positional futures across their expiry: roll the day before (Papa, 4 Nov 2026) ---------- */
@@ -3690,11 +3704,11 @@ Deno.serve(async (req) => {
         if (s.live && !(set?.dhan_client_id && set?.dhan_access_token)) throw new Error("Add your Delta Exchange API key and secret (Delta Exchange connection) to trade this strategy live.");
         set = set ?? { user_id: s.owner_id, broker: "DELTA", dhan_client_id: null, dhan_access_token: null, webhook_url: null, webhook_secret: null, capital: null, capital_since: null, deploy_pct: null, funds_at: null };
         if (cryptoTick && outside) {
-          if (await retryExit(s, set)) { results[s.id] = "exit retried"; okUsers.add(String(s.owner_id)); return; }
+          if (await retryExit(s, set)) { results[s.id] = "exit retried"; okUsers.add(brkKey(s)); return; }
           s = await liveRisk(s, set);
           if (s.live) s = await syncStop(s, set).catch(() => s);
           s = await markPrice(s, set).catch(() => s);
-          results[s.id] = "ok (outside the crypto session: stops only)"; okUsers.add(String(s.owner_id));
+          results[s.id] = "ok (outside the crypto session: stops only)"; okUsers.add(brkKey(s));
           return;
         }
       } else if (!set?.dhan_access_token) throw new Error("Connect your Dhan account (client ID and access token) to run this strategy.");
@@ -3716,13 +3730,13 @@ Deno.serve(async (req) => {
         results[s.id] = "orders working"; return;
       }
       // An exit that didn't go is tried again once a minute (exitFailed) before anything else is decided.
-      if (tick && await retryExit(s, set)) { results[s.id] = "exit retried"; okUsers.add(String(s.owner_id)); return; }
+      if (tick && await retryExit(s, set)) { results[s.id] = "exit retried"; okUsers.add(brkKey(s)); return; }
       // New trades need the account in good standing; exits always go through.
       // The kill rule stops new trades of a strategy doing far worse than its backtest (exits still run).
       // A paused strategy is here only while it holds a position: it runs its stops and exits, never a new entry.
-      const brk = breakers.get(String(s.owner_id));
+      const brk = brkOf(breakers.get(String(s.owner_id)), !!s.live);
       s = { ...s, _block: !s.active ? "the strategy is paused (its open position keeps its stop and exit rules)" : s.kill_at ? `the kill rule stopped new trades (${String(s.kill_note ?? "").slice(0, 160)})`
-        : brk?.halted_at ? `new trades stopped after ${BREAKER_TICKS} failed minutes in a row (${String(brk.halt_reason ?? "").slice(0, 160)}); "Allow new trades again" restarts them` : await entryGate(sb, s, gates).catch(() => null) };
+        : brk.halted_at ? `new ${s.live ? "live" : "paper"} trades stopped after ${BREAKER_TICKS} failed minutes in a row (${String(brk.reason ?? "").slice(0, 160)}); "Allow new trades again" restarts them` : await entryGate(sb, s, gates).catch(() => null) };
       if (tick && isStockSeg(String(s.data_segment))) {
         // Stock futures: a split / bonus ex-date first (before any stop is checked), then the lot size in Dhan's list.
         const l = await dhanFor(set).ltp("NSE_EQ", String(s.data_security_id)).catch(() => null);
@@ -3735,12 +3749,12 @@ Deno.serve(async (req) => {
         const update: Record<string, unknown> = { last_run_at: nowIso() };
         await flatten(s, set, update, { c: Number(s.pos_ltp) || undefined }, `Expiry day: ${s.pos_expiry ?? "a leg"} expires today, closed at ${expiryExitTime(s)}`, "SQUARE_OFF");
         await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "position after the expiry exit");
-        results[s.id] = "closed on its expiry day"; okUsers.add(String(s.owner_id)); return;
+        results[s.id] = "closed on its expiry day"; okUsers.add(brkKey(s)); return;
       }
       // Positional futures roll to the next month on the trading day before expiry (Papa, 4 Nov 2026).
       if (tick && !isCr) {
         const exp = await rollDue(s).catch(() => null);
-        if (exp) { await rollFutures(s, set, exp); results[s.id] = `rolled before the ${exp} expiry`; okUsers.add(String(s.owner_id)); return; }
+        if (exp) { await rollFutures(s, set, exp); results[s.id] = `rolled before the ${exp} expiry`; okUsers.add(brkKey(s)); return; }
       }
       if (tick && s.live) { const s0 = s; s = await actLocked(() => syncStop(s0, set)).catch((e) => { console.error("stop", e); return s0; }); }
       // A manual refresh outside market hours (or in the NSE/BSE pre-open) keeps the session's last price.
@@ -3752,11 +3766,11 @@ Deno.serve(async (req) => {
       else await processFlip(s, set, act);
       if (Dhan.ownUsed.has(`${s.data_segment}|${s.data_security_id}`)) ownAssets.add(String(s.underlying ?? s.data_security_id));
       results[s.id] = `ok ${Date.now() - t1}ms (done ${tickT0 ? Date.now() - tickT0 : 0}ms after the minute)`;
-      if (s.owner_id) okUsers.add(String(s.owner_id));
+      if (s.owner_id) okUsers.add(brkKey(s));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       results[s.id] = msg;
-      if (s.owner_id) errUsers.set(String(s.owner_id), msg);
+      if (s.owner_id) errUsers.set(brkKey(s), msg);
       await sb.from("algo_strategies").update({ last_error: msg, last_run_at: new Date().toISOString() }).eq("id", s.id);
     }
   };

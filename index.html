@@ -1513,12 +1513,12 @@ body.dk-fs-on { overflow: hidden; }
         <div id="cap_stats" style="margin-top:12px"></div>
         <form novalidate id="capForm" style="margin-top:14px">
           <div class="grid">
-            <label class="f"><span>My trading capital (₹)</span><input id="cap_capital" type="number" min="0" step="1000"></label>
+            <label class="f"><span id="cap_capLbl">Live trading capital (₹)</span><input id="cap_capital" type="number" min="0" step="1000"></label>
             <label class="f"><span>Never use more than (% of capital at once)</span><input id="cap_deploy" type="number" min="1" max="100" step="1"></label>
             <label class="f adv"><span>Count profits &amp; losses from</span><input id="cap_since" type="date" lang="en-IN"></label>
           </div>
           <div id="cap_dd" class="dd-box"></div>
-          <p class="hint">Strategies set to “Automatic” lots size every trade from this capital plus the profit or loss made so far, so they trade more after profits and less after losses. The limit keeps all strategies together (fixed and automatic lots) from using more than this share at once: a new entry takes only the lots that fit (e.g. 36 of 40), is skipped only when not even 1 lot fits, and the strategy's log says why. Exits always go.</p>
+          <p class="hint"><b>Live and Paper each have their own capital, limit and count-from date</b> (switch Live / Paper at the top); saving changes only the one shown. Strategies set to “Automatic” lots size every trade from this capital plus the profit or loss made so far, so they trade more after profits and less after losses. The limit keeps all strategies together (fixed and automatic lots) from using more than this share at once: a new entry takes only the lots that fit (e.g. 36 of 40), is skipped only when not even 1 lot fits, and the strategy's log says why. Exits always go.</p>
           <div class="formbar"><button class="btn primary" type="submit">Save</button><span class="hint" id="cap_msg"></span><label class="advtoggle" style="margin-left:auto"><input type="checkbox" data-adv> Show advanced settings</label></div>
         </form>
       </section>
@@ -2379,11 +2379,13 @@ async function loadEngineAlerts() {
 async function loadBreaker() {
   const box = $("breakerAlert");
   if (!me) { box.hidden = true; return; }
-  const { data } = await db.from("risk_state").select("err_ticks, last_error, halted_at, halt_reason").eq("user_id", me.user_id).maybeSingle();
-  box.hidden = !(data && data.halted_at);
+  // Live and paper each have their own breaker (12 Nov 2026, Papa: no linkage at all; migration 94).
+  const { data } = await db.from("risk_state").select("err_ticks, last_error, halted_at, halt_reason, paper_err_ticks, paper_last_error, paper_halted_at, paper_halt_reason").eq("user_id", me.user_id).maybeSingle();
+  const modes = !data ? [] : [["LIVE", "live", data.halted_at, data.halt_reason || data.last_error], ["PAPER", "paper", data.paper_halted_at, data.paper_halt_reason || data.paper_last_error]].filter((m) => m[2]);
+  box.hidden = !modes.length;
   if (box.hidden) { box.textContent = ""; return; }
-  box.innerHTML = `<b>⚠ New trades stopped since ${esc(fmtDate(data.halted_at))} IST.</b> Every strategy run of your account failed 5 minutes in a row: ${esc(String(data.halt_reason || data.last_error || "").slice(0, 200))}. Open positions keep their stops and exits; no new entries (paper and live) until you allow them again. <button type="button" class="btn small" id="breakerAllow">Allow new trades again</button>`;
-  $("breakerAllow").onclick = (ev) => run(ev.currentTarget, async () => { must(await db.rpc("breaker_allow")); toast("New trades allowed again."); await loadBreaker(); });
+  box.innerHTML = modes.map(([m, w, at, why]) => `<div><b>⚠ New ${w} trades stopped since ${esc(fmtDate(at))} IST.</b> Every ${w} strategy run of your account failed 5 minutes in a row: ${esc(String(why || "").slice(0, 200))}. Open ${w} positions keep their stops and exits; no new ${w} entries until you allow them again (${w === "live" ? "paper" : "live"} is not affected). <button type="button" class="btn small" data-brk="${m}">Allow new ${w} trades again</button></div>`).join("");
+  box.querySelectorAll("[data-brk]").forEach((b) => { b.onclick = (ev) => run(ev.currentTarget, async () => { must(await db.rpc("breaker_allow_mode", { p_mode: b.dataset.brk })); toast(`New ${b.dataset.brk === "LIVE" ? "live" : "paper"} trades allowed again.`); await loadBreaker(); }); });
 }
 async function loadAll() {
   loadHolidays();
@@ -4080,7 +4082,7 @@ $("btForm").addEventListener("submit", (e) => {
   if (!state.settings || !state.settings.has_token) { $("btMsg").textContent = "Add your Dhan access token under Dhan connection first."; openConn(); return; }
   const sizing = $("bt_sizing").checked;
   if (sizing && !(s.sizing && s.sizing.mode === "AUTO")) { $("btMsg").textContent = "Set “Lots per trade” to “Size from capital” in this strategy's settings first (and save)."; return; }
-  const deploy = Number((state.settings && state.settings.deploy_pct) || 100);
+  const deploy = Number(capView(cap.status, s.live ? "LIVE" : "PAPER").deploy_pct || (state.settings && state.settings.deploy_pct) || 100);
   const params = JSON.stringify({ from, to, capital, brokerage, charges, near_code: code, ...(sizing ? { sizing: true, deploy_pct: deploy } : {}) });
   $("btMsg").textContent = "";
   run($("bt_run"), async () => {
@@ -4689,11 +4691,11 @@ function applySizeVisibility() {
     ? "Before every entry: lots = the smallest of (share of equity ÷ money one lot needs), (drawdown budget ÷ (1 lot's worst drawdown × safety multiple)), the room left under the capital page's limit, and the maximum. If not even 1 lot fits, the entry is skipped and logged."
     : "Before every trade the desk works out how many lots fit in this share of your capital (set your capital on the Capital page). If not even 1 lot fits, the trade is skipped.";
   if (s && cap.status) {
-    const live = !!s.live, eq = Number(cap.status.capital) + Number(live ? cap.status.live_net : cap.status.paper_net);
+    const live = !!s.live, cv = capView(cap.status, live ? "LIVE" : "PAPER"), eq = equityOf(cv, live ? "LIVE" : "PAPER");
     const used = Number(live ? cap.status.live_used : cap.status.paper_used) - (s.position !== "FLAT" ? Number(s.pos_margin || 0) : 0);
     try {
       const form = { ...s, trade_type: $("f_trade_type").value, option_side: $("f_option_side").value, lot_size: Number($("f_lot_size").value || s.lot_size) };
-      const pv = previewLots(form, readSizing({ qty_mode: "LOTS" }), eq, used, Number(cap.status.deploy_pct || 100));
+      const pv = previewLots(form, readSizing({ qty_mode: "LOTS" }), eq, used, Number(cv.deploy_pct || 100));
       const dr = dhanRateFor(form);
       txt += dr ? ` Margin used: Dhan's rate today, ${(dr * 100).toFixed(1)}% of contract value (checked every morning).` : form.trade_type === "OPTIONS" && form.option_side !== "SELL" ? " Margin used: the premium paid." : "";
       if (pv) txt += ` Right now (${live ? "live" : "paper"} equity ${rupees(eq)}, last price ${fmtNum(s.last_close)}): ${pv.buying ? "about " : ""}${pv.lots} lot${pv.lots === 1 ? "" : "s"} (${rupees(pv.mLot)} a lot${pv.buying ? ", assuming a premium of 1% of the index; the live premium is used at entry" : ""}).`;
@@ -4759,7 +4761,8 @@ document.querySelectorAll("#cap_tabs [data-t]").forEach((b) => b.addEventListene
 capTab((() => { try { return localStorage.getItem("capTab") || "main"; } catch { return "main"; } })());
 function closeCap() { if (!cap.open) return; cap.open = false; $("capPane").hidden = true; $("openCap").classList.remove("primary"); }
 async function loadCap() {
-  const st = await loadCapStatus(), trades = myTrades.filter((t) => t.mode === cap.mode).slice(0, 200); // the latest 200 closed trades of the mode
+  const st = capView(await loadCapStatus(), cap.mode), trades = myTrades.filter((t) => t.mode === cap.mode).slice(0, 200); // this mode's settings; the latest 200 closed trades of the mode
+  $("cap_capLbl").textContent = cap.mode === "LIVE" ? "Live trading capital (₹)" : "Paper trading capital (₹)";
   if (!$("cap_capital").matches(":focus")) { $("cap_capital").value = String(Math.trunc(st.capital ?? 0)); $("cap_since").value = st.since || ""; $("cap_deploy").value = String(st.deploy_pct ?? 60); }
   if (lw.savedPct !== st.deploy_pct) { lw.savedPct = st.deploy_pct; $("lw_capPct").value = String(st.deploy_pct ?? 60); }
   if (!lw.capSet) { $("lw_cap").value = String(Math.trunc(equityOf(st, cap.mode))); }
@@ -4937,7 +4940,7 @@ function lwRender() {
   const used = sized.reduce((a, r) => a + r.used, 0), fall = sized.reduce((a, r) => a + (r.fall || 0), 0), lots = sized.reduce((a, r) => a + r.lots, 0);
   const zero = sized.filter((r) => !r.lots).length, over = used > limit;
   $("lw_modeTxt").textContent = live ? "live" : "paper";
-  const savedPct = Number(cap.status && cap.status.deploy_pct) || 60;
+  const savedPct = Number(capView(cap.status, cap.mode).deploy_pct) || 60;
   $("lw_capWords").innerHTML = capAmt ? esc(`${rupees(capAmt)} · margin may use up to ${rupees(limit)} at once. Prefilled with your capital plus ${live ? "live" : "paper"} profit / loss and your saved limit (${savedPct}%).`)
     + (capPct > savedPct ? ` <b style="color:var(--red)">Above your saved limit of ${savedPct}%.</b>` : "") : "Enter the capital.";
   $("lw_capPct").style.borderColor = capPct > savedPct ? "var(--red)" : "";
@@ -4978,7 +4981,7 @@ function lwRender() {
   const top = Math.max(1, ...byA.values());
   $("lw_assets").innerHTML = [...byA].sort((a, b) => b[1] - a[1]).map(([u, v]) => `<div class="lw-a"><span>${esc(lwName(u))}</span><span class="b"><i class="${capAmt && v / capAmt > .25 ? "hot" : ""}" style="width:${v / top * 100}%"></i></span><span class="v">${rupees(v)}${capAmt ? ` · ${Math.round(v / capAmt * 100)}%` : ""}</span></div>`).join("") || '<p class="hint">Nothing ticked.</p>';
   const notes = [];
-  const saved = Number(cap.status && cap.status.deploy_pct) || 60;
+  const saved = Number(capView(cap.status, cap.mode).deploy_pct) || 60;
   if (capPct > saved) notes.push(["err", `${capPct}% here is above your saved limit of ${saved}% (“Never use more than” at the top of this page). Strategies on automatic lots stop new entries above ${saved}%, so plan with ${saved}% or raise the saved limit first.`]);
   else if (used > capAmt * saved / 100) notes.push(["err", `Margin needed (${rupees(used)}) is above your saved limit of ${saved}% (${rupees(capAmt * saved / 100)}).`]);
   if (over) notes.push(["err", `Margin needed (${rupees(used)}) is above your ${capPct}% limit (${rupees(limit)}). Lower the lots or the share, or raise the limit.`]);
@@ -5081,6 +5084,7 @@ $("lw_apply").addEventListener("click", (e) => {
 $("openCap").addEventListener("click", () => cap.open ? null : openCap());
 $("cap_mode").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
   cap.mode = b.dataset.m; $("cap_mode").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+  lw.capSet = false; document.activeElement && document.activeElement.blur && document.activeElement.blur(); $("cap_msg").textContent = "";
   withLoading($("capPane"), loadCap()).catch((e) => toast(errorText(e)));
 }));
 $("cap_funds").addEventListener("click", (e) => run(e.currentTarget, async () => {
@@ -5093,8 +5097,8 @@ $("capForm").addEventListener("submit", (e) => {
   if (!(c >= 0)) { $("cap_msg").textContent = "Capital must be 0 or more."; return; }
   if (!(d >= 1 && d <= 100)) { $("cap_msg").textContent = "The cap must be between 1 and 100%."; return; }
   run(e.submitter, async () => {
-    must(await db.rpc("save_my_capital", { p_capital: c, p_since: since, p_deploy_pct: d }));
-    $("cap_msg").textContent = "Saved. Sizing uses this from the next entry."; await loadAll(); await loadCap();
+    must(await db.rpc("save_mode_capital", { p_mode: cap.mode, p_capital: c, p_since: since, p_deploy_pct: d }));
+    $("cap_msg").textContent = `Saved for ${cap.mode === "LIVE" ? "Live" : "Paper"} only. Sizing of ${cap.mode === "LIVE" ? "live" : "paper"} strategies uses this from the next entry.`; await loadAll(); await loadCap();
   });
 });
 
@@ -7031,7 +7035,14 @@ function runOf(mode) {
   return { open, upnl: open.reduce((a, x) => a + (Number(x.pos_upnl) || 0), 0), margin: open.reduce((a, x) => a + (Number(x.pos_margin) || 0), 0) };
 }
 /** Capital + this mode's Booked P&L: the server's figure when "count from" is set, else every closed trade (bookOf). One way everywhere. */
+/** One mode's capital settings (12 Nov 2026, Papa: live and paper have no linkage at all): Live = capital / since /
+ *  deploy_pct as saved, Paper = its own paper_capital / paper_since / paper_deploy_pct. Safe to apply twice. */
+function capView(st, mode) {
+  if (!st || mode === "LIVE" || st.paper_capital === undefined) return st || {};
+  return { ...st, capital: st.paper_capital, since: st.paper_since, deploy_pct: st.paper_deploy_pct };
+}
 function equityOf(st, mode) {
+  st = capView(st, mode);
   const live = mode === "LIVE", net = st && st.since ? Number(live ? st.live_net : st.paper_net) : bookOf(live ? "LIVE" : "PAPER").net;
   return (Number(st && st.capital) || 0) + (Number.isFinite(net) ? net : 0);
 }
@@ -7268,17 +7279,28 @@ function filteredOpen() {
     && (!q || `${x.name} ${x.futures_symbol || ""}`.toLowerCase().includes(q)));
 }
 function renderAllTrades() {
-  const rows = filteredTrades(), st = stats(rows), open = filteredOpen();
+  const rows = filteredTrades(), open = filteredOpen();
   const runSum = open.reduce((a, x) => a + (Number(x.pos_upnl) || 0), 0);
   const filtered = rows.length !== deskTrades.length;
   const arch = !$("tf_arch").checked ? deskTrades.filter((t) => { const s = stratOf(t.strategy_id); return s && s.archived; }) : [];
   const sgn = (v) => v > 0 ? "up" : v < 0 ? "down" : "";
-  renderAllTrades.booked = st.net;
-  const runTile = `<div class="stats" style="margin-top:10px"><div class="stat"><span class="label">Running P&amp;L</span><span class="v ${sgn(runSum)}" id="tf_runsum">${esc(rupees(runSum))}</span><span class="hint">${open.length} position${open.length === 1 ? "" : "s"} · not yet booked</span></div>
-    <div class="stat"><span class="label">Booked + Running P&amp;L</span><span class="v ${sgn(st.net + runSum)}" id="tf_bookrun">${esc(rupees(st.net + runSum))}</span><span class="hint">if everything open closed at the last price</span></div></div>`;
-  $("tf_stats").innerHTML = statsHtml(st, `${runTile}<p class="hint" style="margin:8px 0 0">${filtered ? `Showing ${rows.length} of ${deskTrades.length} closed trades. ` : ""}${arch.length ? `${arch.length} trade${arch.length === 1 ? "" : "s"} of archived strategies (${rupees(arch.reduce((a, t) => a + Number(t.net || 0), 0))}) left out, as on the strategies list; tick “Archived strategies” to include them.` : ""}</p>`);
+  // Live and paper are never added together (12 Nov 2026, Papa: no linkage): with both modes shown, each gets its own
+  // figures; one mode shows one set. Running tiles carry data-tfrun / data-tfboth = their mode for the live repaint.
+  const isL = (x) => (x.mode ? x.mode === "LIVE" : !!x.live);
+  const modes = $("tf_mode").value ? [$("tf_mode").value] : [...new Set([...rows.map((t) => t.mode), ...open.map((x) => x.live ? "LIVE" : "PAPER")])].sort();
+  if (!modes.length) modes.push("PAPER");
+  renderAllTrades.booked = {};
+  const block = (m) => {
+    const r = modes.length > 1 ? rows.filter((t) => isL(t) === (m === "LIVE")) : rows, o = modes.length > 1 ? open.filter((x) => isL(x) === (m === "LIVE")) : open;
+    const st = stats(r), run = o.reduce((a, x) => a + (Number(x.pos_upnl) || 0), 0);
+    renderAllTrades.booked[m] = st.net;
+    const runTile = `<div class="stats" style="margin-top:10px"><div class="stat"><span class="label">Running P&amp;L</span><span class="v ${sgn(run)}" data-tfrun="${m}">${esc(rupees(run))}</span><span class="hint">${o.length} position${o.length === 1 ? "" : "s"} · not yet booked</span></div>
+    <div class="stat"><span class="label">Booked + Running P&amp;L</span><span class="v ${sgn(st.net + run)}" data-tfboth="${m}">${esc(rupees(st.net + run))}</span><span class="hint">if everything open closed at the last price</span></div></div>`;
+    return (modes.length > 1 ? `<h4 style="margin:14px 0 4px">${m === "LIVE" ? "Live" : "Paper"}</h4>` : "") + statsHtml(st, runTile);
+  };
+  $("tf_stats").innerHTML = modes.map(block).join("") + `<p class="hint" style="margin:8px 0 0">${filtered ? `Showing ${rows.length} of ${deskTrades.length} closed trades. ` : ""}${arch.length ? `${arch.length} trade${arch.length === 1 ? "" : "s"} of archived strategies (${rupees(arch.reduce((a, t) => a + Number(t.net || 0), 0))}) left out, as on the strategies list; tick “Archived strategies” to include them.` : ""}</p>`;
   // Open positions in their own small block above the closed trades (M8).
-  $("tf_open").innerHTML = open.length ? `<div class="label" style="margin-bottom:6px">Open now · ${plural(open.length, "position")} · Running P&amp;L ${rupees(runSum)}</div>${tradesHtml([], { withStrategy: true, withMode: true }, open)}` : "";
+  $("tf_open").innerHTML = open.length ? `<div class="label" style="margin-bottom:6px">Open now · ${plural(open.length, "position")} · Running P&amp;L ${runByMode(open)}</div>${tradesHtml([], { withStrategy: true, withMode: true }, open)}` : "";
   $("tf_list").innerHTML = `<div class="label" style="margin-bottom:6px">Closed trades · ${plural(rows.length, "trade")}</div>` + tradesHtml(rows, { withStrategy: true, withMode: true, empty: deskTrades.length ? "No trades match these filters." : "No closed trades yet. Trades appear here as soon as a strategy closes a position, paper or live." }, []);
   wireOpenLinks($("tf_open")); wireOpenLinks($("tf_list"));
   paintFilterToggle("tf");
@@ -7387,8 +7409,9 @@ function groupInfo(g, ranks, hiddenArch) {
     if (best.live) tag = `<span class="tag ok" title="${esc(`${best.name} (consistency ${r(best).score}) is the best of this group and it is live`)}">best is live</span>`;
     else tag = `<span class="tag warn" title="${esc(`Best: ${best.name} (consistency ${r(best).score}, not live). Live: ${live.map((s) => `${short(s)} (${r(s).rank ? `rank ${r(s).rank} of ${r(s).of}` : "no lab result"})`).join(", ")}`)}">best isn't live</span>`;
   }
-  const booked = g.list.reduce((a, s) => { const p = pnl.get(s.id) || {}; return a + (s.live ? (p.live || 0) : (p.paper || 0)); }, 0);
-  return { title, count: parts.join(" · "), tag, booked };
+  const bk = (live) => g.list.filter((s) => !!s.live === live).reduce((a, s) => { const p = pnl.get(s.id) || {}; return a + ((live ? p.live : p.paper) || 0); }, 0);
+  const hasL = g.list.some((s) => s.live), hasP = g.list.some((s) => !s.live);
+  return { title, count: parts.join(" · "), tag, bookedHtml: byModeHtml(bk(true), bk(false), hasL, hasP || !hasL, rupees) };
 }
 /* ---------- Home card (6 Nov 2026): the first thing a user sees on the Strategies page — today's open positions with their
    stop-distance meters, today's Booked P&L, expiries today, and only when they matter: token / data plan running out, the error
@@ -7421,7 +7444,7 @@ function renderMorning() {
   if (expiring.length) lines.push(`<li><b>${plural(expiring.length, "contract")}</b> expire today: ${expiring.map((o) => esc(assetLabel(o.asset))).join(", ")} — options close at 14:30; futures roll before expiry (index: the day before, stock futures 3 days, MCX metals 5).</li>`);
   if (Number(m.new_lab_passes) > 0 && isAdmin()) lines.push(`<li>${plural(Number(m.new_lab_passes), "new lab pass", "new lab passes")} since yesterday — <a href="#" data-go="lab">Strategy Lab</a>.</li>`);
   box.innerHTML = `<section class="card morning"><div class="head"><div><span class="label">Today · ${esc(fmtDay(m.day || Date.now()))}</span><h2 style="font-size:18px">Home</h2></div>
-    <div class="mstats"><span>Booked P&amp;L today <b class="${cls(m.booked_today)}">${rupees(m.booked_today || 0)}</b></span><span>${Number(m.active_live) || 0} live · ${Number(m.active_paper) || 0} paper active</span>${ksNeeded() ? '<button class="btn small ks-btn" type="button" id="ks_btn" title="Press and hold for 1.5 seconds: every open position is closed and every strategy paused"><i></i>Emergency stop</button>' : ""}</div></div>
+    <div class="mstats">${m.booked_live_today !== undefined ? `<span>Booked P&amp;L today: live <b class="${cls(m.booked_live_today)}">${rupees(m.booked_live_today || 0)}</b> · paper <b class="${cls(m.booked_paper_today)}">${rupees(m.booked_paper_today || 0)}</b></span>` : `<span>Booked P&amp;L today <b class="${cls(m.booked_today)}">${rupees(m.booked_today || 0)}</b></span>`}<span>${Number(m.active_live) || 0} live · ${Number(m.active_paper) || 0} paper active</span>${ksNeeded() ? '<button class="btn small ks-btn" type="button" id="ks_btn" title="Press and hold for 1.5 seconds: every open position is closed and every strategy paused"><i></i>Emergency stop</button>' : ""}</div></div>
     ${open.length ? `<div class="mrows">${open.map(row).join("")}</div>` : '<p class="hint" style="margin:8px 0 0">No open position. Active strategies enter on their next signal.</p>'}
     ${lines.length ? `<ul class="mlines">${lines.join("")}</ul>` : ""}</section>`;
   wireOpenLinks(box);
@@ -7488,10 +7511,10 @@ function renderOnboard() {
     if (k === "conn") openConn(); else if (k === "market") showPage("market"); else if (k === "new") $("newFlip2").click(); else if (k === "trades") setLpTab("trades");
   }));
 }
-const groupRunHtml = (list) => { const v = listRunTotal(list), priced = list.some((s) => !s.archived && s.position !== "FLAT" && s.pos_upnl != null); return `<span class="${cls(v)}">${priced ? rupeesSigned(v) : "–"}</span>`; };
+const groupRunHtml = (list) => runByMode(list);
 function groupHeadHTML(g, ranks, hiddenArch, folded) {
   const i = groupInfo(g, ranks, hiddenArch);
-  return `<span class="car" aria-hidden="true">${folded ? "▸" : "▾"}</span><b>${esc(i.title)}</b><span class="hint">${esc(i.count)}</span>${i.tag}<span class="pl">Running P&amp;L <span data-grun="${esc(g.k)}">${groupRunHtml(g.list)}</span></span><span class="pl">Booked P&amp;L <span class="${cls(i.booked)}">${rupees(i.booked)}</span></span>`;
+  return `<span class="car" aria-hidden="true">${folded ? "▸" : "▾"}</span><b>${esc(i.title)}</b><span class="hint">${esc(i.count)}</span>${i.tag}<span class="pl">Running P&amp;L <span data-grun="${esc(g.k)}">${groupRunHtml(g.list)}</span></span><span class="pl">Booked P&amp;L ${i.bookedHtml}</span>`;
 }
 const toggleFold = (k) => { lpFold.has(k) ? lpFold.delete(k) : lpFold.add(k); saveFold(); renderList(); };
 /** Strategies table, simple view (Papa, 2 Nov 2026): asset, long / short, lots, running P&L, booked P&L, status. */
@@ -7625,12 +7648,15 @@ function paintMarks(prev) {
     for (const el of els.ltp) el.textContent = posPriceText(s);
     for (const el of els.ltpn) el.textContent = fmtNum(s.pos_ltp);
   }
-  const rs = $("tf_runsum");
-  if (rs && rs.offsetParent) {
-    const run = filteredOpen().reduce((a, x) => a + (Number(x.pos_upnl) || 0), 0), both = (renderAllTrades.booked || 0) + run;
-    const sg = (v) => "v " + (v > 0 ? "up" : v < 0 ? "down" : "");
-    rs.textContent = rupees(run); rs.className = sg(run);
-    const br = $("tf_bookrun"); if (br) { br.textContent = rupees(both); br.className = sg(both); }
+  const tfr = document.querySelectorAll("#tf_stats [data-tfrun]");
+  if (tfr.length && tfr[0].offsetParent) {
+    const sg = (v) => "v " + (v > 0 ? "up" : v < 0 ? "down" : ""), all = filteredOpen(), split = tfr.length > 1;
+    for (const rs of tfr) {
+      const m = rs.dataset.tfrun, run = all.filter((x) => !split || !!x.live === (m === "LIVE")).reduce((a, x) => a + (Number(x.pos_upnl) || 0), 0);
+      const both = ((renderAllTrades.booked || {})[m] || 0) + run;
+      rs.textContent = rupees(run); rs.className = sg(run);
+      const br = document.querySelector(`#tf_stats [data-tfboth="${m}"]`); if (br) { br.textContent = rupees(both); br.className = sg(both); }
+    }
   }
   if (page === "strat" && cur() && cur().position !== "FLAT") renderStratPos(cur());
   const tot = $("lp_tot_upnl"); if (tot && renderList.shown) tot.innerHTML = listRunTotalHtml(renderList.shown);
@@ -8636,11 +8662,11 @@ function deskClock() {
 }
 /** Numbers, tiles, feed, ticker: everything that is plain HTML. */
 function deskPaint() {
-  const live = desk.mode === "LIVE", all = deskStrats(), open = dkOpen(), st = cap.status || {};
+  const live = desk.mode === "LIVE", all = deskStrats(), open = dkOpen(), st = capView(cap.status || {}, desk.mode);
   const names = new Map(state.strategies.map((x) => [x.id, x]));
   const ro = runOf(desk.mode), run = ro.upnl, margin = ro.margin, bk = bookOf(desk.mode), booked = bk.net, n = bk.n, wins = bk.wins;
   desk.booked = booked; // shown beside the running P&L in the profit-flow panel (Papa, 4 Nov)
-  const capital = Number(st.capital) || 0, equity = capital + Number(live ? st.live_net : st.paper_net || 0), limit = Number(st.deploy_pct) || 60;
+  const capital = Number(st.capital) || 0, equity = equityOf(st, desk.mode), limit = Number(st.deploy_pct) || 60;
   $("dk_sub").textContent = `${live ? "LIVE" : "PAPER"} · ${all.length} STRATEGIES · ${all.filter((x) => x.active).length} ACTIVE`;
   $("dk_acct").textContent = live ? "Live account" : "Paper account";
   $("dk_note").textContent = live && !all.length ? "No live strategies yet: switch to Paper to see your paper desk." : "";
@@ -9814,10 +9840,22 @@ $("lp_quick").querySelectorAll("button").forEach((b) => b.addEventListener("clic
   lpQuick = b.dataset.q; $("lp_quick").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); renderList();
 }));
 /** Running P&L total of the strategies shown in the table (kept up to date by the live prices). */
+/** Live and paper money is never added together (12 Nov 2026, Papa: "no linkage at all"): rows of one mode show one
+ *  figure; rows of both show "Live … · Paper …". f = the formatter (rupees / rupeesSigned), dash = no price yet. */
+function byModeHtml(vL, vP, hasL, hasP, f, dashL = false, dashP = false) {
+  const one = (v, dash) => `<span class="${cls(v)}">${dash ? "–" : f(v)}</span>`;
+  if (hasL && hasP) return `<span class="hint sm">Live</span> ${one(vL, dashL)} · <span class="hint sm">Paper</span> ${one(vP, dashP)}`;
+  return hasL ? one(vL, dashL) : one(vP, dashP);
+}
+function runByMode(rows) {
+  const open = rows.filter((s) => !s.archived && s.position !== "FLAT"), L = open.filter((s) => s.live), P = open.filter((s) => !s.live);
+  const v = (l) => l.reduce((a, s) => a + (s.pos_upnl != null ? Number(s.pos_upnl) : 0), 0), priced = (l) => l.some((s) => s.pos_upnl != null);
+  return byModeHtml(v(L), v(P), L.length > 0, P.length > 0 || !L.length, rupeesSigned, !priced(L), !priced(P));
+}
 function listRunTotal(rows) { return rows.reduce((a, s) => a + (!s.archived && s.position !== "FLAT" && s.pos_upnl != null ? Number(s.pos_upnl) : 0), 0); }
 function listRunTotalHtml(rows) {
-  const v = listRunTotal(rows), n = rows.filter((s) => !s.archived && s.position !== "FLAT").length, priced = rows.some((s) => !s.archived && s.position !== "FLAT" && s.pos_upnl != null);
-  return `<span class="${cls(v)}">${priced ? rupeesSigned(v) : "–"}</span><div class="hint sm">${n} open</div>`;
+  const n = rows.filter((s) => !s.archived && s.position !== "FLAT").length;
+  return `${runByMode(rows)}<div class="hint sm">${n} open</div>`;
 }
 /** The totals row under the strategies table: one figure for every column. */
 function listTotals(cols, rows) {
@@ -9825,7 +9863,6 @@ function listTotals(cols, rows) {
   const cnt = (arr) => { const m = new Map(); for (const x of arr) m.set(x, (m.get(x) || 0) + 1); return m; };
   const p = (s) => pnl.get(s.id) || {};
   const nTr = sum((s) => p(s).n), nWin = sum((s) => p(s).wins);
-  const tl = sum((s) => p(s).live), tpp = sum((s) => p(s).paper), shownBooked = sum((s) => s.live ? p(s).live : p(s).paper);
   const lots = open.filter((s) => s.position !== "FLAT").reduce((a, s) => a + (Number(s.pos_lots) || 0), 0);
   const nOpen = open.filter((s) => s.position !== "FLAT").length;
   const req = open.reduce((a, s) => a + (marginRequired(s).v || 0), 0), dep = open.reduce((a, s) => a + (marginDeployed(s) || 0), 0), capSet = open.reduce((a, s) => a + (capitalOf(s) || 0), 0);
@@ -9841,7 +9878,7 @@ function listTotals(cols, rows) {
     sasset: `Total<div class="hint sm">${rows.length} strateg${rows.length === 1 ? "y" : "ies"} · ${new Set(rows.map((s) => s.underlying)).size} assets</div>`,
     side: nOpen ? `${open.filter((s) => s.position === "LONG").length} long · ${open.filter((s) => s.position === "SHORT").length} short` : '<span class="hint">All flat</span>',
     lots: String(lots),
-    booked: `<span class="${cls(shownBooked)}">${rupees(shownBooked)}</span><div class="hint sm">these rows · live ${rupees(tl)} · paper ${rupees(tpp)}</div>${(() => { const P = bookOf("PAPER"), L = bookOf("LIVE"); return P.arch || L.arch ? `<div class="hint sm" title="Every closed trade, archived strategies included: the figure on Capital and Desk">account: paper ${rupees(P.net)}${L.n ? ` · live ${rupees(L.net)}` : ""}</div>` : ""; })()}`,
+    booked: `${byModeHtml(sum((s) => s.live ? p(s).live : 0), sum((s) => s.live ? 0 : p(s).paper), rows.some((s) => s.live), rows.some((s) => !s.live) || !rows.some((s) => s.live), rupees)}<div class="hint sm">these rows</div>${(() => { const P = bookOf("PAPER"), L = bookOf("LIVE"); return P.arch || L.arch ? `<div class="hint sm" title="Every closed trade, archived strategies included: the figure on Capital and Desk">account: paper ${rupees(P.net)}${L.n ? ` · live ${rupees(L.net)}` : ""}</div>` : ""; })()}`,
     trades: String(nTr),
     win: nTr ? `${pct(nWin / nTr * 100)}<div class="hint sm">${nWin} of ${nTr}</div>` : "–",
     size: capSet ? `${rupees(capSet)}<div class="hint sm">capital set</div>` : "–",
@@ -10275,7 +10312,7 @@ async function loadActivity() {
     <td><b>${esc(u.full_name || u.email)}</b><div class="hint">${esc(u.email)} · seen ${esc(agoText(u.last_seen))}${u.last_sign_in_at ? ` · signed in ${esc(agoText(u.last_sign_in_at))}` : ""}</div>
       <button class="btn small aa-pages" type="button" data-u="${esc(u.user_id)}" aria-expanded="false">Pages ▸</button></td>
     <td class="n" data-v="${Number(u.active_min) || 0}">${Number(u.active_min) ? `<div>open ${esc(hrsMin(u.active_min))}</div><div class="hint">in use ${esc(hrsMin(u.engaged_min))} · ${Number(u.visits_24h) || 0} visit${Number(u.visits_24h) === 1 ? "" : "s"}</div>` : "–"}</td>
-    <td class="n" data-v="${Number(u.capital) || 0}">${Number(u.capital) ? esc(rupees(u.capital)) : "–"}</td>
+    <td class="n" data-v="${Number(u.capital) || 0}"><div>${Number(u.capital) ? `live ${esc(rupees(u.capital))}` : "live –"}</div><div class="hint">${Number(u.paper_capital) ? `paper ${esc(rupees(u.paper_capital))}` : "paper –"}</div></td>
     ${mode(u, "live")}${mode(u, "paper")}
     <td class="n" data-v="${Number(u.trades_24h) || 0}">${Number(u.trades_24h) || 0}</td>
     <td>${u.status === "active" ? "" : `<span class="chip">${esc(u.status)}</span> `}${u.role === "admin" ? '<span class="chip">admin</span> ' : ""}${u.dhan_ok ? '<span class="chip green">Dhan ✓</span>' : '<span class="chip yellow">no Dhan</span>'}${u.halted ? ' <span class="chip red">new trades stopped</span>' : ""}</td></tr>`).join("")

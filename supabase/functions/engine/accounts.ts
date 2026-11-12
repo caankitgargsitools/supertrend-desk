@@ -5,6 +5,8 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 export type Account = {
   user_id: string; broker: string; dhan_client_id: string | null; dhan_access_token: string | null; webhook_url: string | null; webhook_secret: string | null;
   capital: number | null; capital_since: string | null; deploy_pct: number | null; funds_at: string | null;
+  /** Paper's own capital, count-from date and limit (12 Nov 2026, Papa: live and paper have no linkage at all). */
+  paper_capital?: number | null; paper_since?: string | null; paper_deploy_pct?: number | null;
   /** Prices come from the admin's Dhan login (SHARED_PAPER_DATA): paper only, never orders. */
   shared_data?: boolean;
 };
@@ -17,9 +19,19 @@ export async function accountFor(sb: SupabaseClient, userId: string, broker = "D
   const a = data ? {
     user_id: data.user_id, broker: data.broker, dhan_client_id: data.client_id, dhan_access_token: data.access_token, webhook_url: data.webhook_url,
     webhook_secret: data.webhook_secret, capital: data.capital, capital_since: data.capital_since, deploy_pct: data.deploy_pct, funds_at: data.funds_at,
+    paper_capital: data.paper_capital, paper_since: data.paper_since, paper_deploy_pct: data.paper_deploy_pct,
   } as Account : null;
   cache?.set(key, a);
   return a;
+}
+
+/**
+ * The account as one mode sees it: capital, count-from date and limit are the Live ones (the original columns) for a
+ * live strategy and the Paper ones for a paper strategy (12 Nov 2026, Papa: "no linkage at all" between the two).
+ */
+export function modeAccount<T extends Account>(a: T, live: boolean): T {
+  if (live) return a;
+  return { ...a, capital: a.paper_capital ?? null, capital_since: a.paper_since ?? null, deploy_pct: a.paper_deploy_pct ?? null };
 }
 
 /** The admin's account: used for the strategy lab, margin checks and the MCX contract list. */

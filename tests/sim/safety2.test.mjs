@@ -125,10 +125,10 @@ await t("breaker: one failing strategy among ones that ran cleanly does not stop
   db.risk_state = [];
   db.algo_strategies.push({ ...base, id: "s2", name: "second", last_error: "Dhan /charts request failed (HTTP 401)" });
   S().last_error = null;
-  await E.breakerAfterTick(new Set(), new Map([["u1", "Dhan /charts request failed (HTTP 401)"]]), new Map());
+  await E.breakerAfterTick(new Set(), new Map([["u1|L", "Dhan /charts request failed (HTTP 401)"]]), new Map());
   assert.equal(db.risk_state.length, 0, "not counted while s1 is fine");
   S().last_error = "Dhan /charts request failed (HTTP 401)";
-  await E.breakerAfterTick(new Set(), new Map([["u1", "Dhan /charts request failed (HTTP 401)"]]), new Map());
+  await E.breakerAfterTick(new Set(), new Map([["u1|L", "Dhan /charts request failed (HTTP 401)"]]), new Map());
   assert.equal(db.risk_state[0]?.err_ticks, 1, "counted once every active strategy has failed");
 });
 

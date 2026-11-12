@@ -76,8 +76,9 @@ if (heads.length !== 3) fail("3 group headers", heads);
 if (!/Crude/.test(heads[0]) || !/Gold/.test(heads[1]) || !/Nifty/.test(heads[2])) fail("group order (asset A–Z)", heads);
 if (!/Daily · Futures/.test(heads[1]) || !/4 strategies · 1 live · 3 paper · 1 archived hidden/.test(heads[1])) fail("gold header counts", heads[1]);
 if (!/15 min · Futures/.test(heads[2]) || !/3 strategies · 1 live · 2 paper/.test(heads[2])) fail("nifty header counts", heads[2]);
-// Group P&L: Gold running +₹4,250 (the live long), booked ₹9,000 live + ₹5,000 paper = ₹14,000; Crude running −₹800.
-if (!/Running P&L \+₹4,250/.test(heads[1]) || !/Booked P&L ₹14,000/.test(heads[1])) fail("gold group P&L", heads[1]);
+// Group P&L: Gold running +₹4,250 (only the live long is open), booked live ₹9,000 and paper ₹5,000 shown apart, never
+// added together (12 Nov 2026, Papa: live and paper have no linkage); Crude running −₹800.
+if (!/Running P&L \+₹4,250/.test(heads[1]) || !/Booked P&L Live ₹9,000 · Paper ₹5,000/.test(heads[1]) || /14,000/.test(heads[1])) fail("gold group P&L", heads[1]);
 if (!/Running P&L −₹800/.test(heads[0])) fail("crude running P&L", heads[0]);
 // 2. Tags: Gold's best (902, consistency 83.5) isn't the live one (901) → amber; Nifty's best is live → green; Crude has nothing live → no tag.
 const tags = await p.$$eval(hdSel, (x) => x.map((t) => { const g = t.querySelector(".tag"); return g ? [g.className, g.textContent, g.title] : null; }));

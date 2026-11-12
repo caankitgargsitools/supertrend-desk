@@ -358,8 +358,10 @@ await t("breaker: 5 minutes in a row where every run of the account failed → n
   clock = Date.parse("2026-10-20T05:30:00Z"); db.risk_state = [];
   for (let i = 0; i < 6; i++) { clock += 60000; const r = await tick(); assert.match(String(r.z1), /Connect your Dhan account/); }
   const b = db.risk_state.find((x) => x.user_id === "u2");
-  assert.equal(b.err_ticks, 6); assert.ok(b.halted_at); assert.match(b.halt_reason, /Connect your Dhan account/);
-  assert.equal(db.notifications.filter((n) => n.user_id === "u2" && /New trades stopped/.test(n.title)).length, 1);
+  // a paper strategy failing counts on the paper breaker only (12 Nov 2026: live and paper separate)
+  assert.equal(b.paper_err_ticks, 6); assert.ok(b.paper_halted_at); assert.match(b.paper_halt_reason, /Connect your Dhan account/);
+  assert.ok(!b.err_ticks && !b.halted_at, "live breaker untouched");
+  assert.equal(db.notifications.filter((n) => n.user_id === "u2" && /New paper trades stopped/.test(n.title)).length, 1);
 });
 await t("breaker: a run that works resets the count; the stop stays until it is allowed again", async () => {
   db.broker_accounts.push({ user_id: "u2", broker: "DHAN", client_id: "C2", access_token: "TOK2", webhook_url: null });
@@ -369,8 +371,16 @@ await t("breaker: a run that works resets the count; the stop stays until it is 
   const r = await tick();
   assert.equal(r.z2, "exit retried");
   const b = db.risk_state.find((x) => x.user_id === "u2");
-  assert.equal(b.err_ticks, 0); assert.ok(b.halted_at, "still stopped until allowed");
+  assert.equal(b.paper_err_ticks, 0); assert.ok(b.paper_halted_at, "still stopped until allowed");
   db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "z2");
+});
+await t("breaker: a paper stop doesn't stop the same account's live entries, and the reverse", async () => {
+  const b = db.risk_state.find((x) => x.user_id === "u2");
+  assert.ok(b.paper_halted_at && !b.halted_at);
+  const { brkOf } = E;
+  assert.ok(brkOf(b, false).halted_at, "paper blocked"); assert.equal(brkOf(b, true).halted_at, null, "live free");
+  const lv = { user_id: "u3", halted_at: "x", halt_reason: "y", err_ticks: 5 };
+  assert.equal(brkOf(lv, false).halted_at, null, "a live stop leaves paper free");
 });
 
 // ---------------- options on a stock / an MCX commodity (6 Nov 2026) ----------------
@@ -433,6 +443,27 @@ await t("move sizing obeys the strategy's max lots when live (paper as sized)", 
   assert.equal(ns.pos_qty, 5); assert.equal(legs[0].quantity, "5"); // 26.7 lots wanted, max 5
   assert.match(notes.join(" | "), /capped at the strategy's max 5/);
   db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "mx1" && x.id !== "mx0");
+});
+await t("live and paper capital are separate: a live entry sizes from the live capital, a paper one from the paper capital", async () => {
+  db.lab_margins = [{ asset: "NIFTY", price: 25000, fut_pct: 0.12, day_move: 0.02 }];
+  // ₹4 lakh live, ₹75 lakh paper, both 100%: one lot needs about ₹2.25 lakh of margin
+  const acct = { ...set, capital: 400000, deploy_pct: 100, capital_since: null, paper_capital: 7500000, paper_deploy_pct: 100, paper_since: null };
+  const L = add("cp1", { live: true, risk: null, lots: 40 });
+  const e = E.entryLeg(L(), "LONG", 25000, 1, 40), legs = [e.leg].flat(), ns = { ...e.state, position: "LONG" }; delete ns._px;
+  const notes = [e.label];
+  assert.equal(await E.sizeEntry(L(), acct, legs, ns, 25000, notes), true);
+  assert.equal(ns.pos_qty, 1, "live: ₹4 lakh holds 1 lot " + notes.join(" | "));
+  const P = add("cp2", { live: false, risk: null, lots: 40 });
+  const e2 = E.entryLeg(P(), "LONG", 25000, 1, 40), legs2 = [e2.leg].flat(), ns2 = { ...e2.state, position: "LONG" }; delete ns2._px;
+  const notes2 = [e2.label];
+  assert.equal(await E.sizeEntry(P(), acct, legs2, ns2, 25000, notes2), true);
+  assert.ok(ns2.pos_qty > 30 && ns2.pos_qty <= 34, "paper: ₹75 lakh holds about 33 lots, got " + ns2.pos_qty + " " + notes2.join(" | "));
+  // a paper position's margin doesn't use up the live room, and the reverse
+  Object.assign(P(), { position: "LONG", pos_margin: 7000000 });
+  const e3 = E.entryLeg(L(), "LONG", 25000, 1, 40), legs3 = [e3.leg].flat(), ns3 = { ...e3.state, position: "LONG" }; delete ns3._px;
+  assert.equal(await E.sizeEntry(L(), acct, legs3, ns3, 25000, [e3.label]), true);
+  assert.equal(ns3.pos_qty, 1, "live room unchanged by paper margin");
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "cp1" && x.id !== "cp2");
 });
 await t("live entry cut to what one exchange order carries (freeze quantity); paper isn't; unknown limit leaves it", async () => {
   db.lab_margins = [{ asset: "NIFTY", price: 25000, fut_pct: 0.12, day_move: 0.02 }];
