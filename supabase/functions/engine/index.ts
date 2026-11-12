@@ -2330,7 +2330,7 @@ async function pushOut() {
   if (!keys) return { sent: 0, why: "no keys" };
   webpush.setVapidDetails(keys.subject, keys.public_key, keys.private_key);
   const { data: list } = await sb.rpc("claim_notifications", { p_limit: 50 });
-  const ns = (list ?? []) as { id: number; user_id: string; kind: string; title: string; body: string | null; url: string | null; tag: string | null }[];
+  const ns = (list ?? []) as { id: number; user_id: string; kind: string; title: string; body: string | null; url: string | null; tag: string | null; meta?: Record<string, unknown> | null }[];
   if (!ns.length) return { sent: 0 };
   const users = [...new Set(ns.map((n) => n.user_id))];
   const { data: subs } = await sb.from("push_subs").select("id, user_id, endpoint, p256dh, auth, prefs").in("user_id", users);
@@ -2341,8 +2341,10 @@ async function pushOut() {
     await Promise.all(mine.map(async (x) => {
       try {
         await webpush.sendNotification({ endpoint: x.endpoint, keys: { p256dh: x.p256dh, auth: x.auth } },
-          JSON.stringify({ title: n.title, body: n.body ?? "", url: n.url ?? "/", tag: n.tag ?? `n${n.id}`, kind: n.kind }),
-          { TTL: 6 * 3600, urgency: n.kind === "error" || n.kind === "account" ? "high" : "normal" });
+          // meta (live trades, 12 Nov 2026): side, asset, prices, stop / target, stage — the phone draws the position bar
+          // from it and the open app shows its full-screen alert; id lets the app tell an update of the same alert.
+          JSON.stringify({ id: n.id, title: n.title, body: n.body ?? "", url: n.url ?? "/", tag: n.tag ?? `n${n.id}`, kind: n.kind, meta: n.meta ?? null }),
+          { TTL: 6 * 3600, urgency: n.kind === "error" || n.kind === "account" || n.kind === "live_trade" ? "high" : "normal" });
         sent++; notes.push("ok");
         await sb.from("push_subs").update({ last_ok_at: new Date().toISOString(), fail_count: 0 }).eq("id", x.id);
       } catch (e) {

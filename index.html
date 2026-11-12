@@ -517,6 +517,30 @@ details.raw code { display: block; white-space: pre-wrap; word-break: break-all;
 .morning .btn.ks-btn { position: relative; overflow: hidden; color: var(--red); border-color: var(--red); background: transparent; font-weight: 700; touch-action: none; user-select: none; -webkit-user-select: none; }
 .ks-btn i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--red); opacity: .25; pointer-events: none; }
 .ks-btn.holding i { width: 100%; transition: width 1.5s linear; }
+/* Live trade alert inside the app (Papa, 12 Nov 2026, option C): full screen, with a sound; one card per trade that
+   updates in place as it moves (signal → filled → stop at the broker; exit → P&L → confirmed). */
+.lt-over { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 16px; background: rgba(4,7,14,.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); animation: ltfade .25s ease-out; overflow: hidden; }
+.lt-over[hidden] { display: none; }
+@keyframes ltfade { from { opacity: 0; } }
+.lt-card { --c: var(--green); position: relative; width: min(520px, 100%); background: var(--panel); color: var(--ink); border: 2px solid var(--c); border-radius: 18px; padding: 20px 20px 16px; box-shadow: 0 0 0 6px color-mix(in srgb, var(--c) 18%, transparent), 0 0 60px color-mix(in srgb, var(--c) 45%, transparent); animation: ltpop .45s cubic-bezier(.2, 1.4, .4, 1); }
+.lt-card.down, .lt-card.loss, .lt-card.failed { --c: var(--red); } .lt-card.win { --c: var(--yellow); }
+.lt-card.ping { animation: ltping .5s ease-out; }
+@keyframes ltpop { from { transform: scale(.7); opacity: 0; } }
+@keyframes ltping { 30% { transform: scale(1.025); } }
+.lt-badge { display: inline-flex; gap: 6px; align-items: center; font: 800 11.5px var(--font-ui, inherit); letter-spacing: .12em; text-transform: uppercase; color: var(--c); }
+.lt-badge i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); animation: hbbeat 1.2s infinite; }
+.lt-badge b { color: var(--muted); font-weight: 700; } .lt-badge .tst { background: var(--yellow-soft); color: var(--yellow-ink); padding: 1px 7px; border-radius: 99px; letter-spacing: .06em; }
+.lt-card h2 { margin: 8px 0 4px; font-size: 24px; line-height: 1.2; }
+.lt-card .lt-body { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+.lt-pnl { font: 800 52px var(--font-data); color: var(--c); margin: 4px 0 2px; text-shadow: 0 0 24px color-mix(in srgb, var(--c) 45%, transparent); }
+.lt-steps { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 12px; padding: 0; list-style: none; }
+.lt-steps li { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.lt-steps li.done { border-color: var(--c); color: var(--c); } .lt-steps li.now { background: var(--c); color: #04130b; border-color: var(--c); animation: hbbeat 1.6s infinite; }
+.lt-card .pladder { margin: 6px 0 12px; }
+.lt-coins { position: absolute; inset: 0; pointer-events: none; }
+.lt-coins i { position: absolute; top: -40px; width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff7c2, #facc15 45%, #b7791f); color: #7a4b00; font: 800 15px/26px var(--font-ui, sans-serif); text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,.4); animation: ltcoin linear forwards; }
+@keyframes ltcoin { to { transform: translateY(110vh) rotate(540deg); } }
+@media (prefers-reduced-motion: reduce) { .lt-card, .lt-over, .lt-coins i, .lt-steps li.now, .lt-badge i { animation: none !important; } .lt-coins { display: none; } }
 .lw-lots { width: 64px; text-align: right; font: 600 13px var(--font-data); padding: 3px 6px; }
 .lw-lots.set { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue) inset; }
 .morning .mlines { margin: 10px 0 0; padding-left: 18px; font-size: 13px; display: grid; gap: 4px; } .morning .mlines li.warn { color: var(--yellow-ink); }
@@ -1115,6 +1139,7 @@ body.dk-fs-on { overflow: hidden; }
 <body>
 
 <div id="netbar" role="progressbar" aria-label="Talking to the server" aria-hidden="true"></div>
+<div id="lt_over" class="lt-over" hidden role="alertdialog" aria-modal="true" aria-labelledby="lt_title"><div class="lt-card" id="lt_card"></div><div class="lt-coins" id="lt_coins"></div></div>
 <header class="bar">
   <div class="brand"><img class="logo" src="icons/logo.svg" alt="" width="40" height="40"><div><h1><span class="ank">Ank</span><span class="gn">Genie</span></h1><small>Your wish, traded · Dhan · NSE / BSE / MCX · Delta crypto</small></div><button class="hb" id="hb" type="button" hidden aria-live="polite" title="Checking the engine…"><span class="hbd" aria-hidden="true"></span><span class="hbt">Checking</span></button></div>
   <span class="mk mkts" id="mkts"><span class="mx" id="mx_nse"><span class="dot"></span>NSE/BSE</span><span class="mx" id="mx_mcx"><span class="dot"></span>MCX</span><span class="mx" id="mx_dlt"><span class="dot"></span>Delta</span></span>
@@ -2014,7 +2039,7 @@ function setBusy(btn, key, on) {
 }
 const rawFetch = window.fetch.bind(window);
 // Background checks that shouldn't light the comet (the heartbeat's own poll and the presence marks).
-const NET_QUIET = /\/rpc\/(desk_feeds|touch_presence|log_activity)\b/;
+const NET_QUIET = /\/rpc\/(desk_feeds|touch_presence|log_activity)\b|kind=eq\.live_trade/;
 window.fetch = (...args) => {
   const bar = document.getElementById("netbar");
   const url = String(args[0] && args[0].url || args[0] || "");
@@ -7527,13 +7552,13 @@ function listRows(anyArch = false) {
 }
 /* ---------- phone notifications (web push to the installed app) ---------- */
 const VAPID_PUBLIC = "BLyDxFopHCv-MOmA9kzMEF_ZkvmKj55TiWC4YzV0WTFu9rCkW0zIabbKAx71j5XTsaInAsb0MNPfw2q7X30mjyE";
-const NTF_KINDS = [["trade", "New positions and exits (with P&L)"], ["error", "Errors and failed orders"], ["live", "Strategies going live / back to paper"],
+const NTF_KINDS = [["live_trade", "Live trades (real money): loud, stays on screen, one alert per trade"], ["trade", "Paper trades (silent)"], ["error", "Errors and failed orders"], ["live", "Strategies going live / back to paper"],
   ["account", "Dhan token problems"], ["lab", "Strategy Lab results (admin)"], ["shukrana", "Clients owing Shukrana (admin)"], ["health", "System health (admin)"]];
 const b64uBytes = (b) => { const p = "=".repeat((4 - (b.length % 4)) % 4), raw = atob((b + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from([...raw].map((c) => c.charCodeAt(0))); };
 async function loadNotifyCard() {
   const box = $("ntf_box"); if (!box) return;
   const ok = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window && location.protocol === "https:";
-  if (!ok) { box.innerHTML = '<p class="hint">This browser can\'t receive notifications. On Android, open the desk in Chrome (and “Add to Home screen” for the app), then switch them on here.</p>'; return; }
+  if (!ok) { box.innerHTML = '<p class="hint">This browser can\'t receive notifications. On Android, open the desk in Chrome (and “Add to Home screen” for the app), then switch them on here.</p>'; ltTestBar(box); return; }
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
   const row = sub ? (await db.from("push_subs").select("id, prefs").eq("endpoint", sub.endpoint).maybeSingle()).data : null;
@@ -7547,6 +7572,7 @@ async function loadNotifyCard() {
     : `<p class="hint" style="margin:0 0 8px">Get an alert on this phone for new positions, exits with their P&amp;L, errors, failed orders, strategies going live and Dhan token problems. Each phone is switched on separately.</p>
       <div class="formbar"><button class="btn primary" type="button" id="ntf_on">Turn on notifications on this phone</button><span class="hint" id="ntf_msg"></span></div>`}
     ${recent && recent.length ? `<ul class="ntflist">${recent.map((n) => `<li><b>${esc(n.title)}</b><span>${esc(n.body || "")}</span><div class="hint sm">${esc(fmtDate(n.created_at))}${n.push_note ? ` · ${n.push_note === "no phone registered" ? "no phone was on" : /ok/.test(n.push_note) ? "sent" : "not delivered"}` : ""}</div></li>`).join("")}</ul>` : ""}`;
+  ltTestBar(box);
   const msg = (t) => { const m = $("ntf_msg"); if (m) m.textContent = t; };
   const on = $("ntf_on");
   if (on) on.addEventListener("click", () => run(on, async () => {
@@ -8768,6 +8794,94 @@ setInterval(() => hbLoad(), 15000);
 setInterval(() => { if (!document.hidden && $("hb") && !$("hb").hidden) hbPaint(); }, 5000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) hbLoad(); });
 $("hb").addEventListener("click", () => showPage(isAdmin() ? "health" : "desk"));
+/* ---------- Live trade alert inside the app (Papa, 12 Nov 2026: A + B + C + D) ----------
+   A live trade arrives two ways: the service worker passes the phone push to the open app at once, and the app looks for
+   live-trade notifications every 10 s while it is on screen (laptops without phone notifications). Each notification is
+   one trade; a later stage of the same one (same id) updates the card in place. Sounds: a rising chime for an entry,
+   coins for a profit, a low tone for a loss or a refused order, a soft tick for quiet updates. */
+const lt = { seen: new Map(), cur: null, poll: 0, init: false, ac: null };
+const LT_ENTRY = [["sent", "Signal sent"], ["filled", "Filled"], ["stop", "Stop at the broker"]];
+const LT_EXIT = [["exiting", "Closing"], ["closed", "Booked"], ["confirmed", "Confirmed by the broker"]];
+function ltSound(kind) {
+  try {
+    const ac = lt.ac = lt.ac || new (window.AudioContext || window.webkitAudioContext)();
+    if (ac.state === "suspended") ac.resume();
+    const t0 = ac.currentTime + .02;
+    const note = (f, at, dur, type = "sine", vol = .18) => {
+      const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f, t0 + at);
+      g.gain.setValueAtTime(0, t0 + at); g.gain.linearRampToValueAtTime(vol, t0 + at + .015); g.gain.exponentialRampToValueAtTime(.0005, t0 + at + dur);
+      o.connect(g).connect(ac.destination); o.start(t0 + at); o.stop(t0 + at + dur + .05);
+    };
+    if (kind === "entry") [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => note(f, i * .09, .45, "triangle"));
+    else if (kind === "win") for (let i = 0; i < 7; i++) { note(1318.5 + (i % 2) * 260, i * .075, .22, "square", .07); note(2637, i * .075 + .02, .12, "sine", .05); }
+    else if (kind === "loss") { note(220, 0, .6, "sawtooth", .09); note(164.8, .25, .8, "sawtooth", .09); }
+    else note(880, 0, .12, "sine", .08);
+  } catch { /* no sound on this device */ }
+}
+function ltCoins() {
+  const box = $("lt_coins"); if (!box || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  box.innerHTML = Array.from({ length: 26 }, () => `<i style="left:${(Math.random() * 96).toFixed(1)}%;animation-duration:${(1.6 + Math.random() * 1.6).toFixed(2)}s;animation-delay:${(Math.random() * .9).toFixed(2)}s">₹</i>`).join("");
+  setTimeout(() => { box.innerHTML = ""; }, 4200);
+}
+function ltPaint(n) {
+  const m = n.meta || {}, card = $("lt_card"), exit = /^(exiting|closed|confirmed)$/.test(m.stage), failed = m.stage === "failed";
+  const net = Number(m.net), cl = failed ? "failed" : exit ? (m.stage === "exiting" ? "" : net >= 0 ? "win" : "loss") : m.side === "SELL" ? "down" : "up";
+  const steps = exit ? LT_EXIT : LT_ENTRY, at = steps.findIndex(([k]) => k === m.stage);
+  const lad = !exit && !failed && (m.fill || m.px) ? ladder({ entry: m.fill || m.px, now: m.now || m.fill || m.px, stop: m.stop, tgt: m.tgt, dir: m.dir || (m.side === "SELL" ? -1 : 1), units: m.units || 1 }) : "";
+  card.className = "lt-card " + cl;
+  card.innerHTML = `<div class="lt-badge"><i></i>Live trade <b>· real money</b>${m.test ? ' <span class="tst">TEST</span>' : ""}</div>
+    <h2 id="lt_title">${esc(String(n.title || "").replace(/^TEST\s*/, ""))}</h2>
+    ${exit && m.stage !== "exiting" && Number.isFinite(net) ? `<div class="lt-pnl">${net >= 0 ? "+" : ""}${esc(rupees(net))}</div>` : ""}
+    <p class="lt-body">${esc(String(n.body || "").replace(/^TEST — (.)/, (_, c) => c.toUpperCase()))}</p>
+    ${failed ? "" : `<ol class="lt-steps" aria-label="Where this trade is">${steps.map(([k, t], i) => `<li class="${i < at ? "done" : i === at ? "now" : ""}">${i < at ? "✓ " : ""}${t}</li>`).join("")}</ol>`}
+    ${lad ? `<div data-ltlad>${lad}</div>` : ""}
+    <div class="formbar"><button class="btn primary" type="button" id="lt_ok">Got it</button>${n.url && !m.test ? `<button class="btn" type="button" id="lt_open">Open the strategy</button>` : ""}</div>`;
+  $("lt_ok").onclick = ltClose;
+  const op = $("lt_open"); if (op) op.onclick = () => { const u = n.url; ltClose(); openDeepLink(new URL(u, location.origin).href); };
+}
+function ltClose() { $("lt_over").hidden = true; lt.cur = null; $("lt_coins").innerHTML = ""; }
+function ltShow(n) {
+  if (!n || !n.meta) return;
+  const m = n.meta, key = `${m.stage}|${m.at || ""}`;
+  if (lt.seen.get(n.id) === key) return;
+  lt.seen.set(n.id, key);
+  const over = $("lt_over"), same = lt.cur === n.id && !over.hidden;
+  lt.cur = n.id; ltPaint(n); over.hidden = false;
+  if (same) { const c = $("lt_card"); c.classList.remove("ping"); void c.offsetWidth; c.classList.add("ping"); }
+  else $("lt_ok").focus({ preventScroll: true });
+  const win = m.stage === "closed" && Number(m.net) >= 0;
+  ltSound(m.stage === "failed" || (m.stage === "closed" && Number(m.net) < 0) ? "loss" : win ? "win" : m.stage === "sent" ? "entry" : "tick");
+  if (win) ltCoins();
+}
+async function ltPoll(force) {
+  if (!me || (document.hidden && !force)) return;
+  const { data } = await db.from("notifications").select("id, title, body, url, tag, meta, created_at").eq("kind", "live_trade")
+    .gte("created_at", new Date(Date.now() - 6 * 3600e3).toISOString()).order("id", { ascending: false }).limit(5);
+  const rows = (data || []).reverse();
+  if (!lt.init) { lt.init = true; for (const n of rows) if (n.meta) lt.seen.set(n.id, `${n.meta.stage}|${n.meta.at || ""}`); return; }
+  for (const n of rows) ltShow(n);
+}
+setInterval(() => ltPoll().catch(() => {}), 10000);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("lt_over").hidden) ltClose(); });
+if (navigator.serviceWorker) navigator.serviceWorker.addEventListener("message", (e) => { if (e.data && e.data.liveTrade && !document.hidden) ltShow(e.data.liveTrade); });
+/** The test row under Phone notifications (shown even where phone notifications can't be switched on: the app's own alert still works). */
+function ltTestBar(box) {
+  box.insertAdjacentHTML("beforeend", `<div class="formbar lt-testbar"><button class="btn small" type="button" id="lt_test">⚡ Send a test live-trade alert</button><span class="hint" id="lt_test_msg">A sample live trade (marked TEST) in four steps: signal → filled → stop at the broker → exit with P&amp;L. No strategy, order or trade is touched.</span></div>`);
+  const b = $("lt_test"); if (b) b.addEventListener("click", () => run(b, () => ltTestRun()));
+}
+/** The test button: a sample live trade in four steps, a few seconds apart (rows only in notifications, marked TEST). */
+async function ltTestRun() {
+  const msg = (t) => { const m = $("lt_test_msg"); if (m) m.textContent = t; };
+  if (!lt.init) await ltPoll(true).catch(() => {});
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const steps = [[1, "Step 1 of 4: signal sent…"], [2, "Step 2 of 4: filled…"], [3, "Step 3 of 4: stop placed at the broker…"], [4, "Step 4 of 4: exit with P&L…"]];
+  for (const [k, t] of steps) {
+    msg(t); must(await db.rpc("notify_live_test", { p_stage: k }));
+    await ltPoll(true).catch(() => {});
+    if (k < 4) await wait(k === 3 ? 6000 : 4000);
+  }
+  msg("Done. On the phone you should have seen one live-trade alert change three times, then the exit alert with coins in the app.");
+}
 function deskFeedsPaint() {
   const box = $("dk_feeds"); if (!box || page !== "desk") return;
   if (!box.children.length) box.innerHTML = DK_FEEDS.map(([k, a, b]) => `<div class="dk-pulse off" role="listitem" data-f="${k}"><div class="bars"><i></i><i></i><i></i><i></i></div><div class="n">${a}<br>${b}</div><div class="s">…</div></div>`).join("");

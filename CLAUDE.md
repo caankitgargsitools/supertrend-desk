@@ -402,6 +402,28 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   keep the compact `stopMeterHTML`. **Desk**: the Strategies panel has Tiles / Positions (`#dk_heatv`, localStorage
   `dkHeat`, `deskPosPaint`): one card per open position of the mode with its ladder; a card opens the strategy. The phone
   menu bar sits above page content (z-index 60). Tests: `tests/ui/ui_home.mjs`, `ui_strat_ux.mjs`, `ui_desk.mjs`.
+- **Live trade alerts (12 Nov 2026, Papa chose A + B + C + D, then a test button; migration 93 / 93b / 93c, engine v155;
+  tests `tests/ui/ui_live_alert.mjs` (args: theme width), `ui_desk.mjs`)**: live trades no longer look like paper ones.
+  (A) kind `live_trade` (new phone preference, on by default; "trade" is now "Paper trades (silent)"): trade-slip titles
+  ("🟢 LIVE BUY · GOLDM · 2 lots @ ₹1,37,020", "💰 LIVE EXIT · GOLDM · +₹8,450 (+0.6%)"), facts in `notifications.meta`
+  (side, asset, lots, px / fill, stop, tgt, risk, margin, units, dir, stage, net, pct, held, today, test, quiet); the
+  service worker (`sw.js`) draws a picture of the position (stop · entry · now · target, or the exit's P&L) with
+  OffscreenCanvas as the notification image, vibrates `LIVE_BUZZ`, keeps it until tapped (requireInteraction), urgency
+  high in `pushOut` (payload now carries id + meta). (B) one notification per trade, updated in place by `live_note(user,
+  strategy, tag, new, title, body, meta)` (same tag; pushed_at reset so it is pushed again; meta.quiet = no new sound):
+  entry tag `le-<strategy>` — signal (trg_signal_notify, "⚡ … sending to the broker") → filled (trigger `live_pos_notify`
+  on algo_strategies: position or pos_broker.fill changed) → stop placed (pos_broker.stopId set) or "❌ entry not filled"
+  (`live_order_notify` on live_orders); exit tag `lx-<strategy>` — closing (exit signal) → booked with P&L, held time (from
+  the entry notification), today's live total (trg_trade_notify) → confirmed with the broker's fills (`trade_confirm_notify`,
+  provisional → false). Triggers never block the engine's write (exception → return new). `live_px()` formats prices.
+  (C) in the app: the service worker hands each live push to the open app, and the app also looks every 10 s
+  (`ltPoll`, quiet for the comet): full-screen card `#lt_over` (`ltShow` / `ltPaint`; stage chips, the position ladder,
+  "Got it" / "Open the strategy", Esc), Web Audio sounds (`ltSound`: chime entry, coins profit, low tone loss / refused,
+  tick for quiet updates), falling ₹ coins on a profit (`ltCoins`). (D) paper trades push silently. **Test button**
+  Connections › Phone notifications "⚡ Send a test live-trade alert" (`ltTestBar` / `ltTestRun` → `notify_live_test(1..4)`:
+  a TEST GOLDM trade — signal → filled → stop at the broker → exit +₹8,450, a few seconds apart; notification rows only,
+  once a minute). Checked with a rolled-back transaction on a live GOLDM strategy: entry and exit each ended as one row.
+  The Android WebView app still gets no phone notifications (in-app alert works there).
 - **Go-live fixes (12 Nov 2026, Papa: "start building these"; engine v153, migrations 89–90; tests `tests/sim/safety.test.mjs`
   "max lots", "one exchange order", "price band", "F&O ban", "roll: stock futures", "Dhan shows free", `tests/ui/ui_home.mjs`)**:
   (1) Dhan's instrument lists carry `SM_FREEZE_QTY` (per-order limit, the order's own unit: units on NSE / BSE F&O, lots on
