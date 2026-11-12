@@ -2272,7 +2272,9 @@ function errorText(e) {
   const m = (e && (e.message || e.error_description || e.error)) || String(e);
   if (/JWT/i.test(m)) return "Your session has ended. Sign in again.";
   if (/permission denied/i.test(m)) return "Your account isn't allowed to do that.";
-  if (/Failed to fetch|NetworkError/i.test(m)) return "Couldn't reach the server. Check your internet connection and try again.";
+  // Chrome says "Failed to fetch", Firefox "NetworkError", Safari / iPhone "Load failed" (12 Nov 2026: seen on a client's
+  // phone after activating 30 strategies — the change had saved; only a reply was lost).
+  if (/Failed to fetch|NetworkError|Load failed|network connection was lost/i.test(m)) return "The connection to the server dropped. What you did may have saved: the page refreshes in a moment to show where things stand.";
   return m;
 }
 function must(res) { if (res.error) throw res.error; return res.data; }
@@ -4025,7 +4027,11 @@ function askConfirm(html, label, fn, danger) {
 
 async function run(btn, fn, keepDisabled) {
   if (btn) { btn.disabled = true; setBusy(btn, "run", true); }
-  try { await fn(); } catch (e) { toast(errorText(e)); if (btn) btn.disabled = false; return; } finally { if (btn) setBusy(btn, "run", false); }
+  try { await fn(); } catch (e) {
+    const t = errorText(e); toast(t); if (btn) btn.disabled = false;
+    if (/connection to the server dropped/.test(t)) setTimeout(() => { refreshAll().catch?.(() => {}); }, 2500); // show what actually saved
+    return;
+  } finally { if (btn) setBusy(btn, "run", false); }
   if (btn && !keepDisabled) btn.disabled = false;
   if (cur()) renderStrategy();
 }
@@ -9294,7 +9300,8 @@ async function bulkAction(kind) {
     if (!todo.length) { toast(kind === "on" ? "They are all active already." : "They are all paused already."); return; }
     const go = () => run(btn, async () => {
       for (let i = 0; i < todo.length; i += 100) must(await db.from("algo_strategies").update({ active: kind === "on" }).in("id", todo.slice(i, i + 100).map((s) => s.id)));
-      await loadAll();
+      // Saved: a lost reply while reloading the list mustn't read as "not activated" (12 Nov 2026); try the reload again.
+      await loadAll().catch(() => new Promise((r) => setTimeout(r, 3000)).then(() => loadAll()).catch(() => {}));
       toast(kind === "on" ? `${todo.length} strateg${todo.length === 1 ? "y" : "ies"} active. Each acts on its next signal.` : `${todo.length} strateg${todo.length === 1 ? "y" : "ies"} paused.`);
     });
     if (kind === "off" && todo.some((s) => s.position !== "FLAT")) {
