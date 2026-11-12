@@ -20,7 +20,7 @@ import { runCombos } from "./combos.ts";
 import { contractsFor, CRYPTO, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaCancel, deltaOrderChecked, deltaOrderState, deltaPositions, deltaStop, deltaStopMove, niceLot } from "./crypto.ts";
 import {
   brokerQty, type BrokerStatus, brokerStopTrigger, chaseDecision, type Creds, dhanByTag, dhanCancel, dhanLtp, dhanModify, dhanPlace, dhanPositions, dhanStatus,
-  positionDiff, productOf, resolveLeg, setDhanRpc, type Side, sideOf, stepFor, stopLimit, syncFno, toTick,
+  lotsPerOrder, positionDiff, productOf, resolveLeg, setDhanRpc, type Side, sideOf, stepFor, stopLimit, syncFno, toTick,
 } from "./execution.ts";
 import { loadMarginRates, refreshDayMoves, refreshMargins } from "./margins.ts";
 import { type Account, accountFor, adminAccount, credsOf, dataAccount, dataUid, entryGate, withMasters } from "./accounts.ts";
@@ -349,6 +349,12 @@ async function dhanRate(s: Strategy): Promise<number | null> {
  */
 async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknown>[], newState: Record<string, any>, entryPx: number, notes: string[]): Promise<boolean> {
   const opt = s.trade_type === "OPTIONS", multi = isMulti(s);
+  // A stock in the F&O ban period takes no new positions at the exchange (12 Nov 2026, go-live review): no entry, paper
+  // or live, so paper shows what live could do. Exits are allowed and go on as usual.
+  if (STOCK_KEYS.includes(String(s.underlying))) {
+    const ban = await fnoBanList();
+    if (ban?.has(String(s.underlying))) { notes.push(`Entry skipped: ${s.underlying} is in NSE's F&O ban period today (no new positions until it leaves the list).`); return false; }
+  }
   // An option entry goes to an expiry Dhan really lists (4 Nov 2026): the date worked out from the expiry weekday can
   // miss a holiday-shifted or changed expiry day; the next listed one on or after it is used instead.
   if (opt && isListedOpt(s)) {
@@ -444,6 +450,10 @@ async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknow
     const { data: mr } = await sb.from("lab_margins").select("day_move").eq("asset", String(s.underlying)).maybeSingle();
     const dm = Number(mr?.day_move) || 0, perLot = entryPx * Number(s.lot_size) * dm;
     const mv = moveLots(lots, Number(s.sizing.move_amt) || 0, perLot);
+    // "Never more than" lots (12 Nov 2026, go-live review): MOVE sizing had no cap (1,006 lots NATGASMINI on paper). Live
+    // only: 60 paper strategies carry an old default max of 10 from automatic sizing that nobody chose for MOVE.
+    const moveMax = s.live ? Math.trunc(Number(s.sizing.max_lots) || 0) : 0;
+    if (moveMax > 0 && mv.lots > moveMax) { mv.why = `${mv.why ?? `₹${Math.trunc(Number(s.sizing.move_amt))} on a typical day → ${mv.lots} lots`}; capped at the strategy's max ${moveMax}`; mv.lots = moveMax; }
     if (!dm) notes.push("Size: no typical day's move stored for this asset yet; the saved lots are used");
     else if (mv.lots < 1) { notes.push(`Entry skipped: one lot moves ₹${Math.trunc(perLot).toLocaleString("en-IN")} on a typical day, far more than the ₹${Math.trunc(Number(s.sizing.move_amt)).toLocaleString("en-IN")} target.`); return false; }
     else if (mv.why) {
@@ -484,8 +494,114 @@ async function sizeEntry(s: Strategy, set: Settings, legs: Record<string, unknow
       notes.push(`Size: ${fit.why} ⇒ ${lots} lot${lots === 1 ? "" : "s"}`);
     }
   }
+  // Live: never more than one exchange order can carry (12 Nov 2026, go-live review). Each exchange rejects an order at or
+  // above its freeze quantity (Dhan's SM_FREEZE_QTY); a bigger position could be opened in several orders but then not
+  // be closed in one, so the entry is cut to what one order carries. Paper is left as sized.
+  if (s.live && !isCrypto(String(s.data_segment))) {
+    const cap = await orderCapLots(s, newState);
+    if (cap && cap.lots < lots) {
+      if (cap.lots < 1) { notes.push(`Entry skipped: one lot is above the exchange's per-order limit (${cap.why}).`); return false; }
+      lots = cap.lots;
+      const e = entryLeg(s, newState.position, entryPx, legs.length - nLegs + 1, lots);
+      legs.splice(legs.length - nLegs, nLegs, ...asArr(e.leg));
+      Object.assign(newState, e.state, multi && mpx ? { pos_legs: (e.state.pos_legs as MLeg[]).map((l, i) => ({ ...l, px: +mpx![i].toFixed(2) })) } : {});
+      delete newState._px;
+      const last = notes.length - 1;
+      if (last >= 0) notes[last] = notes[last].replace(/ x \d+$/, ` x ${e.state.pos_qty}`);
+      notes.push(`Size: cut to ${lots} lot${lots === 1 ? "" : "s"}, the most one order can carry (${cap.why})`);
+    }
+  }
+  // Live: what the Dhan account can actually fund right now (12 Nov 2026, go-live review). The capital typed on the Capital
+  // page can be more than the money at Dhan; an entry needing more margin than is free there is cut (keeping 5% spare for
+  // Dhan's own margin figure differing from the desk's) or skipped, instead of being rejected for margin.
+  if (s.live && !isCrypto(String(s.data_segment)) && mLot > 0) {
+    // A reversal closes the held position first: its margin comes free with the exit.
+    const free0 = await dhanAvailable(set), free = free0 == null ? null : free0 + (s.position !== "FLAT" ? Number(s.pos_margin) || 0 : 0);
+    if (free != null) {
+      const fit = Math.floor(Math.max(0, free * 0.95) / mLot);
+      if (fit < lots) {
+        const r0 = (x: number) => Math.trunc(x).toLocaleString("en-IN");
+        if (fit < 1) { notes.push(`Entry skipped: Dhan shows ₹${r0(free)} free; 1 lot needs about ₹${r0(mLot)} of margin.`); return false; }
+        lots = fit;
+        const e = entryLeg(s, newState.position, entryPx, legs.length - nLegs + 1, lots);
+        legs.splice(legs.length - nLegs, nLegs, ...asArr(e.leg));
+        Object.assign(newState, e.state, multi && mpx ? { pos_legs: (e.state.pos_legs as MLeg[]).map((l, i) => ({ ...l, px: +mpx![i].toFixed(2) })) } : {});
+        delete newState._px;
+        const last = notes.length - 1;
+        if (last >= 0) notes[last] = notes[last].replace(/ x \d+$/, ` x ${e.state.pos_qty}`);
+        notes.push(`Size: cut to ${lots} lot${lots === 1 ? "" : "s"}: Dhan shows ₹${r0(free)} free, about ₹${r0(mLot)} a lot`);
+      }
+    }
+  }
   Object.assign(newState, { pos_entry_px: entryPx, pos_entry_prem: premium, pos_lots: lots, pos_margin: Math.trunc(mLot * lots) });
   return true;
+}
+/** Money free in the Dhan account now (Dhan's /fundlimit "availabelBalance"); null when it can't be read. */
+async function dhanAvailable(set: Settings): Promise<number | null> {
+  const c = credsOf(set);
+  if (!c.client || !c.token) return null;
+  try {
+    const r = await fetch("https://api.dhan.co/v2/fundlimit", { headers: { "access-token": c.token, "client-id": c.client, Accept: "application/json" }, signal: AbortSignal.timeout(6000) });
+    if (!r.ok) return null;
+    const j = await r.json().catch(() => null);
+    const v = Number(j?.availabelBalance ?? j?.availableBalance);
+    return Number.isFinite(v) ? v : null;
+  } catch { return null; }
+}
+/**
+ * NSE's F&O ban list for today (securities over 95% of the market-wide position limit: no new positions), from NSE's
+ * public file, read once a day. Null when it can't be read (then nothing is skipped; Dhan's answer decides).
+ */
+let BAN: { day: string; set: Set<string> | null; at: number } | null = null;
+async function fnoBanList(): Promise<Set<string> | null> {
+  const day = todayIst();
+  if (BAN && BAN.day === day && (BAN.set || Date.now() - BAN.at < 30 * 60000)) return BAN.set;
+  let set: Set<string> | null = null;
+  try {
+    const r = await fetch("https://nsearchives.nseindia.com/content/fo/fo_secban.csv", { headers: { "User-Agent": "Mozilla/5.0 (AnkGenie desk)", Accept: "text/csv,*/*" }, signal: AbortSignal.timeout(8000) });
+    if (r.ok) {
+      const txt = await r.text();
+      // "Securities in Ban For Trade Date 12-NOV-2026:" then one "n,SYMBOL" line each (or "NIL").
+      set = new Set(txt.split(/\r?\n/).slice(1).map((l) => l.split(",").pop()!.trim().toUpperCase()).filter((x) => /^[A-Z0-9&-]+$/.test(x) && x !== "NIL")
+        .map((x) => x === "M&M" ? "MM" : x));
+    }
+  } catch { /* unreadable: nothing skipped */ }
+  BAN = { day, set, at: Date.now() };
+  return set;
+}
+/** Today's price band of a contract (Dhan's SM_UPPER_LIMIT / SM_LOWER_LIMIT, stored by the daily list sync). */
+async function bandFor(seg: string, sec: string): Promise<{ lo: number; hi: number } | null> {
+  const { data } = seg === "MCX_COMM" && !/OPT/.test(seg)
+    ? await sb.from("mcx_contracts").select("band_hi, band_lo").eq("sec_id", sec).limit(1)
+    : await sb.from("fno_contracts").select("band_hi, band_lo").eq("seg", seg).eq("sec_id", sec).limit(1);
+  let k = data?.[0];
+  if (!k && seg === "MCX_COMM") k = (await sb.from("fno_contracts").select("band_hi, band_lo").eq("seg", seg).eq("sec_id", sec).limit(1)).data?.[0];
+  const lo = Number(k?.band_lo), hi = Number(k?.band_hi);
+  return lo > 0 && hi > lo ? { lo, hi } : null;
+}
+/** A limit price kept inside the day's band (the exchange rejects one outside it): a buy no higher than the top, a sell no lower than the bottom. */
+export function inBand(px: number, side: string, band: { lo: number; hi: number } | null): number {
+  if (!band) return px;
+  return side === "BUY" ? Math.min(px, band.hi) : Math.max(px, band.lo);
+}
+/**
+ * The most lots one order may carry for the contract this entry goes to (12 Nov 2026): from the exchange's freeze quantity
+ * stored with the contract (syncFno / syncMcx). Null when it isn't known (the order goes as sized; Dhan's answer decides).
+ */
+async function orderCapLots(s: Strategy, st: Record<string, any>): Promise<{ lots: number; why: string } | null> {
+  const mcx = isCommodity(String(s.data_segment)), und = String(s.underlying), today = todayIst();
+  const opt = s.trade_type === "OPTIONS" || isMulti(s);
+  let q;
+  if (mcx && !opt) q = sb.from("mcx_contracts").select("freeze_qty, lot").eq("underlying", und).gt("expiry", today).not("freeze_qty", "is", null).order("expiry").limit(1);
+  else q = sb.from("fno_contracts").select("freeze_qty, lot, seg").eq("underlying", und)
+    .gte("expiry", today).not("freeze_qty", "is", null).in("instrument", opt ? ["OPTIDX", "OPTSTK", "OPTFUT"] : ["FUTIDX", "FUTSTK"]).order("expiry").limit(1);
+  const { data } = await q;
+  const k = data?.[0];
+  if (!k) return null;
+  const seg = mcx ? "MCX_COMM" : String((k as any).seg ?? "NSE_FNO"), lot = Number(k.lot) || Number(s.lot_size) || 1;
+  const n = lotsPerOrder(seg, Number(k.freeze_qty), mcx ? 1 : lot);
+  if (n == null) return null;
+  return { lots: n, why: `${und}: orders must stay below ${Number(k.freeze_qty).toLocaleString("en-IN")} ${mcx ? "lots" : "units"}` };
 }
 /**
  * Records the position being closed in the trade ledger (estimated from the index / futures price or the option's
@@ -2808,6 +2924,10 @@ async function runOrders(passes = 4) {
           if (d.kind === "filled") await onFilled(r, st);
           else if (d.kind === "failed") await failRow(r, d.reason);
           else if (d.kind === "modify") {
+            // Never chase past the day's price band (12 Nov 2026): the exchange would reject the modification.
+            const band = await bandFor(r.seg, r.sec).catch(() => null);
+            d.price = inBand(d.price, r.side, band);
+            if (r.limit_px != null && d.price === Number(r.limit_px)) continue; // already at the band's edge: wait
             await dhanModify(c, r.broker_order_id, { type: "LIMIT", qty: r.qty, price: d.price });
             await sb.from("live_orders").update({ limit_px: d.price, steps: Number(r.steps) + 1, updated_at: nowIso() }).eq("id", r.id);
           } else if (d.kind === "market") {
@@ -2945,6 +3065,13 @@ async function syncStop(s: Strategy, set: Settings): Promise<Strategy> {
   }
   if (pb.stopId && pb.stopTrig != null && (w.long ? w.trig <= pb.stopTrig : w.trig >= pb.stopTrig)) return s; // not tighter
   const leg = pb.legs[0], side: Side = w.long ? "SELL" : "BUY", qty = Math.abs(leg.qty);
+  if (pb.broker === "DHAN") {
+    // The day's price band (12 Nov 2026): a trigger outside it can't be reached today and Dhan would reject the order, so
+    // none is placed (the desk's own stop still watches every second); a limit beyond the band is brought to its edge.
+    const band = await bandFor(leg.seg, leg.sec).catch(() => null);
+    if (band && !pb.stopId && (w.trig < band.lo || w.trig > band.hi)) return s;
+    if (band && w.limit != null) w.limit = inBand(Number(w.limit), side, band);
+  }
   const next: PosBroker = { ...pb, stopErrAt: null };
   try {
     if (pb.broker === "DELTA") {
@@ -3137,7 +3264,22 @@ function dayBefore(d: string): string {
   for (let i = 0; i < 4; i++) { const wd = new Date(`${x}T12:00:00+05:30`).getUTCDay(); if (wd !== 0 && wd !== 6) break; x = addDays(x, -1); }
   return x;
 }
-/** Roll time on the day before expiry (risk.roll_time, default 15:00 IST). */
+/**
+ * How many weekdays before expiry a position rolls (12 Nov 2026, go-live review): stock futures settle by delivery and
+ * their margins climb in expiry week, and MCX metals go into the tender (delivery) period several days before expiry —
+ * brokers close such positions themselves around then. Stock futures 3 days before, MCX delivery commodities 5,
+ * everything else (index futures, cash-settled crude / natural gas) the day before. risk.roll_days (1–10) overrides.
+ */
+const MCX_DELIVERY = new Set(["GOLD", "GOLDM", "GOLDGUINEA", "GOLDPETAL", "SILVER", "SILVERM", "SILVERMIC", "COPPER", "ZINC", "ZINCMINI", "ALUMINIUM", "ALUMINI", "LEAD", "LEADMINI", "NICKEL"]);
+function rollDays(s: Strategy): number {
+  const own = Math.trunc(Number(s.risk?.roll_days));
+  if (own >= 1 && own <= 10) return own;
+  if (STOCK_KEYS.includes(String(s.underlying))) return 3;
+  if (isCommodity(String(s.data_segment)) && MCX_DELIVERY.has(String(s.underlying))) return 5;
+  return 1;
+}
+function rollDay(s: Strategy, exp: string): string { let d = exp; for (let i = rollDays(s); i > 0; i--) d = dayBefore(d); return d; }
+/** Roll time on the roll day (risk.roll_time, default 15:00 IST). */
 const rollTime = (s: Strategy) => /^\d{2}:\d{2}$/.test(String(s.risk?.roll_time ?? "")) ? String(s.risk.roll_time) : "15:00";
 /**
  * The expiry to roll away from now, or null: a positional (carried overnight) futures position, from the roll time on
@@ -3149,7 +3291,7 @@ async function rollDue(s: Strategy): Promise<string | null> {
   if (s.exec_state === "working" || s.exec_state === "exit_retry") return null;
   const exp = await heldFutExpiry(s);
   if (!exp) return null;
-  const now = ist(Date.now() / 1000), d = dayBefore(exp);
+  const now = ist(Date.now() / 1000), d = rollDay(s, exp);
   if (now.date > d) return exp;
   const [h, m] = rollTime(s).split(":").map(Number);
   return now.date === d && now.min >= h * 60 + m ? exp : null;

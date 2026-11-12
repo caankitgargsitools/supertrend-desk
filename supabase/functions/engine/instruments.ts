@@ -3,7 +3,7 @@
 // this module looks up the live contract from a table refreshed from Dhan's instrument list once a day.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { isCommodity } from "./logic.ts";
-import { nearestTwo } from "./execution.ts";
+import { limitCols, nearestTwo } from "./execution.ts";
 
 const STALE_MS = 20 * 3600 * 1000;
 
@@ -20,6 +20,7 @@ export async function syncMcx(sb: SupabaseClient, clientId: string, token: strin
   const iSec = col("SECURITY_ID"), iIns = col("INSTRUMENT"), iUnd = col("UNDERLYING_SYMBOL"), iDisp = col("DISPLAY_NAME"), iExp = col("SM_EXPIRY_DATE"),
     iLot = col("LOT_SIZE"), iTick = col("TICK_SIZE");
   if ([iSec, iIns, iUnd, iExp].some((i) => i < 0)) throw new Error("Dhan's MCX instrument list has an unexpected format.");
+  const lim = limitCols(head);
   const now = new Date().toISOString();
   const rows: Record<string, unknown>[] = [];
   // Options on the futures (6 Nov 2026, Papa): OPTFUT, the two nearest expiries of each commodity, into fno_contracts.
@@ -29,12 +30,12 @@ export async function syncMcx(sb: SupabaseClient, clientId: string, token: strin
     const a = line.split(",");
     if (a[iIns] === "OPTFUT" && (a[iExp] ?? "").slice(0, 10) >= today && iStr >= 0 && iOpt >= 0) {
       opts.push({ seg: "MCX_COMM", sec_id: a[iSec], underlying: a[iUnd], instrument: "OPTFUT", expiry: a[iExp].slice(0, 10), strike: Number(a[iStr]), opt_type: a[iOpt],
-        lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) / 100 || null : null, display: a[iDisp] ?? null, synced_at: now });
+        lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) / 100 || null : null, display: a[iDisp] ?? null, synced_at: now, ...lim(a) });
       continue;
     }
     if (a[iIns] !== "FUTCOM" || !/^\d{4}-\d{2}-\d{2}/.test(a[iExp] ?? "")) continue;
     rows.push({ sec_id: a[iSec], underlying: a[iUnd], display: a[iDisp] ?? null, expiry: a[iExp].slice(0, 10), synced_at: now,
-      lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) / 100 || null : null }); // Dhan lists the tick in paise
+      lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) / 100 || null : null, ...lim(a) }); // Dhan lists the tick in paise
   }
   if (!rows.length) throw new Error("Dhan's MCX instrument list had no futures contracts.");
   for (let i = 0; i < rows.length; i += 500) {

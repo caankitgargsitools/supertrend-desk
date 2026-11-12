@@ -203,6 +203,25 @@ export function nearestTwo(rows: Record<string, unknown>[], instrument: string) 
   const keep = new Map([...exps].map(([u, l]) => [u, new Set(l.sort().slice(0, 2))]));
   for (let i = rows.length - 1; i >= 0; i--) if (rows[i].instrument === instrument && !keep.get(String(rows[i].underlying))?.has(String(rows[i].expiry))) rows.splice(i, 1);
 }
+/**
+ * The exchange's per-order quantity limit and the day's price band from a Dhan instrument list row (12 Nov 2026):
+ * SM_FREEZE_QTY (in the order's own unit — units on NSE / BSE F&O, lots on MCX; an order must stay below it),
+ * SM_UPPER_LIMIT / SM_LOWER_LIMIT. Missing columns → nulls.
+ */
+export function limitCols(head: string[]) {
+  const iF = head.indexOf("SM_FREEZE_QTY"), iU = head.indexOf("SM_UPPER_LIMIT"), iL = head.indexOf("SM_LOWER_LIMIT");
+  const n = (v: string | undefined) => { const x = Number(v); return Number.isFinite(x) && x > 0 ? x : null; };
+  return (a: string[]) => ({ freeze_qty: iF >= 0 ? n(a[iF]) : null, band_hi: iU >= 0 ? n(a[iU]) : null, band_lo: iL >= 0 ? n(a[iL]) : null });
+}
+/**
+ * The most one order may carry, in lots, for a contract with this freeze quantity (exchanges reject an order at or above
+ * it; Dhan lists MIDCPNIFTY at 2,761 units = 23 lots of 120 + 1). MCX quantities are lots already. Null when unknown.
+ */
+export function lotsPerOrder(seg: string, freeze: number | null | undefined, lot: number): number | null {
+  if (!(Number(freeze) > 0)) return null;
+  const maxQty = Number(freeze) - 1;
+  return seg === "MCX_COMM" ? Math.max(0, Math.floor(maxQty)) : Math.max(0, Math.floor(maxQty / Math.max(1, lot)));
+}
 /** Downloads Dhan's F&O instrument lists (NSE and BSE) and keeps the index futures and options, and the desk's stock futures, of the next 4 months. */
 export async function syncFno(sb: SupabaseClient, c: Creds): Promise<number> {
   const until = new Date(Date.now() + 125 * 86400000).toISOString().slice(0, 10);
@@ -217,6 +236,7 @@ export async function syncFno(sb: SupabaseClient, c: Creds): Promise<number> {
     const col = (k: string) => head.indexOf(k);
     const iSec = col("SECURITY_ID"), iIns = col("INSTRUMENT"), iUnd = col("UNDERLYING_SYMBOL"), iExp = col("SM_EXPIRY_DATE"),
       iStr = col("STRIKE_PRICE"), iOpt = col("OPTION_TYPE"), iLot = col("LOT_SIZE"), iTick = col("TICK_SIZE"), iDisp = col("DISPLAY_NAME"), iSym = col("SYMBOL_NAME");
+    const lim = limitCols(head);
     if ([iSec, iIns, iUnd, iExp].some((i) => i < 0)) throw new Error(`Dhan's ${seg} instrument list has an unexpected format.`);
     const rows: Record<string, unknown>[] = [];
     for (const line of lines.slice(1)) {
@@ -231,7 +251,7 @@ export async function syncFno(sb: SupabaseClient, c: Creds): Promise<number> {
       const opt = ins.startsWith("OPT");
       rows.push({ sec_id: a[iSec], seg, underlying: und, instrument: ins, expiry: exp, strike: opt && iStr >= 0 ? Number(a[iStr]) : null,
         opt_type: opt && iOpt >= 0 ? a[iOpt] : null, lot: iLot >= 0 ? Number(a[iLot]) || null : null, tick: iTick >= 0 ? Number(a[iTick]) / 100 || null : null, // Dhan lists the tick in paise
-        display: iDisp >= 0 ? a[iDisp] : null, synced_at: now });
+        display: iDisp >= 0 ? a[iDisp] : null, synced_at: now, ...lim(a) });
     }
     nearestTwo(rows, "OPTSTK");
     for (let i = 0; i < rows.length; i += 500) {

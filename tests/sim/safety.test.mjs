@@ -419,6 +419,86 @@ await t("move sizing: the entry takes target ÷ one lot's typical day, the new l
   db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "m1");
 });
 
+// ---------------- go-live review (12 Nov 2026): Max lots for move sizing, one order's limit for live entries ----------------
+await t("move sizing obeys the strategy's max lots when live (paper as sized)", async () => {
+  db.lab_margins = [{ asset: "NIFTY", price: 25000, fut_pct: 0.12, day_move: 0.02 }];
+  const P = add("mx0", { live: false, risk: null, lots: 1, sizing: { mode: "MOVE", move_amt: 1000000, max_lots: 5 } });
+  const p0 = E.entryLeg(P(), "LONG", 25000, 1, 1), lp = [p0.leg].flat(), np = { ...p0.state, position: "LONG" }; delete np._px;
+  assert.equal(await E.sizeEntry(P(), set, lp, np, 25000, [p0.label]), true);
+  assert.equal(np.pos_qty, 27, "paper: 26.7 → 27 lots, max not applied");
+  const S = add("mx1", { live: true, risk: null, lots: 1, sizing: { mode: "MOVE", move_amt: 1000000, max_lots: 5 } });
+  const e = E.entryLeg(S(), "LONG", 25000, 1, 1), legs = [e.leg].flat(), ns = { ...e.state, position: "LONG" }; delete ns._px;
+  const notes = [e.label];
+  assert.equal(await E.sizeEntry(S(), set, legs, ns, 25000, notes), true);
+  assert.equal(ns.pos_qty, 5); assert.equal(legs[0].quantity, "5"); // 26.7 lots wanted, max 5
+  assert.match(notes.join(" | "), /capped at the strategy's max 5/);
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "mx1" && x.id !== "mx0");
+});
+await t("live entry cut to what one exchange order carries (freeze quantity); paper isn't; unknown limit leaves it", async () => {
+  db.lab_margins = [{ asset: "NIFTY", price: 25000, fut_pct: 0.12, day_move: 0.02 }];
+  for (const c of db.fno_contracts) c.freeze_qty = 1801; // NIFTY: orders below 1,801 units = 24 lots of 75
+  const S = add("fz1", { live: true, risk: null, lots: 40 });
+  const e = E.entryLeg(S(), "LONG", 25000, 1, 40), legs = [e.leg].flat(), ns = { ...e.state, position: "LONG" }; delete ns._px;
+  const notes = [e.label];
+  assert.equal(await E.sizeEntry(S(), set, legs, ns, 25000, notes), true);
+  assert.equal(ns.pos_qty, 24); assert.equal(ns.pos_lots, 24); assert.equal(legs[0].quantity, "24");
+  assert.match(notes.join(" | "), /cut to 24 lots, the most one order can carry .*below 1,801 units/);
+  const P = add("fz2", { live: false, risk: null, lots: 40 });
+  const e2 = E.entryLeg(P(), "LONG", 25000, 1, 40), legs2 = [e2.leg].flat(), ns2 = { ...e2.state, position: "LONG" }; delete ns2._px;
+  assert.equal(await E.sizeEntry(P(), set, legs2, ns2, 25000, [e2.label]), true);
+  assert.equal(ns2.pos_qty, 40, "paper keeps its size");
+  for (const c of db.fno_contracts) delete c.freeze_qty;
+  const e3 = E.entryLeg(S(), "LONG", 25000, 1, 40), legs3 = [e3.leg].flat(), ns3 = { ...e3.state, position: "LONG" }; delete ns3._px;
+  assert.equal(await E.sizeEntry(S(), set, legs3, ns3, 25000, [e3.label]), true);
+  assert.equal(ns3.pos_qty, 40, "no limit known: as sized");
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "fz1" && x.id !== "fz2");
+});
+await t("price band: a limit is kept inside the day's band; a stop beyond it isn't placed (the desk watches)", async () => {
+  assert.equal(E.inBand(110, "BUY", { lo: 90, hi: 105 }), 105); assert.equal(E.inBand(80, "SELL", { lo: 90, hi: 105 }), 90);
+  assert.equal(E.inBand(100, "BUY", null), 100);
+  const c = db.fno_contracts.find((x) => x.sec_id === "35001");
+  c.band_lo = 24950; c.band_hi = 26000; // the stop at 24,900 is below today's band
+  const S = add("bd1", longPos({ pos_broker: pbOf("35001", 75) }));
+  const placed0 = dhan.calls.filter((x) => x === "POST /v2/orders").length;
+  await E.syncStop(S(), set);
+  assert.equal(S().pos_broker.stopId ?? null, null, "no stop order sent");
+  assert.equal(dhan.calls.filter((x) => x === "POST /v2/orders").length, placed0);
+  c.band_lo = 24000; // now inside the band: placed
+  await E.syncStop(S(), set);
+  assert.ok(S().pos_broker.stopId);
+  delete c.band_lo; delete c.band_hi;
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "bd1");
+});
+await t("F&O ban: a stock in the ban list takes no new entry; an unreadable list skips nothing", async () => {
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, init) => /fo_secban/.test(String(url)) ? new Response("Securities in Ban For Trade Date 15-OCT-2026:\n1,SAIL\n2,RELIANCE\n", { status: 200 }) : real(url, init);
+  const keep = clock; clock += 31 * 60000; // past the half hour an unreadable list is remembered for
+  const S = add("ban1", { live: false, risk: null, underlying: "RELIANCE", dhan_symbol: "RELIANCE", futures_symbol: "RELIANCE1!", data_segment: "NSE_EQ", lot_size: 500 });
+  const e = E.entryLeg(S(), "LONG", 1400, 1, 1), legs = [e.leg].flat(), ns = { ...e.state, position: "LONG" }; delete ns._px;
+  const notes = [e.label];
+  assert.equal(await E.sizeEntry(S(), set, legs, ns, 1400, notes), false);
+  assert.match(notes.join(" | "), /RELIANCE is in NSE's F&O ban period today/);
+  globalThis.fetch = real; clock = keep;
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "ban1");
+});
+await t("live entry cut to what Dhan shows free (5% kept spare); nothing free → skipped; unreadable → as sized", async () => {
+  db.lab_margins = [{ asset: "NIFTY", price: 25000, fut_pct: 0.12, day_move: 0.02 }];
+  const real = globalThis.fetch;
+  let free = 1000000;
+  globalThis.fetch = async (url, init) => /fundlimit/.test(String(url)) ? new Response(JSON.stringify({ availabelBalance: free }), { status: 200 }) : real(url, init);
+  const S = add("fd1", { live: true, risk: null, lots: 10 });
+  const run = async () => { const e = E.entryLeg(S(), "LONG", 25000, 1, 10), legs = [e.leg].flat(), ns = { ...e.state, position: "LONG" }; delete ns._px; const notes = [e.label]; const ok = await E.sizeEntry(S(), set, legs, ns, 25000, notes); return { ok, ns, notes: notes.join(" | ") }; };
+  // one lot ≈ 25,000 × 75 × 12% = ₹2,25,000; ₹10 lakh × 95% → 4 lots
+  let r = await run(); assert.equal(r.ok, true); assert.equal(r.ns.pos_qty, 4); assert.match(r.notes, /Dhan shows ₹10,00,000 free/);
+  free = 100000; r = await run(); assert.equal(r.ok, false); assert.match(r.notes, /Entry skipped: Dhan shows ₹1,00,000 free/);
+  globalThis.fetch = real; r = await run(); assert.equal(r.ns.pos_qty, 10);
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "fd1");
+});
+await t("lotsPerOrder: units below the freeze on NSE, lots on MCX", async () => {
+  assert.equal(E.lotsPerOrder("NSE_FNO", 2761, 120), 23);
+  assert.equal(E.lotsPerOrder("MCX_COMM", 48, 1), 47);
+  assert.equal(E.lotsPerOrder("NSE_FNO", null, 75), null);
+});
 // ---------------- positional futures roll the day before expiry (4 Nov 2026) ----------------
 await t("roll: due from 15:00 on the trading day before expiry, not before, not for intraday ones", async () => {
   const S = add("rl1", { live: false, intraday: false, product_type: "M", ...longPos({ pos_broker: null, pos_entry_date: "2026-10-14" }) });
@@ -428,6 +508,23 @@ await t("roll: due from 15:00 on the trading day before expiry, not before, not 
   assert.equal(await E.rollDue(S()), "2026-10-27");
   assert.equal(await E.rollDue({ ...S(), intraday: true }), null);
   assert.equal(await E.rollDue({ ...S(), risk: { ...S().risk, roll: false } }), null);
+});
+await t("roll: stock futures 3 weekdays before expiry, MCX metals 5, risk.roll_days overrides", async () => {
+  const keep = clock;
+  db.fno_contracts.push({ seg: "NSE_FNO", sec_id: "61633", underlying: "LT", instrument: "FUTSTK", expiry: "2026-10-27", lot: 175, tick: 0.1, display: "LT OCT FUT", synced_at: iso() });
+  const S = add("rs1", { live: false, intraday: false, product_type: "M", underlying: "LT", dhan_symbol: "LT", futures_symbol: "LT1!", data_segment: "NSE_EQ", lot_size: 175,
+    ...longPos({ pos_broker: null, pos_entry_date: "2026-10-14", pos_expiry: "2026-10-27" }) });
+  clock = Date.parse("2026-10-21T09:35:00Z"); // Wednesday 15:05 IST: 4 weekdays before
+  assert.equal(await E.rollDue(S()), null);
+  clock = Date.parse("2026-10-22T09:35:00Z"); // Thursday 15:05 IST: 3 weekdays before (Thu, Fri, Mon → Tue 27th)
+  assert.equal(await E.rollDue(S()), "2026-10-27");
+  clock = Date.parse("2026-10-23T05:00:00Z"); // Friday morning, missed: at once
+  assert.equal(await E.rollDue(S()), "2026-10-27");
+  clock = Date.parse("2026-10-22T09:35:00Z");
+  assert.equal(await E.rollDue({ ...S(), risk: { ...S().risk, roll_days: 1 } }), null, "own setting: the day before");
+  clock = keep;
+  db.fno_contracts = db.fno_contracts.filter((x) => x.sec_id !== "61633");
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "rs1");
 });
 await t("roll (paper): the old contract's part booked, same side and lots go on in the next month, not rolled twice", async () => {
   const S = () => db.algo_strategies.find((x) => x.id === "rl1");
