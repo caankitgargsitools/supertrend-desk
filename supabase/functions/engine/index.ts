@@ -3416,7 +3416,10 @@ Deno.serve(async (req) => {
       const ins = a2[head.indexOf("INSTRUMENT")]; counts[ins] = (counts[ins] ?? 0) + 1;
       if (out.length < Math.min(60, Number(b2.limit) || 25)) out.push(Object.fromEntries(pick.map((k, i) => [k, ix[i] >= 0 ? a2[ix[i]] : ""])));
     }
-    return Response.json({ action, seg, q, counts, rows: out });
+    // The list's column names too (12 Nov 2026: to see whether Dhan publishes the exchange's per-order quantity limit).
+    const extra = head.filter((h) => /FREEZE|MAX|QTY|QUANT|LIMIT|BAN|BAND|CIRCUIT|PRICE_RANGE/i.test(h));
+    const first = out.length && extra.length ? lines.slice(1).find((l) => [l.split(",")[head.indexOf("UNDERLYING_SYMBOL")], l.split(",")[head.indexOf("SYMBOL_NAME")]].join(" ").toUpperCase().includes(q)) : null;
+    return Response.json({ action, seg, q, counts, rows: out, head, extra: first ? Object.fromEntries(extra.map((h) => [h, first.split(",")[head.indexOf(h)]])) : extra });
   }
   if (action === "margins") {
     const admin = await adminAccount(sb);
