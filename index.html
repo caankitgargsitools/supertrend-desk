@@ -1688,7 +1688,7 @@ body.dk-fs-on { overflow: hidden; }
       <div id="lp_all_box">
       <div id="lp_morning" hidden></div>
       <div id="lp_onboard" hidden></div>
-      <div class="lp-tools"><div class="seg" id="lp_view" role="group" aria-label="Table view"><button type="button" data-v="simple" aria-pressed="true">Simple</button><button type="button" data-v="full" aria-pressed="false">Detailed</button></div>
+      <div class="lp-tools"><div class="seg" id="lp_modeseg" role="group" aria-label="Live or paper" title="Live strategies trade real money at your broker; paper ones only log"><button type="button" data-m="" aria-pressed="true">All</button><button type="button" data-m="LIVE" aria-pressed="false">Live</button><button type="button" data-m="PAPER" aria-pressed="false">Paper</button></div><div class="seg" id="lp_view" role="group" aria-label="Table view"><button type="button" data-v="simple" aria-pressed="true">Simple</button><button type="button" data-v="full" aria-pressed="false">Detailed</button></div>
         <label class="showtr" title="One group per asset and timeframe, ranked by the Strategy Lab's consistency score"><input type="checkbox" id="lp_group" checked> Group by asset</label>
         <button class="btn small" id="lp_fold" type="button">Fold all</button></div>
       <button class="btn small mob-only" id="lf_toggle" type="button" aria-expanded="false">Filters</button>
@@ -2209,6 +2209,8 @@ function chips(s, which = "all") {
   if (which !== "flags") {
     c.push(s.archived ? '<span class="chip">Archived</span>' : s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>');
     c.push(s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>');
+    // Live / Paper switch waiting for the held position to close (12 Nov 2026, migration 91).
+    if (s.switch_to) c.push(`<span class="chip blue" title="${esc(s.switch_to === "LIVE" ? "This strategy holds a paper position. It goes live the moment that position closes; the paper position is never sent to the broker." : "This strategy holds a live position. It goes back to paper once that position closes.")}">${s.switch_to === "LIVE" ? "Live when flat" : "Paper when flat"}</span>`);
   }
   if (which !== "state") {
     if (s.lab_status === "failed") c.push(`<span class="chip red" title="${esc(s.lab_note || "Its lab result did not pass the tougher test")}">Failed lab test</span>`);
@@ -4115,7 +4117,7 @@ function wireLiveType() {
 }
 $("b_live").addEventListener("click", () => {
   const s = cur();
-  if (s.live) return run($("b_live"), async () => { must(await db.rpc("set_live", { p_strategy: s.id, p_live: false })); await loadAll(); toast("Paper mode. Orders are logged, not sent."); });
+  if (s.live) return run($("b_live"), async () => { const r = must(await db.rpc("set_live", { p_strategy: s.id, p_live: false })); await loadAll(); toast(r && r.pending ? "It holds a live position: it goes back to paper the moment that position closes." : "Paper mode. Orders are logged, not sent."); });
   if (isCrypto(s.data_segment)) { if (!deltaSt || !deltaSt.has_key || !deltaSt.has_secret) { toast("Add your Delta Exchange API key and secret under Connections first."); openConn(); return; } }
   else if (!state.settings || !state.settings.has_url) { toast("Add your order webhook URL under Dhan connection first."); openConn(); return; }
   const bl = (me && me.billing) || {}, fee = Number(bl.deploy_fee || 0);
@@ -4123,7 +4125,7 @@ $("b_live").addEventListener("click", () => {
     ? `<br>A deployment fee of <strong>${rupees(fee)}</strong>${bl.deploy_fee_period === "ONE_TIME" ? " (once)" : " (for the next month)"} will be taken from your wallet.` : "";
   askConfirm((isCrypto(s.data_segment) ? "<strong>Send real orders to Delta Exchange?</strong><br>From the next signal, this strategy places market orders on Delta Exchange India with your API key. Crypto trades round the clock and moves fast; check the paper-mode log first." : "<strong>Send real orders to Dhan?</strong><br>From the next signal, this strategy posts orders to your Dhan webhook, on your own account. Check the paper-mode log first.")
     + goLiveSummary([s]) + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + feeTxt + sameAssetWarn([s]) + noStopHTML([s]) + liveTypeHTML(),
-    "Go live", async () => run($("b_live"), async () => { must(await db.rpc("set_live", { p_strategy: s.id, p_live: true })); await loadAll(); await refreshMe(); toast("Live. Real orders will be sent."); }), true);
+    "Go live", async () => run($("b_live"), async () => { const r = must(await db.rpc("set_live", { p_strategy: s.id, p_live: true })); await loadAll(); await refreshMe(); toast(r && r.pending ? "It holds a paper position: it goes live the moment that position closes (the paper position is never sent to the broker)." : "Live. Real orders will be sent."); }), true);
   wireLiveType();
 });
 $("b_flat").addEventListener("click", () => {
@@ -9384,9 +9386,11 @@ async function bulkAction(kind) {
       + goLiveSummary(ready) + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + sameAssetWarn(ready) + noStopHTML(ready) + liveTypeHTML(),
       "Go live", async () => run(btn, async () => {
         const bad = [];
-        for (const s of ready) { const { error } = await db.rpc("set_live", { p_strategy: s.id, p_live: true }); if (error) bad.push(`${s.name}: ${errorText(error)}`); }
+        let waiting = 0;
+        for (const s of ready) { const { data, error } = await db.rpc("set_live", { p_strategy: s.id, p_live: true }); if (error) bad.push(`${s.name}: ${errorText(error)}`); else if (data && data.pending) waiting++; }
         await loadAll(); await refreshMe();
-        toast(bad.length ? `${ready.length - bad.length} live; ${bad.length} not changed (${bad[0]})` : `${plural(ready.length, "strategy", "strategies")} live. Real orders will be sent.`);
+        const now = ready.length - bad.length - waiting;
+        toast(`${now} live now${waiting ? `; ${waiting} hold a paper position and go live the moment it closes (it is never sent to the broker)` : ""}${bad.length ? `; ${bad.length} not changed (${bad[0]})` : ""}.`);
       }), true);
     wireLiveType();
   }
@@ -9474,6 +9478,7 @@ function renderList() {
     if (!folded) for (const s of g.list) tb.append(rowEl(s));
   }
   renderOnboard(); renderMorning();
+  lpModePaint();
   $("lp_fold").hidden = !groups || !groups.length;
   if (groups) $("lp_fold").textContent = groups.some((g) => !lpFold.has(g.k)) ? "Fold all" : "Unfold all";
   renderBulkBar();
@@ -9531,6 +9536,20 @@ function renderListCards(cols, rows) {
 }
 $("lp_group").checked = lpGroup;
 $("lp_group").addEventListener("change", () => { lpGroup = $("lp_group").checked; try { localStorage.setItem("lpGroup", lpGroup ? "1" : "0"); } catch { /* not remembered */ } renderList(); });
+/* Live | Paper | All on the Strategies page (12 Nov 2026, Papa: "a clear cut view of live strategies separately"): drives
+   the Mode filter, shows the counts, remembered in this browser (localStorage lpMode). */
+function lpModePaint() {
+  const m = $("lf_mode").value, mine = myStrats().filter((x) => !x.archived);
+  const n = { "": mine.length, LIVE: mine.filter((x) => x.live).length, PAPER: mine.filter((x) => !x.live).length };
+  $("lp_modeseg").querySelectorAll("[data-m]").forEach((b) => { b.setAttribute("aria-pressed", String(b.dataset.m === m)); b.textContent = `${b.dataset.m === "LIVE" ? "Live" : b.dataset.m === "PAPER" ? "Paper" : "All"} ${n[b.dataset.m]}`; });
+}
+$("lp_modeseg").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-m]"); if (!b) return;
+  $("lf_mode").value = b.dataset.m; try { localStorage.setItem("lpMode", b.dataset.m); } catch { /* private window */ }
+  $("tf_mode").value = b.dataset.m; $("tf_mode").dispatchEvent(new Event("change")); // the Trades tab follows the same choice
+  renderList();
+});
+try { const m = localStorage.getItem("lpMode"); if (m === "LIVE" || m === "PAPER") { $("lf_mode").value = m; $("tf_mode").value = m; } } catch { /* private window */ }
 $("lp_fold").addEventListener("click", () => {
   const groups = renderList.groups || [];
   if (groups.some((g) => !lpFold.has(g.k))) groups.forEach((g) => lpFold.add(g.k)); else groups.forEach((g) => lpFold.delete(g.k));

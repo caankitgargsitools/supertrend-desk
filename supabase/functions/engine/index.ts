@@ -1069,13 +1069,21 @@ async function finishNow(s: Strategy, set: Settings, update: Record<string, unkn
     // The position may have changed since this tick read the row (the per-second stop watcher exits under this same
     // lock, a partly filled entry shrinks it): decide on what the row says now, not on a copy up to a minute old
     // (6 Nov 2026 audit — the old copy booked a second exit or re-entered on top of a position already closed).
-    const { data: cur } = await sb.from("algo_strategies").select("position, exec_state, pos_qty, pos_lots, pos_broker, pos_entry_px, pos_entry_prem, pos_risk, pos_legs, pos_margin, day_pnl, day_pnl_date").eq("id", s.id).maybeSingle();
+    const { data: cur } = await sb.from("algo_strategies").select("position, exec_state, pos_qty, pos_lots, pos_broker, pos_entry_px, pos_entry_prem, pos_risk, pos_legs, pos_margin, day_pnl, day_pnl_date, live, switch_to").eq("id", s.id).maybeSingle();
     if (cur && (cur.position !== s.position || (cur.exec_state && cur.exec_state !== s.exec_state))) {
       await logSignal(s, "INFO", `Skipped: the position changed while this candle was being worked (now ${cur.position}${cur.exec_state ? `, ${cur.exec_state}` : ""}); nothing sent for ${event}.`, candle);
       await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "indicator state");
       return;
     }
     if (cur) s = { ...s, ...cur };
+    // A Live / Paper switch waits for a flat moment (12 Nov 2026, migration 91): a position stays in the mode it was
+    // opened in. A reversal only closes the held one (booked in its own mode); the trigger then switches the strategy and
+    // the new entry comes on the next signal, in the new mode.
+    if ((s as any).switch_to && s.position !== "FLAT" && event === "REVERSE") {
+      legs.splice(exitCount(s, event, legs));
+      newState = { ...FLAT_STATE }; event = "EXIT";
+      notes.push(`Position closed only: the strategy switches to ${(s as any).switch_to === "LIVE" ? "live" : "paper"} now that it is flat, and enters again on its next signal`);
+    }
     const entryPx = newState._px as number | undefined;
     delete newState._px;
     const swing = Number(newState._swing) || 0;
