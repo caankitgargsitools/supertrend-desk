@@ -212,5 +212,20 @@ await p.click('#dk_tiles [data-dk="g1"]'); await p.waitForTimeout(400);
 if (await p.evaluate(() => page) !== "strat") fail("tile opens the strategy");
 if (await p.evaluate(() => desk.raf)) fail("animation stopped after leaving");
 if (await p.evaluate(() => document.body.classList.contains("dk-one"))) fail("menu back after leaving the Desk");
+// Heartbeat dot (12 Nov 2026, Papa option 1): the worst feed that applies — crypto 200 s old = red; all fresh = green.
+feedAge.crypto = 200;
+await p.evaluate(() => hbLoad(true)); await p.waitForTimeout(200);
+let hbc = await p.getAttribute("#hb", "class");
+if (!/\bbad\b/.test(hbc) || await p.isHidden("#hb")) fail("heartbeat red when a feed stopped", hbc);
+for (const k in feedAge) feedAge[k] = 2;
+await p.evaluate(() => hbLoad(true)); await p.waitForTimeout(200);
+hbc = await p.getAttribute("#hb", "class");
+if (!/\bok\b/.test(hbc) || !/Live/.test(await p.textContent("#hb"))) fail("heartbeat green when all run", hbc);
+// Comet (option 3): a failed request ends with the red flash; the heartbeat's own poll doesn't light it.
+await p.evaluate(() => fetch("http://127.0.0.1:9/x").catch(() => {})); await p.waitForTimeout(150);
+if (!/\berr\b/.test(await p.getAttribute("#netbar", "class"))) fail("comet red flash on a failed request", await p.getAttribute("#netbar", "class"));
+await p.waitForTimeout(1700);
+const quiet = await p.evaluate(async () => { const pr = hbLoad(true); const on = document.getElementById("netbar").classList.contains("on"); await pr; return on; });
+if (quiet) fail("heartbeat poll lit the comet");
 console.log("ok desk", theme, width);
 await b.close();

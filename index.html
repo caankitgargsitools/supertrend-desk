@@ -143,8 +143,34 @@ button, input, select, textarea { font: inherit; color: inherit; }
    runs, a spinning circle where the duration is unknown, a loading pill over a page while its data loads. */
 #netbar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 1000; pointer-events: none; opacity: 0; overflow: hidden; transition: opacity .2s; }
 #netbar.on { opacity: 1; transition-delay: .12s; }
-#netbar::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 35%; background: var(--blue); border-radius: 0 3px 3px 0; animation: netslide 1.1s ease-in-out infinite; }
-@keyframes netslide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+/* The comet (Papa, 12 Nov 2026, option 3): a bright head with a fading tail runs across while a request is out; when the
+   answer comes back the line flashes green (or red when the server failed or couldn't be reached). */
+#netbar { height: 3px; overflow: visible; }
+#netbar::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 30%; border-radius: 0 3px 3px 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--blue) 35%, transparent) 45%, var(--blue) 85%, #fff);
+  box-shadow: 0 0 8px 1px color-mix(in srgb, var(--blue) 70%, transparent), 0 0 18px 2px color-mix(in srgb, var(--blue) 35%, transparent);
+  animation: netslide 1.05s cubic-bezier(.45, .05, .35, 1) infinite; }
+#netbar::after { content: ""; position: absolute; inset: 0; opacity: 0; }
+#netbar.ok, #netbar.err { opacity: 1; transition: none; }
+#netbar.ok::before, #netbar.err::before { display: none; }
+#netbar.ok::after { background: var(--green); box-shadow: 0 0 10px var(--green); animation: netflash .7s ease-out forwards; }
+#netbar.err::after { background: var(--red); box-shadow: 0 0 10px var(--red); animation: netflash 1.4s ease-out forwards; }
+@keyframes netslide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+@keyframes netflash { 0% { opacity: .95; transform: scaleX(.2); } 35% { opacity: .9; transform: scaleX(1); } 100% { opacity: 0; transform: scaleX(1); } }
+/* Heartbeat (Papa, 12 Nov 2026, option 1): a dot beside the name that beats while the engine and the price feeds are
+   alive — green, amber when one is late, red when one has stopped or the server can't be reached, grey while checking. */
+.hb { display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; padding: 3px 9px 3px 7px; border-radius: 99px; border: 1px solid var(--line); background: transparent; color: var(--muted); font: 600 11.5px var(--font-ui, inherit); cursor: pointer; white-space: nowrap; align-self: center; }
+.hb .hbd { position: relative; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+.hb .hbd::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid currentColor; opacity: 0; }
+.hb.ok { color: var(--green); } .hb.ok .hbd { background: var(--green); animation: hbbeat 1.2s ease-in-out infinite; }
+.hb.ok .hbd::after { animation: hbring 1.2s ease-out infinite; }
+.hb.warn { color: var(--yellow-ink); } .hb.warn .hbd { background: var(--yellow); animation: hbbeat 2.4s ease-in-out infinite; }
+.hb.bad { color: var(--red); } .hb.bad .hbd { background: var(--red); animation: hbblink 1s steps(2, start) infinite; }
+.hb.ok .hbd { box-shadow: 0 0 8px var(--green); }
+@keyframes hbbeat { 0%, 40%, 100% { transform: scale(1); } 12% { transform: scale(1.35); } 26% { transform: scale(1.15); } }
+@keyframes hbring { 0% { opacity: .7; transform: scale(.6); } 70%, 100% { opacity: 0; transform: scale(1.6); } }
+@keyframes hbblink { to { visibility: hidden; } }
+@media (max-width: 700px) { .hb .hbt { display: none; } .hb { padding: 4px; border: 0; } }
 .spin { display: inline-block; width: .95em; height: .95em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -.15em; animation: spin .7s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .btn.busy { cursor: progress; }
@@ -153,7 +179,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .loading > :not(.loadpill) { opacity: .5; transition: opacity .2s; }
 .loadpill { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 4; display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 99px; background: var(--panel); border: 1px solid var(--line); color: var(--blue); font-size: 13px; font-weight: 600; box-shadow: 0 4px 14px rgba(0,0,0,.12); white-space: nowrap; }
 .working { display: inline-flex; align-items: center; gap: 8px; }
-@media (prefers-reduced-motion: reduce) { #netbar::before, .spin, .btn.busy::before { animation-duration: 2.4s; } }
+@media (prefers-reduced-motion: reduce) { #netbar::before, .spin, .btn.busy::before { animation-duration: 2.4s; } .hb .hbd, .hb .hbd::after { animation: none !important; } }
 .btn.go { background: var(--red); border-color: var(--red); }
 .btn.danger { color: var(--red); border-color: var(--red); }
 .btn:disabled { opacity: .5; cursor: default; }
@@ -1090,7 +1116,7 @@ body.dk-fs-on { overflow: hidden; }
 
 <div id="netbar" role="progressbar" aria-label="Talking to the server" aria-hidden="true"></div>
 <header class="bar">
-  <div class="brand"><img class="logo" src="icons/logo.svg" alt="" width="40" height="40"><div><h1><span class="ank">Ank</span><span class="gn">Genie</span></h1><small>Your wish, traded · Dhan · NSE / BSE / MCX · Delta crypto</small></div></div>
+  <div class="brand"><img class="logo" src="icons/logo.svg" alt="" width="40" height="40"><div><h1><span class="ank">Ank</span><span class="gn">Genie</span></h1><small>Your wish, traded · Dhan · NSE / BSE / MCX · Delta crypto</small></div><button class="hb" id="hb" type="button" hidden aria-live="polite" title="Checking the engine…"><span class="hbd" aria-hidden="true"></span><span class="hbt">Checking</span></button></div>
   <span class="mk mkts" id="mkts"><span class="mx" id="mx_nse"><span class="dot"></span>NSE/BSE</span><span class="mx" id="mx_mcx"><span class="dot"></span>MCX</span><span class="mx" id="mx_dlt"><span class="dot"></span>Delta</span></span>
   <button class="btn small" id="menuBtn" type="button" aria-expanded="false" aria-controls="nav">☰ Menu</button>
   <nav class="nav" id="nav" aria-label="Pages" hidden>
@@ -1987,13 +2013,24 @@ function setBusy(btn, key, on) {
   btn.classList.toggle("busy", any); if (any) btn.setAttribute("aria-busy", "true"); else btn.removeAttribute("aria-busy");
 }
 const rawFetch = window.fetch.bind(window);
+// Background checks that shouldn't light the comet (the heartbeat's own poll and the presence marks).
+const NET_QUIET = /\/rpc\/(desk_feeds|touch_presence|log_activity)\b/;
 window.fetch = (...args) => {
   const bar = document.getElementById("netbar");
+  const url = String(args[0] && args[0].url || args[0] || "");
+  if (NET_QUIET.test(url)) return rawFetch(...args);
   const btn = net.btn && Date.now() - net.at < 600 ? net.btn : null;
-  net.n++; if (bar) bar.classList.add("on");
+  if (!net.n) { net.start = Date.now(); net.err = false; }
+  net.n++; if (bar) { clearTimeout(net.flashT); bar.classList.remove("ok", "err"); bar.classList.add("on"); }
   if (btn) setBusy(btn, "net", true);
-  const done = () => { net.n = Math.max(0, net.n - 1); if (!net.n && bar) bar.classList.remove("on"); if (btn) setBusy(btn, "net", false); };
-  return rawFetch(...args).finally(done);
+  const done = () => {
+    net.n = Math.max(0, net.n - 1); if (btn) setBusy(btn, "net", false);
+    if (net.n || !bar) return;
+    bar.classList.remove("on");
+    // Flash only when the comet was on screen long enough to be seen (it shows after 120 ms).
+    if (net.err || Date.now() - net.start > 150) { void bar.offsetWidth; bar.classList.add(net.err ? "err" : "ok"); net.flashT = setTimeout(() => bar.classList.remove("ok", "err"), net.err ? 1500 : 800); }
+  };
+  return rawFetch(...args).then((r) => { if (r.status >= 500) net.err = true; return r; }, (e) => { net.err = true; throw e; }).finally(done);
 };
 /** A page or box shows a loading pill while its data loads; returns the same promise. */
 function withLoading(el, p) {
@@ -7623,7 +7660,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) { po
    and every 30 seconds while the app stays open. The thin bar at the top shows while it loads; unsaved settings are kept. */
 let lastRefresh = 0, refreshBusy = false;
 async function refreshAll() {
-  touchPresence();
+  touchPresence(); if (me && !hb.at && !hb.busy) hbLoad(true);
   if (refreshBusy || !me || !deskUser || pending || btPoll) return;
   refreshBusy = true;
   try {
@@ -8690,6 +8727,47 @@ function dkPulseTick() {
   }
 }
 setInterval(dkPulseTick, 450); // slower (Papa, 6 Nov: "it's moving too fast")
+/* ---------- Heartbeat (Papa, 12 Nov 2026: "show that the portal is live and not stuck") ----------
+   The dot beside the name reads desk_feeds every 15 s on every page (the same times the Desk's pulse bars use, no Dhan /
+   Delta calls) and shows the worst of the feeds that apply right now: the engine's minute run always, prices while their
+   market is open, the stop watcher while a position is open. Green and beating = all running; amber = one is late;
+   red and blinking = one has stopped or the server can't be reached; grey = checking. Its own poll doesn't light the comet. */
+const hb = { fail: 0, busy: false, at: 0 };
+async function hbLoad(force) {
+  if (!me || hb.busy || (document.hidden && !force)) return;
+  hb.busy = true;
+  try {
+    const { data, error } = await db.rpc("desk_feeds");
+    if (error || !data || !data.now) throw error || new Error("no answer");
+    dkF.data = data; dkF.skew = Date.parse(data.now) - Date.now(); hb.fail = 0; hb.at = Date.now();
+  } catch { hb.fail++; } finally { hb.busy = false; }
+  hbPaint();
+}
+function hbState() {
+  if (hb.fail >= 2 || (hb.at && Date.now() - hb.at > 90000)) return { c: "bad", t: "Offline", tip: "Can't reach the server right now — what you see may be out of date. It keeps trying." };
+  if (!dkF.data) return { c: "", t: "Checking", tip: "Checking the engine…" };
+  const rank = { ok: 1, warn: 2, bad: 3 }, rows = [];
+  let worst = "ok";
+  for (const [k, a, b, limit] of DK_FEEDS) {
+    const f = feedState(k, limit); rows.push(`${a} ${b}: ${f.t}`);
+    if (rank[f.c] > rank[worst]) worst = f.c;
+  }
+  const t = worst === "ok" ? "Live" : worst === "warn" ? "Slow" : "Stopped";
+  const head = worst === "ok" ? "Engine and prices running." : worst === "warn" ? "Something is running late." : "Something has stopped — check System health.";
+  return { c: worst, t, tip: head + "\n" + rows.join("\n") };
+}
+function hbPaint() {
+  const el = $("hb"); if (!el) return;
+  el.hidden = !me;
+  const st = hbState();
+  if (el.dataset.c !== st.c) { el.className = "hb " + st.c; el.dataset.c = st.c; }
+  el.querySelector(".hbt").textContent = st.t;
+  el.title = st.tip; el.setAttribute("aria-label", "System " + st.t.toLowerCase() + ". " + st.tip.split("\n")[0]);
+}
+setInterval(() => hbLoad(), 15000);
+setInterval(() => { if (!document.hidden && $("hb") && !$("hb").hidden) hbPaint(); }, 5000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) hbLoad(); });
+$("hb").addEventListener("click", () => showPage(isAdmin() ? "health" : "desk"));
 function deskFeedsPaint() {
   const box = $("dk_feeds"); if (!box || page !== "desk") return;
   if (!box.children.length) box.innerHTML = DK_FEEDS.map(([k, a, b]) => `<div class="dk-pulse off" role="listitem" data-f="${k}"><div class="bars"><i></i><i></i><i></i><i></i></div><div class="n">${a}<br>${b}</div><div class="s">…</div></div>`).join("");

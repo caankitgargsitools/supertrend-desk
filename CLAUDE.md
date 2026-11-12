@@ -43,7 +43,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
    - **Log every call**: which tier answered and its cost (a table such as `ai_calls`), so cost is visible.
    - Before adding or changing any AI or paid-data use, show Papa where it is used and the plan, then wait for his go.
 2. **Every running process must show it is working.** Never leave a screen silently waiting.
-   - A thin activity bar at the top while anything talks to the server (`#netbar`, driven by the fetch wrapper).
+   - A thin activity bar at the top while anything talks to the server (`#netbar`, driven by the fetch wrapper). Since
+     12 Nov 2026 (Papa chose options 1 + 3): a **comet** — bright head, fading tail, glow — while requests are out, then a
+     green flash when they finish (shown only if the comet was visible, > 150 ms) or a red one when the server failed
+     (≥ 500) or couldn't be reached; background polls `desk_feeds` / `touch_presence` / `log_activity` don't light it
+     (`NET_QUIET`). A **heartbeat dot** beside the name (`#hb`, `hbLoad` / `hbState` / `hbPaint`; reads `desk_feeds` every
+     15 s on every page, same rules as the Desk's pulse bars, `feedState`): green beating "Live" = engine minute run, open
+     markets' prices, stop watcher all on time; amber "Slow"; red blinking "Stopped", or "Offline" when the server
+     can't be reached twice; tooltip lists each feed; click → System health (admins) / Desk. Tested in `tests/ui/ui_desk.mjs`.
    - A spinner on any button while its action runs (`run(btn, fn)` adds `.busy`; buttons clicked just before a
      server request get it automatically).
    - A progress bar with time left where the duration is roughly known (backtests, lab runs, imports, report
