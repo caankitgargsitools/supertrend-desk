@@ -8775,7 +8775,9 @@ function hbState() {
   const rank = { ok: 1, warn: 2, bad: 3 }, rows = [];
   let worst = "ok";
   for (const [k, a, b, limit] of DK_FEEDS) {
-    const f = feedState(k, limit); rows.push(`${a} ${b}: ${f.t}`);
+    // Prices and stops are normally up to ~21 s old between the 10-second price runs (seen 12 Nov 2026): the dot allows 45 s
+    // before amber so it doesn't flicker; the Desk's pulse bars keep their own 20 s rhythm.
+    const f = feedState(k, Math.max(limit, 45)); rows.push(`${a} ${b}: ${f.t}`);
     if (rank[f.c] > rank[worst]) worst = f.c;
   }
   const t = worst === "ok" ? "Live" : worst === "warn" ? "Slow" : "Stopped";

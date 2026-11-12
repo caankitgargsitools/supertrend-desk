@@ -48,7 +48,7 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
      green flash when they finish (shown only if the comet was visible, > 150 ms) or a red one when the server failed
      (≥ 500) or couldn't be reached; background polls `desk_feeds` / `touch_presence` / `log_activity` don't light it
      (`NET_QUIET`). A **heartbeat dot** beside the name (`#hb`, `hbLoad` / `hbState` / `hbPaint`; reads `desk_feeds` every
-     15 s on every page, same rules as the Desk's pulse bars, `feedState`): green beating "Live" = engine minute run, open
+     15 s on every page, the Desk pulse bars' rules but 45 s before a price / stop feed counts as late — prices are normally up to ~21 s old, `feedState`): green beating "Live" = engine minute run, open
      markets' prices, stop watcher all on time; amber "Slow"; red blinking "Stopped", or "Offline" when the server
      can't be reached twice; tooltip lists each feed; click → System health (admins) / Desk. Tested in `tests/ui/ui_desk.mjs`.
    - A spinner on any button while its action runs (`run(btn, fn)` adds `.busy`; buttons clicked just before a
