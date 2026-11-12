@@ -491,6 +491,8 @@ details.raw code { display: block; white-space: pre-wrap; word-break: break-all;
 .morning .btn.ks-btn { position: relative; overflow: hidden; color: var(--red); border-color: var(--red); background: transparent; font-weight: 700; touch-action: none; user-select: none; -webkit-user-select: none; }
 .ks-btn i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--red); opacity: .25; pointer-events: none; }
 .ks-btn.holding i { width: 100%; transition: width 1.5s linear; }
+.lw-lots { width: 64px; text-align: right; font: 600 13px var(--font-data); padding: 3px 6px; }
+.lw-lots.set { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue) inset; }
 .morning .mlines { margin: 10px 0 0; padding-left: 18px; font-size: 13px; display: grid; gap: 4px; } .morning .mlines li.warn { color: var(--yellow-ink); }
 /* New-client checklist (H2) */
 .onboard { display: grid; gap: 10px; margin: 0 0 14px; padding: 14px 16px; border: 1px solid var(--blue); border-radius: var(--r); background: var(--blue-soft); }
@@ -4801,7 +4803,7 @@ async function capDd(st) {
   const b = $("cap_dd_use"); if (b) b.onclick = () => { $("cap_deploy").value = String(sug); $("cap_msg").textContent = `Limit set to ${sug}% — press Save to keep it.`; $("cap_deploy").focus(); };
 }
 /* ---------- Lots wizard (Capital page) ---------- */
-const lw = { method: "move", typesOff: new Set(), off: new Set(), pct: {}, assetLots: {}, capSet: false, plan: [] };
+const lw = { method: "move", typesOff: new Set(), off: new Set(), pct: {}, assetLots: {}, manual: {}, capSet: false, plan: [] };
 const LW_TYPES = ["Indices", "Stocks", "Commodities", "Crypto"];
 const lwType = (s) => isCrypto(s.data_segment) ? "Crypto" : isMcx(s.data_segment) ? "Commodities" : /EQ|STOCK/i.test(String(s.data_segment)) || (PRESETS[s.underlying] && PRESETS[s.underlying].stock) ? "Stocks" : "Indices";
 const lwName = (u) => (PRESETS[u] && PRESETS[u].name) || u;
@@ -4833,6 +4835,8 @@ function lwPlan() {
     else r.why = "no backtest fall stored";
   }
   const target = lw.method === "move" ? lwMoveLots(on, capAmt * Math.min(100, Math.max(5, Number($("lw_capPct").value) || 60)) / 100) : null;
+  // Lots typed by hand in the table (12 Nov 2026, Papa: "I can select or deselect strategies but can't change lots").
+  for (const r of all) if (r.on && lw.manual[r.s.id] != null) { r.lots = lw.manual[r.s.id]; r.manualSet = true; r.why = ""; }
   for (const r of all) { r.used = (r.lots || 0) * r.margin; r.fall = r.dd ? (r.lots || 0) * r.dd : null; r.day = r.move ? (r.lots || 0) * r.move : null; }
   lw.plan = all; lw.target = target;
   return { capAmt, all, on, target };
@@ -4902,7 +4906,7 @@ function lwRender() {
       body += `<tr class="${r.on ? "" : "off"}"><td class="nm"><label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" data-lwpick="${s.id}" ${r.on ? "checked" : ""} ${tOff || r.margin == null ? "disabled" : ""} style="margin-top:3px"><span style="min-width:0;display:block;color:inherit;font-size:13px;white-space:normal"><b>${esc(s.name.split(" · ")[0])}</b>${z ? ' <span class="chip red" style="display:inline">0 lots</span>' : ""}${s.position !== "FLAT" ? ` <span class="chip" style="display:inline">${s.position === "LONG" ? "Long" : "Short"} ${s.pos_lots || ""}</span>` : ""}<span>${esc(s.name.split(" · ").slice(2).join(" · ") || s.name)}${note ? ` — ${esc(note)}` : ""}</span></span></label></td>`
         + (pctCol ? `<td class="n"><input class="pct" type="number" min="0" max="100" step="0.5" data-lwpct="${s.id}" value="${r.on ? (lw.pct[s.id] || 0) : 0}" ${r.on ? "" : "disabled"}></td>` : "")
         + `<td class="n mono">${esc(now)}</td><td class="n mono">${r.margin != null ? rupees(r.margin) : "–"}</td><td class="n mono">${byMove ? (r.move ? `${rupees(r.move)}<div class="hint sm">${(Number(cap.rates[s.underlying].day_move) * 100).toFixed(2)}% a day</div>` : "–") : r.dd ? rupees(r.dd) : "–"}</td>`
-        + `<td class="n lots ${z ? "z" : ""}">${r.on && r.lots != null ? r.lots : "–"}</td><td class="n mono">${r.on && r.lots != null ? rupees(r.used) : "–"}</td><td class="n mono">${byMove ? (r.on && r.day != null && r.lots ? rupees(r.day) : "–") : r.on && r.fall != null ? rupees(r.fall) : "–"}</td></tr>`;
+        + `<td class="n lots ${z ? "z" : ""}">${r.on ? `<input class="lw-lots${r.manualSet ? " set" : ""}" type="number" min="0" step="1" inputmode="numeric" data-lwlots="${s.id}" value="${r.lots != null ? r.lots : ""}" placeholder="–" aria-label="Lots for ${esc(s.name.split(" · ")[0])}" title="Type the lots you want for this strategy (it then keeps a fixed number of lots)">` : "–"}</td><td class="n mono">${r.on && r.lots != null ? rupees(r.used) : "–"}</td><td class="n mono">${byMove ? (r.on && r.day != null && r.lots ? rupees(r.day) : "–") : r.on && r.fall != null ? rupees(r.fall) : "–"}</td></tr>`;
     }
   }
   $("lw_tbl").tBodies[0].innerHTML = body || `<tr><td colspan="${nCol}" class="hint">No ${live ? "live" : "paper"} strategies.</td></tr>`;
@@ -4947,11 +4951,13 @@ function lwRestore() {
   lw.last = last;
   if (!last) return;
   lw.method = last.method || lw.method;
-  if (last.moveAmt) $("lw_moveAmt").value = String(last.moveAmt);
+  // A derived amount is only a guess (live copies inherit their paper sizing, e.g. ₹37 lakh a day): it is shown as the
+  // last selection but not typed in, so the wizard sizes to the capital and limit here.
+  if (last.moveAmt && !last.derived) $("lw_moveAmt").value = String(last.moveAmt);
   if (last.capPct) $("lw_capPct").value = String(last.capPct);
   if (last.cap) { $("lw_cap").value = String(last.cap); lw.capSet = true; }
   if (Array.isArray(last.on)) { const on = new Set(last.on); lw.off = new Set(mine.filter((x) => !on.has(x.id)).map((x) => x.id)); }
-  if (last.pct) lw.pct = { ...last.pct }; if (last.assetLots) lw.assetLots = { ...last.assetLots };
+  if (last.pct) lw.pct = { ...last.pct }; if (last.assetLots) lw.assetLots = { ...last.assetLots }; if (last.manual) lw.manual = { ...last.manual };
 }
 function lwLastPaint(changes) {
   const box = $("lw_last"); if (!box) return;
@@ -4965,7 +4971,7 @@ function lwLastPaint(changes) {
       : "Nothing changes unless you edit something here and press Apply.");
 }
 /** Strategies whose saved lots would change: ticked, sized to 1 lot or more, and different from now (or on automatic lots). */
-const lwChanges = () => lw.plan.filter((r) => r.on && r.lots > 0 && (Number(r.s.lots) !== r.lots || (r.s.sizing && r.s.sizing.mode === "AUTO")
+const lwChanges = () => lw.plan.filter((r) => r.on && r.lots > 0 && (r.manualSet ? (Number(r.s.lots) !== r.lots || !(r.s.sizing && r.s.sizing.mode === "FIXED")) : Number(r.s.lots) !== r.lots || (r.s.sizing && r.s.sizing.mode === "AUTO")
   || (lw.method === "move" ? !(r.s.sizing && r.s.sizing.mode === "MOVE" && Math.trunc(Number(r.s.sizing.move_amt)) === Math.trunc(lw.target || 0)) : !!(r.s.sizing && r.s.sizing.mode === "MOVE"))));
 $("lw_toggle").addEventListener("click", () => {
   const open = $("lw_body").hidden; $("lw_body").hidden = !open;
@@ -4982,6 +4988,7 @@ $("lw_card").addEventListener("change", (e) => {
   if (el.dataset.lwpick) { el.checked ? lw.off.delete(el.dataset.lwpick) : lw.off.add(el.dataset.lwpick); lw.pct = {}; lwRender(); }
   else if (el.dataset.lwpct) { lw.pct[el.dataset.lwpct] = Math.max(0, Number(el.value) || 0); lwRender(); }
   else if (el.dataset.lwasset) { lw.assetLots[el.dataset.lwasset] = Math.max(0, Math.floor(Number(el.value) || 0)); lwRender(); }
+  else if (el.dataset.lwlots) { const v = el.value.trim(); if (v === "") delete lw.manual[el.dataset.lwlots]; else lw.manual[el.dataset.lwlots] = Math.max(0, Math.floor(Number(v) || 0)); lwRender(); }
 });
 ["lw_cap", "lw_capPct", "lw_riskPct", "lw_mult", "lw_moveAmt"].forEach((id) => $(id).addEventListener("input", () => { if (id === "lw_cap" || id === "lw_capPct") lw.capSet = true; lwRender(); }));
 $("lw_apply").addEventListener("click", (e) => {
@@ -4996,12 +5003,12 @@ $("lw_apply").addEventListener("click", (e) => {
     + (liveN ? `<br><b>${liveN} ${liveN === 1 ? "is" : "are"} live: real orders will use the new lots.</b>` : ""), "Apply these lots", () => run(btn, async () => {
     let done = 0; const failed = [];
     for (const r of ch) {
-      const sizing = byMove ? { ...(r.s.sizing || {}), mode: "MOVE", move_amt: Math.trunc(lw.target) } : { ...(r.s.sizing || {}), mode: "FIXED" };
+      const sizing = byMove && !r.manualSet ? { ...(r.s.sizing || {}), mode: "MOVE", move_amt: Math.trunc(lw.target) } : { ...(r.s.sizing || {}), mode: "FIXED" };
       const res = await db.from("algo_strategies").update({ lots: r.lots, sizing }).eq("id", r.s.id);
       if (res.error) failed.push(`${r.s.name.split(" · ")[0]}: ${errorText(res.error)}`); else done++;
     }
     const saved = { method: lw.method, moveAmt: byMove ? Math.trunc(lw.target) : Number($("lw_moveAmt").value) || null, cap: Number($("lw_cap").value) || null, capPct: Number($("lw_capPct").value) || null,
-      on: lw.plan.filter((r) => r.on).map((r) => r.s.id), pct: lw.pct, assetLots: lw.assetLots, at: new Date().toISOString() };
+      on: lw.plan.filter((r) => r.on).map((r) => r.s.id), pct: lw.pct, assetLots: lw.assetLots, manual: lw.manual, at: new Date().toISOString() };
     try { localStorage.setItem(`lwLast:${cap.mode}`, JSON.stringify(saved)); } catch { /* private window */ }
     lw.last = saved; if (byMove) $("lw_moveAmt").value = String(saved.moveAmt);
     await loadAll(); await loadCap();

@@ -158,6 +158,22 @@ const grow = await p.evaluate(() => {
   return { T, used };
 });
 if (!(grow.T > 8000) || !(grow.used > 400000) || grow.used > 600000) fail("move target grows into the freed margin", grow);
+// 12 Nov 2026 (Papa: "I can select or deselect strategies but can't change lots"): lots typed per strategy are kept and
+// saved as fixed lots; a derived (guessed) last amount is not typed into the box.
+await p.evaluate(() => { lw.manual = {}; lw.off = new Set(); lw.typesOff = new Set(); $("lw_moveAmt").value = "100000"; lwRender(); });
+await p.fill('[data-lwlots="gm"]', "4"); await p.dispatchEvent('[data-lwlots="gm"]', "change"); await p.waitForTimeout(100);
+const man = await p.evaluate(() => { const r = lw.plan.find((x) => x.s.id === "gm"); return { lots: r.lots, set: !!document.querySelector('[data-lwlots="gm"].set') }; });
+if (man.lots !== 4 || !man.set) fail("typed lots kept", man);
+writes.length = 0;
+await p.click("#lw_apply"); await p.waitForSelector("#cf_yes"); await p.click("#cf_yes"); await p.waitForTimeout(1200);
+const gmp = writes.filter((w) => w.meth === "PATCH" && /id=eq\.gm/.test(w.u)).map((w) => JSON.parse(w.body));
+if (!gmp.length || gmp[0].lots !== 4 || gmp[0].sizing.mode !== "FIXED") fail("typed lots saved fixed", gmp);
+const der = await p.evaluate(() => {
+  try { localStorage.setItem(`lwLast:${cap.mode}`, JSON.stringify({ method: "move", moveAmt: 3724722, derived: true, on: [] })); } catch {}
+  $("lw_moveAmt").value = ""; lw.restoredFor = null; lw.last = null; lwRestore();
+  const v = $("lw_moveAmt").value; localStorage.removeItem(`lwLast:${cap.mode}`); return v;
+});
+if (der === "3724722") fail("derived amount typed in", der);
 if (errs.length) fail("page errors", errs);
 console.log("ok lots wizard", theme, width);
 await b.close();
