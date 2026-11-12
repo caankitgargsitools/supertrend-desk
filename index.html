@@ -7419,7 +7419,9 @@ function listRows(anyArch = false) {
     if (owner === "ME" && s.owner_id !== me.user_id) return false;
     if (src && srcOf(s) !== src) return false;
     if (act && (act === "ACTIVE") !== !!s.active) return false;
-    if (mode && (mode === "LIVE") !== !!s.live) return false;
+    // "Live" also lists the ones waiting to go live (still holding a paper position, tagged "Live when flat").
+    if (mode === "LIVE" && !(s.live || s.switch_to === "LIVE")) return false;
+    if (mode === "PAPER" && s.live) return false;
     if (asset && s.underlying !== asset) return false;
     if (inst && instName(s) !== inst) return false;
     if (q && ![s.name, assetLabel(s.underlying), s.underlying, ownerName(s.owner_id)].join(" ").toLowerCase().includes(q)) return false;
@@ -9540,7 +9542,7 @@ $("lp_group").addEventListener("change", () => { lpGroup = $("lp_group").checked
    the Mode filter, shows the counts, remembered in this browser (localStorage lpMode). */
 function lpModePaint() {
   const m = $("lf_mode").value, mine = myStrats().filter((x) => !x.archived);
-  const n = { "": mine.length, LIVE: mine.filter((x) => x.live).length, PAPER: mine.filter((x) => !x.live).length };
+  const n = { "": mine.length, LIVE: mine.filter((x) => x.live || x.switch_to === "LIVE").length, PAPER: mine.filter((x) => !x.live).length };
   $("lp_modeseg").querySelectorAll("[data-m]").forEach((b) => { b.setAttribute("aria-pressed", String(b.dataset.m === m)); b.textContent = `${b.dataset.m === "LIVE" ? "Live" : b.dataset.m === "PAPER" ? "Paper" : "All"} ${n[b.dataset.m]}`; });
 }
 $("lp_modeseg").addEventListener("click", (e) => {
