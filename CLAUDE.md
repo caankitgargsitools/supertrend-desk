@@ -429,6 +429,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   amount, capital, limit %, ticked strategies — else worked out from the strategies' saved MOVE amount); banner `#lw_last`
   ("Showing your last selection …", amber "You are changing the lots of N strategies" once anything would change); the
   Apply confirmation lists old → new lots per strategy. Tests: `tests/ui/ui_lots_wizard.mjs`.
+  **Lots typed by hand** (12 Nov 2026, Papa: "I can select or deselect strategies but can't change lots"): the New lots
+  cell is a box (`data-lwlots`, `lw.manual`, blue edge when typed; empty = back to the method's figure); typed rows are
+  saved as FIXED lots whatever the method. A last selection worked out from saved MOVE amounts (`derived`) is shown but no
+  longer typed into the amount box (the live copies carried their paper ₹37 lakh a day → "Margin required ₹48.22 Cr").
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
