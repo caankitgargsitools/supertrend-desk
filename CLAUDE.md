@@ -728,6 +728,42 @@ Still open:
    fine-tune round 2) stay on the shelf.
 5. **Lot sizing, the rest of the 1 Nov questions**: capital and limit per account, rules for clients.
 6. The unfinished question "Also, I want to understand…" (1 Nov).
+7. **From the "AI trading stack" post Papa shared (12 Nov 2026) — 7 items to build, Papa: "put them in the pending list"**
+   (none started; the order is the recommended one, cheapest first; items 5–7 need his go on cost / data first):
+   1. **Validation gate card on every strategy.** One card on the strategy page (and a column in the Lab) showing the
+      path every strategy must walk: Backtest → Held-back period (vault) → Walk-forward → Robustness (shuffled prices,
+      random entries, nearby settings, luck test) → Paper trading (N trades / N weeks, results vs the backtest) → Live.
+      Each step a chip: PASSED (green) / REVIEW (amber, e.g. luck test weak) / REQUIRED (grey, not done yet) / BLOCKED
+      (red). Also a "drawdown range" figure from re-shuffling the strategy's own trades 1,000 times ("95% chance the worst
+      fall stays under ₹X"). Whether Live is actually **blocked** until every step is green is Papa's call (open question 5,
+      "mandatory luck test"); by default it only shows. Data exists already (lab checks, vault, noise / random legs, kill
+      rule, desk trades) — this is mostly a page.
+   2. **Lab funnel and split profit curve.** On the Strategy Lab page: big number tiles "Generated → Backtested → Passed the
+      first filter → Passed every test → On the desk → Live" for a run / all time; and on each strategy's chart the
+      tested years in one colour and the held-back last months in another on the same curve, so a strategy that only
+      looked good in the years it was tuned on shows at a glance.
+   3. **Market-condition table on the Lab page.** `regimeStats` is already calculated and stored (`metrics.regimes`):
+      how the strategy did when India VIX was low / middle / high, when the market was trending (ADX > 25) vs ranging
+      (ADX < 20), above vs below its 200-day average. Show it as a small table per strategy (and in user backtests,
+      which don't calculate it yet), so Papa can see "this one only makes money in trending markets".
+   4. **"How a signal travels" diagram.** A picture page for clients (and Papa): market data → candle closes → strategy
+      rules → lot sizing and risk checks → order to Dhan / Delta (limit, chase, stop at the broker) → fill → booked trade →
+      daily self-check — with the time each step usually takes (from `lag_ms`, order logs). Style like the post's flow
+      boxes; optional neon-glow look for this page only.
+   5. **AI research report and trade journal** (needs Papa's go; standing rule 1 — free tier first, only public data to
+      free tiers, every call logged with tier and cost in an `ai_calls` table). (a) After each lab run / Ideas Lab idea, a
+      short written report: what was tested, what passed / failed and why, what to try next. (b) Per closed trade a 2–3
+      line note: why it entered, why it exited, how it compared with the backtest. Trades and P&L are private, so the
+      journal must use a paid tier that doesn't train on inputs, or stay as code-written text.
+   6. **Incoming TradingView alerts as signals** (needs Papa's go). A secret URL per strategy that accepts Papa's own
+      TradingView alert ("buy NIFTY", "exit"), checked by the desk's risk layer (lots, limit, breaker, stops) and then
+      sent like any other signal. Today we only *send* orders in TradingView's format to Dhan; we can't receive alerts.
+   7. **Zerodha Kite as a second broker** (needs Papa's go; Kite Connect costs ₹2,000/month per app + historical data
+      add-on, and its static-IP and daily-login rules need checking). MT5 (forex / CFDs — not allowed for Indian residents
+      except INR pairs) and Robinhood (US only) are not worth it.
+   Also noted from the post (not separate items): AI suggesting new strategy ideas / writing free-form strategy code (our
+   generator is plain code by Papa's free-first rule), live results feeding back into the Lab's ranking, and a neon /
+   glass look for chosen pages.
 
 ## Open items
 - Supervised 1-lot live test (NATGASMINI, Lab #6038) once Papa adds Dhan funds and whitelists the IP.
