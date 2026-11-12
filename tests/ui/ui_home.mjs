@@ -7,7 +7,7 @@ const theme = process.argv[2] || "dark", width = Number(process.argv[3] || 1440)
 const card = { day: "2026-11-06", booked_today: 1200, active_live: 1, active_paper: 2, kills: 1, token_hours_left: 5, data_plan: "Active", data_valid_until: "2026-11-09", data_days_left: 3, breaker_halted: false, breaker_reason: null, new_lab_passes: 2,
   open: [{ id: "g1", name: "Lab #901 · Futures · GOLD daily · rule g1", asset: "GOLD", live: true, side: "LONG", lots: 2, entry: 138100, ltp: 138500, upnl: 4250, stop: 137000, stop_pct: 1.1, expiry: "2026-11-28", expires_today: false },
     { id: "zz", name: "Lab #999 · Futures · CRUDEOIL 5 min · rule zz", asset: "CRUDEOIL", live: false, side: "SHORT", lots: 1, entry: 5392, ltp: 5400, upnl: -800, stop: 5450, stop_pct: 0.9, expiry: "2026-11-06", expires_today: true }] };
-const { b, p, errs } = await openApp({ theme, width, res: { "rpc/morning_card": card } });
+const { b, p, errs, writes } = await openApp({ theme, width, res: { "rpc/morning_card": card } });
 await p.evaluate(() => showPage("list")); await p.waitForTimeout(600);
 if (await p.isHidden("#lp_morning")) fail("home card shown");
 const txt = (await p.textContent("#lp_morning")).replace(/\s+/g, " ");
@@ -47,6 +47,24 @@ if (!/No open position/.test(t2) || !/New trades stopped/.test(t2) || /Dhan toke
 // The notification link opens the Strategies page at the card.
 await p.evaluate(() => { showPage("wallet"); openDeepLink("http://localhost:8765/?home=1"); }); await p.waitForTimeout(700);
 if ((await p.evaluate(() => page)) !== "list" || await p.isHidden("#lp_morning")) fail("?home=1 opens the Strategies page with the card");
+// Emergency stop (12 Nov 2026): a click alone does nothing; holding 1.5 s asks; "Stop everything" pauses every strategy and
+// closes every open position (desk_engine flatten); unticking paper leaves paper ones alone.
+await p.evaluate(() => { morning = null; showPage("list"); }); await p.evaluate(async () => { await loadMorning(); }); await p.waitForTimeout(300);
+await p.evaluate((c) => { morning = c; renderMorning(); }, card);
+if (!(await p.$("#ks_btn"))) fail("emergency stop button on the Home card");
+await p.click("#ks_btn"); await p.waitForTimeout(200);
+if (!(await p.isHidden("#confirmBox"))) fail("a click alone doesn't ask");
+const box = await p.locator("#ks_btn").boundingBox();
+await p.mouse.move(box.x + 5, box.y + 5); await p.mouse.down(); await p.waitForTimeout(1700); await p.mouse.up(); await p.waitForTimeout(200);
+const ask = (await p.textContent("#confirmBox")).replace(/\s+/g, " ");
+if (!/Emergency stop/.test(ask) || !/Close 1 open position now/.test(ask) || !/1 live: real exit orders go to Dhan/.test(ask)) fail("emergency stop asks with what it will do", ask);
+const before = writes.length;
+await p.evaluate(() => { window.__t0 = Date.now(); const o = window.setTimeout; window.setTimeout = (f, ms, ...a) => o(f, Math.min(ms, 50), ...a); });
+await p.click("#cf_yes"); await p.waitForTimeout(1500);
+const w = writes.slice(before);
+const flat = w.filter((x) => /rpc\/desk_engine/.test(x.u) && /flatten/.test(x.body || ""));
+const pause = w.filter((x) => x.meth === "PATCH" && /algo_strategies/.test(x.u) && /"active":false/.test(x.body || ""));
+if (flat.length !== 1 || !/g1/.test(flat[0].body) || !pause.length) fail("emergency stop: pause + flatten", w.map((x) => `${x.meth} ${x.u} ${x.body}`));
 if (errs.length) fail("page errors", errs);
 console.log("ok home card", theme, width);
 await b.close();

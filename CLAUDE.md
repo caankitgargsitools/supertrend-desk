@@ -393,6 +393,26 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   keep the compact `stopMeterHTML`. **Desk**: the Strategies panel has Tiles / Positions (`#dk_heatv`, localStorage
   `dkHeat`, `deskPosPaint`): one card per open position of the mode with its ladder; a card opens the strategy. The phone
   menu bar sits above page content (z-index 60). Tests: `tests/ui/ui_home.mjs`, `ui_strat_ux.mjs`, `ui_desk.mjs`.
+- **Go-live fixes (12 Nov 2026, Papa: "start building these"; engine v153, migrations 89–90; tests `tests/sim/safety.test.mjs`
+  "max lots", "one exchange order", "price band", "F&O ban", "roll: stock futures", "Dhan shows free", `tests/ui/ui_home.mjs`)**:
+  (1) Dhan's instrument lists carry `SM_FREEZE_QTY` (per-order limit, the order's own unit: units on NSE / BSE F&O, lots on
+  MCX; an order must stay below it) and the day's band `SM_UPPER_LIMIT` / `SM_LOWER_LIMIT` — stored as `freeze_qty`,
+  `band_hi`, `band_lo` on fno_contracts / mcx_contracts by `syncFno` / `syncMcx` (`limitCols`). A **live** entry is cut to
+  what one order carries (`orderCapLots` → `lotsPerOrder`; so its exit also fits one order; no order slicing — paper keeps
+  its size); MOVE sizing obeys `sizing.max_lots` **when live** (60 paper strategies carry an old default 10). (2) Limit
+  chases never step past the band (`inBand`), a broker stop whose trigger is outside today's band isn't placed (the desk's
+  own stop watches), its limit is brought inside; NSE's F&O ban list (`fnoBanList`, nsearchives fo_secban.csv, read once
+  a day; unreadable → nothing skipped) skips new entries in banned stocks, paper and live. (3) Roll earlier (`rollDays` /
+  `rollDay`): stock futures 3 weekdays before expiry, MCX delivery commodities (`MCX_DELIVERY`: gold, silver, copper, zinc,
+  aluminium, lead, nickel and minis) 5, index futures / crude / natural gas the day before; `risk.roll_days` 1–10
+  overrides. Dhan's own square-off dates still to confirm in the 1-lot test. (4) Live Dhan entries check `/fundlimit`
+  (`dhanAvailable`): cut to what 95% of the free money funds (a reversal counts the held position's margin as coming
+  free), skipped below 1 lot; unreadable → as sized. (5) `engine_quiet_check()` (every minute from `engine_minute`): a live
+  open position with no price for 3 minutes while its market is open → "Live prices stopped" to the owner and admins,
+  once per 30 min, pushed. **Emergency stop** on the Home card (`#ks_btn`, press and hold 1.5 s, `holdToFire` → `ksAsk` →
+  `ksRun`): pauses every strategy and closes every open position (`desk_engine` flatten), paper optional. Safari's "Load
+  failed" (Anshul, 12 Nov, activating 30 strategies — it had saved) now reads as a dropped connection and the page
+  refreshes to show what saved.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");

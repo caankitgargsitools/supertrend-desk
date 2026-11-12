@@ -488,6 +488,9 @@ details.raw code { display: block; white-space: pre-wrap; word-break: break-all;
 .morning .mrow { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--panel-2); min-width: 0; }
 .morning .mh { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 13px; } .morning .mh .mu { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
 .morning .mh a { color: var(--ink); text-decoration: none; } .morning .mh a:hover { color: var(--blue); }
+.morning .btn.ks-btn { position: relative; overflow: hidden; color: var(--red); border-color: var(--red); background: transparent; font-weight: 700; touch-action: none; user-select: none; -webkit-user-select: none; }
+.ks-btn i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--red); opacity: .25; pointer-events: none; }
+.ks-btn.holding i { width: 100%; transition: width 1.5s linear; }
 .morning .mlines { margin: 10px 0 0; padding-left: 18px; font-size: 13px; display: grid; gap: 4px; } .morning .mlines li.warn { color: var(--yellow-ink); }
 /* New-client checklist (H2) */
 .onboard { display: grid; gap: 10px; margin: 0 0 14px; padding: 14px 16px; border: 1px solid var(--blue); border-radius: var(--r); background: var(--blue-soft); }
@@ -7294,14 +7297,57 @@ function renderMorning() {
   if (m.data_plan && !/active/i.test(String(m.data_plan))) lines.push(`<li class="warn">Dhan Data API plan <b>${esc(String(m.data_plan))}</b> — prices and candles stop until it is renewed.</li>`);
   else if (m.data_days_left != null && Number(m.data_days_left) <= 7) lines.push(`<li class="${Number(m.data_days_left) <= 3 ? "warn" : ""}">Dhan Data API plan ends in <b>${plural(Math.max(0, Math.round(Number(m.data_days_left))), "day")}</b>${m.data_valid_until ? ` (${esc(fmtDay(m.data_valid_until))})` : ""}.</li>`);
   const expiring = open.filter((o) => o.expires_today);
-  if (expiring.length) lines.push(`<li><b>${plural(expiring.length, "contract")}</b> expire today: ${expiring.map((o) => esc(assetLabel(o.asset))).join(", ")} — options close at 14:30, futures roll the day before.</li>`);
+  if (expiring.length) lines.push(`<li><b>${plural(expiring.length, "contract")}</b> expire today: ${expiring.map((o) => esc(assetLabel(o.asset))).join(", ")} — options close at 14:30; futures roll before expiry (index: the day before, stock futures 3 days, MCX metals 5).</li>`);
   if (Number(m.new_lab_passes) > 0 && isAdmin()) lines.push(`<li>${plural(Number(m.new_lab_passes), "new lab pass", "new lab passes")} since yesterday — <a href="#" data-go="lab">Strategy Lab</a>.</li>`);
   box.innerHTML = `<section class="card morning"><div class="head"><div><span class="label">Today · ${esc(fmtDay(m.day || Date.now()))}</span><h2 style="font-size:18px">Home</h2></div>
-    <div class="mstats"><span>Booked P&amp;L today <b class="${cls(m.booked_today)}">${rupees(m.booked_today || 0)}</b></span><span>${Number(m.active_live) || 0} live · ${Number(m.active_paper) || 0} paper active</span></div></div>
+    <div class="mstats"><span>Booked P&amp;L today <b class="${cls(m.booked_today)}">${rupees(m.booked_today || 0)}</b></span><span>${Number(m.active_live) || 0} live · ${Number(m.active_paper) || 0} paper active</span>${ksNeeded() ? '<button class="btn small ks-btn" type="button" id="ks_btn" title="Press and hold for 1.5 seconds: every open position is closed and every strategy paused"><i></i>Emergency stop</button>' : ""}</div></div>
     ${open.length ? `<div class="mrows">${open.map(row).join("")}</div>` : '<p class="hint" style="margin:8px 0 0">No open position. Active strategies enter on their next signal.</p>'}
     ${lines.length ? `<ul class="mlines">${lines.join("")}</ul>` : ""}</section>`;
   wireOpenLinks(box);
   box.querySelectorAll("[data-go]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); if (a.dataset.go === "lab") openLab(); }));
+  if ($("ks_btn")) holdToFire($("ks_btn"), ksAsk);
+}
+/* ---------- Emergency stop (12 Nov 2026, go-live review; open question 6): press and hold on the Home card → a confirmation
+   → every strategy of the account paused (no new entries) and every open position closed now (live: real exit orders at
+   Dhan / Delta; paper: logged). Paper can be left out with one tick. Uses the same exit as "Exit positions now". */
+const ksNeeded = () => myStrats().some((s) => !s.archived && (s.active || s.position !== "FLAT"));
+function holdToFire(btn, fn, ms = 1500) {
+  let t = 0;
+  const stop = () => { clearTimeout(t); t = 0; btn.classList.remove("holding"); };
+  const start = (e) => { if (e.button > 0) return; e.preventDefault(); stop(); void btn.offsetWidth; btn.classList.add("holding"); t = setTimeout(() => { stop(); fn(); }, ms); };
+  btn.addEventListener("pointerdown", start);
+  ["pointerup", "pointerleave", "pointercancel"].forEach((k) => btn.addEventListener(k, stop));
+  btn.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && !e.repeat && !t) { e.preventDefault(); btn.classList.add("holding"); t = setTimeout(() => { stop(); fn(); }, ms); } });
+  btn.addEventListener("keyup", (e) => { if (e.key === "Enter" || e.key === " ") stop(); });
+  btn.addEventListener("click", (e) => { e.preventDefault(); if (!t) toast("Press and hold for 1.5 seconds."); });
+}
+function ksAsk() {
+  ksPaper = true;
+  const mine = myStrats().filter((s) => !s.archived);
+  const open = mine.filter((s) => s.position !== "FLAT"), liveOpen = open.filter((s) => s.live), act = mine.filter((s) => s.active);
+  const names = (l) => esc(l.slice(0, 8).map((s) => `${assetLabel(s.underlying)}`).join(", ") + (l.length > 8 ? ` and ${l.length - 8} more` : ""));
+  askConfirm(`<strong>Emergency stop</strong><br>
+    ${act.length ? `Pause <b>${plural(act.length, "strategy", "strategies")}</b> (no new entries).<br>` : ""}
+    ${open.length ? `Close <b>${plural(open.length, "open position")}</b> now: ${names(open)}.${liveOpen.length ? `<br><b style="color:var(--red)">${liveOpen.length} live: real exit orders go to ${liveOpen.some((s) => isCrypto(s.data_segment)) && liveOpen.some((s) => !isCrypto(s.data_segment)) ? "Dhan and Delta Exchange" : liveOpen.some((s) => isCrypto(s.data_segment)) ? "Delta Exchange" : "Dhan"}.</b>` : ""}` : "No open position."}
+    <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="ks_paper" checked> Paper strategies too</label>
+    <span class="hint">Open positions are closed now at the current price (live: limit, then market). Each strategy stays paused until you activate it again.</span>`, "Stop everything", () => ksRun(), true);
+  const cb = $("ks_paper"); if (cb) cb.addEventListener("change", () => { ksPaper = cb.checked; });
+}
+let ksPaper = true;
+async function ksRun() {
+  const paper = ksPaper;
+  const mine = myStrats().filter((s) => !s.archived && (paper || s.live));
+  const act = mine.filter((s) => s.active), open = mine.filter((s) => s.position !== "FLAT");
+  const bad = [];
+  toast(`Stopping: pausing ${act.length}, closing ${open.length}…`);
+  try { for (let i = 0; i < act.length; i += 100) must(await db.from("algo_strategies").update({ active: false }).in("id", act.slice(i, i + 100).map((s) => s.id))); }
+  catch (e) { bad.push(`pause: ${errorText(e)}`); }
+  for (const s of open) { const { error } = await db.rpc("desk_engine", { p_action: "flatten", p_strategy: s.id }); if (error) bad.push(`${s.name}: ${errorText(error)}`); }
+  await new Promise((r) => setTimeout(r, Math.min(20000, 6000 + open.length * 1500)));
+  await loadAll().catch(() => {});
+  const still = myStrats().filter((s) => open.some((o) => o.id === s.id) && s.position !== "FLAT");
+  toast(bad.length ? `Emergency stop: ${bad.length} step${bad.length === 1 ? "" : "s"} failed (${bad[0]}). Check the Orders tab and Dhan.` : still.length ? `Paused ${act.length}; ${open.length - still.length} closed, ${still.length} still closing (live orders may be working): check the Orders tab.` : `Emergency stop done: ${act.length} paused, ${open.length} closed.`);
+  if (page === "list") renderMorning();
 }
 /** A new client's path (H2): shown on the Strategies page while they have no strategy of their own. */
 function renderOnboard() {
