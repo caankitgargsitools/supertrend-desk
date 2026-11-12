@@ -1506,6 +1506,7 @@ body.dk-fs-on { overflow: hidden; }
               <p class="hint" style="margin:2px 0 0">Margin on each asset when every strategy on it is in a trade.</p>
               <div class="lw-assets" id="lw_assets"></div>
               <div id="lw_notes" style="display:grid;gap:8px;margin-top:12px"></div>
+              <div id="lw_last" class="banner info" style="margin:12px 0 0" hidden></div>
               <div class="formbar" style="margin-top:12px"><button class="btn primary" id="lw_apply" type="button">Apply these lots</button><span class="hint" id="lw_msg">Margin from today's Dhan / Delta rates; worst fall from each strategy's backtest (1 lot).</span></div>
             </div>
           </div>
@@ -4117,7 +4118,7 @@ function wireLiveType() {
 }
 $("b_live").addEventListener("click", () => {
   const s = cur();
-  if (s.live) return run($("b_live"), async () => { const r = must(await db.rpc("set_live", { p_strategy: s.id, p_live: false })); await loadAll(); toast(r && r.pending ? "It holds a live position: it goes back to paper the moment that position closes." : "Paper mode. Orders are logged, not sent."); });
+  if (s.live) return run($("b_live"), async () => { const r = must(await db.rpc("set_live", { p_strategy: s.id, p_live: false })); await loadAll(); toast(r && r.copy ? "Its live position stays live until it closes (no new live entries). A separate paper copy now trades on paper." : "Paper mode. Orders are logged, not sent."); });
   if (isCrypto(s.data_segment)) { if (!deltaSt || !deltaSt.has_key || !deltaSt.has_secret) { toast("Add your Delta Exchange API key and secret under Connections first."); openConn(); return; } }
   else if (!state.settings || !state.settings.has_url) { toast("Add your order webhook URL under Dhan connection first."); openConn(); return; }
   const bl = (me && me.billing) || {}, fee = Number(bl.deploy_fee || 0);
@@ -4125,7 +4126,7 @@ $("b_live").addEventListener("click", () => {
     ? `<br>A deployment fee of <strong>${rupees(fee)}</strong>${bl.deploy_fee_period === "ONE_TIME" ? " (once)" : " (for the next month)"} will be taken from your wallet.` : "";
   askConfirm((isCrypto(s.data_segment) ? "<strong>Send real orders to Delta Exchange?</strong><br>From the next signal, this strategy places market orders on Delta Exchange India with your API key. Crypto trades round the clock and moves fast; check the paper-mode log first." : "<strong>Send real orders to Dhan?</strong><br>From the next signal, this strategy posts orders to your Dhan webhook, on your own account. Check the paper-mode log first.")
     + goLiveSummary([s]) + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + feeTxt + sameAssetWarn([s]) + noStopHTML([s]) + liveTypeHTML(),
-    "Go live", async () => run($("b_live"), async () => { const r = must(await db.rpc("set_live", { p_strategy: s.id, p_live: true })); await loadAll(); await refreshMe(); toast(r && r.pending ? "It holds a paper position: it goes live the moment that position closes (the paper position is never sent to the broker)." : "Live. Real orders will be sent."); }), true);
+    "Go live", async () => run($("b_live"), async () => { const r = must(await db.rpc("set_live", { p_strategy: s.id, p_live: true })); await loadAll(); await refreshMe(); toast(r && r.copy ? "It holds a paper position, which stays paper here. A separate live copy (flat) was made: it trades live from its own next signal." : "Live. Real orders will be sent."); }), true);
   wireLiveType();
 });
 $("b_flat").addEventListener("click", () => {
@@ -4688,6 +4689,7 @@ async function loadCap() {
   if (!$("cap_capital").matches(":focus")) { $("cap_capital").value = String(Math.trunc(st.capital ?? 0)); $("cap_since").value = st.since || ""; $("cap_deploy").value = String(st.deploy_pct ?? 60); }
   if (lw.savedPct !== st.deploy_pct) { lw.savedPct = st.deploy_pct; $("lw_capPct").value = String(st.deploy_pct ?? 60); }
   if (!lw.capSet) { $("lw_cap").value = String(Math.trunc(equityOf(st, cap.mode))); }
+  if (lw.restoredFor !== cap.mode) { lw.restoredFor = cap.mode; lwRestore(); }
   renderCap(st, trades); lwRender(); capDd(st).catch((e) => { $("cap_dd").innerHTML = `<p class="hint">Drawdown check: ${esc(errorText(e))}</p>`; });
 }
 function renderCap(st, trades) {
@@ -4917,7 +4919,40 @@ function lwRender() {
   $("lw_types").innerHTML = types.map((t) => `<button type="button" class="lw-type" data-lwtype="${t}" aria-pressed="${!lw.typesOff.has(t)}">${t} <span class="hint">${all.filter((r) => r.type === t).length}</span></button>`).join("");
   const changes = lwChanges();
   $("lw_apply").disabled = !changes.length;
+  lwLastPaint(changes);
   $("lw_apply").textContent = changes.length ? `Apply these lots (${changes.length} change${changes.length === 1 ? "" : "s"})` : "Apply these lots";
+}
+/* The wizard opens on the last selection (12 Nov 2026, Papa: "must show my last selection … with a warning that you are
+   changing the lots"). Same browser: the choices saved at Apply (localStorage lwLast:<mode>). Otherwise worked out from the
+   strategies: the "same ₹ a day" amount most of this mode's strategies carry, those ticked, the rest unticked. */
+function lwRestore() {
+  let last = null; try { last = JSON.parse(localStorage.getItem(`lwLast:${cap.mode}`) || "null"); } catch { last = null; }
+  const mine = myStrats().filter((x) => !x.archived && (!!x.live === (cap.mode === "LIVE")));
+  if (!last) {
+    const amts = new Map();
+    for (const x of mine) if (x.sizing && x.sizing.mode === "MOVE" && Number(x.sizing.move_amt) > 0) { const a = Math.trunc(Number(x.sizing.move_amt)); amts.set(a, (amts.get(a) || 0) + 1); }
+    const top = [...amts].sort((a, b) => b[1] - a[1])[0];
+    if (top) last = { method: "move", moveAmt: top[0], on: mine.filter((x) => x.sizing && x.sizing.mode === "MOVE" && Math.trunc(Number(x.sizing.move_amt)) === top[0]).map((x) => x.id), derived: true };
+  }
+  lw.last = last;
+  if (!last) return;
+  lw.method = last.method || lw.method;
+  if (last.moveAmt) $("lw_moveAmt").value = String(last.moveAmt);
+  if (last.capPct) $("lw_capPct").value = String(last.capPct);
+  if (last.cap) { $("lw_cap").value = String(last.cap); lw.capSet = true; }
+  if (Array.isArray(last.on)) { const on = new Set(last.on); lw.off = new Set(mine.filter((x) => !on.has(x.id)).map((x) => x.id)); }
+  if (last.pct) lw.pct = { ...last.pct }; if (last.assetLots) lw.assetLots = { ...last.assetLots };
+}
+function lwLastPaint(changes) {
+  const box = $("lw_last"); if (!box) return;
+  const l = lw.last;
+  if (!l && !changes.length) { box.hidden = true; return; }
+  box.hidden = false;
+  const what = l ? `${l.method === "move" ? `Same ₹ on a typical day, ${rupees(l.moveAmt || 0)} each` : l.method === "equal" ? "Equal capital each" : l.method === "pct" ? "A % each" : l.method === "asset" ? "Lots per asset" : "Equal risk"}${Array.isArray(l.on) ? `, ${plural(l.on.length, "strategy", "strategies")}` : ""}` : "";
+  box.className = `banner ${changes.length ? "warn" : "info"}`;
+  box.innerHTML = (l ? `Showing your last selection${l.at ? ` (saved ${esc(fmtDate(l.at))})` : l.derived ? " (as your strategies are saved now)" : ""}: <b>${esc(what)}</b>. ` : "")
+    + (changes.length ? `<b>You are changing the lots</b> of ${plural(changes.length, "strategy", "strategies")}: the “New lots” column shows the change; nothing is saved until you press Apply and confirm.`
+      : "Nothing changes unless you edit something here and press Apply.");
 }
 /** Strategies whose saved lots would change: ticked, sized to 1 lot or more, and different from now (or on automatic lots). */
 const lwChanges = () => lw.plan.filter((r) => r.on && r.lots > 0 && (Number(r.s.lots) !== r.lots || (r.s.sizing && r.s.sizing.mode === "AUTO")
@@ -4943,7 +4978,8 @@ $("lw_apply").addEventListener("click", (e) => {
   const ch = lwChanges(), btn = e.currentTarget; if (!ch.length) return;
   const open = ch.filter((r) => r.s.position !== "FLAT").length, liveN = ch.filter((r) => r.s.live).length;
   const byMove = lw.method === "move" && lw.target > 0;
-  askConfirm(`<b>Save new lots for ${ch.length} strateg${ch.length === 1 ? "y" : "ies"}?</b><br>` + (byMove
+  const list = ch.slice(0, 12).map((r) => `${esc(r.s.name.split(" · ")[0])} ${esc(assetLabel(r.s.underlying))}: ${r.s.sizing && r.s.sizing.mode === "MOVE" ? `≈${Number(r.s.lots) || 0}` : Number(r.s.lots) || 0} → <b>${r.lots}</b> lot${r.lots === 1 ? "" : "s"}`).join("<br>") + (ch.length > 12 ? `<br>… and ${ch.length - 12} more` : "");
+  askConfirm(`<b style="color:var(--red)">You are changing the lots of ${ch.length} strateg${ch.length === 1 ? "y" : "ies"}.</b><br><span class="hint">${list}</span><br>` + (byMove
     ? `Each is set to “Same ₹ on a typical day” at ${rupees(lw.target)}: from now on its lots follow its asset's typical day's move at every new entry (changes of 20% or less are ignored).`
     : "Each is set to a fixed number of lots (automatic sizing is switched off for them).")
     + (open ? `<br>${open} ${open === 1 ? "has" : "have"} a position open: ${open === 1 ? "it exits" : "they exit"} with the lots held now; the new lots are used from the next entry (also after a reversal).` : "")
@@ -4954,6 +4990,10 @@ $("lw_apply").addEventListener("click", (e) => {
       const res = await db.from("algo_strategies").update({ lots: r.lots, sizing }).eq("id", r.s.id);
       if (res.error) failed.push(`${r.s.name.split(" · ")[0]}: ${errorText(res.error)}`); else done++;
     }
+    const saved = { method: lw.method, moveAmt: byMove ? Math.trunc(lw.target) : Number($("lw_moveAmt").value) || null, cap: Number($("lw_cap").value) || null, capPct: Number($("lw_capPct").value) || null,
+      on: lw.plan.filter((r) => r.on).map((r) => r.s.id), pct: lw.pct, assetLots: lw.assetLots, at: new Date().toISOString() };
+    try { localStorage.setItem(`lwLast:${cap.mode}`, JSON.stringify(saved)); } catch { /* private window */ }
+    lw.last = saved; if (byMove) $("lw_moveAmt").value = String(saved.moveAmt);
     await loadAll(); await loadCap();
     $("lw_msg").textContent = `Saved lots for ${done} strateg${done === 1 ? "y" : "ies"}${failed.length ? `; ${failed.length} failed` : ""}.`;
     toast(failed.length ? `Saved ${done}; failed: ${failed.join("; ")}` : `Saved lots for ${done} strateg${done === 1 ? "y" : "ies"}.`);
@@ -7419,8 +7459,7 @@ function listRows(anyArch = false) {
     if (owner === "ME" && s.owner_id !== me.user_id) return false;
     if (src && srcOf(s) !== src) return false;
     if (act && (act === "ACTIVE") !== !!s.active) return false;
-    // "Live" also lists the ones waiting to go live (still holding a paper position, tagged "Live when flat").
-    if (mode === "LIVE" && !(s.live || s.switch_to === "LIVE")) return false;
+    if (mode === "LIVE" && !s.live) return false;
     if (mode === "PAPER" && s.live) return false;
     if (asset && s.underlying !== asset) return false;
     if (inst && instName(s) !== inst) return false;
@@ -9364,9 +9403,10 @@ async function bulkAction(kind) {
     if (!todo.length) { toast("They are all in paper mode already."); return; }
     run(btn, async () => {
       const bad = [];
-      for (const s of todo) { const { error } = await db.rpc("set_live", { p_strategy: s.id, p_live: false }); if (error) bad.push(`${s.name}: ${errorText(error)}`); }
+      let copies = 0;
+      for (const s of todo) { const { data, error } = await db.rpc("set_live", { p_strategy: s.id, p_live: false }); if (error) bad.push(`${s.name}: ${errorText(error)}`); else if (data && data.copy) copies++; }
       await loadAll();
-      toast(bad.length ? `${todo.length - bad.length} back to paper; ${bad.length} not changed (${bad[0]})` : `${todo.length} strateg${todo.length === 1 ? "y" : "ies"} back to paper mode. Orders are logged, not sent.`);
+      toast(`${todo.length - bad.length - copies} back to paper${copies ? `; ${copies} hold a live position: those stay live until it closes (no new live entries) and a separate paper copy of each was made` : ""}${bad.length ? `; ${bad.length} not changed (${bad[0]})` : ""}.`);
     });
     return;
   }
@@ -9388,11 +9428,11 @@ async function bulkAction(kind) {
       + goLiveSummary(ready) + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + sameAssetWarn(ready) + noStopHTML(ready) + liveTypeHTML(),
       "Go live", async () => run(btn, async () => {
         const bad = [];
-        let waiting = 0;
-        for (const s of ready) { const { data, error } = await db.rpc("set_live", { p_strategy: s.id, p_live: true }); if (error) bad.push(`${s.name}: ${errorText(error)}`); else if (data && data.pending) waiting++; }
+        let copies = 0;
+        for (const s of ready) { const { data, error } = await db.rpc("set_live", { p_strategy: s.id, p_live: true }); if (error) bad.push(`${s.name}: ${errorText(error)}`); else if (data && data.copy) copies++; }
         await loadAll(); await refreshMe();
-        const now = ready.length - bad.length - waiting;
-        toast(`${now} live now${waiting ? `; ${waiting} hold a paper position and go live the moment it closes (it is never sent to the broker)` : ""}${bad.length ? `; ${bad.length} not changed (${bad[0]})` : ""}.`);
+        const now = ready.length - bad.length - copies;
+        toast(`${now} switched to live${copies ? `; ${copies} held a paper position: those stay paper, and a separate live copy of each (flat) was made` : ""}${bad.length ? `; ${bad.length} not changed (${bad[0]})` : ""}.`);
       }), true);
     wireLiveType();
   }
@@ -9542,7 +9582,7 @@ $("lp_group").addEventListener("change", () => { lpGroup = $("lp_group").checked
    the Mode filter, shows the counts, remembered in this browser (localStorage lpMode). */
 function lpModePaint() {
   const m = $("lf_mode").value, mine = myStrats().filter((x) => !x.archived);
-  const n = { "": mine.length, LIVE: mine.filter((x) => x.live || x.switch_to === "LIVE").length, PAPER: mine.filter((x) => !x.live).length };
+  const n = { "": mine.length, LIVE: mine.filter((x) => x.live).length, PAPER: mine.filter((x) => !x.live).length };
   $("lp_modeseg").querySelectorAll("[data-m]").forEach((b) => { b.setAttribute("aria-pressed", String(b.dataset.m === m)); b.textContent = `${b.dataset.m === "LIVE" ? "Live" : b.dataset.m === "PAPER" ? "Paper" : "All"} ${n[b.dataset.m]}`; });
 }
 $("lp_modeseg").addEventListener("click", (e) => {

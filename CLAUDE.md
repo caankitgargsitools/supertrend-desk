@@ -413,14 +413,20 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   `ksRun`): pauses every strategy and closes every open position (`desk_engine` flatten), paper optional. Safari's "Load
   failed" (Anshul, 12 Nov, activating 30 strategies — it had saved) now reads as a dropped connection and the page
   refreshes to show what saved.
-- **A position keeps the mode it was opened in (12 Nov 2026, migration 91, engine v154)**: Papa made 30 strategies live while 13
-  held PAPER positions (137 lots MIDCPNIFTY, 1,006 NATGASMINI, 219 SOL …, never at the broker) and every page showed them as
-  live. Now `set_live` on a strategy holding a position only sets `switch_to` ('LIVE' / 'PAPER'); trigger
-  `trg_switch_when_flat` (`apply_switch_when_flat`) applies it the moment it is FLAT with no order working; a REVERSE for a
-  strategy with `switch_to` only closes the held position (booked in its own mode) and the entry comes on the next signal
-  in the new mode. The 13 (16 with earlier ones) were put back to paper with `switch_to = 'LIVE'` (nothing had been sent).
-  Chip "Live when flat" / "Paper when flat" (`chips`); toasts say so. Strategies page: **All | Live | Paper** switch with
-  counts (`#lp_modeseg`, drives `lf_mode` and the Trades tab's `tf_mode`, localStorage `lpMode`).
+- **Live and Paper are independent (12 Nov 2026, Papa: "Paper and Live do not have any linkage at all. Any strategy can be in
+  any mode or both"; migrations 91 → 92)**: a position always stays in the mode it was opened in. `set_live` on a FLAT
+  strategy switches it as before; on one **holding a position** it leaves that strategy and its position alone and makes a
+  separate copy in the other mode (`mode_copy(id, live)`: same settings, flat, name "Lab #n (live) · …" / "(paper)", new
+  live_since; no position / pending / error / kill fields) — going live: the paper one keeps running (both run); back to
+  paper: the live one is paused (its live position keeps its stops and exits until it closes) and the paper copy runs.
+  Returns `{ copy, copy_mode }`; toasts say so. Migration 91's wait-until-flat (`switch_to`, "Live when flat") is retired
+  (`apply_switch_when_flat` now a no-op; the engine's REVERSE-with-switch_to branch never fires). On 12 Nov the 16 strategies
+  that held paper positions when Papa made them live got live copies (30 live strategies, all flat). Strategies page:
+  **All | Live | Paper** switch with counts (`#lp_modeseg`, drives `lf_mode` and the Trades tab's `tf_mode`, localStorage
+  `lpMode`). **Lots wizard opens on the last selection** (`lwRestore`: localStorage `lwLast:<mode>` saved at Apply — method,
+  amount, capital, limit %, ticked strategies — else worked out from the strategies' saved MOVE amount); banner `#lw_last`
+  ("Showing your last selection …", amber "You are changing the lots of N strategies" once anything would change); the
+  Apply confirmation lists old → new lots per strategy. Tests: `tests/ui/ui_lots_wizard.mjs`.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");

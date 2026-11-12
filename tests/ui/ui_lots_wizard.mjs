@@ -134,6 +134,19 @@ const form = await p.evaluate(() => {
   return { ok, err, text: sizeText(ok) };
 });
 if (form.ok.mode !== "MOVE" || form.ok.move_amt !== 50000 || !/₹ this strategy should make or lose/.test(form.err) || !/typical day/.test(form.text)) fail("form move sizing", form);
+// 12 Nov 2026 (Papa): the wizard opens on the last selection, and warns once something would change.
+const last = await p.evaluate(() => {
+  try { localStorage.setItem(`lwLast:${cap.mode}`, JSON.stringify({ method: "move", moveAmt: 12345, on: [], at: "2026-11-12T08:00:00Z" })); } catch {}
+  lw.restoredFor = null; lw.last = null; lwRestore(); lwRender();
+  const box = document.getElementById("lw_last");
+  const r = { shown: !box.hidden, text: box.textContent, amt: document.getElementById("lw_moveAmt").value, method: lw.method };
+  document.getElementById("lw_moveAmt").value = "54321"; lwRender();
+  r.warn = box.className; r.text2 = box.textContent;
+  localStorage.removeItem(`lwLast:${cap.mode}`);
+  return r;
+});
+if (!last.shown || !/Showing your last selection/.test(last.text) || !/₹12,345 each/.test(last.text) || last.amt !== "12345" || last.method !== "move") fail("last selection shown", last);
+if (/You are changing the lots/.test(last.text2) && !/warn/.test(last.warn)) fail("warning style", last);
 // 12 Nov 2026 (Anshul's ₹10 lakh): whole lots round big contracts to 0 at the first estimate; the target must then rise
 // until the margin the zeros freed is used (it stayed at ₹3,943 a day, ₹67k of ₹6 lakh used).
 const grow = await p.evaluate(() => {
