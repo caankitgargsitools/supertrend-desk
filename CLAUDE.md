@@ -761,6 +761,17 @@ Still open:
    7. **Zerodha Kite as a second broker** (needs Papa's go; Kite Connect costs ₹2,000/month per app + historical data
       add-on, and its static-IP and daily-login rules need checking). MT5 (forex / CFDs — not allowed for Indian residents
       except INR pairs) and Robinhood (US only) are not worth it.
+8. **Go-live risk review (12 Nov 2026, given to Papa in chat as tables; nothing built yet).** No live order has ever been
+   sent (live_orders empty). Biggest gaps found: (a) **no exchange freeze-quantity / max-order-size split** — NSE (e.g.
+   MIDCPNIFTY, NIFTY) and MCX reject an order above the per-order limit, and MOVE sizing (ignores `max_lots`) already
+   sizes paper strategies at 1,006 lots NATGASMINI / 742 SILVERMIC / 137 MIDCPNIFTY: live, the entry would be rejected and,
+   worse, an exit of a big held quantity would fail every retry; (b) no F&O-ban list check for stock futures (new
+   positions refused); (c) no Dhan price-band (DPR) check for limit / stop prices; (d) broker stop is STOP_LOSS (limit) —
+   a gap through its limit leaves it unfilled; Dhan stops are day orders, none rests overnight; (e) stock F&O physical
+   settlement / higher expiry-week margins and MCX tender (delivery) periods may make Dhan square off before our roll;
+   (f) orders depend on the database's fixed IP 13.206.175.148 being whitelisted at Dhan and on the daily token renewal;
+   (g) no kill switch (question 6), no account daily loss limit (Papa's choice), lot sizing uses the saved capital, not
+   Dhan's live available funds; (h) manual trades in the same Dhan account confuse reconcile / exit checks.
    Also noted from the post (not separate items): AI suggesting new strategy ideas / writing free-form strategy code (our
    generator is plain code by Papa's free-first rule), live results feeding back into the Lab's ranking, and a neon /
    glass look for chosen pages.
