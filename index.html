@@ -4832,7 +4832,13 @@ function lwMoveLots(on, limit) {
   if (typed > 0) { place(typed); return typed; }
   let T = limit / rs.reduce((a, r) => a + r.margin / r.move, 0);
   for (let i = 0; i < 200 && T > 0 && place(T) > limit; i++) T *= 0.98;
-  return Math.trunc(T);
+  // Whole lots round many contracts down to 0 at the first estimate, and the margin they free was left unused (12 Nov 2026:
+  // Anshul's ₹10 lakh, 30 strategies, limit 60% → target ₹3,943, ₹67k–₹1 lakh used). Raise the target 1% at a time and
+  // keep the largest whose whole lots still fit the limit.
+  let best = place(T) <= limit ? T : 0;
+  for (let t = Math.max(T, 1); t < Math.max(T, 1) * 200; t *= 1.01) if (place(t) <= limit) best = t;
+  place(best);
+  return Math.trunc(best);
 }
 function lwRender() {
   if (!$("lw_card")) return;

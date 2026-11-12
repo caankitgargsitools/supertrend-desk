@@ -222,7 +222,11 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   `z_mode` MOVE / `z_move`); at every new entry `sizeEntry` → `moveLots` (sizing.ts) sets lots = move_amt ÷ (entry price ×
   lot size × today's `day_move`), keeps the lots held when the exact figure is within ±20% (`MOVE_BAND`), saves new lots
   on the strategy, skips the entry below 1 lot, then the "Never use more than" limit applies as for fixed lots. Lists
-  show "≈N next". Tests: `tests/sim/sizing.test.mjs` "move:", `tests/sim/safety.test.mjs` "move sizing".
+  show "≈N next". **Fixed 12 Nov 2026** (Anshul's ₹10 lakh, 30 strategies: only ~₹1 lakh placed): `lwMoveLots`
+  only ever lowered the target, so contracts that whole lots rounded to 0 left their share unused; it now raises the
+  target 1% at a time and keeps the largest whose whole lots still fit the limit (his case: ₹3,943 → ₹10,635 a day each,
+  ₹67k → ₹5.65 lakh of ₹6 lakh). Contracts whose one lot moves more than twice the target (GOLD 1 kg, SILVER 30 kg, COPPER,
+  ZINC, ALUMINIUM, MIDCPNIFTY, NIFTY, GOLDM at that size) still get 0 — the honest limit of equal ₹ with 30 strategies. Tests: `tests/sim/sizing.test.mjs` "move:", `tests/sim/safety.test.mjs` "move sizing".
 - Going live warns (doesn't block — Papa, 4 Nov 2026) when another live strategy of the account trades the same asset
   (`sameAssetWarn`, single and bulk Go live). Test: `tests/ui/ui_bulk.mjs`.
   Fixed lots obey the limit too (2 Nov 2026, Papa): `sizeEntry` → `fixedLotsFit` (sizing.ts) cuts a fixed-lot entry to the lots

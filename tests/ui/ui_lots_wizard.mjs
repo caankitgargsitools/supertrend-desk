@@ -134,6 +134,17 @@ const form = await p.evaluate(() => {
   return { ok, err, text: sizeText(ok) };
 });
 if (form.ok.mode !== "MOVE" || form.ok.move_amt !== 50000 || !/₹ this strategy should make or lose/.test(form.err) || !/typical day/.test(form.text)) fail("form move sizing", form);
+// 12 Nov 2026 (Anshul's ₹10 lakh): whole lots round big contracts to 0 at the first estimate; the target must then rise
+// until the margin the zeros freed is used (it stayed at ₹3,943 a day, ₹67k of ₹6 lakh used).
+const grow = await p.evaluate(() => {
+  const mk = (margin, move, n) => Array.from({ length: n }, () => ({ margin, move, lots: null }));
+  const rs = [...mk(1293392, 212474, 4), ...mk(36780, 15992, 5), ...mk(27583, 5292, 2), ...mk(11964, 3977, 1), ...mk(203638, 27235, 3), ...mk(130386, 16260, 1), ...mk(150335, 26195, 1)];
+  const box = $("lw_moveAmt"), keep = box.value; box.value = "";
+  const T = lwMoveLots(rs, 600000), used = rs.reduce((a, r) => a + r.lots * r.margin, 0);
+  box.value = keep;
+  return { T, used };
+});
+if (!(grow.T > 8000) || !(grow.used > 400000) || grow.used > 600000) fail("move target grows into the freed margin", grow);
 if (errs.length) fail("page errors", errs);
 console.log("ok lots wizard", theme, width);
 await b.close();
