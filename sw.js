@@ -64,12 +64,17 @@ self.addEventListener("push", (e) => {
     }
     let image;
     if (live && m && m.stage !== "note" && m.stage !== "failed") image = await tradeImage(m).catch(() => undefined);
-    await self.registration.showNotification(d.title || "AnkGenie", {
-      body: d.body || "", tag: d.tag || undefined, renotify: !quiet, icon: "icons/icon-192.png", badge: "icons/icon-192.png", image,
-      silent: kind === "trade" || (live && quiet),
-      requireInteraction: live || kind === "error" || kind === "account", data: { url: d.url || "/" },
-      vibrate: live ? LIVE_BUZZ : kind === "error" || kind === "account" ? [200, 100, 200, 100, 200] : kind === "trade" ? [] : [120, 60, 120],
-    });
+    const silent = kind === "trade" || (live && quiet);
+    const opts = { body: d.body || "", tag: d.tag || undefined, renotify: !quiet && !!d.tag, icon: "icons/icon-192.png", badge: "icons/icon-192.png",
+      requireInteraction: live || kind === "error" || kind === "account", data: { url: d.url || "/" } };
+    if (image) opts.image = image;
+    // Chrome refuses a silent notification that also has a vibration pattern (found 12 Nov 2026: quiet live updates and
+    // paper trades never appeared), so silent ones get none.
+    if (silent) opts.silent = true;
+    else opts.vibrate = live ? LIVE_BUZZ : kind === "error" || kind === "account" ? [200, 100, 200, 100, 200] : [120, 60, 120];
+    // Whatever goes wrong with the extras, the notification itself must still appear.
+    try { await self.registration.showNotification(d.title || "AnkGenie", opts); }
+    catch { await self.registration.showNotification(d.title || "AnkGenie", { body: d.body || "", tag: d.tag || undefined, icon: "icons/icon-192.png", data: { url: d.url || "/" } }); }
   })());
 });
 self.addEventListener("notificationclick", (e) => {
