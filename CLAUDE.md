@@ -486,6 +486,21 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   totals row / group headers ("Live … · Paper …", `byModeHtml` / `runByMode`), Trades tab with "Live and paper" (a block per
   mode), morning card and 08:30 note (`booked_live_today` / `booked_paper_today`, running per mode), Admin › User activity
   (live and paper capital). The emergency stop's "Paper strategies too" tick stays a choice. Test `tests/ui/ui_capital_modes.mjs`.
+- **Orders › Failed orders (13 Nov 2026, Papa: "list all the failed orders, live or paper … the price the order was sent,
+  current price, an option to send a manual order strategy-wise, then see whether it is filled"; migration 95 / 95b)**: card
+  `#fo_card` at the top of the Orders tab (`loadFailed` / `renderFailed` / `foSend`, state `fo`; with every Orders load) ←
+  SQL `failed_orders(p_days)`: the caller's signals the broker refused (status FAILED: Dhan / Delta errors), entries the desk
+  skipped ("Entry skipped:"), Dhan order rows failed / cancelled with nothing filled; each with the signal's price, the side
+  it wanted (from the description), lots wanted, the reason, the price now (`live_prices` via `ticker_ref.asset`, else the
+  strategy's last price), the strategy now, and the latest manual order. Grouped by strategy; All / Live / Paper; Today / 7 /
+  30 days; ones already sent again hidden unless "Show ones already sent again". Per row: side + lots + "Send again" (live
+  asks for a real-money confirmation) or "Exit now" → `manual_order(p_strategy, p_side, p_lots, p_ref, p_px)` (owner / admin,
+  one at a time per strategy, flat for an entry / holding for an exit) → table `manual_orders` (queued → working → sent /
+  filled / refused, result text) → engine action `manual_entry` (exit = `flatten`): `manualEntry` takes the price now (Dhan /
+  Delta LTP), builds the entry with the typed lots and goes `finish` — the normal path (limit, one-order cap, Dhan funds,
+  order or paper fill, stop at the broker, booking); a manual order ignores pause / kill rule / breaker (`_manual` survives
+  finishNow's re-read); refused when the market is shut. The card polls every 4 s while one is being worked. Tests:
+  `tests/sim/safety.test.mjs` "manual order", `tests/ui/ui_failed_orders.mjs` (args: theme width).
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
@@ -810,6 +825,12 @@ failed ("stopped: never finished"); Anshul's two paper strategies paused, his er
 connect Dhan; cloud-session start-up hook (`.claude/settings.json`, `.claude/hooks/session-start.sh`). Kept as is:
 clients may go live by themselves (Papa: keep `set_live` as it is); the Strategy Lab generator stays on.
 Still open:
+00. **SUPERMOST URGENT (Papa, 13 Nov 2026) — a fixed server with its own fixed IP for every Dhan order.** Today Dhan sees the
+   database server's IPv6 address (whitelisted as Secondary, see Layout › execution.ts); it can change with a compute upgrade
+   or a new server, and Dhan's whitelist is locked for 7 days after each change, so orders could be refused for days.
+   Plan to agree with Papa: a small always-on server (the Dhandha AWS server with an Elastic IP at no extra cost, or a separate
+   one) that `dhan_send` calls, which forwards to api.dhan.co from its own permanent IPv4; whitelist that IP as Primary after
+   19 Nov 2026 (the current lock ends); keep the database's IPv6 as Secondary until the server is proven.
 0. **SUPER URGENT · SUPER IMPORTANT — roll back the shared paper data before any public / larger roll-out** (Papa,
    5 Nov 2026). Turned on for close family users only: a user without a Dhan login paper trades on the admin's Dhan
    prices (`SHARED_PAPER_DATA` in accounts.ts, `dataAccount` / `dataUid`). Risks: exchange data redistribution

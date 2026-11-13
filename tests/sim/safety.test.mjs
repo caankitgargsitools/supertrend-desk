@@ -465,6 +465,42 @@ await t("live and paper capital are separate: a live entry sizes from the live c
   assert.equal(ns3.pos_qty, 1, "live room unchanged by paper margin");
   db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "cp1" && x.id !== "cp2");
 });
+// ---------------- manual orders from Orders › Failed orders (13 Nov 2026) ----------------
+const clock0 = clock, ltp0 = dhan.ltp["13"];
+const mrow = (sid, side, lots, ref = null) => {
+  db.manual_orders = db.manual_orders ?? [];
+  const id = db.manual_orders.length + 1;
+  db.manual_orders.push({ id, user_id: "u1", strategy_id: sid, ref_signal: ref, side, lots, mode: "x", state: "working", created_at: new Date(clock).toISOString() });
+  E.MANUAL.set(sid, { id, side, lots, ref });
+  return () => db.manual_orders.find((m) => m.id === id);
+};
+const mrun = async (S) => { const upd = { last_run_at: new Date(clock).toISOString() }; await E.manualEntry(S(), set, upd, { t: 1, c: 24000 }, undefined); };
+await t("manual order (paper): enters at the price now with the lots typed, even while paused; result written back", async () => {
+  clock = Date.parse("2026-10-20T06:00:00Z"); dhan.ltp["13"] = 25040;
+  const S = add("mo1", { live: false, active: false, lots: 1, sizing: { mode: "MOVE", move_amt: 5000000 }, risk: { basis: "UNDERLYING", sl: { type: "POINTS", value: 100 } } });
+  const m = mrow("mo1", "SHORT", 2, 304); await mrun(S);
+  assert.equal(S().position, "SHORT", JSON.stringify(m()));
+  assert.equal(S().pos_lots, 2); assert.equal(Number(S().pos_entry_px), 25040, "the price now, not the candle's");
+  assert.equal(S().pos_risk.stop, 25140, "its stop from the new entry price");
+  assert.equal(m().state, "filled"); assert.match(m().result, /Filled \(paper\): 2 lots/);
+  assert.ok(db.algo_signals.some((g) => g.strategy_id === "mo1" && /Manual order \(Orders › Failed orders, signal #304\)/.test(g.description)));
+  // a second one while it holds the position: refused, nothing changes
+  const m2 = mrow("mo1", "LONG", 1); await mrun(S);
+  assert.equal(m2().state, "refused"); assert.match(m2().result, /already holds a short position/); assert.equal(S().position, "SHORT");
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "mo1");
+});
+await t("manual order outside market hours: refused, nothing sent", async () => {
+  clock = Date.parse("2026-10-20T13:00:00Z"); // 18:30 IST: NSE shut
+  add("mo3", { live: true, active: true, lots: 1, risk: null });
+  db.manual_orders.push({ id: 99, user_id: "u1", strategy_id: "mo3", side: "LONG", lots: 1, mode: "LIVE", state: "queued", created_at: new Date(clock).toISOString() });
+  const r = await handler(new Request("http://x", { method: "POST", headers: { "x-engine-secret": "SECRET", "content-type": "application/json" }, body: JSON.stringify({ action: "manual_entry", strategy_id: "mo3" }) }));
+  await r.json();
+  const m = db.manual_orders.find((x) => x.id === 99);
+  assert.equal(m.state, "refused"); assert.match(m.result, /market is closed/);
+  assert.equal(ordersOf("mo3").length, 0);
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "mo3");
+  clock = clock0; dhan.ltp["13"] = ltp0;
+});
 await t("live entry cut to what one exchange order carries (freeze quantity); paper isn't; unknown limit leaves it", async () => {
   db.lab_margins = [{ asset: "NIFTY", price: 25000, fut_pct: 0.12, day_move: 0.02 }];
   for (const c of db.fno_contracts) c.freeze_qty = 1801; // NIFTY: orders below 1,801 units = 24 lots of 75

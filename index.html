@@ -1134,6 +1134,20 @@ body.dk-fs-on { overflow: hidden; }
 .pwbox .eye:hover, .pwbox .eye[aria-pressed="true"] { color: var(--ink); }
 .pwbox .eye:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
 .pwbox .eye svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* Failed orders (13 Nov 2026): every order that didn't go through, live and paper, strategy-wise, with "Send again". */
+.fo-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 0 0 14px; background: var(--card); }
+.fo-card h3 { margin: 0; font-size: 16px; }
+.fo-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.fo-strat { border-top: 1px solid var(--line); padding: 10px 0 4px; margin-top: 10px; }
+.fo-strat > .fo-sn { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.fo-row { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(170px, 1fr) minmax(200px, 1.6fr) minmax(240px, 1.4fr); gap: 8px 14px; align-items: start; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+.fo-row:last-child { border-bottom: 0; }
+.fo-px b { font-variant-numeric: tabular-nums; }
+.fo-act { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.fo-act input[type=number] { width: 64px; }
+.fo-act select { width: auto; }
+.fo-why { color: var(--muted); overflow-wrap: anywhere; }
+@media (max-width: 900px) { .fo-row { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -1703,6 +1717,7 @@ body.dk-fs-on { overflow: hidden; }
       <div class="seg" id="lp_tabs" role="tablist" aria-label="Strategies view" style="margin:4px 0 10px">
         <button type="button" role="tab" data-t="all" aria-pressed="true">All strategies</button><button type="button" role="tab" data-t="live" aria-pressed="false">Live performance</button><button type="button" role="tab" data-t="trades" aria-pressed="false">Trades</button><button type="button" role="tab" data-t="orders" aria-pressed="false">Orders</button></div>
       <div id="lp_orders_box" hidden>
+        <section class="fo-card" id="fo_card"></section>
         <button class="btn small" id="of_toggle" type="button" aria-expanded="false">Filters ▸</button>
         <div class="filters fold" id="of_box">
           <label class="f"><span>Period</span><select id="of_period"><option value="today">Today</option><option value="2">Since yesterday</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>
@@ -7769,6 +7784,80 @@ function ordFrom() {
   if (p === "today") return new Date(Date.parse(day + "T00:00:00+05:30")).toISOString();
   return new Date(Date.parse(day + "T00:00:00+05:30") - (Number(p) - 1) * 86400000).toISOString();
 }
+/* ---------- Failed orders (13 Nov 2026, Papa): every order that didn't go through — live or paper — strategy-wise, the
+   signal's price, the price now, "Send again" per order and its status after (failed_orders / manual_order, migration 95). */
+const fo = { rows: [], days: 7, mode: "", done: false, poll: null };
+async function loadFailed() {
+  fo.rows = must(await db.rpc("failed_orders", { p_days: fo.days })) || [];
+  renderFailed();
+  const busy = fo.rows.some((r) => r.manual && ["queued", "working"].includes(r.manual.state));
+  clearTimeout(fo.poll); if (busy && page === "list" && lpTab === "orders") fo.poll = setTimeout(() => loadFailed().catch(() => {}), 4000);
+}
+const FO_STATE = { queued: ["Queued", "yellow"], working: ["Sending…", "yellow"], sent: ["Sent to broker", "blue"], filled: ["Filled", "green"], refused: ["Not placed", "red"] };
+function foMove(r) {
+  const a = Number(r.signal_px), b = Number(r.now_px);
+  if (!(a > 0) || !(b > 0)) return "";
+  const p = (b - a) / a * 100, good = r.side === "SHORT" ? p < 0 : r.side === "LONG" ? p > 0 : null;
+  return ` <span class="${good == null ? "" : good ? "pos-num" : "neg-num"}" title="Move since the signal${good == null ? "" : good ? ": in the trade's favour (a later entry is at a better price)" : ": against the trade (a later entry is at a worse price)"}">${p >= 0 ? "+" : "−"}${Math.abs(p).toFixed(2)}%</span>`;
+}
+function renderFailed() {
+  const box = $("fo_card"); if (!box) return;
+  const open = (r) => !r.manual || r.manual.state === "refused";
+  let rows = fo.rows.filter((r) => !fo.mode || r.mode === fo.mode);
+  const nOpen = rows.filter(open).length;
+  if (!fo.done) rows = rows.filter(open);
+  const head = `<div class="fo-head"><div><span class="label">Orders that didn't go through</span><h3>Failed orders${nOpen ? ` · ${nOpen} to look at` : ""}</h3></div>
+    <div class="fo-act"><div class="seg" role="group" aria-label="Mode">${[["", "All"], ["LIVE", "Live"], ["PAPER", "Paper"]].map(([m, t]) => `<button type="button" data-fom="${m}" aria-pressed="${fo.mode === m}">${t}</button>`).join("")}</div>
+    <select id="fo_days" aria-label="Period">${[[1, "Today"], [7, "Last 7 days"], [30, "Last 30 days"]].map(([d, t]) => `<option value="${d}"${fo.days === d ? " selected" : ""}>${t}</option>`).join("")}</select>
+    <label class="hint"><input type="checkbox" id="fo_done"${fo.done ? " checked" : ""}> Show ones already sent again</label></div></div>`;
+  if (!rows.length) { box.innerHTML = head + `<p class="hint" style="margin:8px 0 0">${fo.rows.length ? "Nothing left to look at for this choice." : `No failed orders ${fo.days === 1 ? "today" : `in the last ${fo.days} days`}, live or paper.`}</p>`; foWire(box); return; }
+  const by = new Map(); for (const r of rows) { if (!by.has(r.strategy_id)) by.set(r.strategy_id, []); by.get(r.strategy_id).push(r); }
+  box.innerHTML = head + [...by.values()].map((list) => {
+    const s0 = list[0];
+    const pos = s0.now_position === "FLAT" ? "Flat now" : `${s0.now_position === "LONG" ? "Long" : "Short"} ${s0.now_lots ? plural(s0.now_lots, "lot") : ""} now`;
+    return `<div class="fo-strat"><div class="fo-sn"><b><a href="#" data-fos="${esc(s0.strategy_id)}">${esc(s0.name)}</a></b> <span class="chip ${s0.now_live ? "red" : ""}">${s0.now_live ? "LIVE" : "Paper"}</span> <span class="hint">${esc(pos)}${s0.active ? "" : " · paused"}</span></div>
+      ${list.map((r) => {
+        const exit = r.side === "EXIT", m = r.manual, ms = m ? FO_STATE[m.state] || [m.state, ""] : null;
+        const canEnter = !exit && s0.now_position === "FLAT" && !s0.exec_state, canExit = exit && s0.now_position !== "FLAT";
+        const lotsDef = Math.max(1, Number(r.lots_wanted) || Number(s0.lots) || 1);
+        const act = !open(r) ? "" : exit
+          ? (canExit ? `<button class="btn small danger" type="button" data-fosend="${r.sig_id}" data-side="EXIT">Exit now</button>` : '<span class="hint">Position already closed</span>')
+          : canEnter ? `<select data-foside="${r.sig_id}" aria-label="Side"><option value="LONG"${r.side === "LONG" ? " selected" : ""}>Buy (long)</option><option value="SHORT"${r.side === "SHORT" ? " selected" : ""}>Sell (short)</option></select>
+              <input type="number" min="1" step="1" value="${lotsDef}" data-folots="${r.sig_id}" aria-label="Lots"> <span class="hint">lots</span>
+              <button class="btn small primary" type="button" data-fosend="${r.sig_id}">Send again${r.mode === "LIVE" ? " (live)" : ""}</button>`
+            : `<span class="hint">${s0.exec_state ? "Orders are being worked at the broker" : "The strategy already holds a position"}</span>`;
+        const status = m ? `<div><span class="chip ${ms[1]}">${esc(ms[0])}</span> <span class="hint">${esc(fmtDate(m.at))}${m.lots ? ` · ${plural(m.lots, "lot")}` : ""}</span></div>${m.result ? `<div class="hint">${esc(m.result)}</div>` : ""}${r.manual_order_row ? `<div class="hint">Broker: ${esc(r.manual_order_row.state)}${r.manual_order_row.avg_px ? ` at ${fmtNum(r.manual_order_row.avg_px)}` : ""}${r.manual_order_row.note ? ` · ${esc(r.manual_order_row.note)}` : ""}</div>` : ""}` : "";
+        return `<div class="fo-row" data-forow="${r.sig_id}">
+          <div><b>${esc(exit ? "Exit" : r.side === "SHORT" ? "Sell (short)" : r.side === "LONG" ? "Buy (long)" : r.event)}</b>${r.lots_wanted ? ` · ${plural(r.lots_wanted, "lot")}` : ""}<div class="hint">${esc(fmtDate(r.at))} · ${r.mode === "LIVE" ? "live" : "paper"} · ${r.kind === "skipped" ? "skipped by the desk" : "refused by the broker"}</div></div>
+          <div class="fo-px">Signal <b>${fmtNum(r.signal_px)}</b><br>Now <b>${fmtNum(r.now_px)}</b>${foMove(r)}<div class="hint">${r.now_at ? `price ${esc(agoText(r.now_at))}` : ""}</div></div>
+          <div class="fo-why" title="${esc(r.description || "")}">${esc(r.reason || "")}</div>
+          <div><div class="fo-act">${act}</div>${status}</div></div>`;
+      }).join("")}</div>`;
+  }).join("") + `<p class="hint" style="margin:8px 0 0">“Send again” places the entry now at the current price through the desk's normal path: the lots you type (still cut to what fits your ${fo.mode === "PAPER" ? "paper" : "live or paper"} limit, one exchange order and, live, Dhan's free funds), its stop at the broker and the trade booking. It goes even if the strategy is paused. Live orders are real money.</p>`;
+  foWire(box);
+}
+function foWire(box) {
+  box.querySelectorAll("[data-fom]").forEach((b) => b.onclick = () => { fo.mode = b.dataset.fom; renderFailed(); });
+  const d = $("fo_days"); if (d) d.onchange = () => { fo.days = Number(d.value) || 7; loadFailed().catch((e) => toast(errorText(e))); };
+  const c = $("fo_done"); if (c) c.onchange = () => { fo.done = c.checked; renderFailed(); };
+  box.querySelectorAll("[data-fos]").forEach((a) => a.onclick = (e) => { e.preventDefault(); openStrat(a.dataset.fos); });
+  box.querySelectorAll("[data-fosend]").forEach((b) => b.onclick = () => foSend(b));
+}
+function foSend(btn) {
+  const id = Number(btn.dataset.fosend), r = fo.rows.find((x) => Number(x.sig_id) === id); if (!r) return;
+  const exit = btn.dataset.side === "EXIT";
+  const side = exit ? "EXIT" : (box => box ? box.value : r.side)(document.querySelector(`[data-foside="${id}"]`));
+  const lots = exit ? 0 : Math.trunc(Number((document.querySelector(`[data-folots="${id}"]`) || {}).value) || 0);
+  if (!exit && !(lots >= 1)) { toast("Lots must be 1 or more."); return; }
+  if (!exit && side !== "LONG" && side !== "SHORT") { toast("Choose Buy or Sell."); return; }
+  const live = r.now_live, what = exit ? "Exit the position" : `${side === "LONG" ? "Buy" : "Sell"} ${plural(lots, "lot")}`;
+  askConfirm(`<strong>${esc(what)} · ${esc(r.name)}</strong><br>${live ? '<b style="color:var(--red)">LIVE: a real order goes to the broker now, at market.</b>' : "Paper: booked at the current price."}<br>
+    Signal price ${fmtNum(r.signal_px)} · price now ${fmtNum(r.now_px)}.${exit ? "" : "<br>The strategy's stop and target are set from the new entry price."}`, live ? "Send live order" : "Send", () => run(btn, async () => {
+    must(await db.rpc("manual_order", { p_strategy: r.strategy_id, p_side: side, p_lots: exit ? null : lots, p_ref: id, p_px: Number(r.now_px) || null }));
+    toast(live ? "Sent to the desk; status below in a few seconds." : "Sent; status below in a few seconds.");
+    await loadFailed();
+  }), live);
+}
 async function loadOrders() {
   const mine = new Set(myStrats().map((x) => x.id)), from = ordFrom();
   // Only this user's own strategies, chosen on the server (an admin can see everyone's signals, which used to fill the
@@ -7783,6 +7872,7 @@ async function loadOrders() {
   ordRows = ordRows.concat(legs.filter((l) => l.purpose === "stop").map((l) => ({ id: `stop${l.id}`, strategy_id: l.strategy_id, created_at: l.created_at, event: "STOP_ORDER", mode: "LIVE", status: "SENT", stopLeg: l })))
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
   fillOrderFilters(); renderOrders(); // refreshAll re-reads the orders every 30 s while this tab is open
+  loadFailed().catch((e) => { $("fo_card").innerHTML = `<p class="hint">Failed orders: ${esc(errorText(e))}</p>`; });
 }
 /** The order legs as the desk wrote them (without the webhook secret). */
 function ordLegText(g) {

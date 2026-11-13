@@ -1077,7 +1077,8 @@ async function finishNow(s: Strategy, set: Settings, update: Record<string, unkn
       await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "indicator state");
       return;
     }
-    if (cur) s = { ...s, ...cur };
+    // A manual order keeps the lots typed on the page (no automatic sizing) and isn't blocked by a pause / kill / breaker.
+    if (cur) s = { ...s, ...cur, ...((s as any)._manual ? { sizing: null, lots: s.lots, _block: null } : {}) };
     // A Live / Paper switch waits for a flat moment (12 Nov 2026, migration 91): a position stays in the mode it was
     // opened in. A reversal only closes the held one (booked in its own mode); the trigger then switches the strategy and
     // the new entry comes on the next signal, in the new mode.
@@ -1121,6 +1122,38 @@ async function finishNow(s: Strategy, set: Settings, update: Record<string, unkn
   await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), legs.length ? "position after the signal" : "strategy state");
 }
 
+/* ---------- manual orders (13 Nov 2026, Papa: "fill all the rejected orders manually" — Orders › Failed orders) ---------- */
+/** The manual order being worked for a strategy in this call (the row in manual_orders, read by id in the handler). */
+const MANUAL = new Map<string, { id: number; side: Pos; lots: number; ref: number | null }>();
+/**
+ * A manual entry goes the engine's own entry path (finish → sizing limits, one-order cap, Dhan funds check, the order or
+ * the paper fill, its stop at the broker, the ledger), at the strategy's current price, with the lots typed on the page.
+ * Papa's explicit order: the strategy's pause / kill rule / error breaker don't block it (sizing limits still do).
+ */
+async function manualEntry(s: Strategy, set: Settings, update: Record<string, unknown>, candle: Candle, bars?: { h: number; l: number; c: number }[]) {
+  const m = MANUAL.get(s.id);
+  if (!m) throw new Error("No manual order found for this strategy.");
+  const done = async (state: string, result: string) => { await sb.from("manual_orders").update({ state, result: result.slice(0, 400), done_at: nowIso() }).eq("id", m.id); };
+  if (s.position !== "FLAT") { await done("refused", `Not sent: the strategy already holds a ${s.position.toLowerCase()} position.`); return; }
+  if (s.exec_state) { await done("refused", "Not sent: orders for this strategy are still being worked at the broker. Try again in a minute."); return; }
+  // The price now, not the last closed candle's (a daily strategy's candle can be a day old).
+  const ltp = await dhanFor(set).ltp(s.data_segment, String(s.data_security_id)).catch(() => null);
+  if (Number(ltp) > 0) candle = { ...candle, c: Number(ltp) };
+  if (!(Number(candle.c) > 0)) { await done("refused", "Not sent: no current price for this strategy yet."); return; }
+  const lots = Math.max(1, Math.trunc(m.lots || Number(s.lots) || 1));
+  const s2 = { ...s, sizing: null, lots, _block: null, _manual: true } as unknown as Strategy;
+  const e = entryLeg(s2, m.side, Number(candle.c), 1, lots);
+  const r = riskOf(s);
+  const atrNow = r && bars?.length ? (atrSeries(bars as any, r.atr_len ?? 14).at(-1) || 0) : 0;
+  const notes = [`Manual order (Orders › Failed orders${m.ref ? `, signal #${m.ref}` : ""}): ${e.label}`];
+  await finish(s2, set, update, asArr(e.leg), "ENTRY", notes, { position: m.side, ...e.state }, { ...candle, t: Math.floor(Date.now() / 1000) }, atrNow);
+  const { data: after } = await sb.from("algo_strategies").select("position, exec_state, pos_lots").eq("id", s.id).maybeSingle();
+  const { data: sig } = await sb.from("algo_signals").select("id, description, status").eq("strategy_id", s.id).order("id", { ascending: false }).limit(1).maybeSingle();
+  if (after?.position === m.side) await done(s.live && !isCrypto(String(s.data_segment)) ? "sent" : "filled", `${s.live ? "Sent to the broker" : "Filled (paper)"}: ${after.pos_lots ?? lots} lot${Number(after.pos_lots ?? lots) === 1 ? "" : "s"} at about ${candle.c}${sig ? ` (signal #${sig.id})` : ""}`);
+  else if (after?.exec_state) await done("sent", `Sent to the broker, being worked${sig ? ` (signal #${sig.id})` : ""}`);
+  else await done("refused", `Not placed: ${String(sig?.description ?? "see the strategy's signal log").replace(/^.*?(Entry skipped:)/, "$1").slice(0, 300)}`);
+}
+
 async function processFlip(s: Strategy, set: Settings, action: string) {
   const dhan = dhanFor(set);
   const { bars, st, trend } = await flipSeries(s, dhan);
@@ -1137,6 +1170,7 @@ async function processFlip(s: Strategy, set: Settings, action: string) {
     Object.assign(update, NO_PENDING);
     await flatten(s, set, update, candle); await sb.from("algo_strategies").update(update).eq("id", s.id); return;
   }
+  if (action === "manual_entry") { Object.assign(update, NO_PENDING); await manualEntry(s, set, update, candle, bars); return; }
 
   const nowSec = Date.now() / 1000;
   const now = ist(nowSec);
@@ -1342,6 +1376,7 @@ async function processRulesDaily(s: Strategy, set: Settings, action: string) {
   await saveChart(s, days, days.map(() => NaN), days.map(() => 0));
   if (action === "refresh") { await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
   if (action === "flatten") { await flatten(s, set, update, candle); await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
+  if (action === "manual_entry") { await manualEntry(s, set, update, candle, undefined); return; }
   const sess = tradingSession(seg, now.date);
   const legs: Record<string, unknown>[] = [], notes: string[] = [];
   let event = "", newState: Record<string, unknown> = {};
@@ -1394,6 +1429,7 @@ async function processRules(s: Strategy, set: Settings, action: string) {
   await saveChart(s, bars, bars.map(() => NaN), bars.map(() => 0));
   if (action === "refresh") { await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
   if (action === "flatten") { await flatten(s, set, update, candle); await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
+  if (action === "manual_entry") { await manualEntry(s, set, update, candle, bars); return; }
 
   const sess = sessionFor(s.data_segment, now.date);
   const sqOff = timeToMin(String(s.square_off)), ss = timeToMin(String(s.session_start)), le = timeToMin(String(s.last_entry));
@@ -1450,6 +1486,7 @@ async function processTimed(s: Strategy, set: Settings, action: string) {
   const candle = { t: bars[n - 1].t, trend: tNow, c: spot ?? bars[n - 1].c, st: stNow };
   if (action === "refresh") { await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
   if (action === "flatten") { await flatten(s, set, update, candle); await sb.from("algo_strategies").update(update).eq("id", s.id); return; }
+  if (action === "manual_entry") { await manualEntry(s, set, update, candle, bars); return; }
   if (!marketDay) { await sb.from("algo_strategies").update(update).eq("id", s.id); return; } // holiday or no data yet
 
   const entryMin = timeToMin(String(s.entry_time)), exitMin = timeToMin(String(s.exit_time));
@@ -3598,12 +3635,19 @@ Deno.serve(async (req) => {
     return Response.json({ action, priced: n, of: keys.length });
   }
 
-  if (!["tick", "tick_crypto", "refresh", "flatten", "sync_instruments"].includes(action)) return Response.json({ error: `Unknown action ${action}` }, { status: 400 });
+  if (!["tick", "tick_crypto", "refresh", "flatten", "manual_entry", "sync_instruments"].includes(action)) return Response.json({ error: `Unknown action ${action}` }, { status: 400 });
   const nowIst = ist(Date.now() / 1000);
   // Exchange holidays today (no session, or MCX's evening session only).
   { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", nowIst.date); setHolidays(hol ?? []); }
   // Crypto trades every day: its own minute tick (tick_crypto) runs round the clock, the market tick on weekdays.
-  if ((action === "flatten" || action === "refresh") && !body.strategy_id) return Response.json({ error: `${action} needs a strategy_id` }, { status: 400 });
+  if ((action === "flatten" || action === "refresh" || action === "manual_entry") && !body.strategy_id) return Response.json({ error: `${action} needs a strategy_id` }, { status: 400 });
+  if (action === "manual_entry") {
+    // The order's details come from its own row (written by manual_order() after the owner check), never from the body.
+    const { data: mo } = await sb.from("manual_orders").select("id, side, lots, ref_signal, state").eq("strategy_id", body.strategy_id).eq("state", "queued").order("id", { ascending: false }).limit(1).maybeSingle();
+    if (!mo) return Response.json({ error: "no queued manual order for this strategy" }, { status: 400 });
+    await sb.from("manual_orders").update({ state: "working" }).eq("id", mo.id);
+    MANUAL.set(String(body.strategy_id), { id: Number(mo.id), side: mo.side as Pos, lots: Number(mo.lots) || 1, ref: mo.ref_signal == null ? null : Number(mo.ref_signal) });
+  }
   const cryptoTick = action === "tick_crypto";
   if (action === "tick" && (nowIst.wd === 0 || nowIst.wd === 6)) return Response.json({ skipped: "weekend" });
 
@@ -3693,6 +3737,11 @@ Deno.serve(async (req) => {
       const sess = tradingSession(s.data_segment, nowIst.date); // holidays: no session, or the evening session only
       const outside = nowIst.min < sess.open || nowIst.min > sess.close + 5;
       if (action === "tick" && outside) return;
+      if (action === "manual_entry" && outside && !isCr) {
+        const m = MANUAL.get(s.id);
+        if (m) await sb.from("manual_orders").update({ state: "refused", result: "Not sent: this market is closed now. Send it again when it opens.", done_at: nowIso() }).eq("id", m.id);
+        results[s.id] = "market closed"; return;
+      }
       // Between its candle closes a flat rule strategy has nothing to decide: skipped, so a busy database only does
       // the work that can change something (open positions, and strategies whose candle just closed).
       if (tick && !outside && quietNow(s, sess)) { results[s.id] = "waiting for its candle"; return; }
@@ -3764,6 +3813,14 @@ Deno.serve(async (req) => {
       if (s.strategy_kind === "TIMED") await processTimed(s, set, act);
       else if (s.strategy_kind === "RULES") await processRules(s, set, act);
       else await processFlip(s, set, act);
+      // A manual exit from Orders › Failed orders goes the "Exit positions now" way; write its result back.
+      if (action === "flatten") {
+        const { data: after } = await sb.from("algo_strategies").select("position, exec_state").eq("id", s.id).maybeSingle();
+        const ok = after?.position === "FLAT", working = !!after?.exec_state;
+        await sb.from("manual_orders").update({ state: ok ? (s.live && !isCr ? "sent" : "filled") : working ? "sent" : "refused",
+          result: ok ? (s.live ? "Exit sent to the broker" : "Closed (paper)") : working ? "Exit sent, being worked at the broker" : "Exit not placed: see the strategy's signal log", done_at: nowIso() })
+          .eq("strategy_id", s.id).eq("side", "EXIT").eq("state", "working");
+      }
       if (Dhan.ownUsed.has(`${s.data_segment}|${s.data_security_id}`)) ownAssets.add(String(s.underlying ?? s.data_security_id));
       results[s.id] = `ok ${Date.now() - t1}ms (done ${tickT0 ? Date.now() - tickT0 : 0}ms after the minute)`;
       if (s.owner_id) okUsers.add(brkKey(s));
