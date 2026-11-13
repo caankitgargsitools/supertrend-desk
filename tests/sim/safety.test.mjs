@@ -23,6 +23,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.pathname === "/v2/optionchain/expirylist") return J({ data: dhan.expiries, status: "success" });
   if (u.pathname === "/v2/optionchain") return J({ data: { oc: dhan.chain[body.Expiry] ?? {} }, status: "success" });
   if (u.pathname === "/v2/orders" && m === "POST") {
+    if (dhan.rejectAll) return J({ errorMessage: dhan.rejectAll }, 400);
     if (dhan.reject) { const r = dhan.reject; dhan.reject = null; return J({ errorMessage: r }, 400); }
     const id = String(dhan.next++); dhan.orders.set(id, { ...body, orderId: id, orderStatus: "PENDING", filledQty: 0 });
     return J({ orderId: id, orderStatus: "TRANSIT" });
@@ -164,6 +165,30 @@ await t("4/10 exit booked as provisional, Dhan rejects it (also at market) → p
   assert.equal(S().pos_broker.legs[0].sec, "35001"); assert.equal(S().pos_broker.exitTries, 1);
   assert.equal(tr.hidden, true); assert.equal(tr.provisional, false);
   assert.ok(note(/Exit not done yet/));
+});
+await t("4 an exit Dhan refuses outright (limit and market, e.g. Invalid IP) keeps the position: not flat, no trade booked, retry set", async () => {
+  // 13 Nov 2026 audit: the refusal came back inside the send, failRow put the position back, and the caller then
+  // booked the trade and wrote FLAT over it — the desk flat while Dhan still held the position.
+  const S = add("rx", longPos({ pos_broker: pbOf("35001", 75), pos_risk: null })); // no stop resting at the broker
+  dhan.positions = [{ exchangeSegment: "NSE_FNO", securityId: "35001", netQty: 150 }]; // r1 (the test before) holds 75 too
+  dhan.ltp["35001"] = 25080; dhan.rejectAll = "Invalid IP";
+  const n0 = db.algo_trades.filter((x) => x.strategy_id === "rx" && !x.hidden).length;
+  const upd = {};
+  await E.flattenNow(S(), set, upd, { c: 25050 }); await write("rx", upd);
+  assert.equal(S().position, "LONG", "the desk still holds what Dhan holds");
+  assert.equal(S().pos_qty, 1); assert.equal(S().exec_state, "exit_retry"); assert.equal(S().pos_broker.legs[0].sec, "35001");
+  assert.equal(db.algo_trades.filter((x) => x.strategy_id === "rx" && !x.hidden).length, n0, "no trade booked");
+  assert.ok(note(/Exit not done yet/));
+  // the same through a strategy's own exit signal (finishNow)
+  const S2 = add("ry", longPos({ pos_broker: pbOf("35001", 75), pos_risk: null }));
+  dhan.positions = [{ exchangeSegment: "NSE_FNO", securityId: "35001", netQty: 225 }];
+  const u2 = {};
+  await E.finishNow(S2(), set, u2, [{ ...leg("S") }], "EXIT", ["Exit signal: Sell NIFTY1! x 1"], { position: "FLAT", pos_qty: null, pos_lots: null, pos_entry_px: null, pos_broker: null, pos_risk: null, pos_margin: null }, { t: Math.floor(clock / 60000) * 60 - 60, c: 25050 });
+  assert.equal(S2().position, "LONG"); assert.equal(S2().exec_state, "exit_retry");
+  assert.equal(db.algo_trades.filter((x) => x.strategy_id === "ry" && !x.hidden).length, 0);
+  dhan.rejectAll = null; dhan.positions = [{ exchangeSegment: "NSE_FNO", securityId: "35001", netQty: 75 }];
+  db.algo_strategies = db.algo_strategies.filter((x) => !["rx", "ry"].includes(x.id));
+  db.live_orders = db.live_orders.filter((x) => !["rx", "ry"].includes(x.strategy_id));
 });
 await t("4 a stop goes back in at the broker while the exit is retried", async () => {
   const S = () => db.algo_strategies.find((x) => x.id === "r1");

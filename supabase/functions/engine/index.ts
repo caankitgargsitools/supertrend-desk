@@ -716,6 +716,10 @@ async function riskExitNow(s: Strategy, set: Settings, pr: PosRisk, hit: { px: n
   const under = pr.basis === "PREMIUM" ? undefined : hit.px;
   const ok = await sendOrders(s, set, event, asArr(exitLeg(s, 1)), `${hit.why}${pr.basis === "PREMIUM" ? " (premium)" : ""}: ${exitLabel(s)}`, { t: hit.t, c: under });
   if (!ok) {
+    if (lastFail.handledFor === s.id) { // failRow put the position back and set the retry: work from the row as it is now
+      const { data: cur } = await sb.from("algo_strategies").select("*").eq("id", s.id).maybeSingle();
+      return cur ? { ...s, ...(cur as Strategy) } : s;
+    }
     await exitFailed(s, update, hit.why, "the stop-loss exit didn't go");
     await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "exit retry state");
     return { ...s, ...update };
@@ -729,7 +733,7 @@ async function riskExitNow(s: Strategy, set: Settings, pr: PosRisk, hit: { px: n
 }
 
 async function sendOrders(s: Strategy, set: Settings, event: string, legs: Record<string, unknown>[], description: string, candle: Candle): Promise<boolean> {
-  lastLiveBatch = null;
+  lastLiveBatch = null; lastFail = noFail();
   if (isCrypto(String(s.data_segment))) return sendDelta(s, set, event, legs, description, candle);
   if (s.live) return queueDhan(s, set, event, legs, description, candle);
   const payload = { secret: set.webhook_secret ?? "", alertType: "multi_leg_order", order_legs: legs };
@@ -769,6 +773,7 @@ async function sendDelta(s: Strategy, set: Settings, event: string, legs: Record
   const payload = { broker: "DELTA", orders: legs.map((l) => ({ symbol: l.symbol, side: l.side === "B" ? "buy" : "sell", lots: l.qty, size: contractsFor(String(l.symbol), Number(s.lot_size), Number(l.qty)), reduce_only: !!l.reduce_only })) };
   let status = "LOGGED", response: string | null = null;
   deltaFill = { exit: null, entry: null };
+  lastFail = noFail();
   if (s.live) {
     if (!set.dhan_client_id || !set.dhan_access_token) { status = "FAILED"; response = "Add your Delta Exchange API key and secret under Delta Exchange connection."; }
     else {
@@ -806,6 +811,7 @@ async function sendDelta(s: Strategy, set: Settings, event: string, legs: Record
       // order for this strategy's own part, after checking that part is really there (31 Oct 2026).
       const others = payload.orders.some((o) => o.reduce_only) ? await othersHolding(s) : new Map<string, number>();
       let held: Map<string, number> | null | undefined;
+      if (stopClosed) lastFail.exitDone = true;
       for (const o of payload.orders) {
         if (o.reduce_only && stopClosed) continue;
         let reduceOnly = o.reduce_only;
@@ -828,6 +834,7 @@ async function sendDelta(s: Strategy, set: Settings, event: string, legs: Record
           const st = await deltaOrderChecked(sb, set.user_id, { symbol: String(o.symbol), size: Number(o.size), side: o.side as "buy" | "sell", reduceOnly });
           const filled = st.size - st.unfilled;
           out.push(`${o.side} ${o.size} ${o.symbol}: order ${st.id || "?"} ${st.state}${st.avg ? ` filled at ${st.avg}` : ""}${st.unfilled ? `, ${st.unfilled} unfilled` : ""}`);
+          if (o.reduce_only && filled > 0 && !(st.unfilled > 0)) lastFail.exitDone = true;
           if (o.reduce_only) { deltaFill.exit = st.avg ?? deltaFill.exit; if (filled > 0 && st.unfilled > 0) partExit = { symbol: String(o.symbol), size: Number(o.size), filled, avg: Number(st.avg) || 0, id: String(st.id ?? "") }; }
           else {
             deltaFill.entry = st.avg;
@@ -841,6 +848,7 @@ async function sendDelta(s: Strategy, set: Settings, event: string, legs: Record
         }
       }
       if (opened) opened.step = stepFor(Number(opened.fill) || 0, opened.tick, false);
+      lastFail.open = !!opened && status === "FAILED";
       // An exit that filled only in part (6 Nov 2026 audit): that part is booked at Delta's price and the position
       // shrinks to the rest, so the retry closes only what is still open instead of the whole quantity again.
       if (partExit && status === "FAILED" && partExit.avg > 0 && s.position !== "FLAT") {
@@ -969,6 +977,7 @@ async function logSignal(s: Strategy, event: string, description: string, candle
   if (s.locked) { description = plainLog(event, description); candle = { t: candle.t, c: candle.c }; }
   if (Dhan.ownUsed.has(`${s.data_segment}|${s.data_security_id}`)) description += " · on the desk's own candles (Dhan's candle data was unavailable)";
   lastSignalId = null;
+  if (status === "FAILED") lastFail = { ...lastFail, why: String(response ?? description ?? "").slice(0, 300) };
   const row = {
     strategy_id: s.id, event, description, mode: s.live ? "LIVE" : "PAPER", status, payload, response, lag_ms: tickT0 ? Date.now() - tickT0 : null,
     candle_time: candle.t ? new Date(candle.t * 1000).toISOString() : null,
@@ -1061,7 +1070,7 @@ async function flattenNow(s: Strategy, set: Settings, update: Record<string, unk
     Object.assign(update, FLAT_STATE);
     if (s.exec_state === "exit_retry" && (!s.live || isCrypto(String(s.data_segment)))) Object.assign(update, { exec_state: null, last_error: null });
     else if (s.exec_state === "exit_retry") update.last_error = null;
-  } else await exitFailed(s, update, why, "the exit order didn't go");
+  } else if (lastFail.handledFor !== s.id) await exitFailed(s, update, why, "the exit order didn't go");
 }
 
 const finish = (s: Strategy, set: Settings, update: Record<string, unknown>, legs: Record<string, unknown>[], event: string, notes: string[], newState: Record<string, unknown>, candle: Candle, atrNow = 0) =>
@@ -1099,23 +1108,40 @@ async function finishNow(s: Strategy, set: Settings, update: Record<string, unkn
       legs.pop();
       if (!legs.length) { await logSignal(s, "INFO", notes.join(" | "), candle); await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "indicator state"); return; }
       newState = { ...FLAT_STATE }; event = "EXIT";
-    } else if (entering) await armRisk(s, set, newState, entryPx!, atrNow, notes, swing);
+      // A reversal that only closes: the skipped entry used to sit inside the exit's log line, nothing else said so.
+      if (s.live) await tellOnce(s, "Position closed, new entry skipped", `The reversal closed the position but the new entry was not taken. ${String(notes.find((n) => /^Entry skipped:/.test(n)) ?? "").slice(0, 300)}`, `revskip-${s.id}-${candle.t ?? Math.floor(Date.now() / 60000)}`);
+    } else if (entering) {
+      await armRisk(s, set, newState, entryPx!, atrNow, notes, swing);
+      // Lots the desk cut by itself (limit, one-order cap, Dhan's free funds, the strategy's max): told for live entries.
+      const cuts = notes.filter((n) => /^Size: (cut to|.*⇒|.*capped at)/.test(n));
+      if (s.live && cuts.length) await tellOnce(s, "Lots cut by the desk", `This entry goes with ${newState.pos_lots ?? "fewer"} lot${Number(newState.pos_lots) === 1 ? "" : "s"}${Number(s.lots) > Number(newState.pos_lots) ? ` instead of ${s.lots}` : ""}. ${cuts.map((n) => n.replace(/^Size: /, "")).join("; ").slice(0, 280)}`, `lotcut-${s.id}-${candle.t ?? Math.floor(Date.now() / 60000)}`);
+    }
     // A second run that sees the same candle again (a slow position update) sends nothing and changes nothing.
     if (!(await claimSignal(s, event, candle))) { console.warn(`signal for ${s.id} at ${candle.t} already handled`); return; }
     const ok = await sendOrders(s, set, event, legs, notes.join(" | "), candle);
     const fills: Fill[] = [];
     const crLive = s.live && isCrypto(String(s.data_segment));
-    if (ok && exiting) fills.push(fillOf(s, "Exit", await bookPnl(s, set, update, (crLive ? deltaFill.exit : null) ?? candle.c, notes[0] ?? event)));
+    // A reversal on Delta whose closing order went while the new entry was refused: the close is real and is booked; the
+    // desk is flat (13 Nov 2026 audit — it used to be treated as "the exit didn't go", keeping a position that was gone).
+    const exitOnly = !ok && exiting && entering && lastFail.exitDone && !lastFail.open;
+    if ((ok || exitOnly) && exiting) fills.push(fillOf(s, "Exit", await bookPnl(s, set, update, (crLive ? deltaFill.exit : null) ?? candle.c, notes[0] ?? event)));
     if (ok && entering && newState.position !== "FLAT") {
       if (crLive && deltaFill.entry) newState.pos_entry_px = deltaFill.entry;
       const st = { ...s, ...newState };
       fills.push(fillOf(st, "Entry", s.trade_type === "OPTIONS" ? (newState.pos_entry_prem as number | null) : entryPx));
       Object.assign(newState, { pos_ltp: null, pos_ltp_at: null, pos_upnl: null });
     }
-    if (ok) await saveFills(fills);
+    if (ok || exitOnly) await saveFills(fills);
+    const where = isCrypto(String(s.data_segment)) ? "Delta Exchange" : "Dhan";
     if (ok) Object.assign(update, newState);
+    else if (lastFail.handledFor === s.id) { /* failRow already settled this strategy and told the owner */ }
+    else if (exitOnly) Object.assign(update, FLAT_STATE, await entryRefused(s, `the position was closed, but the new entry was refused: ${lastFail.why || "the order didn't go"}`));
     else if (exiting) await exitFailed(s, update, notes[0] ?? event, "the exit order didn't go");
-    else Object.assign(update, { last_error: `Order failed to send, so the strategy was paused. Check the log and your ${isCrypto(String(s.data_segment)) ? "Delta Exchange" : "Dhan"} positions.`, active: false });
+    else if (lastFail.open) {
+      // Part of the entry is open at the broker and the rest failed: a state the desk doesn't hold. Paused, and told.
+      Object.assign(update, { last_error: `Part of the entry filled and the rest failed, so the desk paused the strategy. Check your ${where} positions (${lastFail.why.slice(0, 120)}).`, active: false });
+      await alert(s, "Strategy paused by the desk", `Part of the entry filled at ${where} and the rest failed (${lastFail.why.slice(0, 160)}). The desk paused the strategy: check and close the open part in ${where}.`, `partpause-${s.id}-${todayIst()}`);
+    } else Object.assign(update, await entryRefused(s, lastFail.why || "the order didn't go"));
   } else if (event === "INFO") {
     await logSignal(s, event, notes.join(" "), candle);
   }
@@ -1141,6 +1167,7 @@ async function manualEntry(s: Strategy, set: Settings, update: Record<string, un
   if (Number(ltp) > 0) candle = { ...candle, c: Number(ltp) };
   if (!(Number(candle.c) > 0)) { await done("refused", "Not sent: no current price for this strategy yet."); return; }
   const lots = Math.max(1, Math.trunc(m.lots || Number(s.lots) || 1));
+  const t0 = nowIso();
   const s2 = { ...s, sizing: null, lots, _block: null, _manual: true } as unknown as Strategy;
   const e = entryLeg(s2, m.side, Number(candle.c), 1, lots);
   const r = riskOf(s);
@@ -1151,7 +1178,15 @@ async function manualEntry(s: Strategy, set: Settings, update: Record<string, un
   const { data: sig } = await sb.from("algo_signals").select("id, description, status").eq("strategy_id", s.id).order("id", { ascending: false }).limit(1).maybeSingle();
   if (after?.position === m.side) await done(s.live && !isCrypto(String(s.data_segment)) ? "sent" : "filled", `${s.live ? "Sent to the broker" : "Filled (paper)"}: ${after.pos_lots ?? lots} lot${Number(after.pos_lots ?? lots) === 1 ? "" : "s"} at about ${candle.c}${sig ? ` (signal #${sig.id})` : ""}`);
   else if (after?.exec_state) await done("sent", `Sent to the broker, being worked${sig ? ` (signal #${sig.id})` : ""}`);
-  else await done("refused", `Not placed: ${String(sig?.description ?? "see the strategy's signal log").replace(/^.*?(Entry skipped:)/, "$1").slice(0, 300)}`);
+  else {
+    // Why it wasn't placed, in the broker's or the desk's own words: the refused order row, the failed signal's answer,
+    // or the "Entry skipped: …" note of the sizing checks.
+    const { data: bad } = await sb.from("live_orders").select("note, state").eq("strategy_id", s.id).eq("purpose", "entry").gte("created_at", t0).order("id", { ascending: false }).limit(1).maybeSingle();
+    const { data: sg } = sig ? await sb.from("algo_signals").select("status, response").eq("id", sig.id).maybeSingle() : { data: null };
+    const skipped = /Entry skipped:/.test(String(sig?.description ?? "")) ? String(sig!.description).replace(/^.*?(Entry skipped:)/, "$1") : "";
+    const why = bad?.note || (sg?.status === "FAILED" ? String(sg.response ?? "") : "") || skipped || lastFail.why || "see the strategy's signal log";
+    await done("refused", `Not placed: ${String(why).replace(/\s+/g, " ").slice(0, 300)}`);
+  }
 }
 
 async function processFlip(s: Strategy, set: Settings, action: string) {
@@ -2164,6 +2199,7 @@ async function stockLotSync(s: Strategy): Promise<Strategy> {
   const lot = await stockLotNow(String(s.underlying));
   if (!lot || lot === Number(s.lot_size)) return s;
   await sb.from("algo_strategies").update({ lot_size: lot }).eq("id", s.id).eq("position", "FLAT");
+  await tellOnce(s, "Lot size changed by the exchange", `${s.underlying}: the futures lot is now ${lot} shares (was ${s.lot_size}). The desk updated the strategy; its next order of ${Number(s.lots) || 1} lot${(Number(s.lots) || 1) === 1 ? "" : "s"} is ${(Number(s.lots) || 1) * lot} shares. Check the lots still suit your capital.`, `lotsize-${s.id}-${lot}`);
   return { ...s, lot_size: lot };
 }
 /**
@@ -2443,6 +2479,48 @@ let deltaFill: { exit: number | null; entry: number | null } = { exit: null, ent
  * at the desk's price (provisional) until fixLedger puts Dhan's fills on it, and is hidden if Dhan rejects the exit.
  */
 let lastLiveBatch: string | null = null;
+/** The last failed send: why, and whether anything was left open at the broker (a part of the entry filled). */
+/**
+ * `handledFor`: the strategy whose row failRow already settled during this send (an exit Dhan refused outright: the
+ * position was put back with its retry; an entry refused: flat, owner told) — the caller must not book, flatten or
+ * count the failure again (13 Nov 2026 audit: the caller used to book the trade and write FLAT over the position put
+ * back, leaving the desk flat while Dhan still held it). `exitDone`: on Delta the closing order of a reversal went and
+ * only the new entry failed.
+ */
+type SendFail = { why: string; open: boolean; handledFor: string | null; exitDone: boolean };
+const noFail = (): SendFail => ({ why: "", open: false, handledFor: null, exitDone: false });
+let lastFail: SendFail = noFail();
+/** Refused entries in a row before the desk pauses a strategy by itself (13 Nov 2026). */
+const REFUSED_PAUSE = 3;
+/**
+ * An entry the broker refused cleanly (nothing filled, nothing resting) no longer pauses the strategy (13 Nov 2026, Papa,
+ * after the LT entry refused for "Invalid IP" paused its strategy): the desk stays flat, the strategy keeps running and
+ * takes its next signal, the order is listed under Orders › Failed orders, and the owner is told. Only REFUSED_PAUSE
+ * refusals in a row pause it (a strategy re-entering every candle must not keep hitting the broker), and that is told too.
+ * Returns the fields to write on the strategy.
+ */
+async function entryRefused(s: Strategy, why: string): Promise<Record<string, unknown>> {
+  const where = isCrypto(String(s.data_segment)) ? "Delta Exchange" : "Dhan";
+  // Refused live entries in a row, from the signal log (a Dhan order refused after it was queued is marked FAILED there too).
+  let streak = 1;
+  try {
+    const { data } = await sb.from("algo_signals").select("status").eq("strategy_id", s.id).eq("mode", "LIVE").in("event", ["ENTRY", "REVERSE"]).order("id", { ascending: false }).limit(REFUSED_PAUSE);
+    streak = 0; for (const g of data ?? []) { if (g.status === "FAILED") streak++; else break; }
+  } catch { streak = 1; }
+  streak = Math.max(1, streak);
+  const short = why.replace(/\s+/g, " ").slice(0, 160);
+  // The reply never came (network, timeout): the order may exist at the broker, so this is not a clean refusal.
+  if (/network|timed? ?out|abort|fetch failed|couldn't reach|couldn't send/i.test(why)) {
+    await alert(s, "Strategy paused by the desk", `The entry order's answer from ${where} never came (${short}), so the order may or may not exist there. The desk holds no position and paused the strategy: check your ${where} orders and positions, then activate it again.`, `unkpause-${s.id}-${todayIst()}`);
+    return { active: false, last_error: `Entry order's answer from ${where} never came (${short}). The desk holds no position and paused the strategy: check ${where}, then activate it again.` };
+  }
+  if (streak >= REFUSED_PAUSE) {
+    await alert(s, "Strategy paused by the desk", `${where} refused its entry ${streak} times in a row (${short}). No position was opened. The desk paused the strategy so it stops sending orders: fix the cause, then activate it again. The refused orders are under Orders › Failed orders.`, `refpause-${s.id}-${todayIst()}`);
+    return { active: false, last_error: `Entry refused by ${where} ${streak} times in a row (${short}). No position was opened; the desk paused the strategy. Fix the cause and activate it again.` };
+  }
+  await alert(s, "Entry refused, nothing opened", `${where} refused the entry (${short}). No position was opened. The strategy is NOT paused: it takes its next signal. You can send this one again from Orders › Failed orders.`, `refused-${s.id}-${Math.floor(Date.now() / 600000)}`);
+  return { last_error: `Entry refused by ${where}: ${short}. No position was opened; the strategy keeps running (Orders › Failed orders can send it again).` };
+}
 const ledgerTag = (s: Strategy) => s.live && !isCrypto(String(s.data_segment)) && lastLiveBatch ? { provisional: true, order_batch: lastLiveBatch } : {};
 
 /** How many of an order's legs close the current position (they go first; the rest open the new one). */
@@ -2452,12 +2530,26 @@ function exitCount(s: Strategy, event: string, legs: Record<string, unknown>[]):
   if (event === "REVERSE" || event === "ROLL") return Math.min(legs.length, asArr(exitLeg(s, 1)).length);
   return 0;
 }
+/** "LT · 75 min" / "GOLD · Daily": the short strategy name used in notification titles (13 Nov 2026, Papa). */
+function shortName(s: Strategy): string {
+  const daily = (s.strategy_kind === "RULES" && (s.rules as any)?.daily) || Number(s.timeframe_min) === 1440;
+  const tf = s.strategy_kind === "TIMED" ? String(s.bias_timeframe ?? "") : daily ? "Daily" : s.timeframe_min ? `${s.timeframe_min} min` : "";
+  const u = String(s.underlying ?? "").trim();
+  return u ? `${u}${tf ? ` · ${tf === "D" ? "Daily" : tf}` : ""}${s.live ? " (live)" : ""}` : String(s.name ?? "").slice(0, 50);
+}
+/** An automatic action told once (per tag) while this worker lives; alert()'s own check covers a restart. */
+const toldTags = new Set<string>();
+async function tellOnce(s: Strategy, title: string, body: string, tag: string) {
+  if (toldTags.has(tag)) return;
+  toldTags.add(tag); if (toldTags.size > 5000) toldTags.clear();
+  await alert(s, title, body, tag).catch((e) => console.error("tell", e));
+}
 async function alert(s: Strategy, title: string, body: string, tag?: string) {
   if (tag) {
     const { data } = await sb.from("notifications").select("id").eq("tag", tag).gte("created_at", new Date(Date.now() - 6 * 3600000).toISOString()).limit(1);
     if (data?.length) return;
   }
-  await sb.rpc("notify_tagged", { p_user: s.owner_id, p_kind: "error", p_title: `${title} · ${String(s.name ?? "").slice(0, 50)}`, p_body: body.slice(0, 400), p_url: `/?s=${s.id}`, p_strategy: s.id, p_tag: tag ?? null });
+  await sb.rpc("notify_tagged", { p_user: s.owner_id, p_kind: "error", p_title: `${title} · ${shortName(s)}`, p_body: body.slice(0, 400), p_url: `/?s=${s.id}`, p_strategy: s.id, p_tag: tag ?? null });
 }
 const brokerKey = (seg: string, sec: string) => `${seg}|${sec}`;
 
@@ -2530,6 +2622,7 @@ async function crossInside(r: LiveRow, c: Creds, px: number | null): Promise<boo
  * exit is never sent for a position the account doesn't hold (it would open a position the wrong way).
  */
 async function queueDhan(s: Strategy, set: Settings, event: string, legs: Record<string, unknown>[], description: string, candle: Candle): Promise<boolean> {
+  lastFail = noFail();
   const c = credsOf(set), today = todayIst();
   const nExit = exitCount(s, event, legs);
   const payload = { broker: "DHAN", legs };
@@ -2621,9 +2714,12 @@ async function queueDhan(s: Strategy, set: Settings, event: string, legs: Record
   const first = (ins ?? []).sort((a, b) => a.seq - b.seq).find((r) => r.state === "queued");
   if (first) {
     const ok = await placeRow(first, c);
+    // Dhan refused it outright and failRow settled the strategy (entry: flat, owner told; exit: position put back with
+    // its retry): tell the caller nothing went, so it books nothing and doesn't write over that.
+    if (!ok && lastFail.handledFor === s.id) return false;
     if (!ok && first.purpose === "entry" && !(ins ?? []).some((r) => r.purpose === "exit")) {
       await sb.from("algo_strategies").update({ exec_state: null }).eq("id", s.id);
-      return false; // a plain entry Dhan wouldn't take: nothing changed, the strategy is paused by the caller
+      return false;
     }
   } else await afterRow(s.id, batch);
   return true;
@@ -2732,7 +2828,7 @@ async function failRow(r: LiveRow, reason: string): Promise<boolean> {
   const s = (await sb.from("algo_strategies").select("*").eq("id", r.strategy_id).single()).data as Strategy | null;
   if (s) {
     const anyFilled = (await sb.from("live_orders").select("id").eq("batch", r.batch).eq("state", "filled").eq("purpose", "entry")).data?.length;
-    const upd: Record<string, unknown> = { exec_state: null, active: false };
+    let upd: Record<string, unknown> = { exec_state: null, active: false };
     if (r.purpose === "exit") {
       const exRows = (await sb.from("live_orders").select("sec, qty, filled_qty, avg_px, state").eq("batch", r.batch).eq("purpose", "exit")).data ?? [];
       const filledRows = exRows.filter((x) => x.state === "filled");
@@ -2753,14 +2849,24 @@ async function failRow(r: LiveRow, reason: string): Promise<boolean> {
         await exitFailed({ ...s, ...back } as Strategy, back, String((back.pos_broker as PosBroker | null)?.exitWhy ?? r.event ?? "exit"),
           `Dhan rejected the exit for ${r.label} (${reason.slice(0, 120)}), also at market${partQty > 0 ? `; ${partQty} of ${fullQty} had already closed` : ""}`);
         await must(() => sb.from("algo_strategies").update(back).eq("id", s.id), "position put back");
+        lastFail.handledFor = s.id;
         return false;
       }
       upd.last_error = `Exit order rejected by Dhan (${reason.slice(0, 150)}), also at market. The strategy is paused: close ${r.label} in Dhan.`;
+      await alert(s, "Strategy paused by the desk", `Dhan rejected the exit for ${r.label} (${reason.slice(0, 150)}), also at market. The desk paused the strategy: close ${r.label} in Dhan.`, `exitpause-${s.id}-${todayIst()}`);
     } else {
       // The desk takes back the entry it assumed (a structure partly opened is flagged to close by hand).
       Object.assign(upd, FLAT_STATE);
-      upd.last_error = anyFilled ? `Part of the entry filled, then Dhan rejected ${r.label} (${reason.slice(0, 120)}). The strategy is paused: close the filled legs in Dhan.`
-        : `Entry order rejected by Dhan: ${reason.slice(0, 160)}. The desk stays flat and the strategy is paused.`;
+      if (anyFilled) {
+        upd.last_error = `Part of the entry filled, then Dhan rejected ${r.label} (${reason.slice(0, 120)}). The strategy is paused: close the filled legs in Dhan.`;
+        await alert(s, "Strategy paused by the desk", `Part of the entry filled, then Dhan rejected ${r.label} (${reason.slice(0, 120)}). The desk paused the strategy: close the filled legs in Dhan.`, `partpause-${s.id}-${todayIst()}`);
+      } else {
+        // Refused cleanly, nothing filled: the desk stays flat and the strategy keeps running (paused only after 3 in a row).
+        // The signal that said "sent" now says what happened (it feeds Orders, Failed orders and the count of refusals).
+        if (r.signal_id) await sb.from("algo_signals").update({ status: "FAILED", response: `Dhan didn't take the order: ${reason}`.slice(0, 1000) }).eq("id", r.signal_id);
+        upd = { exec_state: null, ...FLAT_STATE, ...(await entryRefused(s, reason)) };
+        lastFail.handledFor = s.id;
+      }
     }
     await sb.from("algo_strategies").update(upd).eq("id", s.id);
   }
@@ -3071,6 +3177,7 @@ async function giveUp(r: LiveRow, ltp: number | null) {
   const partial = (await sb.from("live_orders").select("id").eq("batch", r.batch).eq("purpose", "entry").eq("state", "filled")).data?.length;
   await sb.from("algo_strategies").update({ ...FLAT_STATE, exec_state: null, ...(partial ? { active: false, last_error: `Part of the entry filled, then the price ran away from ${r.label}. The strategy is paused: close the filled legs in Dhan.` } : {}) }).eq("id", s.id);
   await logSignal({ ...s, live: true }, "INFO", `Entry not filled: ${r.label} moved away from the limit (${r.steps} steps). The order was cancelled and the desk is flat again.`, { c: ltp ?? undefined });
+  if (partial) await alert(s, "Strategy paused by the desk", `Part of the entry filled, then the price ran away from ${r.label} and the rest was cancelled. The desk paused the strategy: close the filled legs in Dhan.`, `partpause-${s.id}-${todayIst()}`);
   if (!partial) await alert(s, "Entry not filled", `${r.label} moved away from the limit; the order was cancelled after ${r.steps} steps and the desk is flat again. It enters on the next signal.`);
 }
 
@@ -3379,6 +3486,7 @@ async function rollFutures(s: Strategy, set: Settings, exp: string) {
     const entryL = asArr(e.leg).map((l) => ({ ...l, _after: exp }));
     const why = `Rolled to the next month before the ${exp} expiry`;
     const ok = await sendOrders(s, set, "ROLL", [...exitL, ...entryL], `${why}: ${exitLabel(s)} → ${e.label} (${next} contract)`, { c: px });
+    if (!ok && lastFail.handledFor === s.id) return;
     if (!ok) { await exitFailed(s, update, why, "the roll's exit didn't go"); await must(() => sb.from("algo_strategies").update(update).eq("id", s.id), "roll retry state"); return; }
     const out = await bookPnl(s, set, update, px, why);
     await saveFills([fillOf(s, "Exit", out), fillOf({ ...s, ...e.state, position: s.position }, "Entry", px)]);
@@ -3786,6 +3894,8 @@ Deno.serve(async (req) => {
       const brk = brkOf(breakers.get(String(s.owner_id)), !!s.live);
       s = { ...s, _block: !s.active ? "the strategy is paused (its open position keeps its stop and exit rules)" : s.kill_at ? `the kill rule stopped new trades (${String(s.kill_note ?? "").slice(0, 160)})`
         : brk.halted_at ? `new ${s.live ? "live" : "paper"} trades stopped after ${BREAKER_TICKS} failed minutes in a row (${String(brk.reason ?? "").slice(0, 160)}); "Allow new trades again" restarts them` : await entryGate(sb, s, gates).catch(() => null) };
+      // The strategy's own daily loss limit stops new entries for the day: said once (it used to be silent).
+      if (tick && s.active && !canEnter(s)) await tellOnce(s, "Daily loss limit reached", `Today's closed trades lost ${Math.trunc(Math.abs(Number(s.day_pnl) || 0)).toLocaleString("en-IN")}, at or past this strategy's daily limit. No new entries today; an open position keeps its stops and exits. It starts again tomorrow.`, `dayloss-${s.id}-${todayIst()}`);
       if (tick && isStockSeg(String(s.data_segment))) {
         // Stock futures: a split / bonus ex-date first (before any stop is checked), then the lot size in Dhan's list.
         const l = await dhanFor(set).ltp("NSE_EQ", String(s.data_security_id)).catch(() => null);

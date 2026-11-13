@@ -131,11 +131,22 @@ await t("entry chased 4 steps then given up → desk flat again, alert", async (
   assert.equal(S().position, "FLAT"); assert.equal(S().exec_state, null); assert.equal(S().active, true);
   assert.ok(db.notifications.some((n) => /Entry not filled/.test(n.title)));
 });
-await t("entry rejected → desk flat, strategy paused with Dhan's reason", async () => {
-  dhan.reject = "Insufficient margin";
+await t("entry rejected cleanly → desk flat, NOT paused, owner told; three refusals in a row → paused and told", async () => {
+  dhan.reject = "Insufficient margin"; db.notifications = db.notifications ?? []; const n0 = db.notifications.length;
   const ok = await E.queueDhan(S(), set, "ENTRY", [leg("B")], "Buy", { c: 25180 });
-  assert.equal(ok, false); assert.equal(S().exec_state, null);
-  assert.match(S().last_error, /Insufficient margin/); assert.equal(S().active, false);
+  assert.equal(ok, false); assert.equal(S().exec_state, null); assert.equal(S().position, "FLAT");
+  assert.match(S().last_error, /Insufficient margin/); assert.match(S().last_error, /keeps running/);
+  assert.equal(S().active, true, "a clean refusal no longer pauses (13 Nov 2026)");
+  assert.ok(db.notifications.slice(n0).some((n) => /Entry refused, nothing opened/.test(n.title)), "owner told");
+  dhan.reject = "Insufficient margin";
+  await E.queueDhan(S(), set, "ENTRY", [leg("B")], "Buy", { c: 25190 });
+  assert.equal(S().active, true, "second refusal: still running");
+  dhan.reject = "Insufficient margin";
+  await E.queueDhan(S(), set, "ENTRY", [leg("B")], "Buy", { c: 25200 });
+  assert.equal(S().active, false, "third refusal in a row: paused");
+  assert.match(S().last_error, /3 times in a row/);
+  assert.ok(db.notifications.some((n) => /Strategy paused by the desk/.test(n.title)), "the pause is told");
+  for (const o of db.live_orders.filter((x) => x.strategy_id === S().id && x.state === "failed")) o.state = "cancelled"; // later tests start clean
   Object.assign(S(), { active: true, last_error: null, position: "FLAT" });
 });
 await t("reversal: entry waits until the exit fills", async () => {
@@ -270,6 +281,7 @@ rpcs.delta_send = (a) => {
   if (a.p_path === "/v2/orders" && a.p_method === "POST") {
     const id = delta.next++;
     const stop = !!body.stop_order_type;
+    if (delta.rejectEntry && !stop && !body.reduce_only) return { data: { status: 400, body: JSON.stringify({ success: false, error: { code: "insufficient_margin" } }) }, error: null };
     const o = { id, ...body, state: stop ? "open" : "closed", unfilled_size: stop ? body.size : delta.partial ? 3 : 0, average_fill_price: stop ? null : "64000.5" };
     delta.orders.set(String(id), o); return R(o);
   }
@@ -303,6 +315,22 @@ await t("delta partial fill → reported as failed (strategy gets paused by the 
   delta.partial = true;
   assert.equal(await E.sendDelta(C(), dset, "ENTRY", [{ broker: "DELTA", symbol: "BTCUSD", side: "B", qty: 1, reduce_only: false }], "Buy", { c: 64000 }), false);
   delta.partial = false;
+});
+
+await t("delta reversal: the close fills, the new entry is refused → the closed trade is booked, the desk is flat, not paused", async () => {
+  // 13 Nov 2026 audit: this used to count as "the exit didn't go" — a phantom position and five failing retries.
+  Object.assign(C(), { live: true, active: true, position: "LONG", pos_qty: 1, pos_lots: 1, pos_entry_px: 64000, pos_entry_date: "2026-10-14", pos_risk: null, exec_state: null, last_error: null,
+    pos_broker: { broker: "DELTA", symbol: "BTCUSD", legs: [{ sec: "BTCUSD", seg: "DELTA", qty: 1 }], tick: 0.5, step: 0, option: false, offset: 0, fill: 64000 } });
+  delta.rejectEntry = true; const n0 = db.algo_trades.filter((x) => x.strategy_id === "c1").length;
+  const upd = {};
+  await E.finishNow(C(), dset, upd, [{ broker: "DELTA", symbol: "BTCUSD", side: "S", qty: 1, reduce_only: true }, { broker: "DELTA", symbol: "BTCUSD", side: "S", qty: 1, reduce_only: false }], "REVERSE",
+    ["Sell rules met: reversing: Sell BTCUSD x 1", "Sell BTCUSD x 1"], { position: "SHORT", pos_qty: 1, pos_lots: 1, pos_entry_date: "2026-10-15", _px: 64100 }, { t: Math.floor(clock / 60000) * 60 - 600, c: 64100 });
+  delta.rejectEntry = false;
+  assert.equal(C().position, "FLAT", "flat: the long was closed and nothing new opened");
+  assert.equal(C().exec_state ?? null, null); assert.equal(C().active, true, "a clean refusal doesn't pause");
+  assert.equal(db.algo_trades.filter((x) => x.strategy_id === "c1").length, n0 + 1, "the closed long is booked");
+  assert.match(String(C().last_error), /position was closed, but the new entry was refused/);
+  Object.assign(C(), { position: "FLAT", pos_broker: null, last_error: null });
 });
 
 // Two live crypto strategies on the same coin, one long and one short (31 Oct 2026): Delta holds the net.
