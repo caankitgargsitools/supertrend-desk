@@ -6,7 +6,7 @@
 -- is named. "Switch to paper" on a live strategy never makes a second paper twin: with a paper copy already there the
 -- live one is only paused (its position, if any, keeps its stops and exits); without one, a flat live strategy becomes
 -- the paper one and one holding a position gets a paper copy, as before.
--- A copy is recognised by the name without its "(live)" / "(paper)" tag, for the same owner, asset and kind of trade
+-- A copy is recognised by the name without its "(live)" / "(paper)" tag, for the same owner, asset, kind of trade and lab result
 -- (no link column: the two stay independent rows).
 
 create or replace function public.mode_key(p_name text) returns text language sql immutable as
@@ -18,6 +18,7 @@ language sql stable security definer set search_path = public as $$
   select t.id from public.algo_strategies s
   join public.algo_strategies t on t.owner_id = s.owner_id and t.id <> s.id and t.live = p_live and not coalesce(t.archived, false)
     and public.mode_key(t.name) = public.mode_key(s.name) and t.underlying is not distinct from s.underlying and t.trade_type is not distinct from s.trade_type
+    and t.lab_id is not distinct from s.lab_id
   where s.id = p_strategy
   order by t.active desc, t.created_at desc limit 1
 $$;

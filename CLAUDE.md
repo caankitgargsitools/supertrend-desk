@@ -473,12 +473,13 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   **Going live never takes a strategy out of Paper (13 Nov 2026, Papa: "even if I make any strategy live, that doesn't mean
   that you pick it out from paper … if I specifically remove it from paper, then only remove it from paper"; migration
   101)**: `set_live(id, true)` ALWAYS leaves the paper strategy as it is and makes a separate live copy (`mode_copy`), flat or
-  not; when it already has a live copy (`mode_twin`: same owner, asset, kind of trade and name without the "(live)" /
+  not; when it already has a live copy (`mode_twin`: same owner, asset, kind of trade, lab result and name without the "(live)" /
   "(paper)" tag, `mode_key`; not archived) nothing is made and that copy is named (`existing`, `copy_active`).
   `set_live(id, false)` on a live strategy: with a paper copy already there the live one is only paused (`paused`; an open
   position keeps its stops and exits; nothing added to Paper); without one, a flat live strategy becomes the paper one and
   one holding a position gets a paper copy. Toasts `wentLiveText` / `wentPaperText`, dialog line `PAPER_STAYS`. The 14 live
-  strategies that had been switched while flat (no paper copy) got paper copies the same day. Test: `tests/ui/ui_golive.mjs`.
+  strategies that had been switched while flat (no paper copy) got paper copies the same day ("Lab #n (paper) · …", flat,
+  running, the paper sizing they carried): 30 live and 30 running paper strategies, each live one with a paper copy. Test: `tests/ui/ui_golive.mjs`.
   **Lots typed by hand** (12 Nov 2026, Papa: "I can select or deselect strategies but can't change lots"): the New lots
   cell is a box (`data-lwlots`, `lw.manual`, blue edge when typed; empty = back to the method's figure); typed rows are
   saved as FIXED lots whatever the method. A last selection worked out from saved MOVE amounts (`derived`) is shown but no
