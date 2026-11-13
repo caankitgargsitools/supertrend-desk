@@ -62,8 +62,17 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 - `supabase/functions/engine/*.ts` — the engine (Deno edge function). **This folder is the source of truth.**
   - `index.ts` tick loop, orders (paper/live), stops, per-second prices (`pricesLoop`/`pricesTick`/`secondRisk`),
     audit, lab entry points, notifications, reconcile.
-  - `execution.ts` Dhan order client (routed through the DB function `dhan_send` for Dhan's static-IP rule:
-    IP 13.206.175.148 must be whitelisted at Dhan), chase/stop rules.
+  - `execution.ts` Dhan order client (routed through the DB function `dhan_send` for Dhan's static-IP rule), chase/stop rules.
+    **Static IP (13 Nov 2026)**: the database server is IPv6-only and reaches api.dhan.co over IPv6 from its own address
+    `2406:da1a:314:7102:21be:db71:d17e:402` — whitelisted at Dhan as the **Secondary** IP (Dhan reports SECONDARY_MATCH,
+    ordersAllowed true). `13.206.175.148` (Primary) is only Supabase's shared NAT64 gateway for IPv4-only sites, not ours;
+    forcing IPv4 (CURLOPT_IPRESOLVE) cannot reach Dhan. Both slots are locked until 19 Nov 2026. A compute upgrade or a
+    new database server may change the IPv6 address → orders refused ("Invalid IP") until re-whitelisted; check with
+    `dhan_send(p_client, p_token, 'GET', '/v2/ip/getIP', null)` (detectedIP / ipMatchStatus / ordersAllowed). Long-term
+    option offered: send Dhan orders through a server with its own permanent IP (Dhandha AWS server).
+    First live order ever: 13 Nov 2026 13:00 IST, SELL 1 lot LT NOV FUT (Lab #306159 live), refused "Invalid IP" before
+    the whitelist. Papa chose not to pause live strategies or wait for the supervised 1-lot test; unfilled orders are
+    to be placed by hand (a wizard for that is planned with him).
   - `dhan.ts` Dhan data client: per-tick memo, shared pacing (210 ms data, 1.05 s quotes per token), batched LTP.
   - `lab.ts` strategy lab (generate, screen, tougher test, quarter rule, re-verdict). `backtest.ts`, `rules.ts`,
     `risk.ts`, `logic.ts` (sessions, holidays), `crypto.ts` (Delta), `audit.ts` (daily self-check), `margins.ts`,
