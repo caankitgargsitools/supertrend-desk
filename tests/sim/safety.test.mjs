@@ -24,6 +24,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.pathname === "/v2/optionchain") return J({ data: { oc: dhan.chain[body.Expiry] ?? {} }, status: "success" });
   if (u.pathname === "/v2/orders" && m === "POST") {
     if (dhan.rejectAll) return J({ errorMessage: dhan.rejectAll }, 400);
+    if (dhan.autoFill && body.orderType === "MARKET") { const id = String(dhan.next++); dhan.orders.set(id, { ...body, orderId: id, orderStatus: "TRADED", filledQty: dhan.autoFillQty ?? body.quantity, averageTradedPrice: dhan.autoFill }); return J({ orderId: id, orderStatus: "TRANSIT" }); }
     if (dhan.reject) { const r = dhan.reject; dhan.reject = null; return J({ errorMessage: r }, 400); }
     const id = String(dhan.next++); dhan.orders.set(id, { ...body, orderId: id, orderStatus: "PENDING", filledQty: 0 });
     return J({ orderId: id, orderStatus: "TRANSIT" });
@@ -490,6 +491,20 @@ await t("live and paper capital are separate: a live entry sizes from the live c
   assert.equal(ns3.pos_qty, 1, "live room unchanged by paper margin");
   db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "cp1" && x.id !== "cp2");
 });
+await t("a crypto entry obeys the capital limit saved on the Dhan account row (the Delta row carries none)", async () => {
+  db.lab_margins = [{ asset: "SOLUSD", price: 80, fut_pct: 0.1, day_move: 0.04 }];
+  const dhanRow = db.broker_accounts.find((x) => x.user_id === "u1" && x.broker === "DHAN");
+  Object.assign(dhanRow, { capital: 400000, deploy_pct: 100, paper_capital: 400000, paper_deploy_pct: 100 });
+  const dset = { user_id: "u1", broker: "DELTA", dhan_client_id: "K", dhan_access_token: "S", capital: null, deploy_pct: null };
+  const C = add("cr1", { live: false, risk: null, lots: 20, exchange: "DELTA", data_segment: "DELTA", underlying: "SOLUSD", futures_symbol: "SOLUSD", dhan_symbol: "SOLUSD", data_security_id: "SOLUSD", lot_size: 4400 });
+  const e = E.entryLeg(C(), "SHORT", 80, 1, 20), legs = [e.leg].flat(), ns = { ...e.state, position: "SHORT" }; delete ns._px;
+  const notes = [e.label];
+  assert.equal(await E.sizeEntry(C(), dset, legs, ns, 80, notes), true);
+  // one lot: 80 × 4,400 × 10% = ₹35,200 of margin → ₹4 lakh holds 11, not the 20 asked
+  assert.equal(ns.pos_lots, 11, notes.join(" | "));
+  for (const k of ["capital", "deploy_pct", "paper_capital", "paper_deploy_pct"]) delete dhanRow[k];
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "cr1");
+});
 // ---------------- manual orders from Orders › Failed orders (13 Nov 2026) ----------------
 const clock0 = clock, ltp0 = dhan.ltp["13"];
 const mrow = (sid, side, lots, ref = null) => {
@@ -513,6 +528,54 @@ await t("manual order (paper): enters at the price now with the lots typed, even
   const m2 = mrow("mo1", "LONG", 1); await mrun(S);
   assert.equal(m2().state, "refused"); assert.match(m2().result, /already holds a short position/); assert.equal(S().position, "SHORT");
   db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "mo1");
+});
+await t("add missing lots (paper): 80 of 100 held → 20 added at the price now, average entry, stop levels kept", async () => {
+  clock = Date.parse("2026-10-20T06:00:00Z"); dhan.ltp["13"] = 25100; db.lab_margins = [{ asset: "NIFTY", price: 25000, fut_pct: 0.12, day_move: 0.02 }];
+  const S = add("ad1", { live: false, lots: 100, ...longPos({ pos_qty: 80, pos_lots: 80, pos_entry_px: 25000, pos_margin: 80 * 225000, pos_broker: null }) });
+  let res = null;
+  await E.manualAdd(S(), set, 20, async (state, result) => { res = { state, result }; });
+  assert.equal(res.state, "filled", JSON.stringify(res));
+  assert.equal(S().pos_lots, 100); assert.equal(S().pos_qty, 100); assert.equal(S().exec_state, null);
+  assert.equal(Number(S().pos_entry_px), 25020, "(80 × 25,000 + 20 × 25,100) ÷ 100");
+  assert.equal(S().pos_risk.stop, 24900, "the stop keeps its level");
+  assert.ok(S().pos_margin > 80 * 225000);
+  // nothing to add to when flat
+  Object.assign(S(), { position: "FLAT" });
+  await E.manualAdd(S(), set, 5, async (state, result) => { res = { state, result }; });
+  assert.equal(res.state, "refused"); assert.match(res.result, /holds no position/);
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "ad1");
+});
+await t("add missing lots (live Dhan): the resting stop is cancelled, one market order, the fill is merged, a new stop follows", async () => {
+  clock = Date.parse("2026-10-20T06:30:00Z"); dhan.ltp["13"] = 25100; dhan.ltp["35001"] = 25150; db.lab_margins // never earlier than the test before: the price client's pacing waits on this clock = [{ asset: "NIFTY", price: 25000, fut_pct: 0.12, day_move: 0.02 }];
+  const stopId = String(dhan.next++); dhan.orders.set(stopId, { orderId: stopId, orderStatus: "PENDING", quantity: 75, filledQty: 0 });
+  const S = add("ad2", { live: true, lots: 2, ...longPos({ pos_broker: pbOf("35001", 75, { stopId, stopTrig: 24900 }) }) });
+  dhan.autoFill = 25160; let res = null;
+  await E.manualAdd(S(), set, 1, async (state, result) => { res = { state, result }; });
+  dhan.autoFill = null;
+  assert.equal(res.state, "filled", JSON.stringify(res));
+  assert.equal(dhan.orders.get(stopId).orderStatus, "CANCELLED", "the old stop is gone before the order");
+  assert.equal(S().pos_lots, 2); assert.equal(S().pos_broker.legs[0].qty, 150); assert.equal(S().pos_broker.stopId, null, "syncStop places a new stop for 150");
+  assert.equal(Number(S().pos_broker.fill), 25080, "(25,000 + 25,160) ÷ 2 at the broker");
+  assert.equal(Number(S().pos_entry_px), 25050, "(25,000 + 25,100) ÷ 2 on the desk's own price");
+  assert.equal(S().exec_state, null); assert.equal(S().position, "LONG");
+  const row = db.live_orders.find((o) => o.strategy_id === "ad2" && /manual top-up/.test(o.note || ""));
+  assert.ok(row && row.state === "filled" && row.filled_qty === 75);
+  // a stop that can't be cancelled: nothing is sent, nothing changes
+  const stop2 = String(dhan.next++); dhan.orders.set(stop2, { orderId: stop2, orderStatus: "PENDING", quantity: 150, filledQty: 0 }); dhan.noCancel.add(stop2);
+  Object.assign(S(), { lots: 3, pos_broker: { ...S().pos_broker, stopId: stop2 } });
+  const n0 = dhan.next; dhan.autoFill = 25170;
+  await E.manualAdd(S(), set, 1, async (state, result) => { res = { state, result }; });
+  dhan.autoFill = null; dhan.noCancel.delete(stop2);
+  assert.equal(res.state, "refused"); assert.match(res.result, /couldn't be cancelled first/);
+  assert.equal(dhan.next, n0, "no order went out"); assert.equal(S().pos_lots, 2); assert.equal(S().exec_state, null);
+  // Dhan refuses the market order: the position is unchanged
+  Object.assign(S(), { pos_broker: { ...S().pos_broker, stopId: null } });
+  dhan.rejectAll = "RMS: margin";
+  await E.manualAdd(S(), set, 1, async (state, result) => { res = { state, result }; });
+  dhan.rejectAll = null;
+  assert.equal(res.state, "refused"); assert.match(res.result, /RMS: margin/); assert.equal(S().pos_lots, 2); assert.equal(S().exec_state, null);
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "ad2");
+  db.live_orders = db.live_orders.filter((x) => x.strategy_id !== "ad2");
 });
 await t("manual order outside market hours: refused, nothing sent", async () => {
   clock = Date.parse("2026-10-20T13:00:00Z"); // 18:30 IST: NSE shut

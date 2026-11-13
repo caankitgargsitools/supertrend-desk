@@ -349,7 +349,15 @@ async function dhanRate(s: Strategy): Promise<number | null> {
  */
 async function sizeEntry(s: Strategy, set0: Settings, legs: Record<string, unknown>[], newState: Record<string, any>, entryPx: number, notes: string[]): Promise<boolean> {
   // This mode's capital, count-from date and limit only: a paper strategy never sizes from the live capital or the reverse.
-  const set = modeAccount(set0, !!s.live);
+  // The capital and limit are saved on the user's Dhan account row (the Capital page); a crypto strategy runs on the
+  // Delta account row, which has none — so crypto entries skipped the "Never use more than" limit altogether
+  // (13 Nov 2026 audit: live SOL / ETH orders of ₹36 lakh went to Delta on ₹4 lakh capital, refused only for want of funds).
+  let capSrc: Settings = set0;
+  if (set0.broker !== "DHAN" && s.owner_id) {
+    const d = await accountFor(sb, String(s.owner_id), "DHAN").catch(() => null);
+    if (d) capSrc = { ...set0, capital: d.capital, capital_since: d.capital_since, deploy_pct: d.deploy_pct, paper_capital: d.paper_capital, paper_since: d.paper_since, paper_deploy_pct: d.paper_deploy_pct };
+  }
+  const set = modeAccount(capSrc, !!s.live);
   const opt = s.trade_type === "OPTIONS", multi = isMulti(s);
   // A stock in the F&O ban period takes no new positions at the exchange (12 Nov 2026, go-live review): no entry, paper
   // or live, so paper shows what live could do. Exits are allowed and go on as usual.
@@ -1150,7 +1158,7 @@ async function finishNow(s: Strategy, set: Settings, update: Record<string, unkn
 
 /* ---------- manual orders (13 Nov 2026, Papa: "fill all the rejected orders manually" — Orders › Failed orders) ---------- */
 /** The manual order being worked for a strategy in this call (the row in manual_orders, read by id in the handler). */
-const MANUAL = new Map<string, { id: number; side: Pos; lots: number; ref: number | null }>();
+const MANUAL = new Map<string, { id: number; side: Pos | "ADD"; lots: number; ref: number | null }>();
 /**
  * A manual entry goes the engine's own entry path (finish → sizing limits, one-order cap, Dhan funds check, the order or
  * the paper fill, its stop at the broker, the ledger), at the strategy's current price, with the lots typed on the page.
@@ -1160,6 +1168,7 @@ async function manualEntry(s: Strategy, set: Settings, update: Record<string, un
   const m = MANUAL.get(s.id);
   if (!m) throw new Error("No manual order found for this strategy.");
   const done = async (state: string, result: string) => { await sb.from("manual_orders").update({ state, result: result.slice(0, 400), done_at: nowIso() }).eq("id", m.id); };
+  if (m.side === "ADD") return manualAdd(s, set, m.lots, done);
   if (s.position !== "FLAT") { await done("refused", `Not sent: the strategy already holds a ${s.position.toLowerCase()} position.`); return; }
   if (s.exec_state) { await done("refused", "Not sent: orders for this strategy are still being worked at the broker. Try again in a minute."); return; }
   // The price now, not the last closed candle's (a daily strategy's candle can be a day old).
@@ -1169,7 +1178,7 @@ async function manualEntry(s: Strategy, set: Settings, update: Record<string, un
   const lots = Math.max(1, Math.trunc(m.lots || Number(s.lots) || 1));
   const t0 = nowIso();
   const s2 = { ...s, sizing: null, lots, _block: null, _manual: true } as unknown as Strategy;
-  const e = entryLeg(s2, m.side, Number(candle.c), 1, lots);
+  const e = entryLeg(s2, m.side as Pos, Number(candle.c), 1, lots);
   const r = riskOf(s);
   const atrNow = r && bars?.length ? (atrSeries(bars as any, r.atr_len ?? 14).at(-1) || 0) : 0;
   const notes = [`Manual order (Orders › Failed orders${m.ref ? `, signal #${m.ref}` : ""}): ${e.label}`];
@@ -1188,6 +1197,124 @@ async function manualEntry(s: Strategy, set: Settings, update: Record<string, un
     await done("refused", `Not placed: ${String(why).replace(/\s+/g, " ").slice(0, 300)}`);
   }
 }
+
+/**
+ * Adds lots to an open position (13 Nov 2026, Papa: "the order was filled only for 80 lots … there has to be an option to
+ * fill … that 20 lots"). Single futures positions only (no options, no structures). The same guards as an entry: the
+ * mode's "Never use more than" limit, and for live Dhan the one-order cap (held + added must still close in one order)
+ * and Dhan's free funds. Paper: booked at the price now. Live: one MARKET order, checked until the broker reports it —
+ * Dhan directly (not through the order manager, whose entry handling assumes a flat strategy; the strategy is marked
+ * "working" for those seconds so no stop or exit runs in between), Delta as its entries go. What filled is merged into
+ * the position: lots, quantity, average entry (the desk's price and the broker's fill), margin. Stops and targets keep
+ * their levels; a stop order resting at the broker is cancelled first and placed again for the new quantity by syncStop.
+ */
+async function manualAdd(s: Strategy, set0: Settings, want: number, done: (state: string, result: string) => Promise<void>) {
+  const where = isCrypto(String(s.data_segment)) ? "Delta Exchange" : "Dhan";
+  if (s.position === "FLAT") return done("refused", "Not sent: the strategy holds no position to add to.");
+  if (s.exec_state) return done("refused", "Not sent: orders for this strategy are still being worked at the broker. Try again in a minute.");
+  if (s.trade_type === "OPTIONS" || isMulti(s)) return done("refused", "Not sent: lots can be added only to a single futures position (not options or structures).");
+  const held = Number(s.pos_lots) || 0, long = s.position === "LONG";
+  if (!(held > 0)) return done("refused", "Not sent: the desk has no lot count for this position.");
+  const crypto = isCrypto(String(s.data_segment));
+  const pb = (s.pos_broker ?? null) as PosBroker | null;
+  if (s.live && (!pb || pb.legs?.length !== 1)) return done("refused", `Not sent: the desk has no single ${where} leg on record for this position.`);
+  const px = Number(await dhanFor(set0).ltp(s.data_segment, String(s.data_security_id)).catch(() => null)) || Number(s.pos_ltp) || 0;
+  if (!(px > 0)) return done("refused", "Not sent: no current price for this strategy.");
+  let add = Math.max(1, Math.trunc(Number(want) || 0));
+  const notes: string[] = [];
+  // The mode's capital limit (the capital lives on the Dhan account row, also for crypto).
+  let capSrc: Settings = set0;
+  if (set0.broker !== "DHAN" && s.owner_id) {
+    const d = await accountFor(sb, String(s.owner_id), "DHAN").catch(() => null);
+    if (d) capSrc = { ...set0, capital: d.capital, capital_since: d.capital_since, deploy_pct: d.deploy_pct, paper_capital: d.paper_capital, paper_since: d.paper_since, paper_deploy_pct: d.paper_deploy_pct };
+  }
+  const set = modeAccount(capSrc, !!s.live);
+  const rate = await dhanRate(s).catch(() => null);
+  const mLot = marginPerLot(s as any, rate ? { margin_pct: rate * 100 } as any : null, px, null);
+  if (Number(set.capital ?? 0) > 0 && mLot > 0) {
+    const cs = await capitalState(set, !!s.live, s.id);
+    const fit = fixedLotsFit(add, mLot, cs.equity, cs.used + (Number(s.pos_margin) || 0), Number(set.deploy_pct ?? 100), true);
+    if (fit.lots < 1) return done("refused", `Not sent: ${fit.why}.`);
+    if (fit.lots < add) { add = fit.lots; notes.push(`cut to ${add} by your limit`); }
+  }
+  if (s.live && !crypto) {
+    const cap = await orderCapLots(s, {}).catch(() => null);
+    if (cap && held + add > cap.lots) {
+      if (cap.lots - held < 1) return done("refused", `Not sent: the position already holds the most one exchange order can carry (${cap.why}).`);
+      add = cap.lots - held; notes.push(`cut to ${add}: one order carries ${cap.lots} lots`);
+    }
+    const free = await dhanAvailable(set0);
+    if (free != null && mLot > 0) {
+      const fit = Math.floor(Math.max(0, free * 0.95) / mLot);
+      if (fit < 1) return done("refused", `Not sent: Dhan shows ₹${Math.trunc(free).toLocaleString("en-IN")} free; 1 lot needs about ₹${Math.trunc(mLot).toLocaleString("en-IN")} of margin.`);
+      if (fit < add) { add = fit; notes.push(`cut to ${add} by Dhan's free funds`); }
+    }
+  }
+  // Take the strategy for these seconds: no stop, exit or signal may act on it while the order is out.
+  const { data: got } = await sb.from("algo_strategies").update({ exec_state: "working", exec_at: nowIso() }).eq("id", s.id).is("exec_state", null).neq("position", "FLAT").select("id");
+  if (!got?.length) return done("refused", "Not sent: the strategy is busy (an exit or another order is under way).");
+  const release = async (extra: Record<string, unknown> = {}) => { await must(() => sb.from("algo_strategies").update({ exec_state: null, exec_at: null, ...extra }).eq("id", s.id), "position after adding lots"); };
+  let addedLots = 0, brokerPx: number | null = null, pbNew: PosBroker | null = pb;
+  try {
+    if (!s.live) { addedLots = add; }
+    else if (crypto) {
+      const sym = String(pb!.symbol ?? pb!.legs[0].sec), perLot = contractsFor(sym, Number(s.lot_size), 1) || 1;
+      if (pb!.stopId) { try { await deltaCancel(sb, set0.user_id, sym, pb!.stopId); } catch (e) { await release(); return done("refused", `Not sent: the stop order at Delta couldn't be cancelled first (${e instanceof Error ? e.message.slice(0, 120) : e}).`); }
+        await sb.from("live_orders").update({ state: "cancelled", done_at: nowIso(), note: "cancelled: lots are being added; a new stop follows" }).eq("broker_order_id", pb!.stopId).eq("state", "resting"); }
+      const st = await deltaOrderChecked(sb, set0.user_id, { symbol: sym, size: contractsFor(sym, Number(s.lot_size), add), side: long ? "buy" : "sell", reduceOnly: false });
+      const filled = st.size - st.unfilled;
+      addedLots = Math.floor(filled / perLot); brokerPx = st.avg ?? null;
+      pbNew = { ...pb!, legs: [{ ...pb!.legs[0], qty: Number(pb!.legs[0].qty) + (long ? 1 : -1) * filled }], stopId: null, stopTrig: null, stopRow: null, stopErrAt: null };
+      if (!(filled > 0)) { await release({ pos_broker: pbNew }); return done("refused", `Not filled at Delta Exchange (order ${st.id || "?"} ${st.state}).`); }
+    } else {
+      const c = credsOf(set0), leg = pb!.legs[0], mcx = leg.seg === "MCX_COMM";
+      const perLot = mcx ? 1 : Math.abs(Number(leg.qty)) / held || Number(s.lot_size) || 1;
+      if (pb!.stopId) {
+        const gone = await cancelStop(c, pb!.stopId);
+        if (gone !== "cancelled") { await release(); return done("refused", gone === "traded" ? "Not sent: the stop order at Dhan filled just now — the position is closing." : `Not sent: the stop order at Dhan couldn't be cancelled first (${String(gone).slice(0, 120)}).`); }
+        await sb.from("live_orders").update({ state: "cancelled", done_at: nowIso(), note: "cancelled: lots are being added; a new stop follows" }).eq("broker_order_id", pb!.stopId).eq("state", "resting");
+      }
+      pbNew = { ...pb!, stopId: null, stopTrig: null, stopRow: null, stopErrAt: null };
+      const qty = Math.round(add * perLot), tag = `agadd${Date.now() % 100000000}`;
+      let id = "";
+      try { id = (await dhanPlace(c, { sec: leg.sec, seg: leg.seg, product: leg.product ?? "MARGIN", side: long ? "BUY" : "SELL", qty, type: "MARKET", tag } as any)).id; }
+      catch (e) {
+        const found = /timed? ?out|abort|network|fetch/i.test(String(e)) ? await dhanByTag(c, tag).catch(() => null) : null;
+        if (!found) { await release({ pos_broker: pbNew }); return done("refused", `Not placed: ${e instanceof Error ? e.message.slice(0, 250) : String(e)}`); }
+        id = found.id;
+      }
+      let st: BrokerStatus | null = null;
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, i ? 800 : 400));
+        st = await dhanStatus(c, id).catch(() => null);
+        if (st && /TRADED|REJECTED|CANCELLED|EXPIRED/i.test(st.status) && !/PART/i.test(st.status)) break;
+      }
+      if (st && !/TRADED|REJECTED|CANCELLED|EXPIRED/i.test(st.status)) { await dhanCancel(c, id).catch(() => null); st = await dhanStatus(c, id).catch(() => st); }
+      const filled = Number(st?.filled) || 0;
+      addedLots = mcx ? filled : Math.floor(filled / perLot); brokerPx = st?.avg ?? null;
+      await sb.from("live_orders").insert({ user_id: s.owner_id, strategy_id: s.id, batch: crypto_uuid(), seq: 0, purpose: "entry", side: long ? "BUY" : "SELL", qty, seg: leg.seg, sec: leg.sec, product: leg.product ?? "MARGIN",
+        label: `${s.underlying} (lots added)`, lot: perLot, tick: pb!.tick, option: false, state: filled > 0 ? "filled" : "failed", broker: "DHAN", broker_order_id: id, correlation_id: tag, avg_px: brokerPx, filled_qty: filled,
+        ref_px: px, placed_at: nowIso(), done_at: nowIso(), note: filled > 0 ? `manual top-up: ${filled} of ${qty} filled` : `manual top-up not filled: ${st?.reason ?? st?.status ?? "no answer"}`.slice(0, 300) });
+      if (!(filled > 0)) { await release({ pos_broker: pbNew }); return done("refused", `Not filled at Dhan: ${st?.reason ?? st?.status ?? "no answer from Dhan (check your Dhan order book)"}.`); }
+      pbNew = { ...pbNew, legs: [{ ...leg, qty: Number(leg.qty) + (long ? 1 : -1) * filled }] };
+    }
+    if (!(addedLots > 0)) { await release({ pos_broker: pbNew }); return done("refused", "Nothing was added: less than one lot filled. Check the position at the broker."); }
+    const total = held + addedLots, wavg = (a: number, b: number) => +((a * held + b * addedLots) / total).toFixed(4);
+    if (pbNew && brokerPx != null) pbNew = { ...pbNew, fill: pbNew.fill != null ? wavg(Number(pbNew.fill), brokerPx) : brokerPx };
+    const upd: Record<string, unknown> = { pos_lots: total, pos_qty: Number(s.pos_qty) > 0 ? Number(s.pos_qty) * total / held : s.pos_qty, pos_entry_px: wavg(Number(s.pos_entry_px) || px, crypto && brokerPx ? brokerPx : px),
+      pos_margin: Math.trunc((Number(s.pos_margin) || 0) + mLot * addedLots), pos_ltp: null, pos_ltp_at: null, pos_upnl: null, ...(s.live ? { pos_broker: pbNew } : {}) };
+    await release(upd);
+    const how = `${addedLots} lot${addedLots === 1 ? "" : "s"} added at ${brokerPx ?? px}${notes.length ? ` (${notes.join("; ")})` : ""}; the position is now ${total} lot${total === 1 ? "" : "s"}`;
+    await logSignal({ ...s, ...upd } as Strategy, "INFO", `Manual order (Orders › Failed orders): ${how}. Stops and targets keep their levels.`, { c: px }, s.live ? "SENT" : "LOGGED");
+    if (s.live) await alert(s, "Lots added", `${how} at ${where}. Stops and targets keep their levels${pb?.stopId ? "; the stop order at the broker is placed again for the new quantity within a minute" : ""}.`);
+    return done("filled", `${s.live ? `Filled at ${where}` : "Filled (paper)"}: ${how}.`);
+  } catch (e) {
+    await release(s.live ? { pos_broker: pbNew } : {}).catch(() => null);
+    await alert(s, "Adding lots failed", `The order to add lots ran into an error (${e instanceof Error ? e.message.slice(0, 200) : String(e)}). Check the position at ${where}: the desk still holds ${held} lot${held === 1 ? "" : "s"}.`);
+    return done("refused", `Error while adding lots: ${e instanceof Error ? e.message.slice(0, 250) : String(e)}. Check the position at ${where}.`);
+  }
+}
+const crypto_uuid = () => crypto.randomUUID();
 
 async function processFlip(s: Strategy, set: Settings, action: string) {
   const dhan = dhanFor(set);
@@ -3751,10 +3878,10 @@ Deno.serve(async (req) => {
   if ((action === "flatten" || action === "refresh" || action === "manual_entry") && !body.strategy_id) return Response.json({ error: `${action} needs a strategy_id` }, { status: 400 });
   if (action === "manual_entry") {
     // The order's details come from its own row (written by manual_order() after the owner check), never from the body.
-    const { data: mo } = await sb.from("manual_orders").select("id, side, lots, ref_signal, state").eq("strategy_id", body.strategy_id).eq("state", "queued").order("id", { ascending: false }).limit(1).maybeSingle();
+    const { data: mo } = await sb.from("manual_orders").select("id, side, lots, ref_signal, state, add_to").eq("strategy_id", body.strategy_id).eq("state", "queued").order("id", { ascending: false }).limit(1).maybeSingle();
     if (!mo) return Response.json({ error: "no queued manual order for this strategy" }, { status: 400 });
     await sb.from("manual_orders").update({ state: "working" }).eq("id", mo.id);
-    MANUAL.set(String(body.strategy_id), { id: Number(mo.id), side: mo.side as Pos, lots: Number(mo.lots) || 1, ref: mo.ref_signal == null ? null : Number(mo.ref_signal) });
+    MANUAL.set(String(body.strategy_id), { id: Number(mo.id), side: mo.add_to ? "ADD" : mo.side as Pos, lots: Number(mo.lots) || 1, ref: mo.ref_signal == null ? null : Number(mo.ref_signal) });
   }
   const cryptoTick = action === "tick_crypto";
   if (action === "tick" && (nowIst.wd === 0 || nowIst.wd === 6)) return Response.json({ skipped: "weekend" });

@@ -14,7 +14,7 @@ if (!/Send real orders to Dhan\?/.test(txt)) fail("title", txt.slice(0, 200));
 const cells = await p.$$eval("#confirmBox table.golive tbody tr", (r) => r.map((x) => [...x.children].map((c) => c.textContent.replace(/\s+/g, " ").trim())));
 if (cells.length !== 1) fail("one summary row", cells);
 const [asset, lots, margin, stop, exp] = cells[0];
-if (!/Gold/.test(asset) || lots !== "1 lot" || !/≈ ₹1,30,000/.test(margin) || !/1%/.test(stop) || !/rolls the day before expiry/.test(exp)) fail("summary cells", cells[0]);
+if (!/GOLD · Daily/.test(asset) || lots !== "1 lot" || !/≈ ₹1,30,000/.test(margin) || !/1%/.test(stop) || !/rolls the day before expiry/.test(exp)) fail("summary cells", cells[0]);
 if (!/charges apply to every order/.test(txt)) fail("charges note");
 // First go-live: LIVE must be typed; "live" in small letters counts.
 if (!(await p.$("#cf_live"))) fail("typed LIVE field for the first go-live");
@@ -43,7 +43,7 @@ await p.click("#cf_no");
 await p.evaluate(() => { showPage("list"); lsel.add("n1"); renderList(); }); await p.waitForTimeout(400);
 await p.click('#lp_bulk [data-bulk="live"]'); await p.waitForSelector("#confirmBox:not([hidden]) .confirm");
 const bulk = await p.$$eval("#confirmBox table.golive tbody tr", (r) => r.map((x) => x.textContent.replace(/\s+/g, " ")));
-if (bulk.length !== 1 || !/Nifty/.test(bulk[0]) || !/squared off daily at 23:15/.test(bulk[0])) fail("bulk summary", bulk);
+if (bulk.length !== 1 || !/NIFTY/.test(bulk[0]) || !/squared off daily at 23:15/.test(bulk[0])) fail("bulk summary", bulk);
 await p.click("#cf_no");
 if (errs.length) fail("page errors", errs);
 console.log("ok go-live dialog", theme, width);

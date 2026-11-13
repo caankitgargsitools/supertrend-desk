@@ -174,6 +174,22 @@ const der = await p.evaluate(() => {
   const v = $("lw_moveAmt").value; localStorage.removeItem(`lwLast:${cap.mode}`); return v;
 });
 if (der === "3724722") fail("derived amount typed in", der);
+// Autofill (13 Nov 2026): a small typed amount leaves most of the limit unused; Autofill clears it, sizes to the limit
+// and spends what is left with extra lots — never above the limit, never more than 1.5 × the equal amount on one strategy.
+const af = await p.evaluate(() => {
+  lw.manual = {}; lw.off = new Set(); lw.typesOff = new Set(); lw.method = "move"; $("lw_cap").value = "10000000"; $("lw_capPct").value = "60"; $("lw_moveAmt").value = "5000"; lwRender();
+  const used = () => lw.plan.filter((r) => r.on).reduce((a, r) => a + (r.used || 0), 0);
+  const before = used();
+  $("lw_auto").click();
+  const on = lw.plan.filter((r) => r.on && r.move), T = lw.target || 0;
+  return { before, after: used(), limit: 6000000, amt: $("lw_moveAmt").value, msg: $("lw_msg").textContent, worst: Math.max(...on.map((r) => (r.lots || 0) * r.move)), T,
+    smallest: Math.min(...on.filter((r) => r.margin).map((r) => r.margin)) };
+});
+if (af.amt !== "" || !(af.after > af.before * 3)) fail("autofill uses far more of the limit than the typed amount did", af);
+if (af.after > af.limit) fail("autofill stays inside the limit", af);
+if (af.limit - af.after >= af.smallest && af.worst < af.T * 1.5 - 1) fail("autofill leaves margin a lot would still fit in", af);
+if (af.worst > af.T * 1.5 + 1) fail("no strategy above 1.5 × the equal amount", af);
+if (!/Autofill: about/.test(af.msg) || !/of the ₹60,00,000 limit/.test(af.msg)) fail("autofill message", af.msg);
 if (errs.length) fail("page errors", errs);
 console.log("ok lots wizard", theme, width);
 await b.close();

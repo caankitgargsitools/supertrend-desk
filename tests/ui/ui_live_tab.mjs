@@ -23,7 +23,7 @@ const more = await p.textContent("#lv_more");
 if (!/Show every column \(\d+ more\)/.test(more)) fail("more-columns button", more);
 await p.click("#lv_more"); await p.waitForTimeout(300);
 h = await heads();
-if (!h.includes("Capital") || !h.includes("Return") || !h.includes("CAGR") || !h.includes("Profit factor")) fail("every column", h);
+if (!h.includes("Capital tied up") || !h.includes("Return") || !h.includes("CAGR") || !h.includes("Profit factor")) fail("every column", h);
 if (/Set a capital/.test(await p.textContent("#lv_top"))) fail("no capital hint while one strategy has a capital");
 await p.click("#lv_more"); await p.waitForTimeout(200); if ((await heads()).length > 8) fail("back to 8");
 // Without any capital figure: Return / CAGR / Capital columns go and the one hint says why.

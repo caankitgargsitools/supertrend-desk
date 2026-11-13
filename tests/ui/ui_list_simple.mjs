@@ -57,9 +57,9 @@ if (width > 700) {
   let h = await heads();
   if (h.join("|") !== "Asset|Long / short|Lots|Running P&L|Booked P&L|Status") fail("simple headings", h);
   const row = await p.$$eval("#lp_body tr", (r) => r.map((x) => x.textContent));
-  if (!row.some((t) => /Gold/.test(t) && /Short/.test(t))) fail("gold short row", row);
+  if (!row.some((t) => /GOLD · Daily/.test(t) && /Short/.test(t))) fail("gold short row", row);
   // An exit being retried (4 Nov 2026) is marked on its row in both views.
-  if (!row.some((t) => /Gold/.test(t) && /Exit retrying/.test(t))) fail("exit retrying chip (simple)", row);
+  if (!row.some((t) => /GOLD/.test(t) && /Exit retrying/.test(t))) fail("exit retrying chip (simple)", row);
   if (!/1 lots?|1/.test(await p.textContent("#lp_tfoot"))) fail("totals");
   await p.screenshot({ path: `list_simple_${theme}_${width}.png` });
   await p.click('#lp_view [data-v="full"]'); await p.waitForTimeout(200);

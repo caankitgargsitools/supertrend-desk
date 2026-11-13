@@ -501,6 +501,73 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   order or paper fill, stop at the broker, booking); a manual order ignores pause / kill rule / breaker (`_manual` survives
   finishNow's re-read); refused when the market is shut. The card polls every 4 s while one is being worked. Tests:
   `tests/sim/safety.test.mjs` "manual order", `tests/ui/ui_failed_orders.mjs` (args: theme width).
+- **Audit 13 Nov 2026 after the first live orders (Papa: "audit everything thoroughly … one 1,000% sure"; engine v158 → v159,
+  migrations 96–100; three read-only reviews: engine automatic actions, website figures, database security)**:
+  - **First live position**: 13 Nov 14:48 IST, SHORT 1 lot LT NOV FUT (Lab #306159 live) at 4,154.1, sent from Orders › Failed
+    orders after Papa generated a new Dhan token (a token made BEFORE the static IP was registered is refused with
+    "Invalid IP" although /v2/ip/getIP says ordersAllowed). No stop on it (the strategy has none).
+  - **Refused entry no longer pauses** (`entryRefused`, `REFUSED_PAUSE = 3`): a broker refusal with nothing filled leaves the
+    desk flat and the strategy running, tells the owner ("Entry refused, nothing opened"), marks the signal FAILED (so it
+    is under Failed orders) — only 3 refusals in a row pause it ("Strategy paused by the desk"); an answer that never came
+    (network / timeout) or a part-filled entry still pauses, told. `lastFail` (`SendFail`: why / open / handledFor /
+    exitDone) carries what the send left behind.
+  - **Order-path bugs fixed**: (1) an exit Dhan refused outright (limit and market, inside the send) — `failRow` put the
+    position back but `queueDhan` returned true and the caller booked the trade and wrote FLAT over it (desk flat, Dhan
+    still holding): `lastFail.handledFor` now stops `finishNow` / `flattenNow` / `riskExitNow` / `rollFutures` from booking
+    or writing. (2) Delta reversal whose close filled and new entry was refused was treated as "exit didn't go" (phantom
+    position, five failing retries): the close is booked, the desk is flat (`exitOnly`). (3) Crypto entries skipped the
+    capital limit altogether (the capital lives on the DHAN account row; the Delta row has none): `sizeEntry` /
+    `manualAdd` read it from the Dhan row. (4) `engine_minute` gated tick_crypto / reconcile, and job 24 (prices), on
+    ACTIVE strategies: a paused strategy holding a position (Emergency stop, a pause by the desk) lost its crypto tick,
+    broker match and per-second stops — now `(active or position <> 'FLAT')`; `orders` also runs while any strategy is
+    "working". (5) The phone said "Filled" when a Dhan order was only queued: `trg_live_pos_notify` needs the broker fill.
+    (6) A manual order stayed "Sent to broker" after the fill: trigger `manual_order_sync` on live_orders.
+  - **Automatic actions now told** (`tellOnce` / `alert`, titles carry `shortName(s)`): pause by the desk (every cause),
+    lots cut by the desk on a live entry (limit, one-order cap, Dhan funds, max lots), a reversal that closed but skipped
+    the new entry, lot size changed by the exchange (`stockLotSync`), daily loss limit reached, entry refused. Still only
+    in the log: trailing moves of the broker stop, a stop not placed outside the band / session (reconcile alerts after
+    5 min), exit quantity cut to Dhan's holding, internal match (`crossInside`), exit turned to market, light mode,
+    skipped ticks, token renewed.
+  - **Security (migration 96)**: `trade_story` / `morning_card` / `client_statement` / `slippage_summary` were executable by
+    anon and their guard is skipped without a JWT (anyone with the public key could read trades, positions and
+    statements) — EXECUTE revoked from public / anon there and on every other client function; default privileges no
+    longer grant EXECUTE to public / anon for new functions (grant to `authenticated` explicitly in each migration);
+    `listings` no longer readable by anon; schema `net` closed to clients; `guard_strategy` refuses archive / back-to-paper
+    while a position is open; a strategy with LIVE trades can't be deleted by its owner (policy `strategies_user_delete`).
+  - **Website**: short names (`sName` / `sNameH` / `snBase`, "LT · 75 min"; a lab number only when two strategies of a mode
+    share asset and timeframe; full name on hover; "Full names" tick, localStorage `snFull`; `tfLabel` 1440 → Daily); the
+    Home card is a summary with the positions folded (`homeOpen`) and follows All | Live | Paper; Trades tab's "Open now"
+    was drawn twice (`#tf_open` lacked `.tlist`); one Live / Paper control (the Mode select and the phone's quick "Live"
+    are gone); per-mode trade counts (`pnlOf`), totals row / phone tiles / self-check gap per mode (`byModeHtml`), Compare
+    and the drawdown check use the strategy's own mode's trades; Lots wizard starts clean on a mode switch; Dhan funds
+    only on the Live Capital screen; one margin figure (`runOf` uses `marginDeployed`); statement's by-strategy / by-asset
+    rows carry wins / gross / costs (migration 98). **Lots wizard Autofill** (`lwAutofill`, `#lw_auto`): clears the typed
+    ₹-a-day amount (a typed amount is fixed whatever the capital — that is how ₹7 lakh sat on ₹75 crore), sizes "same ₹
+    a day" to the limit, then adds lots one at a time where they fit, never past 1.5 × the equal amount; extra lots show
+    as typed lots. Still open from the review: Booked P&L has four slightly different scopes (all trades of the mode /
+    since the count-from date / shown strategies only / this live stint) — reconcile behind one helper.
+  - **Orders › Failed and short orders**: rows are keyed (`key` = `sig-<id>` / `short-<strategy>`); a failed entry whose
+    strategy holds a position by now is settled; **short fills** (migration 99): every open single-futures position
+    holding fewer lots than the strategy's `lots` is listed ("Holding 80 of 100 lots · 20 lots missing") with "Add the
+    missing lots" → `manual_order(…, 'ADD', n)` (`manual_orders.add_to`) → engine `manualAdd`: the mode's limit, one-order
+    cap and Dhan funds as at an entry; paper booked at the price now; live Dhan = the resting stop cancelled (confirmed),
+    one MARKET order polled until final (not through the order manager; the strategy is "working" for those seconds), the
+    fill merged (lots, quantity, average entry on the desk's price and on the broker's fill, margin), stop levels kept,
+    `stopId` cleared so syncStop places a stop for the new quantity; Delta likewise. Tested in simulation only — the
+    first real top-up should be watched. Tests: `tests/sim/safety.test.mjs` "add missing lots", `ui_failed_orders.mjs`.
+  - **Ready to trade? (migration 100)**: `readiness_compute(user)` → Live and Paper check lists (ok / warn / fail / off, each
+    with what to do): Dhan token hours; Dhan's own answer to "are orders allowed from this address" (`/v2/ip/getIP` through
+    `dhan_send`); token older than the registered address (JWT `iat` vs the IP's change date); Dhan free funds against
+    each live strategy's one lot and planned lots; live lots against the live capital — fail when a strategy's planned
+    lots move more than 25% of the live capital on a normal day (paper sizing carried into live); Delta key / empty
+    wallet; live strategies without a stop; data plan; breaker; exits being retried; paused with an error; engine not
+    running; paper capital at or below zero / margin above the limit. `readiness_check()` (caller, at most every 20 s,
+    stored in `readiness_runs`), `readiness_latest()`, `readiness_cron()` hourly at :23 (cron `readiness-check`) for
+    accounts with a live strategy: a LIVE check newly red → notification "Check before trading: …" (kind error,
+    `/?home=1`). Home card `#lp_ready` (`loadReady` / `renderReady`; red and amber open, green folded, "Check now").
+    Test: `tests/ui/ui_ready.mjs`. On 13 Nov it showed for Papa: 22 live strategies sized far beyond ₹4 lakh (GOLD 10 lots
+    ≈ ₹21 lakh a day — the live copies still carry paper's ₹37 lakh-a-day sizing, max 10 lots), Delta wallet 0 with 6 live
+    crypto strategies, Dhan funds ₹2.71 lakh short of one lot for 7 of 22, 7 of 28 live without a stop.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
@@ -776,7 +843,7 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   per-second quote loop shares that token — the two ways out are Dhan's WebSocket feed (Papa: not now) or building the
   minute candles from the desk's own per-second prices (`price_bars`, as `owncandles.ts` does when Dhan refuses) at the
   cost of candles that differ slightly from Dhan's; Papa to choose. Lab run 966 (stuck since 6 Nov 07:53 IST) was closed by the engine watchdog. **(1) answered 11 Nov 2026
-  (Papa: "On")**: jobs 3 (watchdog), 10 (lab-next), 26 (ideas-lab), 29 (lab-combos) switched back on; 2 (start), 12 (long tests),
+  (Papa: "On")**: jobs 3 (watchdog), 10 (lab-next), 26 (ideas-lab), 29 (lab-combos) switched back on (**off again 13 Nov 2026**, Papa, after two database outages on 12 and 13 Nov; the compute upgrade waits for the Dhan IP lock to end on 19 Nov); 2 (start), 12 (long tests),
   15 (options pricing) stay off. **Found that night**: the Ideas Lab had stood still since 4 Nov — its ledger `idea_tries` passed
   1,000 rows, `registerIdeas` read only the first 1,000 and its insert hit the unique key every instalment. Fixed (engine
   v150): `registerIdeas`, the open-tries read and the luck test's ledger read go through `pagedRows`; the insert is an upsert

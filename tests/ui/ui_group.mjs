@@ -121,7 +121,8 @@ if (!marks.includes("On desk · Live") || !marks.includes("On desk · Paper")) f
 const live = (await p.$$(".chip.ondesk")).find(async () => true);
 await p.click(".chip.ondesk:text('On desk · Live') >> nth=0"); await p.waitForTimeout(600);
 if (await p.isHidden("#stratPane")) fail("on-desk mark opens the strategy");
-if (!/Lab #90[1]|Lab #911/.test(await p.textContent("#sp_name"))) fail("opened a live strategy", await p.textContent("#sp_name"));
+// Short name as the title (13 Nov 2026), the full name on hover.
+if (!/Lab #90[1]|Lab #911/.test(await p.getAttribute("#sp_name", "title")) || !/^(GOLD|NIFTY) · /.test(await p.textContent("#sp_name"))) fail("opened a live strategy", await p.textContent("#sp_name"));
 if (errs.length) fail("page errors", errs);
 console.log("ok strategies grouped by asset", theme, width);
 await b.close();
