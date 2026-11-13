@@ -4216,17 +4216,35 @@ function wireLiveType() {
   if (tick) tick.addEventListener("change", check);
   check(); (inp || tick).focus();
 }
+/* Live and Paper never move into each other (13 Nov 2026, Papa: "even if I make any strategy live, that doesn't mean
+   that you pick it out from paper"; migration 101). Go live = a separate live copy; the paper strategy stays as it is.
+   Switch to paper = the live one stops (paused; a position it holds keeps its stops and exits); it becomes the paper
+   strategy only when it is flat and has no paper copy. set_live answers { live, copy, copy_mode, existing, paused,
+   holding, copy_active, copy_name }. */
+const PAPER_STAYS = "The paper strategy stays in Paper and keeps running; a separate live copy is made for the real orders.";
+function wentLiveText(r) {
+  if (!r || !r.copy) return "Live. Real orders will be sent.";
+  if (r.existing) return r.copy_active ? "It already runs live as a separate copy. Nothing changed; the paper one keeps running on paper."
+    : "It already has a live copy, which is paused. Activate that one in the Live list. The paper one keeps running on paper.";
+  return "A separate live copy was made: it trades live from its own next signal. The paper one stays in Paper and keeps running.";
+}
+function wentPaperText(r) {
+  if (!r || !r.live) return "Paper mode. Orders are logged, not sent.";
+  const pos = r.holding ? " Its live position keeps its stops and exits until it closes." : "";
+  return r.existing ? `Paused in Live: no new live orders.${pos} Its paper copy keeps running on its own.`
+    : `Paused in Live: no new live orders.${pos} A separate paper copy now trades on paper.`;
+}
 $("b_live").addEventListener("click", () => {
   const s = cur();
-  if (s.live) return run($("b_live"), async () => { const r = must(await db.rpc("set_live", { p_strategy: s.id, p_live: false })); await loadAll(); toast(r && r.copy ? "Its live position stays live until it closes (no new live entries). A separate paper copy now trades on paper." : "Paper mode. Orders are logged, not sent."); });
+  if (s.live) return run($("b_live"), async () => { const r = must(await db.rpc("set_live", { p_strategy: s.id, p_live: false })); await loadAll(); toast(wentPaperText(r)); });
   if (isCrypto(s.data_segment)) { if (!deltaSt || !deltaSt.has_key || !deltaSt.has_secret) { toast("Add your Delta Exchange API key and secret under Connections first."); openConn(); return; } }
   else if (!state.settings || !state.settings.has_url) { toast("Add your order webhook URL under Dhan connection first."); openConn(); return; }
   const bl = (me && me.billing) || {}, fee = Number(bl.deploy_fee || 0);
   const feeTxt = me && me.role !== "admin" && fee > 0 && !bl.trial_active && !(s.deploy_paid_until && s.deploy_paid_until >= istDate(0))
     ? `<br>A deployment fee of <strong>${rupees(fee)}</strong>${bl.deploy_fee_period === "ONE_TIME" ? " (once)" : " (for the next month)"} will be taken from your wallet.` : "";
   askConfirm((isCrypto(s.data_segment) ? "<strong>Send real orders to Delta Exchange?</strong><br>From the next signal, this strategy places market orders on Delta Exchange India with your API key. Crypto trades round the clock and moves fast; check the paper-mode log first." : "<strong>Send real orders to Dhan?</strong><br>From the next signal, this strategy posts orders to your Dhan webhook, on your own account. Check the paper-mode log first.")
-    + goLiveSummary([s]) + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + feeTxt + sameAssetWarn([s]) + noStopHTML([s]) + liveTypeHTML(),
-    "Go live", async () => run($("b_live"), async () => { const r = must(await db.rpc("set_live", { p_strategy: s.id, p_live: true })); await loadAll(); await refreshMe(); toast(r && r.copy ? "It holds a paper position, which stays paper here. A separate live copy (flat) was made: it trades live from its own next signal." : "Live. Real orders will be sent."); }), true);
+    + `<br>${PAPER_STAYS}` + goLiveSummary([s]) + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + feeTxt + sameAssetWarn([s]) + noStopHTML([s]) + liveTypeHTML(),
+    "Go live", async () => run($("b_live"), async () => { const r = must(await db.rpc("set_live", { p_strategy: s.id, p_live: true })); await loadAll(); await refreshMe(); toast(wentLiveText(r)); }), true);
   wireLiveType();
 });
 $("b_flat").addEventListener("click", () => {
@@ -9860,10 +9878,11 @@ async function bulkAction(kind) {
     if (!todo.length) { toast("They are all in paper mode already."); return; }
     run(btn, async () => {
       const bad = [];
-      let copies = 0;
-      for (const s of todo) { const { data, error } = await db.rpc("set_live", { p_strategy: s.id, p_live: false }); if (error) bad.push(`${s.name}: ${errorText(error)}`); else if (data && data.copy) copies++; }
+      let moved = 0, paused = 0, holding = 0;
+      for (const s of todo) { const { data, error } = await db.rpc("set_live", { p_strategy: s.id, p_live: false }); if (error) bad.push(`${s.name}: ${errorText(error)}`); else if (data && data.live) { paused++; if (data.holding) holding++; } else moved++; }
       await loadAll();
-      toast(`${todo.length - bad.length - copies} back to paper${copies ? `; ${copies} hold a live position: those stay live until it closes (no new live entries) and a separate paper copy of each was made` : ""}${bad.length ? `; ${bad.length} not changed (${bad[0]})` : ""}.`);
+      toast([moved ? `${moved} back to paper` : "", paused ? `${paused} paused in Live (no new live orders); ${paused === 1 ? "its paper copy runs" : "their paper copies run"} on paper${holding ? `; ${holding} hold a live position, which keeps its stops and exits until it closes` : ""}` : "",
+        bad.length ? `${bad.length} not changed (${bad[0]})` : ""].filter(Boolean).join("; ") + ".");
     });
     return;
   }
@@ -9882,14 +9901,16 @@ async function bulkAction(kind) {
       + (paused ? `<br>${paused} of them ${paused === 1 ? "is" : "are"} paused; ${paused === 1 ? "it" : "they"} won't trade until activated.` : "")
       + (skipped ? `<br>${skipped} can't go live yet (${noDhan ? "no Dhan webhook" : "no Delta API key"}) and will be left in paper mode.` : "")
       + (feeN ? `<br>A deployment fee of <strong>${rupees(fee)}</strong> each${bl.deploy_fee_period === "ONE_TIME" ? " (once)" : " (for the next month)"} will be taken from your wallet for ${feeN} of them (${rupees(fee * feeN)} in all).` : "")
+      + `<br>${PAPER_STAYS.replace("strategy stays", "strategies stay").replace("keeps running", "keep running").replace("a separate live copy is made", "a separate live copy of each is made")}`
       + goLiveSummary(ready) + " Trading derivatives can lose more than you expect; past and backtest results don't guarantee future returns." + sameAssetWarn(ready) + noStopHTML(ready) + liveTypeHTML(),
       "Go live", async () => run(btn, async () => {
         const bad = [];
-        let copies = 0;
-        for (const s of ready) { const { data, error } = await db.rpc("set_live", { p_strategy: s.id, p_live: true }); if (error) bad.push(`${s.name}: ${errorText(error)}`); else if (data && data.copy) copies++; }
+        let made = 0, had = 0, hadPaused = 0;
+        for (const s of ready) { const { data, error } = await db.rpc("set_live", { p_strategy: s.id, p_live: true }); if (error) bad.push(`${s.name}: ${errorText(error)}`); else if (data && data.existing) { had++; if (!data.copy_active) hadPaused++; } else made++; }
         await loadAll(); await refreshMe();
-        const now = ready.length - bad.length - copies;
-        toast(`${now} switched to live${copies ? `; ${copies} held a paper position: those stay paper, and a separate live copy of each (flat) was made` : ""}${bad.length ? `; ${bad.length} not changed (${bad[0]})` : ""}.`);
+        toast([made ? `${made} live cop${made === 1 ? "y" : "ies"} made; the paper ${made === 1 ? "one stays" : "ones stay"} in Paper and keep${made === 1 ? "s" : ""} running` : "",
+          had ? `${had} already had a live copy${hadPaused ? ` (${hadPaused} paused: activate ${hadPaused === 1 ? "it" : "them"} in the Live list)` : ""}` : "",
+          bad.length ? `${bad.length} not changed (${bad[0]})` : ""].filter(Boolean).join("; ") + ".");
       }), true);
     wireLiveType();
   }
