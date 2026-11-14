@@ -26,7 +26,7 @@ export function haCandles<T extends { o: number; h: number; l: number; c: number
   const { ho, hc } = heikinAshi(bars);
   return bars.map((b, i) => ({ ...b, o: ho[i], c: hc[i], h: Math.max(b.h, ho[i], hc[i]), l: Math.min(b.l, ho[i], hc[i]) }));
 }
-const REAL_PRICE = new Set(["VWAP", "PDHL", "ORB", "SWEEP", "TIME", "BTC", "FUND", "HAS", "OI", "PIV", "FIB", "GAP", "RANGE", "CAL", "VIX"]);
+const REAL_PRICE = new Set(["VWAP", "PDHL", "ORB", "SWEEP", "TIME", "BTC", "FUND", "HAS", "OI", "PIV", "FIB", "GAP", "RANGE", "CAL", "VIX", "FX", "USDPX"]);
 /** Conditions that read the decision time or another series, not this asset's candle frames. */
 const NO_FRAME = new Set(["TIME", "BTC", "FUND", "CAL", "VIX"]);
 /** Does any condition of a rule book use this indicator? (the engine fetches India VIX only when a rule reads it) */
@@ -104,7 +104,9 @@ export function weeklyBars(daily: DayBar[]): DayBar[] {
  * from market_events) and the strategy's expiry rule (weekday, monthly, underlying — the backtester's own convention)
  * for the calendar conditions when they don't carry `wd` / `monthly` themselves.
  */
-export type RuleExt = { btc?: DayBar[]; funding?: Map<string, number>; vix?: DayBar[]; vixRaw?: Raw[]; events?: Set<string>; expiry?: { weekday: number; monthly: boolean; underlying: string } };
+export type RuleExt = { btc?: DayBar[]; funding?: Map<string, number>; vix?: DayBar[]; vixRaw?: Raw[];
+  /** USD/INR daily candles (14 Nov 2026): the FX conditions read them, and USDPX divides this asset's rupee prices by them. */
+  fx?: DayBar[]; events?: Set<string>; expiry?: { weekday: number; monthly: boolean; underlying: string } };
 export type Signals = { long: boolean; short: boolean; exitLong: boolean | null; exitShort: boolean | null };
 type Side = "LONG" | "SHORT";
 
@@ -124,7 +126,7 @@ export function ruleTimeframes(r: Rules, baseTf: number): { intraday: number[]; 
   for (const c of allConds(r)) {
     if (c.ind === "PDHL" || c.ind === "PIV" || c.ind === "GAP" || (c.ind === "SWEEP" && Number(c.p?.src) === 1)) daily = true;
     if (c.ind === "CAL" && c.op === "turn_of_month") daily = true; // the month's trading-day count comes from the daily candles
-    if (c.ind === "VIX") continue; // its own candles, not this asset's
+    if (c.ind === "VIX" || c.ind === "FX") continue; // its own candles, not this asset's
     if (c.ind === "TIME" || c.ind === "BTC" || c.ind === "FUND" || c.ind === "CAL") { if (c.tf !== "D" && c.tf !== "W") tfs.add(c.tf === "base" ? baseTf : Number(c.tf)); continue; }
     if (c.tf === "D" || c.tf === "W") daily = true;
     else tfs.add(c.tf === "base" ? baseTf : Number(c.tf));
@@ -190,6 +192,11 @@ export function describeCond(c: Cond): string {
     above_upper: "close above the upper channel", below_lower: "close below the lower channel", squeeze: "Bollinger bands inside the channel (squeeze)", squeeze_release: "squeeze just released",
     is_expiry_day: "is an expiry day", not_expiry_day: "is not an expiry day", days_to_expiry_lt: `under ${v} days to the expiry`,
     turn_of_month: `is the turn of the month (last ${p.a ?? 2} / first ${p.b ?? 3} trading days)`, event_day: (p.n ?? 0) > 0 ? `is within ${p.n} days of a market event` : "is a market-event day",
+    fx_rising: `is rising (vs ${p.n ?? 5} candles ago)`, fx_falling: `is falling (vs ${p.n ?? 5} candles ago)`, fx_above_sma: `above its ${p.len ?? 20}-candle average`, fx_below_sma: `below its ${p.len ?? 20}-candle average`,
+    fx_chg_gt: `changed more than ${v}% in ${p.n ?? 5} candles`, fx_chg_lt: `changed less than ${v}% in ${p.n ?? 5} candles`,
+    usd_rising: `is rising (vs ${p.n ?? 5} candles ago)`, usd_falling: `is falling (vs ${p.n ?? 5} candles ago)`, usd_above_sma: `above its ${p.len ?? 20}-candle average`, usd_below_sma: `below its ${p.len ?? 20}-candle average`,
+    usd_chg_gt: `changed more than ${v}% in ${p.n ?? 5} candles`, usd_chg_lt: `changed less than ${v}% in ${p.n ?? 5} candles`,
+    fx_share_gt: `move of the last ${p.n ?? 5} candles came more than ${v}% from USD/INR`, fx_share_lt: `move of the last ${p.n ?? 5} candles came less than ${v}% from USD/INR`,
     vix_gt: `> ${v}`, vix_lt: `< ${v}`, vix_rising: `is rising (vs ${p.n ?? 5} candles ago)`, vix_pctile_gt: `above its ${v}th percentile of ${p.look ?? 250} candles`, vix_pctile_lt: `below its ${v}th percentile of ${p.look ?? 250} candles`,
     rsi_bull_div: "bullish divergence (price lower low, RSI higher low)", rsi_bear_div: "bearish divergence (price higher high, RSI lower high)",
     macd_bull_div: "bullish divergence (price lower low, MACD higher low)", macd_bear_div: "bearish divergence (price higher high, MACD lower high)",
@@ -205,7 +212,7 @@ export function describeCond(c: Cond): string {
     PIV: `Pivot points (${Number(p.src) === 1 ? "weekly" : "daily"}, ${Number(p.kind) === 1 ? "Camarilla" : "classic"})`,
     FIB: `Fibonacci (${Number(p.mode) === 1 ? `${p.n ?? 5}-bar swings` : `${p.k ?? 2}×ATR swings`}, tolerance ${p.tol ?? 0.2}×ATR)`,
     GAP: "Opening gap", RANGE: "Candle range", KC: `Keltner(${p.len ?? 20},${p.k ?? 1.5})`,
-    CAL: "Calendar", VIX: "India VIX",
+    CAL: "Calendar", VIX: "India VIX", FX: "USD/INR", USDPX: "Price in dollars (÷ USD/INR)",
     DIV: `Divergence (${c.op.startsWith("macd") ? `MACD(${p.fast ?? 12},${p.slow ?? 26},${p.sig ?? 9})` : `RSI(${p.len ?? 14})`}, ${Number(p.mode) === 1 ? `${p.n ?? 5}-bar swings` : `${p.k ?? 2}×ATR swings`})`,
   };
   if (c.ind === "TIME") return `Time ${ops[c.op] ?? c.op}`;
@@ -269,6 +276,28 @@ export class RuleBook {
       if (!this.memo.has(k)) this.memo.set(k, aggregate(raw, tf, "IDX_I"));
       return { bars: this.memo.get(k) as Bar[], isDaily: false, ha: false };
     }
+    // USD/INR (14 Nov 2026, Papa: an MCX price moves with the commodity's dollar price and with the rupee — "factor in both"):
+    // FX reads USD/INR's own daily candles; USDPX is this asset's own candles in dollars (each price ÷ USD/INR: the same
+    // day's close for a daily candle, the last close before the candle's day for an intraday one — never a later rate).
+    // Every USDPX bar also carries its rupee close (rc) and the rate used (f), so a condition can split the move.
+    if (c.ind === "FX") return { bars: this.ext.fx ?? [], isDaily: true, ha: false };
+    if (c.ind === "USDPX") {
+      const fx = this.ext.fx ?? [], daily = c.tf === "D" || c.tf === "W";
+      const tf = daily ? 0 : c.tf === "base" ? this.baseTf : Number(c.tf);
+      const src = (daily ? this.daily : this.frames.get(tf)) ?? [];
+      const k = `USDPX|${tf}|${src.length}|${src[0]?.t ?? 0}|${fx.length}|${fx[fx.length - 1]?.day ?? ""}`;
+      if (!this.memo.has(k)) {
+        let j = -1;
+        const out = fx.length ? src.map((b) => {
+          const day = (b as DayBar).day ?? ist(b.t).date;
+          while (j + 1 < fx.length && (daily ? fx[j + 1].day <= day : fx[j + 1].day < day)) j++;
+          const f = j >= 0 ? fx[j].c : NaN;
+          return { ...b, o: b.o / f, h: b.h / f, l: b.l / f, c: b.c / f, rc: b.c, f };
+        }) : [];
+        this.memo.set(k, out);
+      }
+      return { bars: this.memo.get(k) as Bar[], isDaily: daily, ha: false };
+    }
     if (c.tf === "D") return { bars: conv("D", this.daily), isDaily: true, ha };
     if (c.tf === "W") {
       const k = `WEEKLY|${this.daily.length}|${this.daily[0]?.t ?? 0}`;
@@ -296,7 +325,7 @@ export class RuleBook {
   private build(c: Cond): { frame: Frame; check: Check; level?: Level } {
     const frame = this.frameFor(c);
     const b = frame.bars as (Bar & DayBar)[];
-    const fk = (c.ind === "VIX" ? "VIX:" : "") + (frame.ha ? "HA:" : "") + (c.tf === "D" || c.tf === "W" ? c.tf : String(c.tf === "base" ? this.baseTf : Number(c.tf)));
+    const fk = (c.ind === "VIX" ? "VIX:" : c.ind === "FX" ? "FX:" : c.ind === "USDPX" ? "USD:" : "") + (frame.ha ? "HA:" : "") + (c.tf === "D" || c.tf === "W" ? c.tf : String(c.tf === "base" ? this.baseTf : Number(c.tf)));
     const M = <T>(name: string, fn: () => T): T => {
       const key = `${fk}|${b.length}|${name}`;
       if (!this.memo.has(key)) this.memo.set(key, fn());
@@ -607,6 +636,28 @@ export class RuleBook {
           : c.op === "vix_pctile_gt" ? !!pr && ok(pr[k]) && pr[k] > v : c.op === "vix_pctile_lt" ? !!pr && ok(pr[k]) && pr[k] < v : false;
         break;
       }
+      case "FX": case "USDPX": {
+        // FX = USD/INR itself; USDPX = this asset in dollars (see frameFor). Direction over n candles, above / below its
+        // `len`-candle average, % change over n candles above / below v. USDPX also splits the rupee move of the last n
+        // candles: share of it that came from USD/INR (log terms) above / below v % — "the rupee is carrying this move".
+        const n = Math.max(1, Math.trunc(p.n ?? 5)), len = Math.max(2, Math.trunc(p.len ?? 20));
+        const pre = c.ind === "FX" ? "fx_" : "usd_", op = c.op.startsWith(pre) ? c.op.slice(pre.length) : c.op;
+        const av = /sma$/.test(op) ? M(`SMA${len}`, () => sma(close, len)) : null;
+        const chg = (k: number) => k >= n && ok(close[k], close[k - n]) && close[k - n] > 0 ? (close[k] / close[k - n] - 1) * 100 : NaN;
+        const share = (k: number) => {
+          if (c.ind !== "USDPX" || k < n) return NaN;
+          const x = b[k] as unknown as { rc: number; f: number }, y = b[k - n] as unknown as { rc: number; f: number };
+          if (!(x.rc > 0 && y.rc > 0 && x.f > 0 && y.f > 0)) return NaN;
+          const tot = Math.log(x.rc / y.rc), fxm = Math.log(x.f / y.f);
+          return Math.abs(tot) < 1e-9 ? NaN : fxm / tot * 100;
+        };
+        check = (k) => op === "rising" ? k >= n && ok(close[k], close[k - n]) && close[k] > close[k - n]
+          : op === "falling" ? k >= n && ok(close[k], close[k - n]) && close[k] < close[k - n]
+          : op === "above_sma" ? !!av && above(close, av, k) : op === "below_sma" ? !!av && below(close, av, k)
+          : op === "chg_gt" ? ok(chg(k)) && chg(k) > v : op === "chg_lt" ? ok(chg(k)) && chg(k) < v
+          : op === "fx_share_gt" ? ok(share(k)) && share(k) > v : op === "fx_share_lt" ? ok(share(k)) && share(k) < v : false;
+        break;
+      }
       case "CAL": {
         // The calendar: expiry days (the strategy's own expiry rule: `wd` / `monthly` on the condition, else the rule
         // book's ext.expiry, else unknown → false), days to the next expiry, the turn of the month (last `a` / first `b`
@@ -805,7 +856,7 @@ export function decide(pos: "FLAT" | Side, now: Signals, prev: Signals | null, c
 export function validateRules(r: unknown): Rules {
   const rules = (r ?? {}) as Rules;
   const IND = new Set(["ST", "HA", "RSI", "EMA", "SMA", "MACD", "VWAP", "BB", "ADX", "ATR", "PDHL", "ORB", "SWEEP", "DON", "VOL", "TIME", "BTC", "FUND", "HAS", "OI",
-    "PIV", "FIB", "GAP", "RANGE", "KC", "CAL", "VIX", "DIV"]);
+    "PIV", "FIB", "GAP", "RANGE", "KC", "CAL", "VIX", "DIV", "FX", "USDPX"]);
   const TF = new Set(["base", "1", "3", "5", "15", "25", "30", "45", "60", "75", "120", "125", "240", "D", "W"]);
   for (const k of ["long", "short", "exitLong", "exitShort"] as const) {
     const set = rules[k];

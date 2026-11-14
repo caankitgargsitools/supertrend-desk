@@ -628,6 +628,28 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   Chip "Starts after … exits". Confirmation names both with scores, what happens to the position, the 7 Nov walk-forward
   note, and for live the no-stop tick / typed LIVE. Tested with a rolled-back transaction (live LT → paper MIDCPNIFTY: waits,
   starts on exit, notification) and `tests/ui/ui_group.mjs` "2b".
+- **USD/INR on MCX (14 Nov 2026, Papa: "commodities … their price also fluctuates because of the USD INR … factor in both
+  the changes, and create a smart strategy that takes care of both … go ahead with USD INR on MCX first"; migrations 105 /
+  105b / 105c, engine `fx.ts`)**: table `fx_daily` (pair 'USDINR', day, o/h/l/c, src; never deleted) — free public data:
+  Yahoo Finance INR=X daily (5,931 days 2004 → today; `fx_load_years(from, to)` loaded the history in 5-year pieces because
+  `range=max` gives MONTHLY bars — those 86 rows are kept as src 'yahoo_month' and never read), cross-checked against FRED's
+  DEXINUS (stored as pair 'USDINR_FRED'): a Yahoo close more than 1.5% off FRED's same-day rate takes FRED's (src
+  'yahoo+fred', 27 days, e.g. the bad prints of 27–31 Jan 2012); highs / lows widened to contain open and close
+  (`fx_clean(from)`). Cron `fx-refresh` hourly at :47: `fx_refresh('1mo')` (Yahoo, FRED if Yahoo fails) then
+  `fx_clean(today − 45)`. Dhan can't be used: its candle API refuses NSE_CURRENCY (DH-905) and its currency list ends at
+  June 2026 contracts. Engine `fxDaily(sb, from)` reads it (10-minute cache, paged). Rule book (`rules.ts`, `RuleExt.fx`):
+  **FX** = USD/INR's own daily candles (fx_rising / fx_falling over n, fx_above_sma / fx_below_sma(len), fx_chg_gt / _lt v%
+  over n); **USDPX** = this asset's price in dollars (each candle ÷ USD/INR: the same day's rate for a daily candle, the last
+  rate before the candle's day for an intraday one — never a later rate; usd_rising / falling / above_sma / below_sma /
+  chg_gt / chg_lt, and fx_share_gt / fx_share_lt v% = share of the rupee move of the last n candles that came from USD/INR,
+  in log terms). No USD/INR data → false. Lab: MCX assets get `fx` (`loadAsset`, cache key includes the latest FX day);
+  generator FILTER templates for MCX only (`isMcx`): fx_rising, fx_above_sma, usd_above_sma, usd_rising, fx_share_lt
+  (non-directional); mirrors for shorts (rising ↔ falling, above ↔ below, chg +v ↔ −v). Live (`rulesExt`): FX / USDPX rules
+  get the series up to yesterday. User backtests: `planBacktest(..., { fx })` (a note when none stored). Website rule
+  builder: "USD/INR (rupee per dollar)" and "Price in dollars (÷ USD/INR)" with plain-English text. Tests:
+  `tests/sim/fx.test.mjs`, `tests/ui/ui_rules.mjs`. The lab jobs are off since 13 Nov, so the lab only starts writing and
+  testing such strategies once they are back on; a user backtest can test one now. Note: USD/INR is ≈ 94 (14 Nov 2026) while
+  the desk books crypto at `lab_settings.usd_inr` = 88 (Delta India's fixed rate unconfirmed, ≈ 85 reported) — see pending 9.1.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
@@ -1026,7 +1048,7 @@ Still open:
       because of the USD INR … for devising any strategy we should factor in both the changes, and create a smart strategy
       that takes care of both". Found the same day: Delta Exchange India books coins at a FIXED USD-INR rate (balances in
       INR, no conversion; reported 85, not in Delta's own docs) — so for coins the rupee result does not move with USDINR;
-      the desk books crypto at ₹88 (`lab_settings.usd_inr`), to be checked against Delta's real rate. MCX prices already
+      the desk books crypto at ₹88 (`lab_settings.usd_inr`), to be checked against Delta's real rate. **Delta's rate: back on the pending list (Papa, 14 Nov: "let me inquire, let me research, and I'll tell you").** **MCX part built 14 Nov** (Key behaviours › USD/INR on MCX). MCX prices already
       carry USDINR (rupee price ≈ dollar price × USDINR + duty). Plan put to Papa: USDINR as a data input (like VIX) +
       the dollar price split out, rules / lab conditions on both, MCX first. Earlier questions kept below. Pairs of USDINR with a commodity (MCX: gold, silver, crude … — their rupee
       price is the dollar price × USDINR) and of USDINR with Bitcoin and the other coins (Delta trades them in dollars).

@@ -5,6 +5,7 @@
 //   options   – the best index strategies are re-priced with real expired-option prices, as option buying and option writing
 // Scoring is walk-forward: strategies are ranked on months 1–9 and must also make money in the last 3 months.
 // Each step runs in a short instalment (Supabase allows ~2 s of computing per call) and chains to the next.
+import { fxDaily } from "./fx.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { Dhan, DhanBusyError, type OptBar } from "./dhan.ts";
 import { type Acc, type BtParams, type ChargeRates, type MBar, newAcc, type OptStore, slippageFor, type Plan, priceBatch, regimeStats, type RegimeStats, simulateRules, type SimData } from "./backtest.ts";
@@ -129,7 +130,8 @@ for (const [a, b] of [["up", "down"], ["turns_up", "turns_down"], ["green", "red
   ["above_pp", "below_pp"], ["cross_up_pp", "cross_down_pp"], ["above_r1", "below_s1"], ["cross_up_r1", "cross_down_s1"],
   ["pullback_to_382", "rally_to_382"], ["pullback_to_50", "rally_to_50"], ["pullback_to_618", "rally_to_618"], ["in_zone_bull", "in_zone_bear"], ["broke_up_786", "broke_down_786"],
   ["gap_up_gt", "gap_dn_gt"], ["above_upper", "below_lower"],
-  ["rsi_bull_div", "rsi_bear_div"], ["macd_bull_div", "macd_bear_div"]]) { MIRROR[a] = b; MIRROR[b] = a; }
+  ["rsi_bull_div", "rsi_bear_div"], ["macd_bull_div", "macd_bear_div"],
+  ["fx_rising", "fx_falling"], ["fx_above_sma", "fx_below_sma"], ["usd_rising", "usd_falling"], ["usd_above_sma", "usd_below_sma"]]) { MIRROR[a] = b; MIRROR[b] = a; }
 
 /** The same condition for the other direction (RSI 60 ↔ 40; ADX and ATR are non-directional and stay as they are). */
 export function mirror(c: Cond): Cond {
@@ -138,6 +140,13 @@ export function mirror(c: Cond): Cond {
   if (c.ind === "VOL" || c.ind === "TIME" || c.ind === "CAL" || c.ind === "VIX" || c.ind === "RANGE") return { ...c };
   // Funding (contrarian): longs when funding is low (crowd short) ↔ shorts when it is high (crowd long).
   if (c.ind === "FUND") return { ...c, op: c.op === "lt" ? "gt" : "lt", v: +(0.02 - Number(c.v ?? 0)).toFixed(4) };
+  // USD/INR and the dollar price (14 Nov 2026): a long wants them rising, a short falling; "% change above v" ↔ "below −v";
+  // the share of the move that came from the rupee works the same both ways.
+  if (c.ind === "FX" || c.ind === "USDPX") {
+    if (/_chg_gt$/.test(c.op)) return { ...c, op: c.op.replace(/_gt$/, "_lt"), v: -Number(c.v ?? 0) };
+    if (/_chg_lt$/.test(c.op)) return { ...c, op: c.op.replace(/_lt$/, "_gt"), v: -Number(c.v ?? 0) };
+    return { ...c, op: MIRROR[c.op] ?? c.op };
+  }
   if (c.ind === "RSI") {
     const op = { gt: "lt", lt: "gt", cross_above: "cross_below", cross_below: "cross_above" }[c.op] ?? c.op;
     return { ...c, op, v: 100 - Number(c.v ?? 50) };
@@ -198,7 +207,7 @@ const EVENT: TplRow[] = [
 /** The divergence template's op depends on which indicator its parameters name. */
 const fixDiv = (c: Omit<Cond, "tf">) => c.ind === "DIV" && !c.op ? { ...c, op: c.p?.len ? "rsi_bull_div" : "macd_bull_div" } : c;
 /** Conditions true for both directions at once (a squeeze, a narrow range, a filled gap …): never the only condition. */
-const NONDIR = new Set(["squeeze", "squeeze_release", "nr_n", "inside_bar", "gap_filled", "gap_held", "cpr_narrow", "cpr_wide", "range_gt_atr", "range_lt_atr", "high_vol", "low_vol", "in_hours", "not_expiry_day", "is_expiry_day", "turn_of_month", "event_day", "vix_gt", "vix_lt", "vix_rising", "vix_pctile_gt", "vix_pctile_lt", "bandwidth_pctile_lt", "bandwidth_pctile_gt"]);
+const NONDIR = new Set(["fx_share_lt", "fx_share_gt", "squeeze", "squeeze_release", "nr_n", "inside_bar", "gap_filled", "gap_held", "cpr_narrow", "cpr_wide", "range_gt_atr", "range_lt_atr", "high_vol", "low_vol", "in_hours", "not_expiry_day", "is_expiry_day", "turn_of_month", "event_day", "vix_gt", "vix_lt", "vix_rising", "vix_pctile_gt", "vix_pctile_lt", "bandwidth_pctile_lt", "bandwidth_pctile_gt"]);
 /** Liquidity-sweep settings: swing look-back, how long the signal stays alive, and (intraday) swing or previous-day levels. */
 const sweepP = (r: R, daily: boolean) => ({ len: pick(r, [5, 10, 20, 30, 50]), within: pick(r, [1, 1, 2, 3]), src: daily ? 0 : pick(r, [0, 0, 1]) });
 const FILTER: TplRow[] = [
@@ -214,7 +223,16 @@ const FILTER: TplRow[] = [
   [(r, a) => ({ ind: "CAL", p: { wd: a?.wd ?? 2, monthly: a?.flag === "WEEK" ? 0 : 1 }, op: pick(r, ["not_expiry_day", "not_expiry_day", "is_expiry_day"]) }), false, (a) => !a.commodity && !a.crypto],
   [(r) => ({ ind: "CAL", p: { a: pick(r, [1, 2]), b: pick(r, [2, 3]) }, op: "turn_of_month" }), false, (a) => !a.commodity && !a.crypto],
   [(r) => ({ ind: "VIX", p: { look: 250 }, op: pick(r, ["vix_lt", "vix_gt", "vix_pctile_lt", "vix_pctile_gt"]), v: 0 }), false, isIndex],
+  // 14 Nov 2026 (Papa: MCX prices move with the commodity's dollar price and with the rupee — factor in both): USD/INR's own
+  // trend, the commodity's dollar-price trend, and "the move isn't mostly the rupee" (MCX only; mirrored for shorts).
+  [(r) => ({ ind: "FX", p: { n: pick(r, [5, 10, 20]) }, op: "fx_rising" }), false, isMcx],
+  [(r) => ({ ind: "FX", p: { len: pick(r, [20, 50, 100]) }, op: "fx_above_sma" }), false, isMcx],
+  [(r) => ({ ind: "USDPX", p: { len: pick(r, [20, 50, 100, 200]) }, op: "usd_above_sma" }), false, isMcx],
+  [(r) => ({ ind: "USDPX", p: { n: pick(r, [5, 10, 20]) }, op: "usd_rising" }), false, isMcx],
+  [(r) => ({ ind: "USDPX", p: { n: pick(r, [5, 10, 20]) }, op: "fx_share_lt", v: pick(r, [25, 40, 60]) }), false, isMcx],
 ];
+/** MCX commodities (their rupee price = dollar price × USD/INR): the USD/INR templates are offered to them only. */
+function isMcx(a?: LabAsset) { return !!a && a.commodity && !a.stock && a.seg === "MCX_COMM"; }
 /** The VIX filter's level follows its op: a VIX level (12–22) or a percentile (20–80). */
 const fixVix = (r: R, c: Omit<Cond, "tf">) => c.ind === "VIX" ? { ...c, v: /pctile/.test(c.op) ? pick(r, [20, 30, 50, 70, 80]) : pick(r, [12, 14, 16, 18, 20, 22]) } : c;
 /** A filter / state / event drawn for an asset, with the follow-ups the template needs. */
@@ -1086,6 +1104,9 @@ export async function loadAsset(sb: SupabaseClient, key: string, long = false): 
     if (vd) out.vix = fromCol(vd.bars).map((r) => ({ ...r, day: ist(r.t).date }));
     if (vi) out.vixRaw = fromCol(vi.bars).filter((r) => { const p = ist(r.t), ss = sessionFor("IDX_I", p.date); return p.min >= ss.open && p.min < ss.close; });
   }
+  // USD/INR for MCX commodities (14 Nov 2026, Papa: their rupee price moves with the dollar price and with the rupee):
+  // the FX and USDPX conditions read it (table fx_daily).
+  if (a.commodity && !a.stock) out.fx = await fxDaily(sb).catch(() => []);
   if (a.crypto) {
     // Crypto extras: Delta's daily funding rates, and Bitcoin's daily candles for the "Bitcoin trend" filter on other coins.
     const f = rows?.find((r) => r.kind === "F")?.bars as { d?: string[]; r?: number[] } | undefined;
@@ -1120,6 +1141,10 @@ export async function cachedAsset(sb: SupabaseClient, key: string, long = false)
   if (!LAB_ASSETS[key]?.crypto && key !== VIX_KEY) {
     const { data: vx } = await sb.from("lab_candles").select("kind, updated_at").eq("asset", VIX_KEY).in("kind", ["D", "I5"]);
     sig += `|VIX@${(vx ?? []).map((m) => `${m.kind}@${m.updated_at}`).sort().join(",")}`;
+  }
+  if (LAB_ASSETS[key]?.commodity && !LAB_ASSETS[key]?.stock) {
+    const { data: fxl } = await sb.from("fx_daily").select("day").eq("pair", "USDINR").order("day", { ascending: false }).limit(1).maybeSingle();
+    sig += `|FX@${fxl?.day ?? ""}`;
   }
   await loadMarketEvents(sb);
   const hit = ASSET_CACHE.get(ck);

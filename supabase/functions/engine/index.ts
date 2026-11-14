@@ -4,6 +4,7 @@
 import webpush from "npm:web-push@3.6.7";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { Dhan } from "./dhan.ts";
+import { fxDaily } from "./fx.ts";
 import { type ChargeRates, newAcc, planBacktest, priceBatch, summarize, tradeCharges, validateParams, VIX_SEC, type Acc, type Plan } from "./backtest.ts";
 import { runSpreads } from "./spreads.ts";
 import { fixedLotsFit, lotsFor, marginPerLot, moveLots, normaliseSizing } from "./sizing.ts";
@@ -1509,7 +1510,10 @@ async function rulesExt(s: Strategy, rules: ReturnType<typeof validateRules>, dh
   if (cr) {
     if (rulesUse(rules, "BTC") && s.underlying !== "BTCUSD") ext.btc = (await cryptoDaily("BTCUSD", addDays(today, -500), addDays(today, 1))).filter((d) => d.day < today);
     if (rulesUse(rules, "FUND")) ext.funding = await cryptoFunding(String(s.underlying), addDays(today, -10), addDays(today, 1));
-  } else if (rulesUse(rules, "VIX")) {
+  }
+  // USD/INR (14 Nov 2026): the stored daily candles up to yesterday (table fx_daily, refreshed hourly).
+  if (!cr && (rulesUse(rules, "FX") || rulesUse(rules, "USDPX"))) ext.fx = (await fxDaily(sb, addDays(today, -800))).filter((d) => d.day < today);
+  if (!cr && rulesUse(rules, "VIX")) {
     ext.vix = (await dhan.daily(VIX_SEC.sec, VIX_SEC.seg, VIX_SEC.instr, addDays(today, -400), addDays(today, 1))).filter((d) => d.day < today);
     if (allConds(rules).some((c) => c.ind === "VIX" && c.tf !== "D" && c.tf !== "W")) {
       ext.vixRaw = await dhan.intraday(VIX_SEC.sec, VIX_SEC.seg, VIX_SEC.instr, 5, `${addDays(today, -10)} 09:00:00`, fmtIst(Date.now() / 1000 + 120, true));
@@ -2430,7 +2434,7 @@ async function runBacktestJob(id: number) {
         const r = await dataSecurity(sb, creds, String(snapshot.data_segment), String(snapshot.data_security_id), ist(Date.now() / 1000).date);
         snapshot.data_sec_resolved = r.sec;
       }
-      const res = await planBacktest(snapshot, creds, params, async (m) => { await setRow({ progress: m }); });
+      const res = await planBacktest(snapshot, creds, params, async (m) => { await setRow({ progress: m }); }, { fx: (f) => fxDaily(sb, f) });
       // Crypto: Delta's daily funding rates over the test, for the funding each trade pays or receives.
       if (isCrypto(String(snapshot.data_segment))) {
         try { params = { ...params, funding: Object.fromEntries(await cryptoFunding(String(snapshot.underlying), addDays(String(params.from), -3), addDays(String(params.to), 3))) }; } catch { /* default rate */ }

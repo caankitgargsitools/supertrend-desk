@@ -2887,6 +2887,14 @@ function plainCond(c, s) {
     case "EMA": case "SMA": t = /fast/.test(c.op) ? `${c.ind} ${p.len ?? 9} ${verb(c.op)} ${c.ind} ${p.len2 ?? 21}` : `Price ${verb(c.op)} ${c.ind} ${p.len ?? 20}`; break;
     case "MACD": t = /signal/.test(c.op) ? `MACD(${p.fast ?? 12}, ${p.slow ?? 26}, ${p.sig ?? 9}) ${verb(c.op)} its signal line` : /hist/.test(c.op) ? `MACD(${p.fast ?? 12}, ${p.slow ?? 26}, ${p.sig ?? 9}) histogram ${c.op === "hist_pos" ? "is positive" : "is negative"}` : `MACD(${p.fast ?? 12}, ${p.slow ?? 26}, ${p.sig ?? 9}) ${verb(c.op)} zero`; break;
     case "VWAP": t = `Price ${verb(c.op)} VWAP`; break;
+    case "FX": case "USDPX": {
+      const who = c.ind === "FX" ? "USD/INR" : "The price in dollars (this price ÷ USD/INR)", n = p.n ?? 5, len = p.len ?? 20, op = c.op.replace(/^(fx|usd)_(?!share)/, "");
+      t = op === "rising" ? `${who} is higher than ${n} candles ago` : op === "falling" ? `${who} is lower than ${n} candles ago`
+        : op === "above_sma" ? `${who} is above its ${len}-candle average` : op === "below_sma" ? `${who} is below its ${len}-candle average`
+        : op === "chg_gt" ? `${who} changed more than ${v}% in ${n} candles` : op === "chg_lt" ? `${who} changed less than ${v}% in ${n} candles`
+        : c.op === "fx_share_gt" ? `More than ${v}% of the price's move over ${n} candles came from the rupee (USD/INR)` : c.op === "fx_share_lt" ? `Less than ${v}% of the price's move over ${n} candles came from the rupee (USD/INR)` : `${who} ${c.op}`;
+      break;
+    }
     case "BB": t = `Price ${/close_/.test(c.op) ? "closes " + (/upper/.test(c.op) ? "above the upper" : "below the lower") : /cross/.test(c.op) ? verb(c.op) + " the " + (/upper/.test(c.op) ? "upper" : "lower") : verb(c.op) + " the middle"} Bollinger band (${p.len ?? 20}, ${p.mult ?? 2})`; break;
     case "PDHL": t = `Price ${verb(c.op)} the previous day's ${/pdh/.test(c.op) ? "high" : "low"}`; break;
     case "SWEEP": t = `Liquidity sweep: price ${c.op === "bull_sweep" ? "dips below" : "pokes above"} ${Number(p.src) === 1 ? "the previous day's " + (c.op === "bull_sweep" ? "low" : "high") : `the ${c.op === "bull_sweep" ? "lowest low" : "highest high"} of the last ${p.len ?? 20} candles`} and the candle closes back ${c.op === "bull_sweep" ? "above" : "below"} it${(p.within ?? 1) > 1 ? ` (in the last ${p.within} candles)` : ""}`; break;
@@ -3008,12 +3016,20 @@ const IND_DEFS = {
     ops: [["is_expiry_day", "is an expiry day"], ["not_expiry_day", "is not an expiry day"], ["days_to_expiry_lt", "days to the expiry are under"], ["turn_of_month", "is the turn of the month"], ["event_day", "is a market-event day (± N days)"]], value: 3 },
   VIX: { name: "India VIX", params: [["n", "Rising vs (candles ago)", 5], ["look", "Percentile over (candles)", 250]],
     ops: [["vix_gt", "is above"], ["vix_lt", "is below"], ["vix_rising", "is rising"], ["vix_pctile_gt", "percentile above"], ["vix_pctile_lt", "percentile below"]], value: 15 },
+  // 14 Nov 2026 (Papa: an MCX price moves with the commodity's dollar price and with the rupee — factor in both). Daily
+  // USD/INR from free public data (table fx_daily); "Price in dollars" = this asset's price ÷ USD/INR (MCX commodities).
+  FX: { name: "USD/INR (rupee per dollar)", params: [["n", "Over (candles)", 5], ["len", "Average of (candles)", 20]],
+    ops: [["fx_rising", "is rising"], ["fx_falling", "is falling"], ["fx_above_sma", "is above its average"], ["fx_below_sma", "is below its average"], ["fx_chg_gt", "changed more than (%)"], ["fx_chg_lt", "changed less than (%)"]], value: 1 },
+  USDPX: { name: "Price in dollars (÷ USD/INR)", params: [["n", "Over (candles)", 5], ["len", "Average of (candles)", 20]],
+    ops: [["usd_rising", "is rising"], ["usd_falling", "is falling"], ["usd_above_sma", "is above its average"], ["usd_below_sma", "is below its average"], ["usd_chg_gt", "changed more than (%)"], ["usd_chg_lt", "changed less than (%)"],
+      ["fx_share_gt", "move came more than (%) from the rupee"], ["fx_share_lt", "move came less than (%) from the rupee"]], value: 1 },
   DIV: { name: "Divergence (RSI / MACD vs price swings)", params: [["mode", "Swings by", 0], ["k", "Swing threshold (× ATR)", 2], ["n", "Fractal width", 5], ["len", "RSI length", 14], ["within", "Signal lasts (candles)", 3]],
     ops: [["rsi_bull_div", "bullish RSI divergence"], ["rsi_bear_div", "bearish RSI divergence"], ["macd_bull_div", "bullish MACD divergence (12,26,9)"], ["macd_bear_div", "bearish MACD divergence (12,26,9)"]] },
 };
 // Parameters that may be 0 (an hour of the day, Sunday).
 const ZERO_OK = new Set(["from", "d", "w", "src", "kind", "mode", "monthly", "n"]);
-const VALUE_OPS = new Set(["gt", "lt", "cross_above", "cross_below", "has_buy", "has_sell", "days_to_expiry_lt", "vix_gt", "vix_lt", "vix_pctile_gt", "vix_pctile_lt"]);
+const VALUE_OPS = new Set(["gt", "lt", "cross_above", "cross_below", "has_buy", "has_sell", "days_to_expiry_lt", "vix_gt", "vix_lt", "vix_pctile_gt", "vix_pctile_lt",
+  "fx_chg_gt", "fx_chg_lt", "usd_chg_gt", "usd_chg_lt", "fx_share_gt", "fx_share_lt"]);
 const COND_TFS = [["base", "Strategy timeframe"], ["1", "1 min"], ["3", "3 min"], ["5", "5 min"], ["15", "15 min"], ["25", "25 min"], ["30", "30 min"], ["45", "45 min"], ["60", "1 hour"], ["75", "75 min"], ["120", "2 hours"], ["125", "125 min"], ["240", "4 hours"], ["D", "Daily"], ["W", "Weekly"]];
 const RULE_SETS = [
   ["long", "buy", "Buy (go long / bullish options) when", true],

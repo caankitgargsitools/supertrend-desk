@@ -166,6 +166,7 @@ export function newAcc(capital: number): Acc {
 /** Phase 1: decide every trade from index data. */
 export async function planBacktest(
   s: Record<string, any>, creds: { client: string; token: string }, p: BtParams, progress: (msg: string) => Promise<void>,
+  opts?: { fx?: (from: string) => Promise<DayBar[]> },
 ): Promise<{ plans: Plan[]; calls: number; notes: string[] }> {
   // Crypto candles come from Delta Exchange (public data); everything else needs the Dhan connection.
   if (!isCrypto(String(s.data_segment)) && (!creds.client || !creds.token)) throw new Error("Add your Dhan client ID and access token under Dhan connection.");
@@ -241,6 +242,12 @@ export async function planBacktest(
       if (allConds(rules!).some((c) => c.ind === "VIX" && c.tf !== "D" && c.tf !== "W")) {
         ext.vixRaw = await intradayRange(dhan, { data_security_id: VIX_SEC.sec, data_segment: VIX_SEC.seg, data_instrument: VIX_SEC.instr }, 5, addDays(p.from, -warm), fetchTo, async () => {});
       }
+    }
+    // USD/INR conditions (14 Nov 2026): the stored daily USD/INR candles (table fx_daily).
+    if ((rulesUse(rules!, "FX") || rulesUse(rules!, "USDPX")) && !isCrypto(seg)) {
+      await progress("Reading USD/INR");
+      ext.fx = opts?.fx ? await opts.fx(addDays(p.from, -800)) : [];
+      if (!ext.fx.length) notes.push("No USD/INR candles stored yet: the USD/INR conditions were false throughout.");
     }
     plans.push(...simulateRules(s, { raw, byDay, daily, ...ext }, p.from, p.to));
   } else if (kind !== "TIMED") {
@@ -420,10 +427,10 @@ export async function planBacktest(
  * Candle data a condition strategy is simulated on. vix / vixRaw: India VIX daily and 5-minute candles (VIX conditions);
  * events: market-event days (calendar conditions; else the engine-wide set).
  */
-export type SimData = { raw: MBar[]; byDay: Map<string, MBar[]>; daily: DayBar[]; btc?: DayBar[]; funding?: Map<string, number>; vix?: DayBar[]; vixRaw?: Raw[]; events?: Set<string> };
+export type SimData = { raw: MBar[]; byDay: Map<string, MBar[]>; daily: DayBar[]; btc?: DayBar[]; funding?: Map<string, number>; vix?: DayBar[]; vixRaw?: Raw[]; events?: Set<string>; fx?: DayBar[] };
 /** The rule book's extra series for a strategy: the crypto series, VIX, events and the strategy's own expiry rule. */
 export function ruleExt(s: Record<string, any>, data: SimData) {
-  return { btc: data.btc, funding: data.funding, vix: data.vix, vixRaw: data.vixRaw, events: data.events,
+  return { btc: data.btc, funding: data.funding, vix: data.vix, vixRaw: data.vixRaw, events: data.events, fx: data.fx,
     expiry: { weekday: Number(s.expiry_weekday) || 4, monthly: s.expiry_flag === "MONTH", underlying: String(s.underlying ?? "") } };
 }
 /** India VIX on Dhan: index segment, security id 21. */

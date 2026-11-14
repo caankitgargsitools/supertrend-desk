@@ -11,7 +11,7 @@ await p.evaluate(() => { openStrat("n1"); showTab("set"); }); await p.waitForTim
 // The indicator select sits under the "Indicator" label (a set's first select is its ALL / ANY mode).
 const indSel = () => [...document.querySelectorAll("#rs_long label")].find((l) => /^Indicator/.test(l.textContent)).querySelector("select");
 const opts = await p.evaluate(`[...(${indSel})().options].map((o) => o.value)`);
-for (const k of ["OI", "PIV", "FIB", "GAP", "RANGE", "KC", "CAL", "VIX", "DIV"]) if (!opts.includes(k)) fail(`indicator ${k}`, opts);
+for (const k of ["OI", "PIV", "FIB", "GAP", "RANGE", "KC", "CAL", "VIX", "DIV", "FX", "USDPX"]) if (!opts.includes(k)) fail(`indicator ${k}`, opts);
 // Entry fill: on the Buy and Sell sets, not on the exit sets; LEVEL lands in the rule book.
 if (!(await p.$("#rs_long .fillsel")) || !(await p.$("#rs_short .fillsel")) || await p.$("#rs_exitLong .fillsel")) fail("Entry fill select placement");
 await p.selectOption("#rs_long .fillsel", "LEVEL"); await p.waitForTimeout(100);
