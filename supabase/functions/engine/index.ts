@@ -32,7 +32,7 @@ import { ownDaily, ownIntraday } from "./owncandles.ts";
 import { KILL_EARLY, KILL_FULL, killVerdict } from "./kill.ts";
 import { ideasStep } from "./ideas.ts";
 import { actionsFor, adjustPosition, daysOf, loadStockActions, splitFactor, STOCK_KEYS, stockLots } from "./stocks.ts";
-import { readCandles } from "./candles.ts";
+import { candleLinks, readCandles } from "./candles.ts";
 import { findListed, isListedOpt, optRows, pickListed } from "./listedopts.ts";
 import { githubOidcOk, predFeed, predKeyOk, predPull, predPush } from "./prediction.ts";
 
@@ -3728,6 +3728,14 @@ Deno.serve(async (req) => {
 
   // Option-pricing queue: one instalment per call (the schedule paces it), only while no lab run is going.
   if (action === "push") return Response.json({ action, ...(await pushOut()) });
+  // Signed links (30 minutes) to the lab's candle files of the assets asked for, for research runs outside the engine
+  // and the database (14 Nov 2026, Papa: stop / trailing-stop variations of the desk's strategies). Engine secret only.
+  if (action === "candle_links") {
+    const keys = [...new Set((((body as { assets?: unknown }).assets as unknown[]) ?? []).map(String))].filter((k) => LAB_ASSETS[k] || k === "INDIAVIX").slice(0, 40);
+    const files: Record<string, unknown> = {};
+    for (const k of keys) files[k] = await candleLinks(sb, k, 1800, true).catch((e) => ({ error: String((e as Error)?.message ?? e) }));
+    return Response.json({ action, files });
+  }
   if (action === "live_test" && body.strategy_id) return Response.json({ action, ...(await liveTest(String(body.strategy_id))) });
   if (action === "orders") return Response.json({ action, ...(await runOrders(Math.min(4, Math.max(1, Number(body.passes) || 4)))) });
   if (action === "reconcile") { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", ist(Date.now() / 1000).date); setHolidays(hol ?? []); }

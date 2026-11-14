@@ -55,8 +55,8 @@ async function readStored(sb: SupabaseClient, asset: string, kinds: string[] | "
 }
 
 /** Signed download links (gzip JSON, columns t/o/h/l/c[/v]) for an asset's candle files, for the prediction server. */
-export async function candleLinks(sb: SupabaseClient, asset: string, seconds = 3600): Promise<{ kind: string; from_day: string; to_day: string; url: string }[]> {
-  const { data: meta, error } = await sb.from("lab_candles").select("kind, from_day, to_day, stored").eq("asset", asset).or("kind.eq.D,kind.eq.I5,kind.like.I5Y*");
+export async function candleLinks(sb: SupabaseClient, asset: string, seconds = 3600, funding = false): Promise<{ kind: string; from_day: string; to_day: string; url: string }[]> {
+  const { data: meta, error } = await sb.from("lab_candles").select("kind, from_day, to_day, stored").eq("asset", asset).or(`kind.eq.D,kind.eq.I5,kind.like.I5Y*${funding ? ",kind.eq.F" : ""}`);
   if (error) throw new Error(error.message);
   const rows = (meta ?? []).filter((m) => m.stored);
   if (!rows.length) return [];
