@@ -16,8 +16,8 @@ const rows = await p.$$eval("#lp_morning .mrow", (r) => r.map((x) => ({ t: x.tex
   now: (x.querySelector(".pl-now") || {}).textContent || "", over: x.querySelector(".pladder") ? x.querySelector(".pladder").scrollWidth > x.querySelector(".pladder").clientWidth + 1 : false,
   pos: Object.fromEntries([...x.querySelectorAll(".pl-tk, .pl-dot")].map((e) => [e.className.replace(/^pl-/, ""), parseFloat(e.style.left)])) })));
 if (rows.length !== 2) fail("two open positions", rows);
-if (!/Gold/.test(rows[0].t) || !/Live/.test(rows[0].t) || !/Long 2 lots/.test(rows[0].t) || !/\+₹4,250/.test(rows[0].t) || !rows[0].meter || !["Stop1,37,000₹3,00,000 · 1.1% away", "loses ₹2,20,000", "Entry1,38,100", "Target1,40,000", "makes ₹3,80,000"].every((x) => rows[0].lbl.includes(x)) || rows[0].now !== "Now 1,38,500") fail("gold row (from the desk's own strategy)", rows[0]);
-if (!/Crude/.test(rows[1].t) || !/Paper/.test(rows[1].t) || !/Short 1 lot/.test(rows[1].t) || !/Expires today/.test(rows[1].t) || !rows[1].meter || !/away/.test(rows[1].lbl) || !/loses ₹/.test(rows[1].lbl) || !/Target ?None/.test(rows[1].lbl)) fail("crude row (from the server only)", rows[1]);
+if (!/Gold/.test(rows[0].t) || !/Live/.test(rows[0].t) || !/Long 2 lots/.test(rows[0].t) || !/\+₹4,250/.test(rows[0].t) || !rows[0].meter || !["Stop1,37,000₹3,00,000 · 1.1% away", "if hit: you lose ₹2,20,000", "Entry1,38,100", "Target1,40,000", "if hit: you make ₹3,80,000"].every((x) => rows[0].lbl.includes(x)) || rows[0].now !== "Now 1,38,500") fail("gold row (from the desk's own strategy)", rows[0]);
+if (!/Crude/.test(rows[1].t) || !/Paper/.test(rows[1].t) || !/Short 1 lot/.test(rows[1].t) || !/Expires today/.test(rows[1].t) || !rows[1].meter || !/away/.test(rows[1].lbl) || !/you lose ₹/.test(rows[1].lbl) || !/Target ?None/.test(rows[1].lbl)) fail("crude row (from the server only)", rows[1]);
 // Ladder on a price scale, lower prices left (Papa, 9 Nov): long gold stop < entry < now < target; short crude in a loss
 // entry < now < stop, and its figures read Target · Entry · Stop.
 const g = rows[0].pos, c = rows[1].pos;
