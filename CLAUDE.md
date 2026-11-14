@@ -98,8 +98,9 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
 ## Key behaviours (current state)
 - Strategies run side by side in each tick (up to 8); booking trades/sending orders is serialized (`actLocked`).
 - Every signal records `lag_ms` (decision delay after candle close), shown in the signal log.
-- Prices: `live_prices` (per instrument) and `live_marks` (running P&L per open position, pushed to the app via
-  Realtime). The minute tick and the order manager reuse these prices (no extra Dhan quote calls).
+- Prices: `live_prices` (per instrument) and `live_marks` (running P&L per open position; the app asks for the changed
+  ones every 2 seconds, `pollMarks` — Realtime is no longer used, see "Database load" below). The minute tick and the
+  order manager reuse these prices (no extra Dhan quote calls).
 - Stops/targets/trailing stops are checked every second (`secondRisk`) and on 1-minute candles (`liveRisk`);
   exits are claimed with `exec_state='stopping'` + `exec_at` so they never run twice. Option premiums: minute only.
 - Bulk actions (29 Oct 2026): Strategies page — tick rows (archived too) → Activate, Pause, Go live, Back to paper,
@@ -175,7 +176,8 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   alerts at once. Admin sidebar "System health" (`healthPane`, `renderHealth`, "Check now" → `health_check_now`) with a
   red dot on the link (`healthDot`, every 5 min) while anything is red or no check ran for 2 h. Test: `tests/ui/ui_health.mjs`.
   The cron checks read only the latest `cron.job_run_details` rows by runid (migration 62; the table can't be indexed);
-  job history is kept 7 days (cron job 34 `job-history-cleanup`, 02:53 IST, approved by Papa 1 Nov 2026). Check ≈ 0.6 s.
+  job history is kept 7 days (cron job 34 `job-history-cleanup`, 02:53 IST, approved by Papa 1 Nov 2026). Check ≈ 0.7 s
+  (it had crept to 6.7 s; fixed 14 Nov 2026, migration 106).
 - **Stock futures** (1 Nov 2026, Papa: "start with stock futures on 10 liquid Nifty 50 stocks"; `stocks.ts`, migration 59):
   RELIANCE, HDFCBANK, ICICIBANK, INFY, TCS, SBIN, BHARTIARTL, AXISBANK, LT, KOTAKBANK; **6 Nov 2026 (Papa) 23 more** (33):
   ITC, HINDUNILVR, BAJFINANCE, BAJAJFINSV, MM (Dhan's "M&M": `DHAN_ALIAS`, mapped in `fnoUnderlying`, since & breaks links /
@@ -650,6 +652,30 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   `tests/sim/fx.test.mjs`, `tests/ui/ui_rules.mjs`. The lab jobs are off since 13 Nov, so the lab only starts writing and
   testing such strategies once they are back on; a user backtest can test one now. Note: USD/INR is ≈ 94 (14 Nov 2026) while
   the desk books crypto at `lab_settings.usd_inr` = 88 (Delta India's fixed rate unconfirmed, ≈ 85 reported) — see pending 9.1.
+- **Database load (14 Nov 2026, Papa: "OK" to the six savings; engine v161, migration 106; tests
+  `tests/sim/dbload.test.mjs`, `tests/ui/ui_poll.mjs` (args: theme width))**: measured over ~28 h with the labs off,
+  the database spent 28% of its time on Realtime reading every change of the whole database once a second (to push
+  `live_marks` to 3 open screens), 9% on the strategy rows' price every 10 s, 5% on charts, 5% on `desk_feeds()`, 3.6% on
+  `desk_health()`, 2.5% on the app re-reading every strategy every 30 s. Changed: (1) **no Realtime**: `pollMarks` reads
+  `live_marks` every 2 s (`MARKS_MS`) while the app is on screen — only rows newer than the last answer (3 s overlap),
+  for the open positions; no websocket is opened (`startLiveMarks` / `marksCh` are gone; `live_marks` is still in the
+  `supabase_realtime` publication, harmless without subscribers). A screen opened before the release keeps its old
+  Realtime connection until it is refreshed. (2) the strategy row's `pos_ltp` / `pos_upnl` every 30 s (`ROW_PX_MS`;
+  `markPrice` prices a position itself only when that is over 50 s old). (3) **charts**: a fresh edge worker has no
+  memory, so every minute's tick rewrote every chart (17 crypto charts a minute); `saveChart` now skips a chart whose
+  last candle equals the strategy's `last_candle_ts` (saved by the tick that handled it) except in every fifth minute
+  and when the portal asked for a refresh (`chartForce`). (4) `desk_feeds()` itself is cheap (4 ms when the database
+  isn't starved; its 54 ms average was the starving) — left as it is. (5) `desk_health()` 6.7 s → 0.7 s: the website-ping
+  lookup ran its sub-select once per row of `net._http_response`, and the failed-jobs check read the whole 7-day cron
+  history (now the newest 15,000 runs ≈ 34 h). (6) **the 30-second refresh** (`refreshAll` → `loadAll(true)` →
+  `loadStrategies(true)`): reads the id list and only the strategies with `updated_at` after the last answer (20 s
+  overlap) and merges them (deleted ids go, order by `created_at`); everything is read again every 5 minutes, after any
+  action of the user (`loadAll()`), and when an id is unknown. `stratRows` pages by 1,000 (761 strategies on 14 Nov; the
+  old single read would have been cut at 1,000). **Not done — old lab results to file storage** (Papa: "OK if this
+  doesn't hamper any of our working"): checked and advised against for now. The 11,586 superseded results carry ~218 MB
+  of trades, but they sit in TOAST storage that costs memory only when read; disk is 16% used; and they are still read
+  (a desk strategy's `lab_id` for Compare / drawdown check / kill rule, the Lab page's re-test history), so moving them
+  needs a fallback reader for little gain. Revisit only if disk becomes the limit.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
@@ -1115,6 +1141,12 @@ Still open:
         `pos_ltp` writes 9.5%, `algo_chart` 5%, `desk_feeds()` 5%, `desk_health()` 4% (6.7 s a run, was 0.6 s), the
         30-second `select *` of all strategies 2.6%. Recommended: Small compute (2 GB, +$5/month) after 19 Nov, plus the
         cuts above before switching the lab jobs back on; Medium (4 GB, +$50/month) only if that isn't enough.
+      - **Papa's answers (14 Nov)**: Vercel — he asked whether it is only deployment usage (it isn't: Active CPU is the
+        Dhandha app's server code running, not deployments; fewer deployments won't lower it) — his decision is open;
+        Supabase Small — "will check and let you know"; the six savings — "OK", built the same day (Key behaviours ›
+        Database load); old lab results to storage — "OK if it doesn't hamper our working": advised against (same place).
+        Still to measure on a market day: the database's time split after the savings, and whether Realtime's reader
+        really stops once no old screen is open.
 
 ## Open items
 - Supervised 1-lot live test (NATGASMINI, Lab #6038) once Papa adds Dhan funds and whitelists the IP.

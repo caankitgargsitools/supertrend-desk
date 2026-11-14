@@ -117,6 +117,10 @@ async function saveChart(s: Strategy, bars: ChartBar[], st: number[], trend: num
   // every tick for every strategy (394 k rewrites of a 10 KB blob, 6 Nov 2026 audit).
   const lastT = bars.at(-1)?.t ?? 0, prev = chartLast.get(s.id);
   if (prev && prev.t === lastT && Date.now() - prev.at < 300000) return;
+  // A fresh worker remembers nothing (14 Nov 2026: 17 crypto charts were rewritten every minute, 5% of all database
+  // time): the strategy's own last candle says this bar's chart was saved by the tick that handled it. Such a chart is
+  // rewritten only in every fifth minute (the bar in progress, or a write that failed), or when the portal asks.
+  if (!prev && lastT > 0 && Number(s.last_candle_ts) === lastT && new Date().getUTCMinutes() % 5 !== 0 && Date.now() - chartForce > 30000) return;
   chartLast.set(s.id, { t: lastT, at: Date.now() });
   const from = Math.max(0, bars.length - CHART_BARS);
   const chart = bars.slice(from).map((b, k) => {
@@ -2044,6 +2048,7 @@ async function runAudit(batch: string, offset: number) {
 let priceHolDay = "";
 const mcxSecMemo = new Map<string, string>();
 const rowWriteAt = new Map<string, number>();
+const ROW_PX_MS = 30000;
 let lastMarkAt = "";
 /**
  * One engine run per minute (cron) that prices every second until the next run takes over. A lock row keeps a
@@ -2114,6 +2119,8 @@ async function adminCached(): Promise<Account | null> {
 const lastMarkPx = new Map<string, { ltp: number; at: number }>();
 /** The last chart bar written per strategy (algo_chart is written on a new bar, or every 5 minutes). */
 const chartLast = new Map<string, { t: number; at: number }>();
+/** When the portal last asked for a refresh (settings changed: the chart is rewritten whatever the candle). */
+let chartForce = 0;
 async function pricesTick(rows: Strategy[]) {
   const nowI = ist(Date.now() / 1000), today = nowI.date;
   const at = nowIso(); // the round's start: of two overlapping rounds, the later-started one's prices are the newer
@@ -2204,8 +2211,10 @@ async function pricesTick(rows: Strategy[]) {
     const upnl = inPx > 0 ? Math.trunc((p! - inPx) * dir * unitsOf(s)) : null;
     marks.push({ strategy_id: s.id, owner_id: s.owner_id, ltp: +p!.toFixed(2), upnl, at });
     checks.push(secondRisk(s, p!, at));
-    // The strategy row itself (lists, capital, alerts) every 10 seconds.
-    if (Date.now() - (rowWriteAt.get(s.id) ?? (s.pos_ltp_at ? Date.parse(s.pos_ltp_at) : 0)) > 10000) rowWriteAt.set(s.id, Date.now()), slow.push(sb.from("algo_strategies").update({ pos_ltp: +p!.toFixed(2), pos_upnl: upnl, pos_ltp_at: at }).eq("id", s.id).eq("position", s.position));
+    // The strategy row itself (lists, capital, alerts) every 30 seconds (10 s until 14 Nov 2026: 145,000 row writes a
+    // day, 9% of all database time; the app's live figures come from live_marks, and the minute tick prices a position
+    // itself only when this is over 50 s old).
+    if (Date.now() - (rowWriteAt.get(s.id) ?? (s.pos_ltp_at ? Date.parse(s.pos_ltp_at) : 0)) > ROW_PX_MS) rowWriteAt.set(s.id, Date.now()), slow.push(sb.from("algo_strategies").update({ pos_ltp: +p!.toFixed(2), pos_upnl: upnl, pos_ltp_at: at }).eq("id", s.id).eq("position", s.position));
   }
   // Realtime decodes every write of live_marks (18% of all database time, 6 Nov 2026 audit): unchanged prices are
   // written only every 15 seconds, so the row never looks stale but a flat market costs nothing.
@@ -3879,6 +3888,7 @@ Deno.serve(async (req) => {
   // Exchange holidays today (no session, or MCX's evening session only).
   { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", nowIst.date); setHolidays(hol ?? []); }
   // Crypto trades every day: its own minute tick (tick_crypto) runs round the clock, the market tick on weekdays.
+  if (action === "refresh") chartForce = Date.now();
   if ((action === "flatten" || action === "refresh" || action === "manual_entry") && !body.strategy_id) return Response.json({ error: `${action} needs a strategy_id` }, { status: 400 });
   if (action === "manual_entry") {
     // The order's details come from its own row (written by manual_order() after the owner check), never from the body.

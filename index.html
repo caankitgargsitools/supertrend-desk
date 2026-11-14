@@ -2104,7 +2104,7 @@ function setBusy(btn, key, on) {
 }
 const rawFetch = window.fetch.bind(window);
 // Background checks that shouldn't light the comet (the heartbeat's own poll and the presence marks).
-const NET_QUIET = /\/rpc\/(desk_feeds|touch_presence|log_activity)\b|kind=eq\.live_trade/;
+const NET_QUIET = /\/rpc\/(desk_feeds|touch_presence|log_activity)\b|kind=eq\.live_trade|\/live_marks\?/;
 window.fetch = (...args) => {
   const bar = document.getElementById("netbar");
   const url = String(args[0] && args[0].url || args[0] || "");
@@ -2453,14 +2453,56 @@ async function loadBreaker() {
   box.innerHTML = modes.map(([m, w, at, why]) => `<div><b>⚠ New ${w} trades stopped since ${esc(fmtDate(at))} IST.</b> Every ${w} strategy run of your account failed 5 minutes in a row: ${esc(String(why || "").slice(0, 200))}. Open ${w} positions keep their stops and exits; no new ${w} entries until you allow them again (${w === "live" ? "paper" : "live"} is not affected). <button type="button" class="btn small" data-brk="${m}">Allow new ${w} trades again</button></div>`).join("");
   box.querySelectorAll("[data-brk]").forEach((b) => { b.onclick = (ev) => run(ev.currentTarget, async () => { must(await db.rpc("breaker_allow_mode", { p_mode: b.dataset.brk })); toast(`New ${b.dataset.brk === "LIVE" ? "live" : "paper"} trades allowed again.`); await loadBreaker(); }); });
 }
-async function loadAll() {
+/**
+ * Strategies, all of them (1,000 at a time: the server never answers more in one request). `f` narrows the read.
+ */
+async function stratRows(cols, f) {
+  const out = [];
+  for (let o = 0; ; o += 1000) {
+    let q = db.from("algo_strategies").select(cols);
+    if (f) q = f(q);
+    const r = must(await q.order("created_at").order("id").range(o, o + 999)); out.push(...r);
+    if (r.length < 1000) break;
+  }
+  return out;
+}
+const strat = { fullAt: 0, stamp: 0 };
+const stratStampOf = (rows) => rows.reduce((m, r) => Math.max(m, Date.parse(r.updated_at) || 0), 0);
+/**
+ * The strategies for a refresh. Every 30 seconds the app used to read all of them in full (760 rows with their
+ * rules: 2.5% of all database time, 14 Nov 2026). A background refresh now reads only the rows changed since the last
+ * answer (20 seconds of overlap) plus the list of ids, which shows deleted and new ones; every 5 minutes, after any
+ * action of the user, and whenever something doesn't add up, everything is read again.
+ */
+async function loadStrategies(soft) {
+  const old = state && state.strategies;
+  if (soft && old && old.length && strat.stamp && Date.now() - strat.fullAt < 300000) {
+    try {
+      const [ids, rows] = await Promise.all([
+        stratRows("id"),
+        stratRows("*", (q) => q.gt("updated_at", new Date(strat.stamp - 20000).toISOString())),
+      ]);
+      const by = new Map(old.map((x) => [x.id, x]));
+      for (const r of rows) by.set(r.id, r);
+      const keep = new Set(ids.map((x) => x.id));
+      if (ids.every((x) => by.has(x.id))) {
+        strat.stamp = Math.max(strat.stamp, stratStampOf(rows));
+        return [...by.values()].filter((x) => keep.has(x.id)).sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : 1));
+      }
+    } catch { /* read everything instead */ }
+  }
+  const all = await stratRows("*");
+  strat.fullAt = Date.now(); strat.stamp = stratStampOf(all);
+  return all;
+}
+async function loadAll(soft) {
   loadHolidays();
   loadEngineAlerts().catch(() => {});
   loadBreaker().catch(() => {});
   if (!alertTimer) alertTimer = setInterval(() => { if (!document.hidden) { loadEngineAlerts().catch(() => {}); loadBreaker().catch(() => {}); } }, 60000);
   const [settings, strategies] = await Promise.all([
     db.rpc("broker_status").then(must),
-    db.from("algo_strategies").select("*").order("created_at").then(must),
+    loadStrategies(soft === true),
     loadCapStatus().catch(() => null),
     loadPnl().catch(() => null),
     loadMargins(),
@@ -8152,8 +8194,8 @@ function paintMarks(prev) {
   { const hr = $("home_run"); if (hr && page === "list") hr.innerHTML = homeRunHtml(); }
   if (renderList.groups && page === "list") for (const g of renderList.groups) document.querySelectorAll(`[data-grun="${CSS.escape(g.k)}"]`).forEach((el) => { el.innerHTML = groupRunHtml(g.list); });
 }
-let marksTimer = null, marksBusy = false, marksCh = null, marksLast = 0, marksPrev = null, marksRaf = 0;
-/** One price update from the server (every second for each open futures / crypto position). */
+let marksTimer = null, marksBusy = false, marksLast = 0, marksPrev = null, marksRaf = 0, marksSince = 0;
+/** One price update from the server (each open futures / crypto position, whenever its price moved). */
 function onMark(m) {
   if (!m || !m.strategy_id) return;
   const s = (state.strategies || []).find((x) => x.id === m.strategy_id);
@@ -8166,33 +8208,32 @@ function onMark(m) {
   // Several positions update in the same second: the screen is repainted once for all of them.
   if (!marksRaf) marksRaf = requestAnimationFrame(() => { marksRaf = 0; const prev = marksPrev; marksPrev = null; if (!document.hidden) paintMarks(prev); });
 }
-/** Live prices: the server pushes each open position's price and running P&L every second (Realtime). */
-function startLiveMarks() {
-  if (marksCh || !me) return;
-  const ch = marksCh = db.channel("live-marks")
-    .on("postgres_changes", { event: "*", schema: "public", table: "live_marks", filter: `owner_id=eq.${me.user_id}` }, (p) => onMark(p.new))
-    .subscribe((st) => {
-      // Connection lost: drop this channel (outside this callback, which removing it would call again) and retry later.
-      if ((st === "CHANNEL_ERROR" || st === "TIMED_OUT" || st === "CLOSED") && marksCh === ch) {
-        marksCh = null;
-        setTimeout(() => { try { db.removeChannel(ch); } catch { /* gone */ } startLiveMarks(); }, 15000);
-      }
-    });
-}
+/**
+ * Live prices: while the app is on screen it asks every 2 seconds for the open positions' prices that changed since
+ * the last answer (a small read of live_marks). Until 14 Nov 2026 the server pushed them through Realtime, but
+ * Realtime read every change of the whole database once a second to find them: 28% of all database time, day and
+ * night, while any screen was open.
+ */
+const MARKS_MS = 2000;
 async function pollMarks() {
   clearTimeout(marksTimer);
-  startLiveMarks();
   const open = (state.strategies || []).filter((s) => s.position !== "FLAT" && !s.archived);
-  // Backup for the live feed: if nothing arrived for 5 seconds, read the latest prices directly.
-  if (open.length && !document.hidden && Date.now() - marksLast > 5000 && !marksBusy) {
+  if (open.length && !document.hidden && !marksBusy) {
     marksBusy = true;
     try {
-      const rows = must(await db.from("live_marks").select("strategy_id, ltp, upnl, at").in("strategy_id", open.map((s) => s.id)));
-      for (const m of rows) if (!open.find((s) => s.id === m.strategy_id && s.pos_ltp_at && Date.parse(s.pos_ltp_at) >= Date.parse(m.at))) onMark(m);
+      let q = db.from("live_marks").select("strategy_id, ltp, upnl, at");
+      if (open.length <= 150) q = q.in("strategy_id", open.map((s) => s.id));
+      // A few seconds of overlap: two price rounds can finish out of order, the older one's rows landing last.
+      if (marksSince) q = q.gt("at", new Date(marksSince - 3000).toISOString());
+      const rows = must(await q);
+      for (const m of rows) {
+        const t = Date.parse(m.at); if (t > marksSince) marksSince = t;
+        if (!open.find((s) => s.id === m.strategy_id && s.pos_ltp_at && Date.parse(s.pos_ltp_at) >= t)) onMark(m);
+      }
     } catch { /* try again next time */ } finally { marksBusy = false; }
   }
   const live = open.some((s) => marketOpenFor(s.data_segment));
-  marksTimer = setTimeout(pollMarks, open.length && live ? 3000 : 60000);
+  marksTimer = setTimeout(pollMarks, open.length && live ? MARKS_MS : 60000);
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { pollMarks(); refreshSoon(); } });
 /* ---------- fresh data whenever the app is looked at (Papa, 3 Nov) ----------
@@ -8205,7 +8246,7 @@ async function refreshAll() {
   if (refreshBusy || !me || !deskUser || pending || btPoll) return;
   refreshBusy = true;
   try {
-    await loadAll();
+    await loadAll(true);
     if (page === "cap" && cap.open) await loadCap();
     else if (page === "desk") await deskSoft();
     else if (page === "list" && lpTab === "live") await renderLive();
