@@ -714,6 +714,18 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   and #305005 trail 4 → fixed 1.5 × ATR; ZINC #293156 none → SL 0.5 + trail 4 × ATR; ALUMINIUM #298619 trail 3 → 4 × ATR;
   GOLDM #304447 SL 1.5% + trail 2%. Pattern: a tighter FIRST stop with a wider or no trailing stop. Nothing was changed
   on the desk; Papa was asked whether to put them on paper beside the originals (1 lot each).
+  **Papa's answer: "actually put that as a parameter in the strategy lab" → stop tuning (same day, migration 107, engine
+  v163; tests `tests/sim/stoptune.test.mjs`, `tests/ui/ui_rules.mjs`)**: Lab settings › "Stop tuning: passed strategies a
+  run (0 = off)" (`#ls_stop_tune`, `lab_settings.stop_tune`, 0–20, set to 5). In each run's writing phase (`generatePhase`,
+  not in focused runs) the best current passed strategies not tuned yet — ones saved on a desk first, then by score —
+  each get their 15 stop versions (`stopTuneVariants`: a fixed stop of 0.5 / 0.75 / 1 / 1.5 / 2 × ATR with no trailing
+  stop or a wide one of 3 / 4 × ATR; on minute candles 1–4 × ATR with none / 6 / 8; the target stays) written into the
+  run with the note "Stop tuning: stop 0.5×ATR, no trailing stop (from lab strategy #n)". At most 40% of a run
+  (50 a run → one strategy, 15 versions; 300 a run → up to the setting). Each version is tested like any strategy
+  (years, doubled slippage, the held-back months) and passes or fails on its own; versions that already failed
+  (`lab_tried`) aren't written again. A strategy is tuned once (`lab_results.stop_tuned_at`); its versions carry the mark
+  too, so they are never tuned themselves. Tight trailing stops are never written (the study: they lose 26–64% of the
+  profit). The lab's jobs are off since 13 Nov, so this starts working when they are switched back on.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");

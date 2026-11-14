@@ -720,6 +720,27 @@ export function trailVariants(parent: LabConfig): LabConfig[] {
   }
   return out;
 }
+/**
+ * Stop tuning (14 Nov 2026, Papa: "put that as a parameter in the strategy lab"). The stop study of the desk's 30 paper
+ * strategies showed one pattern worth testing on every strategy that passes: a TIGHTER FIRST STOP with a WIDE trailing stop
+ * or none (tight trailing stops lost 26–64% of the profit; tightening stop and trail together never helped). So the
+ * variants are a fixed stop of 0.5–2 × ATR (1–4 × ATR on minute candles, whose ATR is one candle's swing) with no trailing
+ * stop, or a wide one (3 / 4 × ATR; 6 / 8 on minute candles). The target, if any, stays. Each variant is tested like any
+ * other strategy (years, slippage, the held-back months), so it passes or fails on its own.
+ */
+export function stopTuneVariants(parent: LabConfig): LabConfig[] {
+  const daily = !!parent.rules?.daily, base: Risk | null = parent.risk ?? null;
+  const sls = daily ? [0.5, 0.75, 1, 1.5, 2] : [1, 1.5, 2, 3, 4], trails: (number | null)[] = daily ? [null, 3, 4] : [null, 6, 8];
+  const out: LabConfig[] = [];
+  for (const sl of sls) for (const tr of trails) {
+    const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
+    cfg.risk = { basis: "UNDERLYING", atr_len: base?.atr_len ?? 14, sl: { type: "ATR", value: sl }, tgt: base?.basis === "PREMIUM" ? null : base?.tgt ?? null,
+      trail: tr ? { type: "ATR", value: tr } : null, max_day_loss: base?.max_day_loss ?? null };
+    cfg.lab_note = `Stop tuning: stop ${sl}×ATR, ${tr ? `trailing stop ${tr}×ATR` : "no trailing stop"}`;
+    out.push(cfg);
+  }
+  return out;
+}
 /** Other indicator combinations: add a filter, swap a filter for another indicator, or drop one (the entry signal stays). */
 export function recombine(parent: LabConfig, seed: number): LabConfig | null {
   const r = rng(seed);
@@ -1548,7 +1569,7 @@ async function countRows(sb: SupabaseClient, runId: number) {
   return count ?? 0;
 }
 
-async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _win: { from: string }): Promise<number> {
+export async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _win: { from: string }): Promise<number> {
   const set = run.settings ?? {};
   let n = Math.max(10, Math.min(1000, Number(set.per_night ?? 300)));
   if ((await countRows(sb, run.id)) > 0) return 0; // already written (instalment repeated)
@@ -1598,6 +1619,34 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   }
   const capital = Number(set.capital ?? 500000);
   let seed = (Number(run.id) * 1000003) >>> 0;
+  // Stop tuning (lab_settings.stop_tune = passed strategies a run, 0 = off; 14 Nov 2026, Papa): the best current passed
+  // strategies that haven't had it yet (ones saved on a desk first) each get their stop variants (stopTuneVariants)
+  // written into this run, at most 40% of the run. A strategy is tuned once (stop_tuned_at); its variants never are.
+  let nTuned = 0;
+  const tuneMax = set.focus || n <= 0 ? 0 : Math.min(Math.max(0, Math.min(20, Math.trunc(Number(set.stop_tune) || 0))), Math.max(1, Math.floor(n * 0.4 / 15)));
+  if (tuneMax > 0) {
+    // Ones saved on a desk first, then by score (sorted here; the light read keeps the configs out until they are needed).
+    const { data: cand, error: ce } = await sb.from("lab_results").select("id, promoted_id, score").eq("passed", true).eq("robust_status", "done")
+      .is("superseded_by", null).is("stop_tuned_at", null).in("asset", assets).order("score", { ascending: false }).limit(500);
+    if (ce) throw new Error(ce.message);
+    const top = (cand ?? []).sort((x, y) => (y.promoted_id ? 1 : 0) - (x.promoted_id ? 1 : 0) || (Number(y.score) || 0) - (Number(x.score) || 0) || Number(x.id) - Number(y.id)).slice(0, tuneMax);
+    const { data: got, error: te } = top.length ? await sb.from("lab_results").select("id, fingerprint, config").in("id", top.map((x) => x.id)) : { data: [], error: null };
+    if (te) throw new Error(te.message);
+    const tp = top.map((x) => (got ?? []).find((g) => g.id === x.id)).filter((g): g is { id: number; fingerprint: string; config: LabConfig } => !!g);
+    const tuneRows: Record<string, unknown>[] = [];
+    const at = new Date().toISOString();
+    for (const par of tp) for (const cfg of stopTuneVariants(par.config)) {
+      const fp = fingerprint(cfg);
+      if (fp === par.fingerprint || seen.has(fp)) continue;
+      seen.add(fp);
+      cfg.lab_note = `${cfg.lab_note} (from lab strategy #${par.id})`;
+      tuneRows.push({ run_id: run.id, asset: cfg.underlying, mode: cfg.rules.daily ? "DAILY" : "INTRADAY", label: labelFor(cfg), fingerprint: fp, champion: false, config: cfg, stage: "pending", stop_tuned_at: at });
+    }
+    const triedT = await triedOf(sb, tuneRows.map((r) => String(r.fingerprint)));
+    const keep = tuneRows.filter((r) => !triedT.has(String(r.fingerprint)));
+    rows.push(...keep); nTuned = keep.length;
+    if (tp.length) { const { error } = await sb.from("lab_results").update({ stop_tuned_at: at }).in("id", tp.map((x) => x.id)); if (error) throw new Error(error.message); }
+  }
   // Evolution: about 40% of the night goes to the winners. Each is tried on the other assets, other decision timeframes,
   // other stop / target / trailing-stop settings, other indicator combinations and setting tweaks. A strategy that keeps
   // passing night after night gets more of these tries, so the strongest ideas are tested hardest.
@@ -1641,7 +1690,7 @@ async function generatePhase(sb: SupabaseClient, run: Run, assets: string[], _wi
   rows.push(...kidRows.filter((r) => !triedKids.has(String(r.fingerprint))));
   // New strategies, shared between assets: indices (option variants too) and coins get twice a commodity's or stock's share.
   const w = assets.map((k) => LAB_ASSETS[k].options || LAB_ASSETS[k].crypto ? 2 : 1), wsum = w.reduce((a, b) => a + b, 0);
-  const nNew = Math.max(0, n - nMade);
+  const nNew = Math.max(0, n - nMade - nTuned);
   for (let i = 0; i < assets.length; i++) {
     const k = assets[i], want = nNew ? Math.max(1, Math.round((nNew * w[i]) / wsum)) : 0;
     let made = 0;

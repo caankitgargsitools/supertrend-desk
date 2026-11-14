@@ -1685,6 +1685,7 @@ body.dk-fs-on { overflow: hidden; }
             <label class="f"><span>Heikin Ashi strength share (% of new strategies)</span><input id="ls_has_pct" type="number" min="0" max="50" step="1"></label>
             <label class="f"><span>Capital for return % (₹)</span><input id="ls_capital" type="number" min="10000" step="10000"></label>
             <label class="f"><span>Winners long-tested each night (00:30 IST)</span><input id="ls_long" type="number" min="0" max="40" step="1"></label>
+            <label class="f" title="For each of that many passed strategies a run (ones on a desk first), the lab also tests a tighter first stop (0.5 to 2 × ATR) with no trailing stop or a wide one (3 or 4 × ATR). Each version must pass every test by itself. A strategy is tuned once. 0 = off."><span>Stop tuning: passed strategies a run (0 = off)</span><input id="ls_stop_tune" type="number" min="0" max="20" step="1"></label>
           </div>
           <div class="f"><span>Assets to research</span><div class="assetpick" id="ls_assets"></div></div>
           <div class="f" id="ls_events"><span>Market-event days (RBI, Fed, budget …) for the Calendar rule's “event day”</span>
@@ -6945,7 +6946,7 @@ async function labBulk(kind, btn) {
 document.querySelectorAll("#lab_bulk [data-lbulk]").forEach((b) => b.addEventListener("click", () => labBulk(b.dataset.lbulk, b)));
 function renderLabSettings() {
   const s = lab.settings || {};
-  $("ls_enabled").value = s.enabled === false ? "false" : "true"; $("ls_mode").value = s.schedule_mode || "nightly"; $("ls_per_night").value = s.per_night ?? 300; $("ls_capital").value = s.capital ?? 500000; $("ls_long").value = s.long_per_night ?? 10; $("ls_has_pct").value = s.ha_strength_pct ?? 8;
+  $("ls_enabled").value = s.enabled === false ? "false" : "true"; $("ls_mode").value = s.schedule_mode || "nightly"; $("ls_per_night").value = s.per_night ?? 300; $("ls_capital").value = s.capital ?? 500000; $("ls_long").value = s.long_per_night ?? 10; $("ls_has_pct").value = s.ha_strength_pct ?? 8; $("ls_stop_tune").value = s.stop_tune ?? 0;
   const box = $("ls_assets"); box.innerHTML = "";
   for (const [k, p] of Object.entries(PRESETS)) {
     const l = document.createElement("label"); const i = document.createElement("input"); i.type = "checkbox"; i.value = k; i.checked = (s.assets || []).includes(k);
@@ -6976,7 +6977,7 @@ $("labSetForm").addEventListener("submit", (e) => {
   if (!(per >= 10 && per <= 1000)) { $("ls_msg").textContent = "Strategies per run must be 10–1000."; return; }
   if (!(cap >= 10000)) { $("ls_msg").textContent = "Capital must be at least ₹10,000."; return; }
   run(e.submitter, async () => {
-    must(await db.from("lab_settings").update({ enabled: $("ls_enabled").value === "true", schedule_mode: $("ls_mode").value, per_night: Math.trunc(per), capital: cap, assets, long_per_night: Math.max(0, Math.min(40, Math.trunc(Number($("ls_long").value) || 0))), ha_strength_pct: Math.max(0, Math.min(50, Number($("ls_has_pct").value) || 0)), updated_at: new Date().toISOString() }).eq("id", 1));
+    must(await db.from("lab_settings").update({ enabled: $("ls_enabled").value === "true", schedule_mode: $("ls_mode").value, per_night: Math.trunc(per), capital: cap, assets, long_per_night: Math.max(0, Math.min(40, Math.trunc(Number($("ls_long").value) || 0))), ha_strength_pct: Math.max(0, Math.min(50, Number($("ls_has_pct").value) || 0)), stop_tune: Math.max(0, Math.min(20, Math.trunc(Number($("ls_stop_tune").value) || 0))), updated_at: new Date().toISOString() }).eq("id", 1));
     $("ls_msg").textContent = "Saved. Changes apply from the next run."; await loadLab();
   });
 });
