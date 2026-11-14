@@ -578,6 +578,25 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
     Test: `tests/ui/ui_ready.mjs`. On 13 Nov it showed for Papa: 22 live strategies sized far beyond ₹4 lakh (GOLD 10 lots
     ≈ ₹21 lakh a day — the live copies still carry paper's ₹37 lakh-a-day sizing, max 10 lots), Delta wallet 0 with 6 live
     crypto strategies, Dhan funds ₹2.71 lakh short of one lot for 7 of 22, 7 of 28 live without a stop.
+- **Best passed strategy per asset and timeframe (14 Nov 2026, Papa: "show if the desk has found any PASSED strategy on any
+  asset on a new time frame … I want to choose all the strategies to run on paper which are the best in that asset on each
+  time frame, so that I can test it in real time on paper, and then whatever I like I will move that to live"; migration
+  102)**: table `lab_best_tf` (asset, tf — 'D' for daily rules, else minutes, as `cxStratTf` / `labTfKey` — the best
+  current passed lab result by consistency score, its fingerprint, how many passed, `first_seen`, `best_since`, `current`;
+  never deleted) kept by `lab_best_tf_refresh()` (cron `lab-best-tf`, hourly at :37; the read un-toasts ~2,300 configs,
+  ≈ 5 s cold, hence stored). After the first run a NEW asset / timeframe notifies admins once (kind "lab", link
+  `/?best=1`). `lab_best_tf_list()` (admins): each row with the caller's desk beside it — `paper_best` / `live_best` (a
+  desk strategy is the same one when its lab result has the same fingerprint; futures only), `paper_n` /
+  `paper_active_n` / `live_n` on that asset and timeframe. Website: card `#lp_besttf` at the bottom of the Strategies
+  list (admins; `bt`, `loadBestTf` / `renderBestTf` / `btAdd`, `btState`): rows whose best isn't running on paper first —
+  "New timeframe" (nothing on paper), "Not on paper" (others of that timeframe are), "On paper, paused"; the running
+  ones behind "Show the N already running"; a Live column; ⇄ Compare / Open. Tick → "Put N on paper": new ones saved with
+  `labStrategyRow` (futures, 1 lot, paused) then started with the paused ones ("Start them now" tick); paper only —
+  going live stays the separate step. A phone shows the rows as stacked cards. Test: `tests/ui/ui_best_tf.mjs` (args:
+  theme width; the shared mock answers an insert with `{ __post: row }` when a table's handler returns that). First
+  result (14 Nov): 19 assets / timeframes with a passed strategy; the best of 13 running on paper; not on paper:
+  ALUMINIUM daily, ETHUSD daily, MIDCPNIFTY 30 min, SILVERMIC daily (others of the timeframe run), and two new
+  timeframes — RELIANCE 60 min, SBIN 125 min.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
@@ -971,24 +990,29 @@ Still open:
    generator is plain code by Papa's free-first rule), live results feeding back into the Lab's ranking, and a neon /
    glass look for chosen pages.
 9. **For today's session (Papa, 14 Nov 2026: "put all of these for today. We'll do that plus other pending items"; none
-   started — discuss each with him before building):**
+   started. Each carries the questions to put to Papa before building — he asked for them to be kept here):**
    1. **Combination strategies with USD/INR.** Pairs of USDINR with a commodity (MCX: gold, silver, crude … — their rupee
       price is the dollar price × USDINR) and of USDINR with Bitcoin and the other coins (Delta trades them in dollars).
-      To settle with Papa first: what "combination" means here (a rupee-hedged commodity / coin position, a spread, or two
-      strategies whose trades offset — the Combinations page's "lessens the drawdown" test), which USDINR contract (NSE
-      currency futures: Dhan segment, lot 1,000 USD, margin, hours 09:00–17:00, RBI's rule that exchange currency
-      derivatives need an underlying exposure), and that USDINR is not a lab asset yet (candles, costs, sessions,
-      instruments to add before anything can be tested).
+      **Questions for Papa:** (a) what "combination" means here — a rupee-hedged commodity / coin position, a spread
+      between the two, or two separate strategies whose trades offset (the Combinations page's "lessens the drawdown"
+      test)? (b) which USDINR contract — NSE currency futures (lot 1,000 USD, 09:00–17:00) through Dhan? (c) RBI's 2024
+      rule says exchange-traded currency derivatives need an underlying exposure — is that covered for his account?
+      (d) paper only at first? To do before anything can be tested: USDINR isn't a lab asset yet (candles, costs,
+      sessions, instruments, margin).
    2. **Best strategy shown where "best isn't live" is flagged, with compare and a smooth switch.** On the Strategies tab's
       group header (`tr.lpg`, the amber "best isn't live" tag, ranks from `lab_scores`): name the best strategy right
       there, a "Compare with the best" button (the running one vs the best, the Compare page's charts), and a "Switch to
-      the best" button — stop the current one and start the best one in the same mode. To settle: what "smoothly" does
-      with an open position (wait for its exit, close it now, or let it run paused to its own exit while the best one
-      starts flat), lots / sizing carried over, live needs the real-money confirmation, and the walk-forward note of 7 Nov
-      (the top-ranked by past consistency earned less next quarter than the average passed strategy in 12 of 13 groups)
-      shown beside the button so the switch is an informed one.
+      the best" button — stop the current one and start the best one in the same mode.
+      **Questions for Papa:** (a) what "smoothly" does when the current strategy holds a position — wait for its own
+      exit and then start the best, close it now, or let it run paused to its own exit while the best starts flat?
+      (b) should the best take over the current one's lots / sizing, or be sized afresh (Lots wizard)? (c) for Live:
+      the real-money confirmation each time, and is the best one required to have run on paper first? (d) show the
+      walk-forward note of 7 Nov beside the button (the top-ranked by past consistency earned less next quarter than
+      the average passed strategy in 12 of 13 groups), so the switch is an informed one? (e) "best" among the
+      strategies on his desk (as the tag works today) or the lab's best overall (the new card below, built 14 Nov)?
    3. **Desk › Positions (one-screen view): improve the entry · stop · target line** (`deskPosPaint`, `ladderHTML` /
-      `ladder`). Papa has "a couple of things in mind" — ask him for them before changing anything.
+      `ladder`). **Question for Papa:** he has "a couple of things in mind" — ask for them before changing anything.
+   4. **Which of the three to start with** (asked 14 Nov, not answered yet).
 
 ## Open items
 - Supervised 1-lot live test (NATGASMINI, Lab #6038) once Papa adds Dhan funds and whitelists the IP.

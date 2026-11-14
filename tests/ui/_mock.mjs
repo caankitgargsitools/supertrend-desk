@@ -42,7 +42,8 @@ export async function openApp({ theme = "dark", width = 1440, res: more = {}, st
     const m = u.match(/\/rest\/v1\/(rpc\/[a-z_]+|[a-z_]+)/), key = m && m[1];
     let body = key in all ? all[key] : [];
     if (typeof body === "function") body = body(r.request());
-    if (meth === "POST" && !/\/rpc\//.test(u)) return r.fulfill({ status: 201, contentType: "application/json", body: "[]" });
+    // An insert answers [] unless the table's handler gives the created row as { __post: row }.
+    if (meth === "POST" && !/\/rpc\//.test(u)) return r.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(body && !Array.isArray(body) && body.__post !== undefined ? body.__post : []) });
     if (/application\/vnd\.pgrst\.object/.test(r.request().headers()["accept"] || "") && Array.isArray(body)) body = body[0] ?? null;
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   });

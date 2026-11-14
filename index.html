@@ -1148,6 +1148,21 @@ body.dk-fs-on { overflow: hidden; }
 .fo-act select { width: auto; }
 .fo-why { color: var(--muted); overflow-wrap: anywhere; }
 @media (max-width: 900px) { .fo-row { grid-template-columns: 1fr; } }
+.card.besttf { margin-top: 16px; } .card.besttf .actions { display: flex; gap: 8px; align-items: center; }
+.bt-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 10px; }
+.bt-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.bt-table th { text-align: left; font: 600 12px/1.2 var(--font-ui, inherit); color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.bt-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.bt-table th.n, .bt-table td.n { text-align: right; font-variant-numeric: tabular-nums; } .bt-table td.ck, .bt-table th.ck { width: 28px; padding-right: 0; }
+.bt-table .bt-rules { min-width: 220px; max-width: 420px; } .bt-clip { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bt-table .bt-act { white-space: nowrap; text-align: right; } .bt-table .bt-act .btn { margin-left: 6px; }
+@media (max-width: 700px) {
+  .bt-table thead { display: none; } .bt-table, .bt-table tbody { display: block; }
+  .bt-table tr { display: grid; grid-template-columns: 34px 1fr; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .bt-table td { display: block; grid-column: 2; padding: 2px 0; border: 0; } .bt-table td.ck { grid-column: 1; grid-row: 1 / span 6; width: auto; padding-top: 2px; }
+  .bt-table td.n { text-align: left; } .bt-table td.n::before { content: "Consistency "; color: var(--muted); }
+  .bt-table .bt-rules { min-width: 0; max-width: none; } .bt-table .bt-act { text-align: left; padding-top: 6px; } .bt-table .bt-act .btn { margin: 0 6px 0 0; }
+}
 .card.ready { margin-top: 12px; } .card.ready .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .rd-part { margin-top: 10px; } .rd-h { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .rd-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
@@ -1813,6 +1828,7 @@ body.dk-fs-on { overflow: hidden; }
       </div>
       <div class="scroll lp-desk"><table class="big-table"><thead id="lp_head"></thead><tbody id="lp_body"></tbody><tfoot id="lp_tfoot"></tfoot></table></div>
       <p class="hint" id="lp_foot" style="margin:8px 0 0"></p>
+      <section class="card besttf" id="lp_besttf" hidden></section>
       </div>
     </section>
 
@@ -2427,6 +2443,7 @@ async function loadAll() {
   await loadLabScores().catch(() => {});
   loadMorning().catch(() => {});
   loadReady().catch(() => {});
+  loadBestTf().catch(() => {});
   renderConn();
   if (page === "list") renderList();
   if (page === "strat" && selected) { renderStrategy(); await loadDetail(); } else if (page === "strat") showPage("list");
@@ -7557,6 +7574,94 @@ function renderReady() {
   $("rd_all").onclick = () => { readyOpen = !readyOpen; renderReady(); };
   $("rd_now").onclick = (e) => run(e.currentTarget, () => loadReady(true));
 }
+/* ---------- Best passed strategy per asset and timeframe (14 Nov 2026, Papa: "show if the desk has found any PASSED
+   strategy on any asset on a new time frame … I want to choose all the strategies to run on paper which are the best in
+   that asset on each time frame, so that I can test it in real time on paper, and then whatever I like I will move that
+   to live"; migration 102). Admins, at the bottom of the Strategies list: one row per asset and timeframe that has a
+   passed lab strategy — the best one (highest consistency score) and whether it is on your paper desk: running, paused,
+   not there while others of that timeframe are, or a new timeframe with nothing on paper. Tick the ones missing →
+   "Put on paper": new ones are saved as paper strategies (futures version, 1 lot) and started, paused ones are started.
+   Paper only — going live stays a separate, deliberate step. Read from lab_best_tf_list() (kept hourly by the database). */
+const bt = { data: null, pick: new Set(), all: false };
+const btKey = (r) => `${r.asset}|${r.tf}`;
+const btTf = (tf) => tf === "D" || tf === "1440" ? "Daily" : `${tf} min`;
+/** run = the best is running on paper · paused = on paper but paused · other = not on paper, others of the timeframe are · new = nothing on paper. */
+const btState = (r) => r.paper_best ? (r.paper_best.active ? "run" : "paused") : Number(r.paper_n) > 0 ? "other" : "new";
+const BT_CHIP = { run: ["green", "Running on paper"], paused: ["yellow", "On paper, paused"], other: ["yellow", "Not on paper"], new: ["blue", "New timeframe"] };
+async function loadBestTf() {
+  if (!isAdmin()) return;
+  const j = await db.rpc("lab_best_tf_list").then((r) => r.data || null).catch(() => null);
+  if (j && Array.isArray(j.rows)) {
+    bt.data = j;
+    const open = new Set(j.rows.filter((r) => btState(r) !== "run").map(btKey));
+    for (const k of [...bt.pick]) if (!open.has(k)) bt.pick.delete(k);
+  }
+  if (page === "list") renderBestTf();
+}
+function renderBestTf() {
+  const box = $("lp_besttf"); if (!box) return;
+  const rows = (bt.data && bt.data.rows) || [];
+  box.hidden = !isAdmin() || !rows.length;
+  if (box.hidden) { box.innerHTML = ""; return; }
+  const todo = rows.filter((r) => btState(r) !== "run"), done = rows.length - todo.length, shown = bt.all ? rows : todo;
+  const n = bt.pick.size, fresh = todo.filter((r) => btState(r) === "new").length;
+  const tr = (r) => {
+    const st = btState(r), k = btKey(r), [c, word] = BT_CHIP[st], rules = String(r.label || "").split(" · ").slice(1).join(" · ") || String(r.label || "");
+    const pn = Number(r.paper_n) || 0, pa = Number(r.paper_active_n) || 0;
+    const note = st === "run" ? (r.paper_best.position && r.paper_best.position !== "FLAT" ? "in a trade" : "waiting for its signal")
+      : st === "paused" ? "start it to test it"
+      : st === "other" ? `${plural(pn, "other strategy", "other strategies")} on this timeframe, ${pa ? `${pa} running` : "none running"}`
+      : "nothing on paper for this timeframe yet";
+    const live = r.live_best ? `<span class="chip ${r.live_best.active ? "green" : "yellow"}">${r.live_best.active ? "Live" : "Live, paused"}</span>` : Number(r.live_n) ? '<span class="hint">another is live</span>' : '<span class="hint">–</span>';
+    return `<tr data-bt="${esc(k)}"><td class="ck">${st === "run" ? "" : `<input type="checkbox" data-btpick="${esc(k)}" aria-label="Select ${esc(assetLabel(r.asset))} ${esc(btTf(r.tf))}" ${bt.pick.has(k) ? "checked" : ""}>`}</td>
+      <td><b>${esc(assetLabel(r.asset))}</b><div class="hint">${esc(btTf(r.tf))}</div></td>
+      <td class="bt-rules" title="${esc(r.label || "")}"><span class="bt-clip">${esc(rules)}</span><div class="hint">Lab #${esc(r.lab_id)} · best of ${esc(fmtNum(Number(r.n_passed) || 1))} passed</div></td>
+      <td class="n">${r.cons == null ? "–" : esc(String(r.cons))}</td>
+      <td><span class="chip ${c}">${esc(word)}</span><div class="hint">${esc(note)}</div></td>
+      <td>${live}</td>
+      <td class="bt-act">${r.paper_best ? `<button class="btn small" type="button" data-btopen="${esc(r.paper_best.id)}">Open</button>` : ""}<button class="btn small" type="button" data-btcmp="${esc(r.lab_id)}" data-btname="${esc(r.label || "")}">⇄ Compare</button></td></tr>`;
+  };
+  box.innerHTML = `<div class="head"><div><span class="label">From the Strategy Lab</span><h2 style="font-size:18px">Best passed strategy per asset and timeframe</h2></div>
+      <div class="actions"><span class="hint">checked ${esc(agoText(bt.data.at))}</span></div></div>
+    <p class="hint" style="margin:4px 0 10px">${plural(rows.length, "asset and timeframe has", "assets and timeframes have")} a passed strategy. The best of ${done} ${done === 1 ? "is" : "are"} running on paper${todo.length ? `; <b>${todo.length} ${todo.length === 1 ? "is" : "are"} not</b>${fresh ? ` (${plural(fresh, "new timeframe")})` : ""}` : ""}. Tick the ones to test and put them on paper; move to Live only what you like there.</p>
+    ${todo.length || bt.all ? `<div class="bt-bar"><label class="showtr"><input type="checkbox" id="bt_allpick" ${todo.length && todo.every((r) => bt.pick.has(btKey(r))) ? "checked" : ""} ${todo.length ? "" : "disabled"}> Tick all that aren't running on paper</label>
+      <button class="btn small primary" id="bt_add" type="button" ${n ? "" : "disabled"}>${n ? `Put ${n} on paper` : "Put on paper"}</button>
+      ${done ? `<button class="btn small" id="bt_more" type="button" aria-expanded="${bt.all}">${bt.all ? "Only the ones not on paper" : `Show the ${done} already running`}</button>` : ""}</div>` : `<p class="banner ok" style="margin:0 0 10px">Every best strategy is running on paper. <button class="btn small" id="bt_more" type="button">Show them</button></p>`}
+    ${shown.length ? `<div class="scroll"><table class="bt-table"><thead><tr><th class="ck"></th><th>Asset · timeframe</th><th>Best passed strategy</th><th class="n" title="The lab's consistency score, 0–100">Consistency</th><th>On paper</th><th>Live</th><th></th></tr></thead><tbody>${shown.map(tr).join("")}</tbody></table></div>` : ""}
+    <p class="hint" style="margin:10px 0 0">"Best" = the highest consistency score among the lab's passed strategies today. It describes the past: passing means worth testing on paper, not proven.</p>`;
+  box.querySelectorAll("[data-btpick]").forEach((el) => el.addEventListener("change", () => { el.checked ? bt.pick.add(el.dataset.btpick) : bt.pick.delete(el.dataset.btpick); renderBestTf(); }));
+  const ap = $("bt_allpick"); if (ap) ap.addEventListener("change", () => { for (const r of todo) ap.checked ? bt.pick.add(btKey(r)) : bt.pick.delete(btKey(r)); renderBestTf(); });
+  const more = $("bt_more"); if (more) more.addEventListener("click", () => { bt.all = !bt.all; renderBestTf(); });
+  const add = $("bt_add"); if (add) add.addEventListener("click", () => btAdd(add));
+  box.querySelectorAll("[data-btopen]").forEach((el) => el.addEventListener("click", () => openStrat(el.dataset.btopen)));
+  box.querySelectorAll("[data-btcmp]").forEach((el) => el.addEventListener("click", () => cmpToggle("lab", String(el.dataset.btcmp), el.dataset.btname)));
+}
+function btAdd(btn) {
+  const rows = ((bt.data && bt.data.rows) || []).filter((r) => bt.pick.has(btKey(r)) && btState(r) !== "run");
+  if (!rows.length) return;
+  const add = rows.filter((r) => !r.paper_best), wake = rows.filter((r) => r.paper_best);
+  let start = true;
+  askConfirm(`<strong>Put ${plural(rows.length, "strategy", "strategies")} on paper?</strong><br>${[add.length ? `${add.length} new: saved as paper strategies (futures) with <b>1 lot</b> each` : "", wake.length ? `${wake.length} already on paper but paused` : ""].filter(Boolean).join("; ")}.
+    <br>Paper only: no real orders are sent. Size their lots together afterwards in Capital › Lots wizard › Paper.
+    <br><label class="showtr" style="margin-top:8px"><input type="checkbox" id="bt_start" checked> Start them now (untick to add them paused)</label>`, "Put on paper", () => run(btn, async () => {
+    const made = [], bad = [];
+    for (let i = 0; i < add.length; i += 10) {
+      const part = must(await db.from("lab_results").select("id, label, config, metrics, basic_passed, robust_status, promoted_id").in("id", add.slice(i, i + 10).map((r) => r.lab_id)));
+      for (const r of part) {
+        if (!r.config) { bad.push(`Lab #${r.id}: its settings aren't stored`); continue; }
+        const { data, error } = await db.from("algo_strategies").insert(labStrategyRow(r, labVersionOf(r, "FUT"))).select("id").single();
+        if (error || !data) { bad.push(`Lab #${r.id}: ${errorText(error || "not saved")}`); continue; }
+        await db.from("lab_results").update({ promoted_id: data.id }).eq("id", r.id);
+        made.push(data.id);
+      }
+    }
+    const on = start ? [...made, ...wake.map((r) => r.paper_best.id)] : [];
+    for (let i = 0; i < on.length; i += 100) must(await db.from("algo_strategies").update({ active: true }).in("id", on.slice(i, i + 100)));
+    bt.pick.clear(); await loadAll(); await loadBestTf();
+    toast([made.length ? `${made.length} added to Paper${start ? " and started" : ", paused"}` : "", wake.length ? (start ? `${wake.length} started` : `${wake.length} left paused`) : "", bad.length ? `${bad.length} not added (${bad[0]})` : ""].filter(Boolean).join("; ") + ". Size their lots in Capital › Lots wizard › Paper.");
+  }));
+  const tick = $("bt_start"); if (tick) tick.addEventListener("change", () => { start = tick.checked; });
+}
 async function loadMorning() {
   if (!me) return;
   morning = await db.rpc("morning_card").then((r) => r.data || null).catch(() => null);
@@ -10073,7 +10178,7 @@ $("lp_modeseg").addEventListener("click", (e) => {
   const b = e.target.closest("[data-m]"); if (!b) return;
   $("lf_mode").value = b.dataset.m; try { localStorage.setItem("lpMode", b.dataset.m); } catch { /* private window */ }
   $("tf_mode").value = b.dataset.m; $("tf_mode").dispatchEvent(new Event("change")); // the Trades tab follows the same choice
-  renderList(); renderMorning(); renderReady();
+  renderList(); renderMorning(); renderReady(); renderBestTf();
 });
 try { const m = localStorage.getItem("lpMode"); if (m === "LIVE" || m === "PAPER") { $("lf_mode").value = m; $("tf_mode").value = m; } } catch { /* private window */ }
 $("lp_fold").addEventListener("click", () => {
@@ -10942,6 +11047,7 @@ function openDeepLink(href) {
     else if (u.searchParams.get("combo") && isAdmin()) showPage("combo");
     else if (u.searchParams.get("health") && isAdmin()) showPage("health");
     else if (u.searchParams.get("shukrana") && isAdmin()) { ad.tab = "shukrana"; showPage("admin"); }
+    else if (u.searchParams.get("best") && isAdmin()) { showPage("list"); setLpTab("all"); setTimeout(() => { const h = $("lp_besttf"); if (h && !h.hidden) h.scrollIntoView({ block: "start" }); }, 900); }
     else if (u.searchParams.get("conn")) openConn();
     else if (u.searchParams.get("home")) { showPage("list"); setLpTab("all"); setTimeout(() => { const h = $("lp_morning"); if (h && !h.hidden) h.scrollIntoView({ block: "start" }); }, 400); }
     if (u.search) history.replaceState(null, "", location.pathname + location.hash);
