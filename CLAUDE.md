@@ -1020,6 +1020,27 @@ Still open:
       Dhan's free funds, but the planned lots are wrong. The ready fix is Capital › Lots wizard › Live › Autofill —
       **don't apply or change anything until Papa says what he wants changed about it** (he will raise it and ask for
       this list).
+   6. **Optimisations: database, Vercel and everything else** (Papa, 14 Nov: "put database Vercel and all other
+      optimizations on the pending list"; nothing started — review first, show him the list with what each one saves and
+      what it risks, then build what he picks). Candidates already known:
+      - **Database** (smallest Supabase compute; outages 23 Oct, 12 Nov, 13 Nov): the compute upgrade (after the Dhan IP
+        lock ends 19 Nov, or with the fixed-IP server of item 00 first — an upgrade may change the IPv6 Dhan sees);
+        superseded lab results' trade payloads out to storage files (~250 MB; needs his approval — item (4) of the
+        6 Nov questions, with the 7 dead tables, 15 dead functions and 13 duplicate policy pairs); the 624 mostly
+        paused paper strategies (archive / delete what he doesn't want); slow statements and timeouts (pg_stat_statements,
+        the advisors' performance list); hourly jobs' cost (`lab-best-tf` ≈ 5 s cold, `readiness-check` asks Dhan,
+        `desk-health`); Realtime decoding share; `net._http_response` / cron history size; tightening table grants
+        (pending item 2); leaked-password protection off; 14 functions without a fixed search_path.
+      - **Vercel / website**: `index.html` is one ~11,000-line file sent on every visit (compression, cache headers, what
+        can load later); the app re-reads strategies, trades and capital every 30 s (payload size with 650 strategies:
+        columns and rows it really needs); every push to `main` deploys, also notes-only commits (skip those); plan
+        usage and limits to check; the Android WebView app loads the same site.
+      - **Engine**: signal lag 22–32 s on Dhan assets (question (7) of 6 Nov: Dhan WebSocket or the desk's own minute
+        candles); CPU per call; `afterRow` without `must`; an account-level stop for account-wide refusals (wrong IP /
+        token refused strategy by strategy).
+      - **Website figures**: Booked P&L behind one helper (four scopes today); the Desk's repeated ladders.
+      - **Labs**: jobs 3 / 10 / 26 / 29 are off since 13 Nov — back on after the compute upgrade.
+      **Question for Papa:** which of these he means first, and whether "Vercel" is about speed, cost or limits.
 
 ## Open items
 - Supervised 1-lot live test (NATGASMINI, Lab #6038) once Papa adds Dhan funds and whitelists the IP.
