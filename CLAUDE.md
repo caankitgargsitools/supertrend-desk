@@ -691,6 +691,29 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   of trades, but they sit in TOAST storage that costs memory only when read; disk is 16% used; and they are still read
   (a desk strategy's `lab_id` for Compare / drawdown check / kill rule, the Lab page's re-test history), so moving them
   needs a fallback reader for little gain. Revisit only if disk becomes the limit.
+- **Stop / trailing-stop study (14 Nov 2026, Papa: "the stop loss and the trailing stop losses are kept too far … try a
+  variation … devise strategies which are yielding more"; engine v162)**: run OFF the database, in the cloud session, with
+  the lab's own backtester and candle files. How: engine action `candle_links` (engine secret only; `candleLinks(sb, asset,
+  1800, true)` → 30-minute signed links to an asset's D / I5 / I5Y / F files), called from SQL with `net.http_post` + the
+  secret sub-select, answer read from `net._http_response`; the session's environment "supertrend-desk" (made that day,
+  Papa approved) allows the host `umryzxusbdttbcshkajt.supabase.co`; the files (62, 16 MB for 15 assets) were downloaded
+  and `tests/sim/lab.mjs` (`loadAsset` with a stand-in database, `screenOne`) ran the 30 running paper strategies × ~115
+  stop settings each (stop and trailing stop none / 0.5–4 × ATR / 0.75–5 %, daily; wider grid for minute strategies; the
+  strategy's own stops × 0.25 / 0.5 / 0.75 / 1.5 / 2), 1 lot, full history, the last 12 months held back. The run
+  reproduces the lab's stored yearly figures (3 of 5 windows exactly, the newest year within 0.4–3.5%: newer candles).
+  The strategies' rules were kept out of the repository (scripts lived in the session scratchpad). **Findings**:
+  tightening a strategy's own stop and trail together loses money — at half width 0 of 23 made more (median profit −25%),
+  at quarter width 0 of 23 (−61%); tight TRAILING stops are the worst (daily, 0.5–1.5 × ATR trail vs no stop: profit −26%
+  to −64%); a plain fixed stop of about 1 × ATR barely costs profit (−3% median) and cuts the worst fall (−14%), better
+  net ÷ fall in 16 of 24 daily strategies. Choosing the best setting on the older years and judging it on the last 12
+  months: better than now for 10, worse for 14, nothing chosen for 6 — picking stops from the past is not a reliable
+  edge. **10 strategies have a setting that beat the current one on every count** (profit, worst fall, last 12 months,
+  profitable years, and its neighbours in the grid; chosen with all the data, so flattering): GOLD #19325 SL 4.5 → 0.5 ×
+  ATR, trail 3 → 2 (₹1.08 Cr → ₹1.28 Cr, fall ₹11.7 L → ₹8.6 L); COPPER #296565 SL 1 → 0.5 × ATR; COPPER #300474 SL 1% +
+  trail 3%; ETHUSD #264797 trail 3 × ATR → fixed 1.5 × ATR; ETHUSD #297273 trail 2 → fixed 1 × ATR; SOLUSD 240 min #39115
+  and #305005 trail 4 → fixed 1.5 × ATR; ZINC #293156 none → SL 0.5 + trail 4 × ATR; ALUMINIUM #298619 trail 3 → 4 × ATR;
+  GOLDM #304447 SL 1.5% + trail 2%. Pattern: a tighter FIRST stop with a wider or no trailing stop. Nothing was changed
+  on the desk; Papa was asked whether to put them on paper beside the originals (1 lot each).
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
