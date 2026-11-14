@@ -85,6 +85,19 @@ const tags = await p.$$eval(hdSel, (x) => x.map((t) => { const g = t.querySelect
 if (tags[0] !== null) fail("crude has no tag", tags[0]);
 if (!tags[1] || !/warn/.test(tags[1][0]) || tags[1][1] !== "best isn't live" || !/Lab #902/.test(tags[1][2]) || !/rank 2 of 3/.test(tags[1][2])) fail("gold amber tag", tags[1]);
 if (!tags[2] || !/ok/.test(tags[2][0]) || tags[2][1] !== "best is live") fail("nifty green tag", tags[2]);
+// 2b. (14 Nov 2026, Papa) The amber header names the best, with ⇄ Compare and "Switch to the best ▸"; the switch pauses the
+// live one (it exits on its own) and the best starts after that exit — one rpc, switch_to_best(live, best).
+if (!/Best: Lab #902 ★ 83\.5 vs live 61/.test(heads[1]) || !/⇄ Compare/.test(heads[1]) || !/Switch to the best ▸/.test(heads[1])) fail("gold header names the best with its buttons", heads[1]);
+if (/Switch to the best/.test(heads[2])) fail("no switch when the best is live", heads[2]);
+const swCalls = []; p.on("request", (q) => { if (/rpc\/switch_to_best/.test(q.url())) swCalls.push(JSON.parse(q.postData() || "{}")); });
+const goldHead = (await p.$$(hdSel))[1];
+await (await goldHead.$("[data-bsw]")).click(); await p.waitForSelector("#confirmBox:not([hidden]) .confirm");
+const swTxt = (await p.textContent("#confirmBox")).replace(/\s+/g, " ");
+if (!/Switch GOLD · Daily.* to the best strategy\?/.test(swTxt) || !/holds a long position/.test(swTxt) || !/closes the position on its own/.test(swTxt) || !/the best one starts and takes its next entry/.test(swTxt) || !/walk-forward/.test(swTxt)) fail("switch confirmation", swTxt.slice(0, 700));
+if (await p.$("#cf_nostop")) await p.check("#cf_nostop");
+await p.click("#cf_yes"); await p.waitForTimeout(800);
+if (swCalls.length !== 1 || swCalls[0].p_from !== "g1" || swCalls[0].p_to !== "g2") fail("switch_to_best call", swCalls);
+if ((await p.$$eval(hdSel, (x) => x.length)) !== 3 || !(await p.$(phone ? "#lp_cards .lpc" : "#lp_body tr.pick"))) fail("the button didn't fold the group");
 // 3. Ranks: ★ on the best, "n of N", "lab –" for a strategy without a lab link; the default order inside a group is the rank.
 const rowSel = phone ? "#lp_cards .lpc" : "#lp_body tr.pick";
 const ranks = await p.$$eval(rowSel, (x) => x.map((t) => { const r = t.querySelector(".rank"); return r ? r.textContent : "(none)"; }));
@@ -92,7 +105,7 @@ if (ranks.length !== 10) fail("10 strategy rows", ranks);
 if (ranks.slice(3, 7).join("|") !== "★ 1 of 3|2 of 3|3 of 3|lab –") fail("gold ranks in order", ranks);
 if (!(await p.$$eval(rowSel, (x) => x.some((t) => /Live/.test(t.textContent) && /2 of 3/.test(t.textContent))))) fail("live chip on the rank-2 gold row");
 // 4. Folding: click a header → its rows go, the fold is remembered; "Fold all" / "Unfold all".
-await p.click(`${hdSel} >> nth=1`); await p.waitForTimeout(250);
+await p.click(`${hdSel} >> nth=1`, { position: { x: 12, y: 10 } }); await p.waitForTimeout(250);
 if ((await p.$$(rowSel)).length !== 6) fail("gold folded", (await p.$$(rowSel)).length);
 const fold = await p.evaluate(() => JSON.parse(localStorage.getItem("lpFold") || "[]"));
 if (fold.length !== 1 || !/^GOLD\|D\|F$/.test(fold[0])) fail("fold remembered", fold);

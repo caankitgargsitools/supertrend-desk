@@ -597,6 +597,37 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   result (14 Nov): 19 assets / timeframes with a passed strategy; the best of 13 running on paper; not on paper:
   ALUMINIUM daily, ETHUSD daily, MIDCPNIFTY 30 min, SILVERMIC daily (others of the timeframe run), and two new
   timeframes — RELIANCE 60 min, SBIN 125 min.
+- **Position ladder ₹ figures fixed + plain words (14 Nov 2026, Papa: ETH short 596 lots "locks in ₹46,143 … what does that
+  mean?")**: `pos_qty` holds LOTS for every kind of position (Dhan, MCX, Delta), not units, so the ladder's ₹ figures were one
+  lot size too small (ETH: 77.42 points × 596 lots = ₹46,143, really × 176 per point = ₹81.2 lakh). `posUnits(s)` = lots held ×
+  lot size feeds `ladderHTML` / `stopMeterHTML`. Wording: stop cell "if hit: you keep / you lose ₹X" (the whole position) +
+  "gives back ₹Y" (running profit between the price now and the stop), entry cell "now +₹Z", target "if hit: you make".
+  **Trade life page** (Papa: "upon clicking on this positions tab … a full page view … all the information that has changed
+  over the course of the life cycle of this trade … very very detailed and very very explanatory"; migration 103): full-page
+  overlay `#tl_over` (`openTradeLife` / `renderTradeLife` / `closeTradeLife`, Esc, refresh every 30 s) from Desk › Positions
+  cards and the strategy page's "Trade life ▸" (`#st_tl`): tiles (running P&L with lots × per-point × points, price vs average
+  and first entry, stop hit now: keep / lose, would give back, best and worst moment, margin, target), "How the stop and the
+  exit work" in words (trail = k × ATR fixed at entry, best price, stop now, what closes it), a chart (candles, average entry,
+  the stop as steps, target, lots changes, price now, best price), "What changed since the entry" (lots, average entry, best
+  price, stop, target, if-hit figure) and every event in order (entry signal with its delay, stop set, each trailing move —
+  "from candles" before 14 Nov, "recorded" after — lots added, broker orders, booked parts). DB: table `position_log`
+  (trigger `position_log_trg` on algo_strategies after update of position / pos_lots / pos_entry_px / pos_risk /
+  pos_broker: open / close / flip / lots / entry / target / stop (one row per strategy per minute, `bucket`) /
+  broker_stop; never blocks the engine's write), `pos_eff_stop(pos_risk)` (fixed or trailing stop, whichever is tighter),
+  `position_life(strategy)` (owner / admin: start of the trade, log, signals, broker orders, booked parts, chart bars). The
+  trailing ATR is fixed at entry (`risk.ts`), so earlier stops are rebuilt as best-so-far ∓ k × trailAtr from candle lows /
+  highs. Test: `tests/ui/ui_trade_life.mjs` (args: theme width; also checks the ladder's ₹81 lakh).
+- **Switch to the best (14 Nov 2026, Papa: "let the old strategy do its exit at its own, and the new entry after that exit
+  has to be as per the new strategy"; migration 104)**: the Strategies group header with "best isn't live" now names the best
+  ("Best: Lab #902 ★ 83.5 vs live 61") with "⇄ Compare" (the two on the Compare page) and "Switch to the best ▸" (`.bsw`,
+  document-level handler, header clicks on it don't fold). The best counts as live when its own live copy (same lab id) runs.
+  `switch_to_best(p_from, p_to)`: pauses p_from (no new entries; its position keeps stops / exit rules); the strategy taking
+  over is p_to in the same mode, else its copy (`mode_twin` / `mode_copy`; live needs the broker connected); refuses p_to being
+  p_from's own copy; it takes over p_from's `lots` and `sizing`; flat → starts now, holding → `algo_strategies.wait_for =
+  p_from` and trigger `handover_on_exit` starts it the moment p_from goes FLAT, notifies (kind "trade", tag `handover-<id>`).
+  Chip "Starts after … exits". Confirmation names both with scores, what happens to the position, the 7 Nov walk-forward
+  note, and for live the no-stop tick / typed LIVE. Tested with a rolled-back transaction (live LT → paper MIDCPNIFTY: waits,
+  starts on exit, notification) and `tests/ui/ui_group.mjs` "2b".
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
@@ -991,7 +1022,13 @@ Still open:
    glass look for chosen pages.
 9. **For today's session (Papa, 14 Nov 2026: "put all of these for today. We'll do that plus other pending items"; none
    started. Each carries the questions to put to Papa before building — he asked for them to be kept here):**
-   1. **Combination strategies with USD/INR.** Pairs of USDINR with a commodity (MCX: gold, silver, crude … — their rupee
+   1. **Combination strategies with USD/INR.** Papa's answer (14 Nov): "commodities and coins … their price also fluctuates
+      because of the USD INR … for devising any strategy we should factor in both the changes, and create a smart strategy
+      that takes care of both". Found the same day: Delta Exchange India books coins at a FIXED USD-INR rate (balances in
+      INR, no conversion; reported 85, not in Delta's own docs) — so for coins the rupee result does not move with USDINR;
+      the desk books crypto at ₹88 (`lab_settings.usd_inr`), to be checked against Delta's real rate. MCX prices already
+      carry USDINR (rupee price ≈ dollar price × USDINR + duty). Plan put to Papa: USDINR as a data input (like VIX) +
+      the dollar price split out, rules / lab conditions on both, MCX first. Earlier questions kept below. Pairs of USDINR with a commodity (MCX: gold, silver, crude … — their rupee
       price is the dollar price × USDINR) and of USDINR with Bitcoin and the other coins (Delta trades them in dollars).
       **Questions for Papa:** (a) what "combination" means here — a rupee-hedged commodity / coin position, a spread
       between the two, or two separate strategies whose trades offset (the Combinations page's "lessens the drawdown"
@@ -1004,13 +1041,14 @@ Still open:
       there, a "Compare with the best" button (the running one vs the best, the Compare page's charts), and a "Switch to
       the best" button — stop the current one and start the best one in the same mode.
       **Questions for Papa:** (a) what "smoothly" does when the current strategy holds a position — wait for its own
-      exit and then start the best, close it now, or let it run paused to its own exit while the best starts flat?
+      exit and then start the best, close it now, or let it run paused to its own exit while the best starts flat? **Answered and built 14 Nov**: the old one exits on its own, the best enters after that (see Key behaviours › Switch to the best).
       (b) should the best take over the current one's lots / sizing, or be sized afresh (Lots wizard)? (c) for Live:
       the real-money confirmation each time, and is the best one required to have run on paper first? (d) show the
       walk-forward note of 7 Nov beside the button (the top-ranked by past consistency earned less next quarter than
       the average passed strategy in 12 of 13 groups), so the switch is an informed one? (e) "best" among the
       strategies on his desk (as the tag works today) or the lab's best overall (the new card below, built 14 Nov)?
-   3. **Desk › Positions (one-screen view): improve the entry · stop · target line** (`deskPosPaint`, `ladderHTML` /
+   3. **Desk › Positions (one-screen view): improve the entry · stop · target line** (14 Nov: ₹ figures fixed, wording plain,
+      Trade life page built — see Key behaviours; Papa still to say what else he wants on the line itself) (`deskPosPaint`, `ladderHTML` /
       `ladder`). **Question for Papa:** he has "a couple of things in mind" — ask for them before changing anything.
    4. **Which of the three to start with** (asked 14 Nov, not answered yet).
    5. **Live lots** (Papa, 14 Nov: "put live lots also on the pending item list. I will tell you during the day there is

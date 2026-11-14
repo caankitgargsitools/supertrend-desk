@@ -475,7 +475,7 @@ th.sort[aria-sort="ascending"]::after { content: " ▲"; } th.sort[aria-sort="de
 .pladder .pl-cells > div { min-width: 0; overflow-wrap: anywhere; } .pladder .pl-cells > div:nth-child(2) { text-align: center; } .pladder .pl-cells > div:nth-child(3) { text-align: right; }
 .pladder .pl-cells small { display: block; text-transform: uppercase; letter-spacing: .06em; font-size: 9.5px; font-weight: 700; }
 .pladder .pl-cells .sl small { color: var(--red); } .pladder .pl-cells .tg small { color: var(--green); }
-.pladder .pl-cells span { display: block; }
+.pladder .pl-cells span { display: block; } .pladder .pl-cells .gb { color: var(--yellow-ink); }
 .pladder .pl-cells b { display: block; color: var(--ink); font-size: 12.5px; font-weight: 700; }
 .pladder .pl-fill, .pladder .pl-tk, .pladder .pl-dot, .pladder .pl-now { transition: left .6s ease, width .6s ease; }
 .pladder .pl-tk.moved { animation: plmoved 1.4s ease-out; }
@@ -519,6 +519,29 @@ details.raw code { display: block; white-space: pre-wrap; word-break: break-all;
 .ks-btn.holding i { width: 100%; transition: width 1.5s linear; }
 /* Live trade alert inside the app (Papa, 12 Nov 2026, option C): full screen, with a sound; one card per trade that
    updates in place as it moves (signal → filled → stop at the broker; exit → P&L → confirmed). */
+/* Trade life (14 Nov 2026): a full page over the app for one open position */
+.tl-over { position: fixed; inset: 0; z-index: 1900; overflow-y: auto; background: var(--bg); }
+.tl-page { max-width: 1120px; margin: 0 auto; padding: 18px 20px 60px; color: var(--ink); }
+.tl-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 8px 0 10px; border-bottom: 1px solid var(--line); }
+.tl-top h1 { font-size: 20px; margin: 0; } .tl-top .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.tl-top .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.tl-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 16px 0; }
+.tl-tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.tl-tile small { display: block; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
+.tl-tile b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 700 18px/1.25 var(--font-data, inherit); margin: 3px 0 2px; font-variant-numeric: tabular-nums; }
+.tl-tile span { color: var(--muted); font-size: 12.5px; line-height: 1.35; display: block; }
+.tl-tile .up { color: var(--green); } .tl-tile .dn { color: var(--red); }
+.tl-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin: 14px 0; }
+.tl-card h2 { font-size: 16px; margin: 0 0 8px; } .tl-card p { margin: 6px 0; line-height: 1.5; }
+.tl-chart svg { width: 100%; height: auto; display: block; } .tl-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+.tl-legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 5px; border-radius: 2px; }
+.tl-ch { width: 100%; border-collapse: collapse; font-size: 13.5px; } .tl-ch th, .tl-ch td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tl-ch th { color: var(--muted); font-size: 12px; font-weight: 600; } .tl-ch td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tl-ev { list-style: none; margin: 0; padding: 0; } .tl-ev li { display: grid; grid-template-columns: 120px 22px 1fr; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.tl-ev .t { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; } .tl-ev .k { width: 12px; height: 12px; border-radius: 50%; margin-top: 4px; background: var(--muted); }
+.tl-ev .k.entry { background: var(--blue); } .tl-ev .k.stop { background: var(--red); } .tl-ev .k.add { background: var(--yellow); } .tl-ev .k.order { background: var(--ink); } .tl-ev .k.exit { background: var(--green); }
+.tl-ev b { display: block; } .tl-ev .d { color: var(--muted); font-size: 13px; line-height: 1.45; margin-top: 2px; } .tl-ev .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 5px; margin-left: 6px; }
+@media (max-width: 700px) { .tl-page { padding: 10px 12px 50px; } .tl-ev li { grid-template-columns: 1fr; gap: 2px; } .tl-ev .k { display: none; } }
 .lt-over { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 16px; background: rgba(4,7,14,.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); animation: ltfade .25s ease-out; overflow: hidden; }
 .lt-over[hidden] { display: none; }
 @keyframes ltfade { from { opacity: 0; } }
@@ -552,6 +575,8 @@ details.raw code { display: block; white-space: pre-wrap; word-break: break-all;
 .lp-tools { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 10px; }
 .big-table tr.lpg td { background: var(--panel-2); cursor: pointer; white-space: normal; padding: 7px 10px; border-top: 2px solid var(--line); }
 .big-table tr.lpg:hover td { background: var(--blue-soft); }
+.bsw { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-left: 8px; font-size: 12.5px; cursor: default; }
+.bsw .btn { margin: 0; }
 .lpgh { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 12.5px; }
 .lpgh .car { color: var(--muted); width: 1em; display: inline-block; }
 .lpgh b { font-size: 13px; }
@@ -1174,6 +1199,7 @@ body.dk-fs-on { overflow: hidden; }
 <body>
 
 <div id="netbar" role="progressbar" aria-label="Talking to the server" aria-hidden="true"></div>
+<div id="tl_over" class="tl-over" hidden role="dialog" aria-modal="true" aria-labelledby="tl_title"><div class="tl-page" id="tl_page"></div></div>
 <div id="lt_over" class="lt-over" hidden role="alertdialog" aria-modal="true" aria-labelledby="lt_title"><div class="lt-card" id="lt_card"></div><div class="lt-coins" id="lt_coins"></div></div>
 <header class="bar">
   <div class="brand"><img class="logo" src="icons/logo.svg" alt="" width="40" height="40"><div><h1><span class="ank">Ank</span><span class="gn">Genie</span></h1><small>Your wish, traded · Dhan · NSE / BSE / MCX · Delta crypto</small></div><button class="hb" id="hb" type="button" hidden aria-live="polite" title="Checking the engine…"><span class="hbd" aria-hidden="true"></span><span class="hbt">Checking</span></button></div>
@@ -1296,7 +1322,7 @@ body.dk-fs-on { overflow: hidden; }
           <div class="stat" id="st_trend_t"><span class="label" id="st_trend_l">Trend</span><span class="v" id="st_trend">–</span></div>
           <div class="stat" id="st_close_t"><span class="label">Last price</span><span class="v" id="st_close">–</span></div>
           <div class="stat" id="st_line_t"><span class="label">Supertrend</span><span class="v" id="st_line">–</span></div>
-          <div class="stat" id="st_pos_t"><span class="label">Position</span><span class="v" id="st_pos">–</span><span class="hint" id="st_pos_sub"></span><div id="st_pos_meter"></div></div>
+          <div class="stat" id="st_pos_t"><span class="label">Position</span><span class="v" id="st_pos">–</span><span class="hint" id="st_pos_sub"></span><div id="st_pos_meter"></div><button class="btn small" id="st_tl" type="button" hidden style="margin-top:6px">Trade life ▸</button></div>
           <div class="stat" id="st_run_t"><span class="label">Last check</span><span class="v" id="st_run">–</span></div>
         </div>
       </section>
@@ -2324,6 +2350,7 @@ function chips(s, which = "all") {
     c.push(s.archived ? '<span class="chip">Archived</span>' : s.active ? '<span class="chip green">Active</span>' : '<span class="chip">Paused</span>');
     c.push(s.live ? '<span class="chip red">Live</span>' : '<span class="chip yellow">Paper</span>');
     // Live / Paper switch waiting for the held position to close (12 Nov 2026, migration 91).
+    if (s.wait_for) { const o = stratOf(s.wait_for); c.push(`<span class="chip blue" title="${esc(`Switch to the best (14 Nov 2026): it starts the moment ${o ? o.name : "the strategy it replaces"} closes its position`)}">Starts after ${esc(o ? sName(o) : "the old one")} exits</span>`); }
     if (s.switch_to) c.push(`<span class="chip blue" title="${esc(s.switch_to === "LIVE" ? "This strategy holds a paper position. It goes live the moment that position closes; the paper position is never sent to the broker." : "This strategy holds a live position. It goes back to paper once that position closes.")}">${s.switch_to === "LIVE" ? "Live when flat" : "Paper when flat"}</span>`);
   }
   if (which !== "state") {
@@ -2589,6 +2616,7 @@ function renderStratPos(s) {
   if (open && s.pos_upnl != null) el.insertAdjacentHTML("beforeend", ` · <span class="${cls(s.pos_upnl)}" data-upnl-inline="${esc(s.id)}">${rupeesSigned(s.pos_upnl)}</span>`);
   $("st_pos_sub").textContent = sub.join(" · ");
   const m = $("st_pos_meter"); if (m) { m.innerHTML = ladderHTML(s); m.dataset.ladder = s.id; }
+  const tb = $("st_tl"); if (tb) { tb.hidden = s.position === "FLAT"; tb.onclick = () => openTradeLife(s.id); }
 }
 /** Stop-distance meter (Papa, 6 Nov 2026): the stop at the left, the entry in the middle, the price now as the dot; under it
  *  "₹1,240 / 0.5% from the stop". The stop is the one the header shows (fixed or trailing, whichever is nearer). */
@@ -2601,11 +2629,15 @@ function stopLevel(s, now) {
   if (p.trail && best != null) { const tr = best - p.dir * d(p.trail, best); stop = stop == null ? tr : p.dir === 1 ? Math.max(stop, tr) : Math.min(stop, tr); }
   return { stop: stop == null ? null : Number(stop), tgt: p.tgt == null ? null : Number(p.tgt) };
 }
+/** Units behind ₹ figures of an open position: lots held × lot size (rupees per point). pos_qty holds LOTS, not units, for
+ *  every kind of position (Dhan, MCX, Delta): using it as units showed the ladder's ₹ figures one lot size too small
+ *  (14 Nov 2026, Papa: ETH short 596 lots "locks in ₹46,143" — really ₹81 lakh at 176 per lot). */
+function posUnits(s) { return (Number(s.pos_lots) || Number(s.pos_qty) || Number(s.lots) || 1) * (Number(s.lot_size) || 1); }
 function stopMeterHTML(s) {
   if (!s || s.position === "FLAT" || s.pos_ltp == null) return "";
   const { stop, tgt } = stopLevel(s, Number(s.pos_ltp)), dir = s.position === "LONG" ? 1 : -1;
   const entry = Number(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px), now = Number(s.pos_ltp);
-  const units = Number(s.pos_qty) || (Number(s.pos_lots) || 1) * (Number(s.lot_size) || 1);
+  const units = posUnits(s);
   return meterHTML({ entry, now, stop, tgt, dir, units });
 }
 /** Position ladder (Papa, 8 Nov 2026: "where we entered, our stop, where we are, our target"). A price scale, lower prices on
@@ -2618,7 +2650,7 @@ function ladderHTML(s) {
   if (!s || s.position === "FLAT" || s.pos_ltp == null) return "";
   const { stop, tgt } = stopLevel(s, Number(s.pos_ltp));
   const entry = Number(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px);
-  const units = Number(s.pos_qty) || (Number(s.pos_lots) || 1) * (Number(s.lot_size) || 1);
+  const units = posUnits(s);
   // An option bought gains when its premium rises, whatever the side of the view.
   const dir = s.trade_type === "OPTIONS" ? (s.pos_option_side === "SELL" ? -1 : 1) : s.position === "LONG" ? 1 : -1;
   return ladder({ entry, now: Number(s.pos_ltp), stop, tgt, dir, units });
@@ -2635,11 +2667,11 @@ function ladder({ entry, now, stop, tgt, dir, units }) {
   const a0 = at(entry), an = at(now), inProfit = gain(now) >= 0, nowCls = an < 12 ? " l" : an > 88 ? " r" : "";
   const hit = stop != null && gain(now) <= gain(stop);
   const slCell = stop == null ? `<div class="sl"><small>Stop</small><b class="none">None</b><span class="none">exits on its rules only</span></div>`
-    : `<div class="sl"><small>Stop</small><b>${fmtNum(stop)}</b>${hit ? '<span class="dn">reached</span>' : `<span>${away(stop)} away</span>`}<span class="${gain(stop) >= 0 ? "up" : "dn"}">${gain(stop) >= 0 ? "locks in" : "loses"} ${rs(gain(stop) * units)}</span></div>`;
+    : `<div class="sl"><small>Stop</small><b>${fmtNum(stop)}</b>${hit ? '<span class="dn">reached</span>' : `<span>${away(stop)} away</span>`}<span class="${gain(stop) >= 0 ? "up" : "dn"}" title="What the whole position (all lots) ends with if the price comes back to the stop now">if hit: ${gain(stop) >= 0 ? "you keep" : "you lose"} ${rs(gain(stop) * units)}</span>${gain(now) > 0 && gain(stop) < gain(now) ? `<span class="gb" title="Part of today's running profit that would go back to the market before the stop closes the trade">gives back ${rs((gain(now) - gain(stop)) * units)}</span>` : ""}</div>`;
   const move = gain(now) / entry * 100;
-  const inCell = `<div class="en"><small>Entry</small><b>${fmtNum(entry)}</b><span class="${move >= 0 ? "up" : "dn"}">${move >= 0 ? "+" : "−"}${Math.abs(move).toFixed(2)}% since</span></div>`;
+  const inCell = `<div class="en"><small>Entry</small><b>${fmtNum(entry)}</b><span class="${move >= 0 ? "up" : "dn"}">${move >= 0 ? "+" : "−"}${Math.abs(move).toFixed(2)}% since</span><span class="${move >= 0 ? "up" : "dn"}" title="Running profit of the whole position at the price now (before exit charges)">now ${move >= 0 ? "+" : "−"}${rs(gain(now) * units)}</span></div>`;
   const tgCell = tgt == null ? `<div class="tg"><small>Target</small><b>None</b><span>trails / rules</span></div>`
-    : `<div class="tg"><small>Target</small><b>${fmtNum(tgt)}</b>${gain(now) >= gain(tgt) ? '<span class="up">reached</span>' : `<span>${away(tgt)} to go</span>`}<span class="up">makes ${rs(gain(tgt) * units)}</span></div>`;
+    : `<div class="tg"><small>Target</small><b>${fmtNum(tgt)}</b>${gain(now) >= gain(tgt) ? '<span class="up">reached</span>' : `<span>${away(tgt)} to go</span>`}<span class="up">if hit: you make ${rs(gain(tgt) * units)}</span></div>`;
   // The cells follow the bar: a long reads Stop · Entry · Target, a short Target · Entry · Stop.
   const cells = dir === 1 ? slCell + inCell + tgCell : tgCell + inCell + slCell;
   const title = `${dir === 1 ? "Long" : "Short"} · stop ${stop == null ? "none" : fmtNum(stop)} · entry ${fmtNum(entry)} · now ${fmtNum(now)} · target ${tgt == null ? "none" : fmtNum(tgt)}`;
@@ -2650,6 +2682,151 @@ function ladder({ entry, now, stop, tgt, dir, units }) {
     + (tgt != null ? `<i class="pl-tk tg" style="left:${f(at(tgt))}" title="Target ${esc(fmtNum(tgt))}"></i>` : "")
     + `<b class="pl-dot" style="left:${f(an)}"></b><span class="pl-now${nowCls}" style="left:${f(an)}">Now ${fmtNum(now)}</span></div>`
     + `<div class="pl-cells">${cells}</div></div>`;
+}
+/* ---------- Trade life (14 Nov 2026, Papa: "upon clicking on this positions tab, it should have a full page view and should
+   show me all the information that has changed over the course of the life cycle of this trade … very very detailed and very
+   very explanatory"; migration 103). One open position on a full page: what it is worth now, what the stop would leave, how
+   the trailing stop has moved since the entry (worked out from the strategy's candles, and recorded exactly by the database
+   from 14 Nov: position_log), lots added, every signal and broker order of the trade, and a plain explanation of the rules
+   that will close it. Opened from Desk › Positions and from the strategy page's Position tile. ---------- */
+const tl = { id: null, data: null, timer: null };
+async function openTradeLife(id) {
+  tl.id = id; const over = $("tl_over"), page = $("tl_page");
+  over.hidden = false; document.body.style.overflow = "hidden";
+  page.innerHTML = '<p class="hint" style="padding:30px 0"><span class="spin" aria-hidden="true"></span> Loading the life of this trade…</p>';
+  try { tl.data = must(await db.rpc("position_life", { p_strategy: id })); renderTradeLife(); }
+  catch (e) { page.innerHTML = `<div class="tl-top"><h1 id="tl_title">Trade life</h1><button class="btn" type="button" data-tlx>Close</button></div><p class="banner bad">${esc(errorText(e))}</p>`; page.querySelector("[data-tlx]").onclick = closeTradeLife; }
+  clearInterval(tl.timer); tl.timer = setInterval(() => { if (!document.hidden && !$("tl_over").hidden) db.rpc("position_life", { p_strategy: tl.id }).then((r) => { if (r.data && tl.id === id) { tl.data = r.data; renderTradeLife(true); } }).catch(() => {}); }, 30000);
+}
+function closeTradeLife() { $("tl_over").hidden = true; document.body.style.overflow = ""; clearInterval(tl.timer); tl.id = null; }
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("tl_over").hidden) closeTradeLife(); });
+/** The trailing / fixed stop at a moment: the best price so far ∓ the trail distance, or the fixed stop, whichever is tighter. */
+function tlStopAt(r, best) {
+  if (!r) return null; const dir = r.dir === -1 ? -1 : 1;
+  const d = !r.trail ? null : r.trail.type === "POINTS" ? Number(r.trail.value) : r.trail.type === "PCT" ? best * Number(r.trail.value) / 100 : Number(r.trail.value) * (Number(r.trailAtr) || 0);
+  const tr = d == null || best == null ? null : best - dir * d, fx = r.stop == null ? null : Number(r.stop);
+  if (tr == null) return fx; if (fx == null) return tr; return dir === 1 ? Math.max(fx, tr) : Math.min(fx, tr);
+}
+function renderTradeLife(soft) {
+  const D = tl.data, page = $("tl_page"); if (!D) return;
+  const s = D.strategy, live = stratOf(s.id), cur = live ? { ...s, ...live, pos_risk: live.pos_risk || s.pos_risk } : s;
+  const r = cur.pos_risk || {}, dir = cur.position === "LONG" ? 1 : cur.position === "SHORT" ? -1 : (r.dir || 1);
+  const ls = Number(cur.lot_size) || 1, lotsNow = Number(cur.pos_lots) || Number(cur.lots) || 0, now = Number(cur.pos_ltp) || null;
+  const avg = Number(cur.pos_entry_px) || Number(r.entry) || null, first = Number(r.entry) || avg, t0 = Date.parse(D.start);
+  const sigs = D.signals || [], logs = D.log || [], orders = D.orders || [], booked = D.trades || [];
+  // Lots over the life: the entry signal's "x N", then each "N lots added … now M lots" note / log row.
+  const entrySig = sigs.find((g) => /^(ENTRY|REVERSE)$/.test(g.event) && g.status !== "FAILED");
+  const lots0 = Number((/\bx\s*(\d+)/.exec(entrySig ? entrySig.description : "") || [])[1]) || Number((logs.find((l) => l.kind === "open") || {}).info?.lots) || lotsNow;
+  const lotSteps = [{ t: t0, lots: lots0 }];
+  for (const g of sigs) { const m = /now (\d+) lots?/.exec(g.description || ""); if (m) lotSteps.push({ t: Date.parse(g.created_at), lots: Number(m[1]), why: g.description }); }
+  for (const l of logs) if (l.kind === "lots") lotSteps.push({ t: Date.parse(l.at), lots: Number(l.new_v) });
+  lotSteps.sort((a, b) => a.t - b.t);
+  const lotsAt = (t) => { let v = lots0; for (const x of lotSteps) if (x.t <= t) v = x.lots; return v; };
+  const gainPer = (px) => (px - avg) * dir;                      // per unit vs the average entry
+  const money = (px, lots = lotsNow) => gainPer(px) * lots * ls;
+  // Candles of the trade (the strategy's own chart), the trailing stop rebuilt from them, and the exact log rows.
+  const bars = (D.bars || []).filter((b) => b && b.t && b.h != null).map((b) => ({ t: b.t * 1000, o: +b.o, h: +b.h, l: +b.l, c: +b.c })).sort((a, b) => a.t - b.t);
+  const span = bars.length > 1 ? bars[bars.length - 1].t - bars[bars.length - 2].t : 86400000;
+  const inTrade = bars.filter((b) => b.t + span > t0), pre = bars.filter((b) => b.t + span <= t0).slice(-6);
+  let best = first; const path = [], moves = [];
+  let prevStop = tlStopAt(r, first);
+  path.push({ t: t0, stop: prevStop, best });
+  for (const b of inTrade) {
+    const ext = b.t >= t0 ? (dir === 1 ? b.h : b.l) : null;     // the candle the entry fell into counts only from the next one
+    if (ext != null && (dir === 1 ? ext > best : ext < best)) best = ext;
+    const st = tlStopAt(r, best), at = Math.max(b.t, t0);
+    if (st != null && prevStop != null && Math.abs(st - prevStop) > 1e-9) moves.push({ t: b.t + span, from: prevStop, to: st, best, px: b.c, lots: lotsAt(b.t + span) });
+    path.push({ t: Math.min(b.t + span, Date.now()), stop: st, best }); prevStop = st;
+  }
+  // The engine's own figures win at the end (it follows every price, not only candle lows / highs).
+  const bestNow = r.best != null ? Number(r.best) : best, stopNow = tlStopAt(r, bestNow), tgt = r.tgt == null ? null : Number(r.tgt);
+  if (stopNow != null) path.push({ t: Date.now(), stop: stopNow, best: bestNow });
+  const upnl = cur.pos_upnl != null ? Number(cur.pos_upnl) : now ? money(now) : null;
+  const keep = stopNow == null ? null : money(stopNow), giveBack = upnl != null && keep != null ? upnl - keep : null;
+  const bestMoney = money(bestNow);
+  const worstPx = inTrade.length ? (dir === 1 ? Math.min(...inTrade.filter((b) => b.t >= t0).map((b) => b.l), first) : Math.max(...inTrade.filter((b) => b.t >= t0).map((b) => b.h), first)) : null;
+  const heldMs = Date.now() - t0, held = `${Math.floor(heldMs / 86400000)} days ${Math.floor(heldMs % 86400000 / 3600000)} h`;
+  const side = dir === 1 ? "Long" : "Short", mode = cur.live ? "Live" : "Paper";
+  const trailTxt = !r.trail ? "" : r.trail.type === "ATR" ? `${fmtNum(r.trail.value)} × ATR = ${fmtNum(+(Number(r.trail.value) * Number(r.trailAtr || 0)).toFixed(2))} points (the ATR, ${fmtNum(+Number(r.trailAtr || 0).toFixed(2))}, was measured when the trade opened and stays fixed)`
+    : r.trail.type === "PCT" ? `${fmtNum(r.trail.value)}% of the best price` : `${fmtNum(r.trail.value)} points`;
+  const away = (px) => now ? `${fmtNum(+Math.abs(px - now).toFixed(2))} points (${pct(Math.abs(px - now) / now * 100, 2)}) away` : "";
+  const tile = (k, v, sub, c) => `<div class="tl-tile"><small>${k}</small><b class="${c || ""}">${v}</b>${sub ? `<span>${sub}</span>` : ""}</div>`;
+  const tiles = [
+    tile("Running P&L now", upnl == null ? "–" : rupeesSigned(upnl), now ? `${plural(lotsNow, "lot")} × ${fmtNum(ls)} per point × ${fmtNum(+(Math.abs(gainPer(now))).toFixed(2))} points ${gainPer(now) >= 0 ? "in your favour" : "against you"}` : "", upnl >= 0 ? "up" : "dn"),
+    tile("Price", now ? fmtNum(now) : "–", `Average entry ${fmtNum(+(+avg).toFixed(2))}${first && Math.abs(first - avg) > 1e-6 ? ` · first entry ${fmtNum(first)}` : ""}`),
+    tile(keep == null ? "If the stop is hit now" : keep >= 0 ? "Stop hit now: you keep" : "Stop hit now: you lose", keep == null ? "No stop" : rupees(Math.abs(keep)), stopNow == null ? "It closes only on its rules at a candle close" : `Stop ${fmtNum(+stopNow.toFixed(2))}, ${away(stopNow)}`, keep == null ? "" : keep >= 0 ? "up" : "dn"),
+    tile("Would give back", giveBack == null || giveBack <= 0 ? "–" : rupees(giveBack), giveBack > 0 ? `of the running profit, between the price now and the stop` : ""),
+    tile("Best moment", rupeesSigned(bestMoney), `At ${fmtNum(+bestNow.toFixed(2))}, the ${dir === 1 ? "highest" : "lowest"} price since entry (at today's ${plural(lotsNow, "lot")})`, "up"),
+    tile("Worst moment", worstPx == null ? "–" : rupeesSigned((worstPx - first) * dir * lots0 * ls), worstPx == null ? "" : `At ${fmtNum(worstPx)}, the ${dir === 1 ? "lowest" : "highest"} price since entry (on the first ${plural(lots0, "lot")})`, worstPx != null && (worstPx - first) * dir < 0 ? "dn" : ""),
+    tile("Margin in use", cur.pos_margin ? rupees(cur.pos_margin) : "–", cur.pos_margin && upnl != null ? `Running P&L is ${pct(upnl / Number(cur.pos_margin) * 100, 1)} of it` : ""),
+    tile("Target", tgt == null ? "None" : fmtNum(tgt), tgt == null ? (r.trail ? "No fixed target: the trailing stop takes the profit" : "Exits on its rules") : `${away(tgt)} · if hit you make ${rupees(money(tgt))}`),
+  ].join("");
+  // Chart: the candles, the average entry, the stop path, the target, the best price, the price now, and the events.
+  const W = 1000, H = 330, P = { l: 64, r: 14, t: 14, b: 26 };
+  const shown = [...pre, ...inTrade];
+  const xs = shown.map((b) => b.t), x0 = Math.min(...xs, t0), x1 = Math.max(Date.now(), ...xs.map((t) => t + span));
+  const ys = [...shown.flatMap((b) => [b.h, b.l]), avg, first, ...path.map((p) => p.stop).filter((v) => v != null), ...(tgt != null ? [tgt] : []), ...(now ? [now] : [])].filter((v) => Number.isFinite(v));
+  let y0 = Math.min(...ys), y1 = Math.max(...ys); const pad = (y1 - y0) * 0.06 || 1; y0 -= pad; y1 += pad;
+  const X = (t) => P.l + (t - x0) / (x1 - x0 || 1) * (W - P.l - P.r), Y = (v) => P.t + (y1 - v) / (y1 - y0 || 1) * (H - P.t - P.b);
+  const bw = Math.max(2, Math.min(14, (W - P.l - P.r) / Math.max(1, shown.length) * 0.6));
+  const candles = shown.map((b) => { const up = b.c >= b.o, x = X(b.t + span / 2); return `<line x1="${x}" x2="${x}" y1="${Y(b.h)}" y2="${Y(b.l)}" stroke="var(--muted)" stroke-width="1"/><rect x="${x - bw / 2}" y="${Y(Math.max(b.o, b.c))}" width="${bw}" height="${Math.max(1, Math.abs(Y(b.o) - Y(b.c)))}" fill="${up ? "var(--green)" : "var(--red)"}" opacity="${b.t + span <= t0 ? 0.35 : 0.8}"/>`; }).join("");
+  let stepD = ""; path.forEach((p, i) => { if (p.stop == null) return; const x = X(p.t), y = Y(p.stop); stepD += stepD ? ` H${x.toFixed(1)} V${y.toFixed(1)}` : `M${x.toFixed(1)} ${y.toFixed(1)}`; });
+  const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => { const v = y0 + (y1 - y0) * f; return `<line x1="${P.l}" x2="${W - P.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${P.l - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${esc(fmtNum(+v.toFixed(v > 100 ? 0 : 2)))}</text>`; }).join("");
+  const days = shown.filter((b, i) => i % Math.max(1, Math.ceil(shown.length / 8)) === 0).map((b) => `<text x="${X(b.t + span / 2)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--muted)">${esc(fmtDay(new Date(b.t).toISOString()).slice(0, 6))}</text>`).join("");
+  const hline = (v, col, dash, lab) => v == null ? "" : `<line x1="${P.l}" x2="${W - P.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="${col}" stroke-width="1.4" stroke-dasharray="${dash}"/><text x="${W - P.r - 4}" y="${Y(v) - 4}" text-anchor="end" font-size="11" fill="${col}">${esc(lab)}</text>`;
+  const marks = [{ t: t0, px: first, c: "var(--blue)", lab: "Entry" }, ...lotSteps.slice(1).map((x) => ({ t: x.t, px: null, c: "var(--yellow)", lab: `${x.lots} lots` }))]
+    .map((m) => `<line x1="${X(m.t)}" x2="${X(m.t)}" y1="${P.t}" y2="${H - P.b}" stroke="${m.c}" stroke-dasharray="3 3"/><text x="${X(m.t) + 4}" y="${P.t + 11}" font-size="11" fill="${m.c}">${esc(m.lab)}</text>`).join("");
+  const svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(`${side} ${cur.underlying}: candles since entry, average entry ${fmtNum(avg)}, stop now ${stopNow == null ? "none" : fmtNum(+stopNow.toFixed(2))}`)}">${grid}${candles}${marks}
+    ${hline(avg, "var(--blue)", "6 4", `Average entry ${fmtNum(+(+avg).toFixed(2))}`)}${hline(tgt, "var(--green)", "6 4", `Target ${tgt == null ? "" : fmtNum(tgt)}`)}
+    ${stepD ? `<path d="${stepD}" fill="none" stroke="var(--red)" stroke-width="2.2"/>` : ""}
+    ${now ? `<circle cx="${X(Date.now())}" cy="${Y(now)}" r="5" fill="var(--ink)"/><text x="${X(Date.now()) - 8}" y="${Y(now) + 16}" text-anchor="end" font-size="11.5" font-weight="700" fill="var(--ink)">Now ${esc(fmtNum(now))}</text>` : ""}
+    <circle cx="${X(path[path.length - 1].t)}" cy="${Y(bestNow)}" r="3.5" fill="var(--green)"/>${days}</svg>`;
+  // What changed: first value → now.
+  const firstStop = path[0].stop, chg = [
+    ["Lots held", plural(lots0, "lot"), plural(lotsNow, "lot"), lotsNow !== lots0 ? `${lotsNow - lots0 > 0 ? "+" : ""}${lotsNow - lots0} by hand (Orders › Failed and short orders)` : "unchanged"],
+    ["Average entry", fmtNum(first), fmtNum(+(+avg).toFixed(2)), first !== avg ? "the lots added later came in at a different price, so the average moved" : "unchanged"],
+    [dir === 1 ? "Highest price since entry" : "Lowest price since entry", fmtNum(first), fmtNum(+bestNow.toFixed(2)), "the trailing stop follows this"],
+    ["Stop", firstStop == null ? "None" : fmtNum(+firstStop.toFixed(2)), stopNow == null ? "None" : fmtNum(+stopNow.toFixed(2)), firstStop != null && stopNow != null && firstStop !== stopNow ? `moved ${fmtNum(+Math.abs(stopNow - firstStop).toFixed(2))} points in your favour (${moves.length} step${moves.length === 1 ? "" : "s"}); it never moves back` : "unchanged"],
+    ["Target", "–", tgt == null ? "None" : fmtNum(tgt), ""],
+    ["If the stop were hit", firstStop == null ? "–" : rupeesSigned((firstStop - first) * dir * lots0 * ls), keep == null ? "–" : rupeesSigned(keep), keep != null ? (keep >= 0 ? "the stop now protects a profit" : "the stop still limits a loss") : ""],
+  ];
+  // The events, oldest first.
+  const ev = [];
+  if (entrySig) ev.push({ t: Date.parse(entrySig.created_at), k: "entry", h: `${side} ${plural(lots0, "lot")} at ${fmtNum(+entrySig.close)}`, d: `${String(entrySig.description || "").replace(/\s*\|\s*Levels:.*$/, "")}${entrySig.lag_ms != null ? ` · decided ${(entrySig.lag_ms / 1000).toFixed(1)} s after the candle closed` : ""}`, tag: entrySig.status });
+  if (firstStop != null) ev.push({ t: t0 + 1, k: "stop", h: `Stop set at ${fmtNum(+firstStop.toFixed(2))}`, d: r.trail ? `Trailing stop: ${trailTxt} ${dir === 1 ? "below the highest" : "above the lowest"} price since entry (${fmtNum(first)} at the start). If hit then: ${rupeesSigned((firstStop - first) * dir * lots0 * ls)}.` : `Fixed stop from the strategy's settings (${riskText(cur.risk, true)}).` });
+  for (const m of moves) ev.push({ t: m.t, k: "stop", h: `Stop moved ${fmtNum(+m.from.toFixed(2))} → ${fmtNum(+m.to.toFixed(2))}`, d: `The price reached a new ${dir === 1 ? "high" : "low"} of ${fmtNum(m.best)} that ${m.t - span < Date.now() ? "candle" : "day"}, so the trailing stop followed it by ${fmtNum(+Math.abs(m.to - m.from).toFixed(2))} points. If hit then: ${rupeesSigned((m.to - avg) * dir * m.lots * ls)} on ${plural(m.lots, "lot")}.`, tag: "from candles" });
+  for (const l of logs) {
+    if (l.kind === "stop") ev.push({ t: Date.parse(l.at), k: "stop", h: `Stop moved ${fmtNum(+(+l.old_v).toFixed(2))} → ${fmtNum(+(+l.new_v).toFixed(2))}`, d: `Best price ${fmtNum(l.info?.best)}; price then ${fmtNum(l.price)}.`, tag: "recorded" });
+    else if (l.kind === "lots") ev.push({ t: Date.parse(l.at), k: "add", h: `Lots ${fmtNum(l.old_v)} → ${fmtNum(l.new_v)}`, d: `At ${fmtNum(l.price)}.`, tag: "recorded" });
+    else if (l.kind === "entry") ev.push({ t: Date.parse(l.at), k: "add", h: `Average entry ${fmtNum(+(+l.old_v).toFixed(2))} → ${fmtNum(+(+l.new_v).toFixed(2))}`, d: "", tag: "recorded" });
+    else if (l.kind === "target") ev.push({ t: Date.parse(l.at), k: "exit", h: `Target ${l.old_v == null ? "none" : fmtNum(l.old_v)} → ${l.new_v == null ? "none" : fmtNum(l.new_v)}`, d: "", tag: "recorded" });
+    else if (l.kind === "broker_stop") ev.push({ t: Date.parse(l.at), k: "order", h: l.info?.placed ? `Stop order placed at the broker${l.info?.trigger ? ` (trigger ${fmtNum(l.info.trigger)})` : ""}` : "Stop order at the broker removed", d: l.info?.placed ? "The exchange now holds it, so it works even if the desk is slow." : "A new one follows when the quantity or level changes, or at the next session.", tag: "recorded" });
+  }
+  for (const g of sigs) if (g !== entrySig) ev.push({ t: Date.parse(g.created_at), k: /lots added/i.test(g.description || "") ? "add" : /EXIT|STOP|TARGET|SQUARE|FLAT/.test(g.event) ? "exit" : "order", h: /lots added/i.test(g.description || "") ? (g.description.match(/\d+ lots? added at [\d.]+/) || [g.event])[0] : `${g.event.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase())}`, d: g.description || "", tag: g.status });
+  for (const o of orders) ev.push({ t: Date.parse(o.created_at), k: "order", h: `Broker order: ${o.side} ${fmtNum(o.qty)} (${o.purpose}) · ${o.state}`, d: [o.limit_px ? `limit ${fmtNum(o.limit_px)}` : "", o.trigger_px ? `trigger ${fmtNum(o.trigger_px)}` : "", o.avg_px ? `filled ${fmtNum(o.filled_qty)} at ${fmtNum(o.avg_px)}` : "", o.note || ""].filter(Boolean).join(" · "), tag: "broker" });
+  for (const b of booked) ev.push({ t: Date.parse(b.exit_at), k: "exit", h: `Booked ${plural(b.lots, "lot")}: ${rupeesSigned(b.net)}`, d: `${fmtNum(b.entry_px)} → ${fmtNum(b.exit_px)}${b.exit_why ? ` · ${b.exit_why}` : ""}` });
+  ev.sort((a, b) => a.t - b.t);
+  const exitHow = [stopNow != null ? `the price ${dir === 1 ? "falls" : "rises"} to the stop (${fmtNum(+stopNow.toFixed(2))} now; checked every second${cur.stop_id ? ", and a stop order also rests at the broker" : ""})` : "",
+    tgt != null ? `the price reaches the target ${fmtNum(tgt)}` : "", "the strategy's own exit rule fires at a candle close", "you close it by hand"].filter(Boolean);
+  page.innerHTML = `<div class="tl-top"><div><h1 id="tl_title">${esc(sName(cur))} · ${side} ${plural(lotsNow, "lot")} · ${mode}</h1>
+      <div class="sub">Opened ${esc(fmtDate(D.start))} · held ${held}${cur.lab_id ? ` · Lab #${esc(cur.lab_id)}` : ""} · updates every 30 s</div></div>
+      <div class="acts"><button class="btn small" type="button" data-tlopen>Open the strategy</button><button class="btn small primary" type="button" data-tlx>Close</button></div></div>
+    ${cur.position === "FLAT" ? '<p class="banner">This position is closed now; the page shows its last trade.</p>' : ""}
+    <div class="tl-tiles">${tiles}</div>
+    <section class="tl-card"><h2>How the stop and the exit work on this trade</h2>
+      ${r.trail ? `<p><b>Trailing stop.</b> The stop sits ${trailTxt} ${dir === 1 ? "below the highest" : "above the lowest"} price reached since the entry. That price is ${fmtNum(+bestNow.toFixed(2))} now, so the stop is at <b>${stopNow == null ? "–" : fmtNum(+stopNow.toFixed(2))}</b>. It only ever moves ${dir === 1 ? "up" : "down"} — in your favour — never back.</p>` : stopNow != null ? `<p><b>Fixed stop</b> at ${fmtNum(stopNow)}.</p>` : `<p><b>No stop.</b> Nothing closes this position between candle closes except you.</p>`}
+      ${keep != null ? `<p>If the price came back to the stop now, the whole position (${plural(lotsNow, "lot")} × ${fmtNum(ls)} per point) would close with <b class="${keep >= 0 ? "up" : "dn"}">${keep >= 0 ? "a profit of" : "a loss of"} ${rupees(Math.abs(keep))}</b>${giveBack > 0 ? `, giving back ${rupees(giveBack)} of the ${rupees(upnl)} running profit` : ""}. That is the figure the ladder calls "if hit".</p>` : ""}
+      <p>It closes when ${exitHow.join(", or ")}.</p></section>
+    <section class="tl-card tl-chart"><h2>Price, entry and stop over the trade</h2>${shown.length ? svg : '<p class="hint">No candles stored for this strategy yet.</p>'}
+      <div class="tl-legend"><span><i style="background:var(--red)"></i>Stop (steps as it trailed)</span><span><i style="background:var(--blue)"></i>Average entry</span>${tgt != null ? '<span><i style="background:var(--green)"></i>Target</span>' : ""}<span><i style="background:var(--yellow)"></i>Lots changed</span><span>● Price now · <span style="color:var(--green)">●</span> best price</span></div>
+      <p class="hint" style="margin-top:8px">The stop before 14 Nov is worked out from the candles (their ${dir === 1 ? "highs" : "lows"}); the engine follows every price, so the real steps were finer. From 14 Nov each move is recorded exactly ("recorded" below).</p></section>
+    <section class="tl-card"><h2>What changed since the entry</h2><div class="scroll"><table class="tl-ch"><thead><tr><th></th><th class="n">At the entry</th><th class="n">Now</th><th>Why</th></tr></thead><tbody>
+      ${chg.map(([k, a, b, w]) => `<tr><td>${esc(k)}</td><td class="n">${esc(a)}</td><td class="n"><b>${esc(b)}</b></td><td class="hint">${esc(w)}</td></tr>`).join("")}</tbody></table></div></section>
+    <section class="tl-card"><h2>Everything that happened, in order (${ev.length})</h2><ul class="tl-ev">
+      ${ev.map((e) => `<li><span class="t">${esc(fmtDate(e.t))}</span><i class="k ${e.k}"></i><div><b>${esc(e.h)}${e.tag ? `<span class="tag">${esc(String(e.tag).toLowerCase())}</span>` : ""}</b>${e.d ? `<div class="d">${esc(e.d)}</div>` : ""}</div></li>`).join("")}</ul></section>`;
+  page.querySelector("[data-tlx]").onclick = closeTradeLife;
+  page.querySelector("[data-tlopen]").onclick = () => { const id = tl.id; closeTradeLife(); openStrat(id); };
+  if (!soft) page.querySelector("[data-tlx]").focus();
 }
 /** Repaints a ladder in place (same elements, new positions and figures) so the ticks and the dot glide (CSS transitions) and a
  *  stop or target that moved flashes, instead of the whole bar being swapped. Falls back to a full swap when the shape changed. */
@@ -7526,8 +7703,18 @@ function groupInfo(g, ranks, hiddenArch) {
   let tag = "";
   if (live.length && best) {
     const short = (s) => String(s.name || "").split(" · ")[0];
-    if (best.live) tag = `<span class="tag ok" title="${esc(`${best.name} (consistency ${r(best).score}) is the best of this group and it is live`)}">best is live</span>`;
-    else tag = `<span class="tag warn" title="${esc(`Best: ${best.name} (consistency ${r(best).score}, not live). Live: ${live.map((s) => `${short(s)} (${r(s).rank ? `rank ${r(s).rank} of ${r(s).of}` : "no lab result"})`).join(", ")}`)}">best isn't live</span>`;
+    // The best counts as live when it, or its live copy (same lab result), runs live (13 Nov 2026: copies keep the lab id).
+    const bestLive = best.live || live.some((s) => s.lab_id && Number(s.lab_id) === Number(best.lab_id));
+    if (bestLive) tag = `<span class="tag ok" title="${esc(`${best.name} (consistency ${r(best).score}) is the best of this group and it is live`)}">best is live</span>`;
+    else {
+      tag = `<span class="tag warn" title="${esc(`Best: ${best.name} (consistency ${r(best).score}, not live). Live: ${live.map((s) => `${short(s)} (${r(s).rank ? `rank ${r(s).rank} of ${r(s).of}` : "no lab result"})`).join(", ")}`)}">best isn't live</span>`;
+      // 14 Nov 2026 (Papa): name the best right here, compare it with the one running live, and switch over smoothly.
+      const run = live.filter((s) => !s.wait_for && Number(s.lab_id) !== Number(best.lab_id)).sort((a, b) => (r(a).rank || 1e9) - (r(b).rank || 1e9))[0];
+      const waiting = live.find((s) => s.wait_for);
+      if (waiting) tag += `<span class="bsw"><span class="hint">Switching: ${esc(sName(waiting))} starts when ${esc(sName(stratOf(waiting.wait_for) || { name: "the old one" }))} exits</span></span>`;
+      else if (run) tag += `<span class="bsw"><span>Best: <b title="${esc(best.name)}">${esc(short(best))}</b> <span class="rank best">★ ${esc(String(r(best).score))}</span>${r(run).score != null ? ` <span class="hint">vs live ${esc(String(r(run).score))}</span>` : ""}</span>`
+        + `<button class="btn small" type="button" data-bcmp="${esc(run.id)}|${esc(best.id)}">⇄ Compare</button><button class="btn small primary" type="button" data-bsw="${esc(run.id)}|${esc(best.id)}">Switch to the best ▸</button></span>`;
+    }
   }
   const bk = (live) => g.list.filter((s) => !!s.live === live).reduce((a, s) => { const p = pnl.get(s.id) || {}; return a + ((live ? p.live : p.paper) || 0); }, 0);
   const hasL = g.list.some((s) => s.live), hasP = g.list.some((s) => !s.live);
@@ -7774,6 +7961,33 @@ function groupHeadHTML(g, ranks, hiddenArch, folded) {
   const i = groupInfo(g, ranks, hiddenArch);
   return `<span class="car" aria-hidden="true">${folded ? "▸" : "▾"}</span><b>${esc(i.title)}</b><span class="hint">${esc(i.count)}</span>${i.tag}<span class="pl">Running P&amp;L <span data-grun="${esc(g.k)}">${groupRunHtml(g.list)}</span></span><span class="pl">Booked P&amp;L ${i.bookedHtml}</span>`;
 }
+/* ---------- Switch to the best (14 Nov 2026, Papa: "let the old strategy do its exit at its own, and the new entry after that
+   exit has to be as per the new strategy"; migration 104): the group header's "Switch to the best ▸" pauses the strategy
+   running live (no new entries; a position it holds keeps its stops and exit rules) and hands over to the best one in the
+   same mode — at once when it is flat, else the moment its position closes (database trigger), with a notification. The
+   best one takes over the old one's lots and sizing. ⇄ Compare puts the two side by side on the Compare page. */
+document.addEventListener("click", (e) => {
+  const c = e.target.closest("[data-bcmp]"), w = e.target.closest("[data-bsw]");
+  if (!c && !w) return;
+  e.stopPropagation();
+  const [fromId, toId] = (c || w).dataset[c ? "bcmp" : "bsw"].split("|"), from = stratOf(fromId), to = stratOf(toId);
+  if (!from || !to) return;
+  if (c) { cmpSet([{ k: "desk", id: from.id, name: from.name }, { k: "desk", id: to.id, name: to.name }]); showPage("cmp"); return; }
+  const live = from.live, holding = from.position !== "FLAT";
+  const sc = (x) => x.lab_id ? labScores.get(Number(x.lab_id)) : null;
+  askConfirm(`<strong>Switch ${esc(sName(from))} to the best strategy?</strong>
+    <br>Now running${live ? " <b>live</b>" : ""}: ${esc(from.name)}${sc(from) != null ? ` (consistency ${esc(String(sc(from)))})` : ""}.
+    <br>Takes over: ${esc(to.name)}${sc(to) != null ? ` (consistency ${esc(String(sc(to)))})` : ""}${live && !to.live ? " — a live copy of it is made; the paper one stays in Paper" : ""}.
+    <br>${holding ? `<b>${esc(sName(from))} holds a ${from.position.toLowerCase()} position.</b> It stops taking new entries now, keeps its stops and exit rules, and closes the position on its own. The moment it is flat, the best one starts and takes its next entry by its own rules. You get a notification.` : "It is flat, so the best one starts now and takes its next entry by its own rules."}
+    <br>The best one takes over its ${plural(Number(from.lots) || 1, "lot")}${from.sizing && from.sizing.mode === "MOVE" ? " (sizing: same ₹ on a typical day)" : ""}.
+    <br><span class="hint">The lab's ranking describes the past: in the 7 Nov walk-forward check, the top-ranked strategies earned less the next quarter than the average passed one in 12 of 13 groups. Compare them first if unsure.</span>`
+    + (live ? noStopHTML([to]) + liveTypeHTML() : ""), "Switch", () => run(null, async () => {
+      const r = must(await db.rpc("switch_to_best", { p_from: from.id, p_to: to.id }));
+      await loadAll();
+      toast(r && r.waiting ? `${sName(from)} stops new entries and exits on its own; the best one starts the moment it is flat.` : "Switched: the best one runs now and takes its next entry by its own rules.");
+    }), live);
+  if (live) wireLiveType();
+}, true);
 const toggleFold = (k) => { lpFold.has(k) ? lpFold.delete(k) : lpFold.add(k); saveFold(); renderList(); };
 /** Strategies table, simple view (Papa, 2 Nov 2026): asset, long / short, lots, running P&L, booked P&L, status. */
 function listColsSimple() {
@@ -9067,8 +9281,8 @@ function deskPosPaint(open) {
   }).join("") || '<p class="dk-lbl">No open position in this mode.</p>';
 }
 $("dk_heatv").addEventListener("click", (e) => { const b = e.target.closest("[data-v]"); if (!b) return; try { localStorage.setItem("dkHeat", b.dataset.v); } catch { /* private window */ } deskPosPaint(dkOpen()); });
-$("dk_pos").addEventListener("click", (e) => { const t = e.target.closest("[data-dk]"); if (t) openStrat(t.dataset.dk); });
-$("dk_pos").addEventListener("keydown", (e) => { const t = e.target.closest("[data-dk]"); if (t && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openStrat(t.dataset.dk); } });
+$("dk_pos").addEventListener("click", (e) => { const t = e.target.closest("[data-dk]"); if (t) openTradeLife(t.dataset.dk); });
+$("dk_pos").addEventListener("keydown", (e) => { const t = e.target.closest("[data-dk]"); if (t && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openTradeLife(t.dataset.dk); } });
 /* ---------- System feeds (Papa, 6 Nov 2026): pulse bars for Dhan NSE/BSE and MCX prices, Delta prices, the stop watcher,
    the order manager and the broker match. A feed stays green (bars bouncing) until it is overdue for its own rhythm —
    prices and stops every second, the order manager every minute, the broker match every 5 minutes (a 12:00 check keeps it
@@ -10099,7 +10313,7 @@ function renderList() {
     const folded = lpFold.has(g.k), tr = document.createElement("tr"); tr.className = "lpg" + (folded ? " fold" : ""); tr.dataset.g = g.k; tr.tabIndex = 0;
     tr.setAttribute("aria-expanded", String(!folded));
     tr.innerHTML = `<td colspan="${cols.length + 1}"><div class="lpgh">${groupHeadHTML(g, ranks, archHidden.get(g.k) || 0, folded)}</div></td>`;
-    tr.addEventListener("click", () => toggleFold(g.k)); tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFold(g.k); } });
+    tr.addEventListener("click", (e) => { if (!e.target.closest(".bsw")) toggleFold(g.k); }); tr.addEventListener("keydown", (e) => { if (e.target.closest(".bsw")) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFold(g.k); } });
     tb.append(tr);
     if (!folded) for (const s of g.list) tb.append(rowEl(s));
   }
@@ -10158,7 +10372,7 @@ function renderListCards(cols, rows) {
   else for (const g of groups) {
     const folded = lpFold.has(g.k), d = document.createElement("div"); d.className = "lpgd"; d.dataset.g = g.k; d.tabIndex = 0;
     d.innerHTML = groupHeadHTML(g, ranks, (renderList.archHidden || new Map()).get(g.k) || 0, folded);
-    d.addEventListener("click", () => toggleFold(g.k));
+    d.addEventListener("click", (e) => { if (!e.target.closest(".bsw")) toggleFold(g.k); });
     box.append(d);
     if (!folded) for (const s of g.list) box.append(cardEl(s));
   }
