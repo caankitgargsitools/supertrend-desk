@@ -1101,6 +1101,20 @@ Still open:
       - **Website figures**: Booked P&L behind one helper (four scopes today); the Desk's repeated ladders.
       - **Labs**: jobs 3 / 10 / 26 / 29 are off since 13 Nov — back on after the compute upgrade.
       **Question for Papa:** which of these he means first, and whether "Vercel" is about speed, cost or limits.
+      **Measured 14 Nov 2026 (report given to Papa in chat; nothing changed, he is to pick):**
+      - **Vercel's warning (13 Nov) is not about AnkGenie.** The mail says the free team used 75% of "Fluid Active CPU
+        (4 hours)" = server-side function CPU. This site is static (no functions) and uses none of it; the team's other
+        projects are Next.js apps (`dhandha`, `bni-attendance`, `driptr`) — Dhandha is the likely user (per-project usage
+        can't be read on the free plan). The limit is per TEAM: at 100% Vercel pauses every project, this website too
+        (the engine and stops keep running on Supabase, but nobody could open the portal or press Emergency stop).
+        Options put to Papa: Vercel Pro (~$20/month; the free plan is also for non-commercial use only), cut Dhandha's
+        function CPU (in the Dhandha session), or host this static site apart from Dhandha.
+      - **Supabase** (Pro $25/month, Micro compute: 1 GB RAM, 60 connections): only the compute is short. Database 1,166 MB
+        of 8 GB disk, files 35 MB of 100 GB, 4 users, ~30 of 60 connections when quiet, engine calls roughly a third of
+        the 2 million a month. Database time over ~25 h with the labs off: Realtime change-decoding 29%, per-second
+        `pos_ltp` writes 9.5%, `algo_chart` 5%, `desk_feeds()` 5%, `desk_health()` 4% (6.7 s a run, was 0.6 s), the
+        30-second `select *` of all strategies 2.6%. Recommended: Small compute (2 GB, +$5/month) after 19 Nov, plus the
+        cuts above before switching the lab jobs back on; Medium (4 GB, +$50/month) only if that isn't enough.
 
 ## Open items
 - Supervised 1-lot live test (NATGASMINI, Lab #6038) once Papa adds Dhan funds and whitelists the IP.
