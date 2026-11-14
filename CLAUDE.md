@@ -1013,6 +1013,13 @@ Still open:
    3. **Desk › Positions (one-screen view): improve the entry · stop · target line** (`deskPosPaint`, `ladderHTML` /
       `ladder`). **Question for Papa:** he has "a couple of things in mind" — ask for them before changing anything.
    4. **Which of the three to start with** (asked 14 Nov, not answered yet).
+   5. **Live lots** (Papa, 14 Nov: "put live lots also on the pending item list. I will tell you during the day there is
+      something to be changed about that"). State: the 30 live strategies still carry paper-sized lots (MOVE sizing with
+      paper's ₹-a-day amounts, e.g. GOLD 10 lots ≈ ₹21 lakh a day, SILVERM 147, GOLDM 193) against ₹4 lakh live capital;
+      "Ready to trade?" shows it red. The desk cuts or skips their entries by the live limit, the one-order cap and
+      Dhan's free funds, but the planned lots are wrong. The ready fix is Capital › Lots wizard › Live › Autofill —
+      **don't apply or change anything until Papa says what he wants changed about it** (he will raise it and ask for
+      this list).
 
 ## Open items
 - Supervised 1-lot live test (NATGASMINI, Lab #6038) once Papa adds Dhan funds and whitelists the IP.
