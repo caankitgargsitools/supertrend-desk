@@ -314,13 +314,17 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   **Two CAGRs on the average capital deployed** (14 Nov 2026, Papa: "calculate the CAGR based on the weighted average
   capital deployed", then "show two separate CAGRs, one based on the booked profit and one based on the booked and
   running P&L"): two read-out cells beside "Profit ÷ deployed", the same whatever tab the chart shows — "CAGR · booked"
-  (`dkBooked`) and "CAGR · booked + running" (`dkBookedRun`), each with its rupee profit, then one line "on avg deployed
-  ₹27.37L in 3 d" (`dkCvpCagr(pts, end, val)` / `dkCvpCagrHtml(pts, end)`). Profit made from the first point of the
-  period to the point read (the hovered one, else now) ÷ the time-weighted average capital deployed in between (each
-  level × how long it stood), compounded to a year: (1 + profit ÷ average) ^ (365 ÷ days) − 1. They follow the period
-  picked (All = the whole record). Under a day "–" ("needs a day or more"); under 30 days "short period, rough
-  figures"; above 9,999% "> 9,999%"; a loss of everything or more = −100%. Where the period starts before running
-  profit was recorded (before 3 Nov 2026), the running part counts from zero.
+  (`dkBooked`) and "CAGR · booked + running" (`dkBookedRun`), each with "+₹X = N% of avg", then one line "avg deployed
+  ₹… over N d since <date>" (`dkCvpCagr(all, end, val)` / `dkCvpCagrHtml(all, end)`). **Always on the whole record,
+  whatever period the chart shows** (the first version took only the period shown: on the default 1-day view Papa's booked
+  ₹38.56 lakh read as "+₹0" — "the figures taken for calculation are wrong … on paper there is a profit"): profit so far
+  at the point read (the hovered one, else now) ÷ the time-weighted average capital deployed from the record's first
+  point (`dkCvpStart`: the mode's first trade's entry day) to that moment, compounded to a year: (1 + profit ÷ average) ^
+  (365 ÷ days) − 1. The whole record's points are `dkCvp.all` (`dkCvpPoints(span, data)`, a second `desk_series` read at
+  most every 5 minutes; the All period reuses its own). Under a day "–"; under 30 days "short record, rough figures";
+  above 9,999% "> 9,999%"; a loss of everything or more = −100%. Before 3 Nov 2026 the capital deployed is the estimate
+  from closed trades and running profit wasn't recorded. Papa's paper record on 14 Nov: 37 days from 8 Oct, recorded
+  average ₹20.58 Cr over the last 10.9 days, booked ₹38.56 lakh, running ₹13.11 Cr.
 - **Same page after a refresh** (3 Nov 2026, Papa): `savePage` stores the page, the open strategy and the Strategies tab in
   this browser (localStorage `lastPage`, per user) on every page change; start-up reads it and, when a saved page will be reopened, keeps the loading card up
   instead of the Strategies list (no flash; Papa, 3 Nov), then `restorePage` reopens it after the data loads (admin pages only for admins; a strategy that no longer exists → the

@@ -9849,26 +9849,39 @@ function deskSankey() {
 /* ---------- Desk: capital deployed vs realised / running / total profit (Papa, 3 Nov 2026) ----------
    From desk_snapshots (every 5 minutes, kept for good) via desk_series; before the first snapshot the capital deployed is
    estimated from closed trades (entry price × units × today's margin rate) and realised profit from their exits. */
-const dkCvp = { tab: "total", range: "1D", from: null, to: null, zoom: null, data: null, pts: [], span: null, hover: null, drag: null, big: false, at: 0 };
+const dkCvp = { tab: "total", range: "1D", from: null, to: null, zoom: null, data: null, pts: [], all: null, span: null, hover: null, drag: null, big: false, at: 0 };
 function deskCvpSpan() {
   const now = Date.now();
   if (dkCvp.zoom) return dkCvp.zoom;
   if (dkCvp.from) return { from: dkCvp.from, to: Math.min(now, dkCvp.to || now) };
   const d = { "1H": 1 / 24, "1D": 1, "1W": 7, "1M": 30, "3M": 91, "1Y": 365 }[dkCvp.range];
   if (d) return { from: now - d * 864e5, to: now };
-  const first = Math.min(now - 864e5, ...desk.trades.map((t) => Date.parse((t.entry_day || String(t.exit_at).slice(0, 10)) + "T03:45:00Z")).filter(Number.isFinite));
-  return { from: first, to: now };
+  return { from: dkCvpStart(), to: now };
 }
+/** When the mode's record begins: its first trade's entry day (at least a day back). */
+const dkCvpStart = () => Math.min(Date.now() - 864e5, ...desk.trades.map((t) => Date.parse((t.entry_day || String(t.exit_at).slice(0, 10)) + "T03:45:00Z")).filter(Number.isFinite));
 async function deskCvpLoad() {
   if (page !== "desk") return;
   deskCvpPaintCtl();
   const sp = deskCvpSpan();
   const r = must(await db.rpc("desk_series", { p_mode: desk.mode, p_from: new Date(sp.from).toISOString(), p_to: new Date(sp.to).toISOString(), p_points: sp.to - sp.from <= 864e5 + 6e4 ? 1500 : 600 })); // a day or less: one point a minute
   dkCvp.data = r || {}; dkCvp.span = sp; dkCvp.at = Date.now();
-  deskCvpBuild(); deskCvpDraw();
+  deskCvpBuild();
+  // The CAGRs are worked out on the whole record, whatever period the chart shows.
+  const mode = desk.mode, whole = dkCvp.range === "ALL" && !dkCvp.from && !dkCvp.zoom;
+  if (whole) dkCvp.all = { mode, at: Date.now(), pts: dkCvp.pts };
+  else if (!dkCvp.all || dkCvp.all.mode !== mode || Date.now() - dkCvp.all.at > 300e3) {
+    deskCvpDraw();
+    const spA = { from: dkCvpStart(), to: Date.now() };
+    const rA = must(await db.rpc("desk_series", { p_mode: mode, p_from: new Date(spA.from).toISOString(), p_to: new Date(spA.to).toISOString(), p_points: 600 }));
+    if (mode === desk.mode) dkCvp.all = { mode, at: Date.now(), pts: dkCvpPoints(spA, rA || {}) };
+  }
+  deskCvpDraw();
 }
-function deskCvpBuild() {
-  const { from, to } = dkCvp.span, first = dkCvp.data.first ? Date.parse(dkCvp.data.first) : Infinity;
+function deskCvpBuild() { dkCvp.pts = dkCvpPoints(dkCvp.span, dkCvp.data); }
+/** The chart's points for a period: estimated from trades before the snapshots began, then the snapshots, then now. */
+function dkCvpPoints(span, data) {
+  const { from, to } = span, first = data.first ? Date.parse(data.first) : Infinity;
   const names = new Map(state.strategies.map((x) => [x.id, x]));
   const trs = desk.trades.map((t) => {
     const x = names.get(t.strategy_id), und = x && x.underlying, rate = (cap.rates && cap.rates[und] && Number(cap.rates[und].fut_pct)) || .1;
@@ -9884,48 +9897,49 @@ function deskCvpBuild() {
     for (const o of open) if (o.start <= t) m += o.m;
     pts.push({ t, m, u: null, r: real, est: true });
   }
-  for (const r of dkCvp.data.rows || []) { const t = Date.parse(r.t); if (t >= from && t <= to) pts.push({ t, m: Number(r.m) || 0, u: Number(r.u) || 0, r: Number(r.r) || 0 }); }
+  for (const r of data.rows || []) { const t = Date.parse(r.t); if (t >= from && t <= to) pts.push({ t, m: Number(r.m) || 0, u: Number(r.u) || 0, r: Number(r.r) || 0 }); }
   // The live end: what the desk shows right now.
   if (to >= Date.now() - step * 2) {
     const live = dkOpen(); pts.push({ t: Date.now(), m: live.reduce((a, s) => a + (Number(s.pos_margin) || 0), 0), u: live.reduce((a, s) => a + (Number(s.pos_upnl) || 0), 0), r: bookOf(desk.mode).net, now: true });
   }
-  dkCvp.pts = pts.sort((a, b) => a.t - b.t);
+  return pts.sort((a, b) => a.t - b.t);
 }
 const dkCvpVal = (p) => dkCvp.tab === "real" ? p.r : dkCvp.tab === "run" ? p.u : p.u == null ? p.r : p.r + p.u;
 /**
  * The yearly rate on the money actually used (Papa, 14 Nov 2026: "CAGR based on the weighted average capital
- * deployed"), from the first point shown to `end`: the profit made in between ÷ the average capital deployed in
- * between (each level weighted by how long it stood), compounded to a year: (1 + profit ÷ average) ^ (365 ÷ days) − 1.
- * `val` picks the profit: booked only, or booked + running. Under a day there is no CAGR (a few hours compounded to a
- * year means nothing); `cagr` is then null.
+ * deployed"; "two separate CAGRs, one based on the booked profit and one based on the booked and running P&L").
+ * Always on the WHOLE record, whatever period the chart shows (the first version took only the period shown, so on the
+ * 1-day view a booked profit of ₹38 lakh read as ₹0 — Papa: "the figures taken for calculation are wrong"):
+ *   profit so far at the point read (`val`: booked, or booked + running)
+ *   ÷ the average capital deployed from the record's first point to that moment (each level × how long it stood)
+ *   compounded to a year: (1 + profit ÷ average) ^ (365 ÷ days) − 1.
+ * `all` = the whole record's points; `end` = the point read. Under a day there is no CAGR (`cagr` null).
  */
 const dkBooked = (p) => p.r, dkBookedRun = (p) => p.u == null ? p.r : p.r + p.u;
-function dkCvpCagr(pts, end, val) {
-  const i1 = pts.indexOf(end); if (i1 < 1) return null;
-  const a = pts[0], span = end.t - a.t, days = span / 864e5, v0 = val(a), v1 = val(end);
+function dkCvpCagr(all, end, val) {
+  const base = (all || []).filter((p) => p.t < end.t); if (!base.length) return null;
+  const a = base[0], span = end.t - a.t, days = span / 864e5, v0 = val(a), v1 = val(end);
   if (v0 == null || v1 == null || !(span > 0)) return null;
-  let area = 0; for (let i = 0; i < i1; i++) area += (Number(pts[i].m) || 0) * (pts[i + 1].t - pts[i].t);
+  let area = 0; for (let i = 0; i < base.length; i++) area += (Number(base[i].m) || 0) * ((i + 1 < base.length ? base[i + 1].t : end.t) - base[i].t);
   const avg = area / span, gain = v1 - v0;
   if (!(avg > 0)) return null;
   const ret = gain / avg;
-  return { days, avg, gain, ret, cagr: days < .95 ? null : ret <= -1 ? -1 : Math.expm1(Math.log1p(ret) * 365 / days) };
+  return { from: a.t, days, avg, gain, ret, cagr: days < .95 ? null : ret <= -1 ? -1 : Math.expm1(Math.log1p(ret) * 365 / days) };
 }
-/**
- * The read-out's two CAGR cells (Papa, 14 Nov 2026: "two separate CAGRs, one based on the booked profit and one based on
- * the booked and running P&L"), whatever tab the chart shows, and a line saying what they were worked out from.
- */
-function dkCvpCagrHtml(pts, end) {
-  const tip = "The profit made over the period shown ÷ the average capital deployed over it (each level counted for as long as it stood), compounded to a year: (1 + profit ÷ average) ^ (365 ÷ days) − 1. Pick All for the whole record.";
-  const money = (g) => `${g < 0 ? "−" : "+"}${rupeesShort(Math.abs(g))}`;
+/** The read-out's two CAGR cells and a line saying what they were worked out from. */
+function dkCvpCagrHtml(all, end) {
+  const tip = "Profit so far ÷ the average capital deployed since the record began (each level counted for as long as it stood), compounded to a year: (1 + profit ÷ average) ^ (365 ÷ days) − 1. Always on the whole record, whatever period the chart shows.";
+  const pc = (x) => `${x < 0 ? "−" : ""}${Math.abs(x) < 100 ? Math.abs(x).toFixed(1) : Math.round(Math.abs(x)).toLocaleString("en-IN")}%`;
   const cell = (name, c) => {
     if (!c) return `<span title="${tip}">CAGR · ${name}<b>–</b></span>`;
-    if (c.cagr == null) return `<span title="${tip}">CAGR · ${name}<b>–</b><small>${esc(money(c.gain))}</small></span>`;
-    const x = c.cagr * 100, txt = x > 9999 ? "> 9,999%" : `${x < 0 ? "−" : ""}${Math.abs(x) < 100 ? Math.abs(x).toFixed(1) : Math.round(Math.abs(x)).toLocaleString("en-IN")}%`;
-    return `<span title="${tip}">CAGR · ${name}<b class="${x >= 0 ? "dk-up" : "dk-down"}">${txt}</b><small>${esc(money(c.gain))}</small></span>`;
+    const from = `${c.gain < 0 ? "−" : "+"}${rupeesShort(Math.abs(c.gain))} = ${pc(c.ret * 100)} of avg`;
+    if (c.cagr == null) return `<span title="${tip}">CAGR · ${name}<b>–</b><small>${esc(from)}</small></span>`;
+    const x = c.cagr * 100;
+    return `<span title="${tip}">CAGR · ${name}<b class="${x >= 0 ? "dk-up" : "dk-down"}">${x > 9999 ? "> 9,999%" : pc(x)}</b><small>${esc(from)}</small></span>`;
   };
-  const b = dkCvpCagr(pts, end, dkBooked), t = dkCvpCagr(pts, end, dkBookedRun), c = b || t;
+  const b = dkCvpCagr(all, end, dkBooked), t = dkCvpCagr(all, end, dkBookedRun), c = b || t;
   const per = !c ? "" : c.days < 2 ? `${Math.max(1, Math.round(c.days * 24))} h` : `${Math.round(c.days)} d`;
-  const base = !c ? "" : `<span><small>on avg deployed ${esc(rupeesShort(c.avg))} in ${per}${c.days < .95 ? " · needs a day or more" : c.days < 30 ? " · short period, rough figures" : ""}</small></span>`;
+  const base = !c ? "" : `<span><small>avg deployed ${esc(rupeesShort(c.avg))} over ${per} since ${esc(fmtDay(new Date(c.from).toISOString()))}${c.days < .95 ? " · needs a day or more" : c.days < 30 ? " · short record, rough figures" : ""}</small></span>`;
   return cell("booked", b) + cell("booked + running", t) + base;
 }
 function deskCvpDraw() {
@@ -9967,14 +9981,14 @@ function deskCvpDraw() {
   // hover: nearest point, crosshair and a read-out
   const last = pts.at(-1), hp = dkCvp.hover != null ? pts.reduce((a, p) => Math.abs(tx(p.t) - dkCvp.hover) < Math.abs(tx(a.t) - dkCvp.hover) ? p : a) : null;
   const show = hp || last, v = dkCvpVal(show), lbl = { real: "Realised", run: "Running", total: "Total" }[dkCvp.tab];
-  $("dk_cvp_read").innerHTML = `<span>${esc(hp ? fmtDate(new Date(hp.t).toISOString()) : "Now")}${show.est ? " · estimated" : ""}</span><span>Capital deployed<b style="color:#5aa8ff">${esc(rupeesShort(show.m))}</b></span><span>${lbl} profit<b class="${(v || 0) >= 0 ? "dk-up" : "dk-down"}">${v == null ? "not recorded" : esc(rupeesSigned(v))}</b></span><span>Profit ÷ deployed<b>${v != null && show.m > 0 ? `${(v / show.m * 100).toFixed(1)}%` : "–"}</b></span>${dkCvpCagrHtml(pts, show)}`;
+  $("dk_cvp_read").innerHTML = `<span>${esc(hp ? fmtDate(new Date(hp.t).toISOString()) : "Now")}${show.est ? " · estimated" : ""}</span><span>Capital deployed<b style="color:#5aa8ff">${esc(rupeesShort(show.m))}</b></span><span>${lbl} profit<b class="${(v || 0) >= 0 ? "dk-up" : "dk-down"}">${v == null ? "not recorded" : esc(rupeesSigned(v))}</b></span><span>Profit ÷ deployed<b>${v != null && show.m > 0 ? `${(v / show.m * 100).toFixed(1)}%` : "–"}</b></span>${dkCvpCagrHtml(dkCvp.all && dkCvp.all.mode === desk.mode ? dkCvp.all.pts : null, show)}`;
   if (hp) { const x = tx(hp.t); ctx.strokeStyle = "rgba(243,178,60,.6)"; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke(); ctx.setLineDash([]);
     if (v != null) { ctx.fillStyle = v >= 0 ? DK_COL.up : DK_COL.down; ctx.beginPath(); ctx.arc(x, ty(v), 3.5, 0, Math.PI * 2); ctx.fill(); }
     ctx.fillStyle = "#5aa8ff"; ctx.beginPath(); ctx.arc(x, tm(hp.m), 3, 0, Math.PI * 2); ctx.fill(); }
   const first = dkCvp.data && dkCvp.data.first;
   { const st = Number(dkCvp.data && dkCvp.data.step_s) || 0, m = Math.round(st / 60);
     $("dk_cvp_step").textContent = !st ? "" : m < 60 ? `1 point = ${m} min` : m < 1440 ? `1 point = ${+(m / 60).toFixed(1)} h` : `1 point = ${+(m / 1440).toFixed(1)} day`; }
-  $("dk_cvp_note").textContent = `Shaded = capital deployed (margin of open positions, right scale); line = ${lbl.toLowerCase()} profit after charges (left scale). Recorded every minute from 6 Nov 2026, 13:46 (every 5 minutes before that${first ? `, since ${fmtDate(first)}` : ""}); before that the capital deployed is estimated from closed trades (dashed) and running profit wasn't recorded. Drag across the chart to zoom in; pick dates to see any past period. The two CAGR figures = the profit made over the period shown (booked only, and booked + running) ÷ the average capital deployed over it, compounded to a year.`;
+  $("dk_cvp_note").textContent = `Shaded = capital deployed (margin of open positions, right scale); line = ${lbl.toLowerCase()} profit after charges (left scale). Recorded every minute from 6 Nov 2026, 13:46 (every 5 minutes before that${first ? `, since ${fmtDate(first)}` : ""}); before that the capital deployed is estimated from closed trades (dashed) and running profit wasn't recorded. Drag across the chart to zoom in; pick dates to see any past period. The two CAGR figures = profit so far (booked only, and booked + running) ÷ the average capital deployed since the record began, compounded to a year; they are worked out on the whole record, whatever period the chart shows.`;
 }
 function deskCvpPaintCtl() {
   $("dk_cvp_tab").querySelectorAll("[data-v]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === dkCvp.tab)));

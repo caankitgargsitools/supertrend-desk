@@ -144,8 +144,13 @@ if (!/Capital deployed/.test(await p.textContent("#dk_cvp_read"))) fail("read-ou
   if (c.short.cagr !== null || c.first !== null) fail("under a day: no CAGR", c);
   if (c.lost.cagr !== -1) fail("more than everything lost = −100%", c.lost);
   if (!near(c.est.cagr, .15)) fail("running profit not on record at the start counts from zero", c.est);
-  if (!/CAGR · booked<b[^>]*>15\.0%<\/b><small>\+₹300<.*CAGR · booked \+ running<b[^>]*>20\.0%<\/b><small>\+₹400<.*on avg deployed ₹2,000 in 365 d/.test(c.html)) fail("the two CAGR cells", c.html);
-  if (!/needs a day or more/.test(c.htmlShort) || /%/.test(c.htmlShort.replace(/title="[^"]*"/g, ""))) fail("CAGR cells for a few hours", c.htmlShort);
+  if (!/CAGR · booked<b[^>]*>15\.0%<\/b><small>\+₹300 = 15\.0% of avg<.*CAGR · booked \+ running<b[^>]*>20\.0%<\/b><small>\+₹400 = 20\.0% of avg<.*avg deployed ₹2,000 over 365 d since /.test(c.html)) fail("the two CAGR cells", c.html);
+  if (!/needs a day or more/.test(c.htmlShort) || (c.htmlShort.match(/<b>–<\/b>/g) || []).length !== 2) fail("CAGR cells for a few hours", c.htmlShort);
+  // On the whole record, whatever period the chart shows: on the 1-month view the booked figure is the profit so far, not the month's change.
+  const w = await p.evaluate(() => { const all = dkCvp.all && dkCvp.all.pts, end = dkCvp.pts.at(-1), c = all && dkCvpCagr(all, end, dkBooked);
+    return { has: !!all, from: all && all[0].t, start: dkCvpStart(), shown: dkCvp.pts[0].t, gain: c && c.gain, v0: all && dkBooked(all[0]), booked: dkBooked(end), from2: c && c.from }; });
+  if (!w.has || Math.abs(w.from - w.start) > 6e5 || w.from2 !== w.from) fail("the CAGRs start at the record's first point", w);
+  if (w.gain !== w.booked - w.v0 || w.v0 !== 0) fail("booked CAGR uses the booked profit so far", w);
   const read = await p.textContent("#dk_cvp_read");
   if (!/CAGR · booked/.test(read) || !/CAGR · booked \+ running/.test(read)) fail("both CAGRs in the read-out", read); }
 await p.click('#dk_cvp_tab [data-v="real"]'); if (await p.evaluate(() => dkCvp.tab) !== "real") fail("realised tab");
