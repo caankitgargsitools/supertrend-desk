@@ -127,23 +127,27 @@ await p.click('#dk_cvp_rng [data-v="1M"]'); await p.waitForTimeout(500);
 const cv = await p.evaluate(() => ({ n: dkCvp.pts.length, est: dkCvp.pts.filter((x) => x.est).length, rec: dkCvp.pts.filter((x) => !x.est && !x.now).length, now: dkCvp.pts.some((x) => x.now) }));
 if (!(cv.est > 0 && cv.rec === 48 && cv.now)) fail("capital vs profit series", cv);
 if (!/Capital deployed/.test(await p.textContent("#dk_cvp_read"))) fail("read-out");
-// CAGR on the weighted average capital deployed (14 Nov 2026): profit of the period ÷ time-weighted average deployed, compounded to a year.
+// Two CAGRs on the weighted average capital deployed (14 Nov 2026): booked profit, and booked + running, each ÷ the
+// time-weighted average deployed over the period shown, compounded to a year; the same whatever tab the chart shows.
 { const c = await p.evaluate(() => {
-    const D = 864e5, was = dkCvp.tab; dkCvp.tab = "total";
+    const D = 864e5;
     const pts = [{ t: 0, m: 1000, r: 0, u: 0 }, { t: 182.5 * D, m: 3000, r: 100, u: 0 }, { t: 365 * D, m: 500, r: 300, u: 100 }];
     const short = [{ t: 0, m: 1000, r: 0, u: 0 }, { t: D / 4, m: 1000, r: 50, u: 0 }];
     const lost = [{ t: 0, m: 100, r: 0, u: 0 }, { t: 365 * D, m: 100, r: -150, u: 0 }];
-    const out = { year: dkCvpCagr(pts, pts[2]), half: dkCvpCagr(pts, pts[1]), short: dkCvpCagr(short, short[1]), lost: dkCvpCagr(lost, lost[1]), first: dkCvpCagr(pts, pts[0]),
-      html: dkCvpCagrHtml(dkCvpCagr(pts, pts[2])), htmlShort: dkCvpCagrHtml(dkCvpCagr(short, short[1])) };
-    dkCvp.tab = was; return out; });
+    const est = [{ t: 0, m: 1000, r: 0, u: null, est: true }, { t: 365 * D, m: 1000, r: 100, u: 50 }];
+    return { booked: dkCvpCagr(pts, pts[2], dkBooked), total: dkCvpCagr(pts, pts[2], dkBookedRun), half: dkCvpCagr(pts, pts[1], dkBooked), short: dkCvpCagr(short, short[1], dkBooked),
+      lost: dkCvpCagr(lost, lost[1], dkBooked), first: dkCvpCagr(pts, pts[0], dkBooked), est: dkCvpCagr(est, est[1], dkBookedRun), html: dkCvpCagrHtml(pts, pts[2]), htmlShort: dkCvpCagrHtml(short, short[1]) }; });
   const near = (x, y) => Math.abs(x - y) < 1e-9;
-  if (!(near(c.year.avg, 2000) && near(c.year.gain, 400) && near(c.year.cagr, .2))) fail("a year: +400 on an average 2,000 = 20%", c.year);
+  if (!(near(c.booked.avg, 2000) && near(c.booked.gain, 300) && near(c.booked.cagr, .15))) fail("a year, booked: +300 on an average 2,000 = 15%", c.booked);
+  if (!(near(c.total.avg, 2000) && near(c.total.gain, 400) && near(c.total.cagr, .2))) fail("a year, booked + running: +400 on an average 2,000 = 20%", c.total);
   if (!(near(c.half.avg, 1000) && near(c.half.cagr, 1.1 ** 2 - 1))) fail("half a year: 10% compounds to 21%", c.half);
   if (c.short.cagr !== null || c.first !== null) fail("under a day: no CAGR", c);
   if (c.lost.cagr !== -1) fail("more than everything lost = −100%", c.lost);
-  if (!/CAGR on avg deployed.*20\.0%.*\+₹400 on avg ₹2,000 in 365 d/.test(c.html)) fail("CAGR cell", c.html);
-  if (!/needs a day or more/.test(c.htmlShort)) fail("CAGR cell for a few hours", c.htmlShort);
-  if (!/CAGR on avg deployed/.test(await p.textContent("#dk_cvp_read"))) fail("CAGR in the read-out", await p.textContent("#dk_cvp_read")); }
+  if (!near(c.est.cagr, .15)) fail("running profit not on record at the start counts from zero", c.est);
+  if (!/CAGR · booked<b[^>]*>15\.0%<\/b><small>\+₹300<.*CAGR · booked \+ running<b[^>]*>20\.0%<\/b><small>\+₹400<.*on avg deployed ₹2,000 in 365 d/.test(c.html)) fail("the two CAGR cells", c.html);
+  if (!/needs a day or more/.test(c.htmlShort) || /%/.test(c.htmlShort.replace(/title="[^"]*"/g, ""))) fail("CAGR cells for a few hours", c.htmlShort);
+  const read = await p.textContent("#dk_cvp_read");
+  if (!/CAGR · booked/.test(read) || !/CAGR · booked \+ running/.test(read)) fail("both CAGRs in the read-out", read); }
 await p.click('#dk_cvp_tab [data-v="real"]'); if (await p.evaluate(() => dkCvp.tab) !== "real") fail("realised tab");
 await p.locator("#dk_cvp").scrollIntoViewIfNeeded(); const box = await p.locator("#dk_cvp").boundingBox();
 await p.mouse.move(box.x + box.width * .5, box.y + box.height * .5); await p.waitForTimeout(100);

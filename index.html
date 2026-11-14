@@ -1043,6 +1043,7 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-cvp-read { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 2px 0 8px; font: 500 11px var(--font-data); color: var(--dk-muted); }
 .dk-cvp-read b { font: 600 15px var(--font-data); color: var(--dk-text); margin-left: 6px; }
 .dk-cvp-read small { font: 500 10px var(--font-data); color: var(--dk-muted); margin-left: 6px; }
+.dk-cvp-read span > small:first-child { margin-left: 0; }
 @media (max-width: 760px) { .dk-cvp-read small { display: block; margin: 1px 0 0; } }
 #dk_cvp { width: 100%; height: 280px; display: block; cursor: crosshair; touch-action: pan-y; }
 .dk-cvp.big #dk_cvp { height: 560px; }
@@ -9895,11 +9896,13 @@ const dkCvpVal = (p) => dkCvp.tab === "real" ? p.r : dkCvp.tab === "run" ? p.u :
  * The yearly rate on the money actually used (Papa, 14 Nov 2026: "CAGR based on the weighted average capital
  * deployed"), from the first point shown to `end`: the profit made in between ÷ the average capital deployed in
  * between (each level weighted by how long it stood), compounded to a year: (1 + profit ÷ average) ^ (365 ÷ days) − 1.
- * Under a day there is no CAGR (a few hours compounded to a year means nothing); `cagr` is then null.
+ * `val` picks the profit: booked only, or booked + running. Under a day there is no CAGR (a few hours compounded to a
+ * year means nothing); `cagr` is then null.
  */
-function dkCvpCagr(pts, end) {
+const dkBooked = (p) => p.r, dkBookedRun = (p) => p.u == null ? p.r : p.r + p.u;
+function dkCvpCagr(pts, end, val) {
   const i1 = pts.indexOf(end); if (i1 < 1) return null;
-  const a = pts[0], span = end.t - a.t, days = span / 864e5, v0 = dkCvpVal(a), v1 = dkCvpVal(end);
+  const a = pts[0], span = end.t - a.t, days = span / 864e5, v0 = val(a), v1 = val(end);
   if (v0 == null || v1 == null || !(span > 0)) return null;
   let area = 0; for (let i = 0; i < i1; i++) area += (Number(pts[i].m) || 0) * (pts[i + 1].t - pts[i].t);
   const avg = area / span, gain = v1 - v0;
@@ -9907,15 +9910,23 @@ function dkCvpCagr(pts, end) {
   const ret = gain / avg;
   return { days, avg, gain, ret, cagr: days < .95 ? null : ret <= -1 ? -1 : Math.expm1(Math.log1p(ret) * 365 / days) };
 }
-/** The read-out's CAGR cell: the figure, and under it what it was worked out from. */
-function dkCvpCagrHtml(c) {
+/**
+ * The read-out's two CAGR cells (Papa, 14 Nov 2026: "two separate CAGRs, one based on the booked profit and one based on
+ * the booked and running P&L"), whatever tab the chart shows, and a line saying what they were worked out from.
+ */
+function dkCvpCagrHtml(pts, end) {
   const tip = "The profit made over the period shown ÷ the average capital deployed over it (each level counted for as long as it stood), compounded to a year: (1 + profit ÷ average) ^ (365 ÷ days) − 1. Pick All for the whole record.";
-  if (!c) return `<span title="${tip}">CAGR on avg deployed<b>–</b></span>`;
-  const per = c.days < 2 ? `${Math.max(1, Math.round(c.days * 24))} h` : `${Math.round(c.days)} d`;
-  const from = `${c.gain < 0 ? "−" : "+"}${rupeesShort(Math.abs(c.gain))} on avg ${rupeesShort(c.avg)} in ${per}`;
-  if (c.cagr == null) return `<span title="${tip}">CAGR on avg deployed<b>–</b><small>${esc(from)} · needs a day or more</small></span>`;
-  const x = c.cagr * 100, txt = x > 9999 ? "> 9,999%" : `${x < 0 ? "−" : ""}${Math.abs(x) < 100 ? Math.abs(x).toFixed(1) : Math.round(Math.abs(x)).toLocaleString("en-IN")}%`;
-  return `<span title="${tip}">CAGR on avg deployed<b class="${x >= 0 ? "dk-up" : "dk-down"}">${txt}</b><small>${esc(from)}${c.days < 30 ? " · short period, a rough figure" : ""}</small></span>`;
+  const money = (g) => `${g < 0 ? "−" : "+"}${rupeesShort(Math.abs(g))}`;
+  const cell = (name, c) => {
+    if (!c) return `<span title="${tip}">CAGR · ${name}<b>–</b></span>`;
+    if (c.cagr == null) return `<span title="${tip}">CAGR · ${name}<b>–</b><small>${esc(money(c.gain))}</small></span>`;
+    const x = c.cagr * 100, txt = x > 9999 ? "> 9,999%" : `${x < 0 ? "−" : ""}${Math.abs(x) < 100 ? Math.abs(x).toFixed(1) : Math.round(Math.abs(x)).toLocaleString("en-IN")}%`;
+    return `<span title="${tip}">CAGR · ${name}<b class="${x >= 0 ? "dk-up" : "dk-down"}">${txt}</b><small>${esc(money(c.gain))}</small></span>`;
+  };
+  const b = dkCvpCagr(pts, end, dkBooked), t = dkCvpCagr(pts, end, dkBookedRun), c = b || t;
+  const per = !c ? "" : c.days < 2 ? `${Math.max(1, Math.round(c.days * 24))} h` : `${Math.round(c.days)} d`;
+  const base = !c ? "" : `<span><small>on avg deployed ${esc(rupeesShort(c.avg))} in ${per}${c.days < .95 ? " · needs a day or more" : c.days < 30 ? " · short period, rough figures" : ""}</small></span>`;
+  return cell("booked", b) + cell("booked + running", t) + base;
 }
 function deskCvpDraw() {
   const cv = $("dk_cvp"); if (!cv || page !== "desk") return;
@@ -9956,14 +9967,14 @@ function deskCvpDraw() {
   // hover: nearest point, crosshair and a read-out
   const last = pts.at(-1), hp = dkCvp.hover != null ? pts.reduce((a, p) => Math.abs(tx(p.t) - dkCvp.hover) < Math.abs(tx(a.t) - dkCvp.hover) ? p : a) : null;
   const show = hp || last, v = dkCvpVal(show), lbl = { real: "Realised", run: "Running", total: "Total" }[dkCvp.tab];
-  $("dk_cvp_read").innerHTML = `<span>${esc(hp ? fmtDate(new Date(hp.t).toISOString()) : "Now")}${show.est ? " · estimated" : ""}</span><span>Capital deployed<b style="color:#5aa8ff">${esc(rupeesShort(show.m))}</b></span><span>${lbl} profit<b class="${(v || 0) >= 0 ? "dk-up" : "dk-down"}">${v == null ? "not recorded" : esc(rupeesSigned(v))}</b></span><span>Profit ÷ deployed<b>${v != null && show.m > 0 ? `${(v / show.m * 100).toFixed(1)}%` : "–"}</b></span>${dkCvpCagrHtml(dkCvpCagr(pts, show))}`;
+  $("dk_cvp_read").innerHTML = `<span>${esc(hp ? fmtDate(new Date(hp.t).toISOString()) : "Now")}${show.est ? " · estimated" : ""}</span><span>Capital deployed<b style="color:#5aa8ff">${esc(rupeesShort(show.m))}</b></span><span>${lbl} profit<b class="${(v || 0) >= 0 ? "dk-up" : "dk-down"}">${v == null ? "not recorded" : esc(rupeesSigned(v))}</b></span><span>Profit ÷ deployed<b>${v != null && show.m > 0 ? `${(v / show.m * 100).toFixed(1)}%` : "–"}</b></span>${dkCvpCagrHtml(pts, show)}`;
   if (hp) { const x = tx(hp.t); ctx.strokeStyle = "rgba(243,178,60,.6)"; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, T + ph); ctx.stroke(); ctx.setLineDash([]);
     if (v != null) { ctx.fillStyle = v >= 0 ? DK_COL.up : DK_COL.down; ctx.beginPath(); ctx.arc(x, ty(v), 3.5, 0, Math.PI * 2); ctx.fill(); }
     ctx.fillStyle = "#5aa8ff"; ctx.beginPath(); ctx.arc(x, tm(hp.m), 3, 0, Math.PI * 2); ctx.fill(); }
   const first = dkCvp.data && dkCvp.data.first;
   { const st = Number(dkCvp.data && dkCvp.data.step_s) || 0, m = Math.round(st / 60);
     $("dk_cvp_step").textContent = !st ? "" : m < 60 ? `1 point = ${m} min` : m < 1440 ? `1 point = ${+(m / 60).toFixed(1)} h` : `1 point = ${+(m / 1440).toFixed(1)} day`; }
-  $("dk_cvp_note").textContent = `Shaded = capital deployed (margin of open positions, right scale); line = ${lbl.toLowerCase()} profit after charges (left scale). Recorded every minute from 6 Nov 2026, 13:46 (every 5 minutes before that${first ? `, since ${fmtDate(first)}` : ""}); before that the capital deployed is estimated from closed trades (dashed) and running profit wasn't recorded. Drag across the chart to zoom in; pick dates to see any past period. CAGR on avg deployed = the profit made over the period shown ÷ the average capital deployed over it, compounded to a year.`;
+  $("dk_cvp_note").textContent = `Shaded = capital deployed (margin of open positions, right scale); line = ${lbl.toLowerCase()} profit after charges (left scale). Recorded every minute from 6 Nov 2026, 13:46 (every 5 minutes before that${first ? `, since ${fmtDate(first)}` : ""}); before that the capital deployed is estimated from closed trades (dashed) and running profit wasn't recorded. Drag across the chart to zoom in; pick dates to see any past period. The two CAGR figures = the profit made over the period shown (booked only, and booked + running) ÷ the average capital deployed over it, compounded to a year.`;
 }
 function deskCvpPaintCtl() {
   $("dk_cvp_tab").querySelectorAll("[data-v]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === dkCvp.tab)));

@@ -311,13 +311,16 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   zoom), Expand, hover read-out (deployed, profit, profit ÷ deployed). Before the first snapshot (first rows 3 Nov 2026, 18:44 IST)
   deployed is estimated from closed trades (entry price × units × today's margin rate, dashed)
   and running P&L isn't on record; the live end is the current state. Tested in `tests/ui/ui_desk.mjs`.
-  **CAGR on avg deployed** (14 Nov 2026, Papa: "calculate the CAGR based on the weighted average capital deployed … show
-  it also there"): a fifth read-out cell beside "Profit ÷ deployed" (`dkCvpCagr(pts, end)` / `dkCvpCagrHtml`): the profit
-  of the tab shown made from the first point of the period to the point read (the hovered one, else now) ÷ the
-  time-weighted average capital deployed in between (each level × how long it stood), compounded to a year:
-  (1 + profit ÷ average) ^ (365 ÷ days) − 1; under it what it came from ("+₹33,500 on avg ₹27.37L in 3 d"). It follows
-  the period picked (All = the whole record). Under a day "–" ("needs a day or more"); under 30 days it says "short
-  period, a rough figure"; above 9,999% it shows "> 9,999%"; a loss of everything or more = −100%.
+  **Two CAGRs on the average capital deployed** (14 Nov 2026, Papa: "calculate the CAGR based on the weighted average
+  capital deployed", then "show two separate CAGRs, one based on the booked profit and one based on the booked and
+  running P&L"): two read-out cells beside "Profit ÷ deployed", the same whatever tab the chart shows — "CAGR · booked"
+  (`dkBooked`) and "CAGR · booked + running" (`dkBookedRun`), each with its rupee profit, then one line "on avg deployed
+  ₹27.37L in 3 d" (`dkCvpCagr(pts, end, val)` / `dkCvpCagrHtml(pts, end)`). Profit made from the first point of the
+  period to the point read (the hovered one, else now) ÷ the time-weighted average capital deployed in between (each
+  level × how long it stood), compounded to a year: (1 + profit ÷ average) ^ (365 ÷ days) − 1. They follow the period
+  picked (All = the whole record). Under a day "–" ("needs a day or more"); under 30 days "short period, rough
+  figures"; above 9,999% "> 9,999%"; a loss of everything or more = −100%. Where the period starts before running
+  profit was recorded (before 3 Nov 2026), the running part counts from zero.
 - **Same page after a refresh** (3 Nov 2026, Papa): `savePage` stores the page, the open strategy and the Strategies tab in
   this browser (localStorage `lastPage`, per user) on every page change; start-up reads it and, when a saved page will be reopened, keeps the loading card up
   instead of the Strategies list (no flash; Papa, 3 Nov), then `restorePage` reopens it after the data loads (admin pages only for admins; a strategy that no longer exists → the
