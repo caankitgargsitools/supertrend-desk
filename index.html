@@ -9929,13 +9929,14 @@ function dkCvpCagr(all, end, val) {
 /** The read-out's two CAGR cells and a line saying what they were worked out from. */
 function dkCvpCagrHtml(all, end) {
   const tip = "Profit so far ÷ the average capital deployed since the record began (each level counted for as long as it stood), compounded to a year: (1 + profit ÷ average) ^ (365 ÷ days) − 1. Always on the whole record, whatever period the chart shows.";
-  const pc = (x) => `${x < 0 ? "−" : ""}${Math.abs(x) < 100 ? Math.abs(x).toFixed(1) : Math.round(Math.abs(x)).toLocaleString("en-IN")}%`;
+  // The full figure, however large (Papa, 14 Nov 2026: "give me the full number, remove the upper limit").
+  const pc = (x) => { const a = Math.abs(x); return `${x < 0 ? "−" : ""}${!Number.isFinite(a) ? "∞" : a < 100 ? a.toFixed(1) : a < 1e15 ? Math.round(a).toLocaleString("en-IN") : a.toExponential(2).replace("e+", " × 10^")}%`; };
   const cell = (name, c) => {
     if (!c) return `<span title="${tip}">CAGR · ${name}<b>–</b></span>`;
     const from = `${c.gain < 0 ? "−" : "+"}${rupeesShort(Math.abs(c.gain))} = ${pc(c.ret * 100)} of avg`;
     if (c.cagr == null) return `<span title="${tip}">CAGR · ${name}<b>–</b><small>${esc(from)}</small></span>`;
     const x = c.cagr * 100;
-    return `<span title="${tip}">CAGR · ${name}<b class="${x >= 0 ? "dk-up" : "dk-down"}">${x > 9999 ? "> 9,999%" : pc(x)}</b><small>${esc(from)}</small></span>`;
+    return `<span title="${tip}">CAGR · ${name}<b class="${x >= 0 ? "dk-up" : "dk-down"}">${pc(x)}</b><small>${esc(from)}</small></span>`;
   };
   const b = dkCvpCagr(all, end, dkBooked), t = dkCvpCagr(all, end, dkBookedRun), c = b || t;
   const per = !c ? "" : c.days < 2 ? `${Math.max(1, Math.round(c.days * 24))} h` : `${Math.round(c.days)} d`;

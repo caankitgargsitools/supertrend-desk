@@ -322,7 +322,8 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   point (`dkCvpStart`: the mode's first trade's entry day) to that moment, compounded to a year: (1 + profit ÷ average) ^
   (365 ÷ days) − 1. The whole record's points are `dkCvp.all` (`dkCvpPoints(span, data)`, a second `desk_series` read at
   most every 5 minutes; the All period reuses its own). Under a day "–"; under 30 days "short record, rough figures";
-  above 9,999% "> 9,999%"; a loss of everything or more = −100%. Before 3 Nov 2026 the capital deployed is the estimate
+  the full figure is shown however large (Papa, 14 Nov: "remove the upper limit"; a first version capped it at "> 9,999%");
+  a loss of everything or more = −100%. Before 3 Nov 2026 the capital deployed is the estimate
   from closed trades and running profit wasn't recorded. Papa's paper record on 14 Nov: 37 days from 8 Oct, recorded
   average ₹20.58 Cr over the last 10.9 days, booked ₹38.56 lakh, running ₹13.11 Cr.
 - **Same page after a refresh** (3 Nov 2026, Papa): `savePage` stores the page, the open strategy and the Strategies tab in

@@ -146,6 +146,8 @@ if (!/Capital deployed/.test(await p.textContent("#dk_cvp_read"))) fail("read-ou
   if (!near(c.est.cagr, .15)) fail("running profit not on record at the start counts from zero", c.est);
   if (!/CAGR · booked<b[^>]*>15\.0%<\/b><small>\+₹300 = 15\.0% of avg<.*CAGR · booked \+ running<b[^>]*>20\.0%<\/b><small>\+₹400 = 20\.0% of avg<.*avg deployed ₹2,000 over 365 d since /.test(c.html)) fail("the two CAGR cells", c.html);
   if (!/needs a day or more/.test(c.htmlShort) || (c.htmlShort.match(/<b>–<\/b>/g) || []).length !== 2) fail("CAGR cells for a few hours", c.htmlShort);
+  { const big = await p.evaluate(() => { const D = 864e5, pts = [{ t: 0, m: 1000, r: 0, u: 0 }, { t: 37 * D, m: 1000, r: 5, u: 1200 }]; return dkCvpCagrHtml(pts, pts[1]); });
+    if (/9,999%/.test(big) || !/booked \+ running<b[^>]*>[\d,]{5,}%<\/b>/.test(big)) fail("a large CAGR is shown in full, no upper limit", big); }
   // On the whole record, whatever period the chart shows: on the 1-month view the booked figure is the profit so far, not the month's change.
   const w = await p.evaluate(() => { const all = dkCvp.all && dkCvp.all.pts, end = dkCvp.pts.at(-1), c = all && dkCvpCagr(all, end, dkBooked);
     return { has: !!all, from: all && all[0].t, start: dkCvpStart(), shown: dkCvp.pts[0].t, gain: c && c.gain, v0: all && dkBooked(all[0]), booked: dkBooked(end), from2: c && c.from }; });
