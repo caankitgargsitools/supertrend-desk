@@ -970,6 +970,25 @@ Still open:
    Also noted from the post (not separate items): AI suggesting new strategy ideas / writing free-form strategy code (our
    generator is plain code by Papa's free-first rule), live results feeding back into the Lab's ranking, and a neon /
    glass look for chosen pages.
+9. **For today's session (Papa, 14 Nov 2026: "put all of these for today. We'll do that plus other pending items"; none
+   started — discuss each with him before building):**
+   1. **Combination strategies with USD/INR.** Pairs of USDINR with a commodity (MCX: gold, silver, crude … — their rupee
+      price is the dollar price × USDINR) and of USDINR with Bitcoin and the other coins (Delta trades them in dollars).
+      To settle with Papa first: what "combination" means here (a rupee-hedged commodity / coin position, a spread, or two
+      strategies whose trades offset — the Combinations page's "lessens the drawdown" test), which USDINR contract (NSE
+      currency futures: Dhan segment, lot 1,000 USD, margin, hours 09:00–17:00, RBI's rule that exchange currency
+      derivatives need an underlying exposure), and that USDINR is not a lab asset yet (candles, costs, sessions,
+      instruments to add before anything can be tested).
+   2. **Best strategy shown where "best isn't live" is flagged, with compare and a smooth switch.** On the Strategies tab's
+      group header (`tr.lpg`, the amber "best isn't live" tag, ranks from `lab_scores`): name the best strategy right
+      there, a "Compare with the best" button (the running one vs the best, the Compare page's charts), and a "Switch to
+      the best" button — stop the current one and start the best one in the same mode. To settle: what "smoothly" does
+      with an open position (wait for its exit, close it now, or let it run paused to its own exit while the best one
+      starts flat), lots / sizing carried over, live needs the real-money confirmation, and the walk-forward note of 7 Nov
+      (the top-ranked by past consistency earned less next quarter than the average passed strategy in 12 of 13 groups)
+      shown beside the button so the switch is an informed one.
+   3. **Desk › Positions (one-screen view): improve the entry · stop · target line** (`deskPosPaint`, `ladderHTML` /
+      `ladder`). Papa has "a couple of things in mind" — ask him for them before changing anything.
 
 ## Open items
 - Supervised 1-lot live test (NATGASMINI, Lab #6038) once Papa adds Dhan funds and whitelists the IP.
