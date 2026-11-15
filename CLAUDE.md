@@ -619,6 +619,17 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   lot size too small (ETH: 77.42 points × 596 lots = ₹46,143, really × 176 per point = ₹81.2 lakh). `posUnits(s)` = lots held ×
   lot size feeds `ladderHTML` / `stopMeterHTML`. Wording: stop cell "if hit: you keep / you lose ₹X" (the whole position) +
   "gives back ₹Y" (running profit between the price now and the stop), entry cell "now +₹Z", target "if hit: you make".
+  **Changed 15 Nov 2026 (Papa: "a couple of duplicated things … the profit of the trade on the top, and then again … I
+  don't want to see that you lose this much if you hit the stop loss, I'm good at calculating … on the top in the main
+  screen … show logged profit aside" — read as LOCKED profit)**: the ladder (every place it is used) no longer repeats
+  the running profit in rupees (entry cell = "±x% since" only) and the stop cell shows only its price and distance
+  ("₹X · y% away" / "reached") — no "if hit: you keep / lose", no "gives back"; the target cell keeps "if hit: you make".
+  `lockedOf(s)` = (stop now − entry) × direction × `posUnits`, null without a stop. Desk: **"Locked in by stops"**
+  (`#dk_lock` in `#dk_lockbox`, beside the running P&L in the account card; `desk.locked`) = the sum over the mode's open
+  positions that have a stop — what stays if every stop is hit now, before exit charges; can be negative; positions
+  without a stop aren't counted (sub-line "· N with a stop", tooltip "N of M"); the profit-flow corner box shows running
+  P&L · locked in by stops · booked P&L (132 px tall, agents start at 168). The Trade life page keeps the detailed keep /
+  give-back tiles. Tests: `ui_desk.mjs`, `ui_home.mjs`, `ui_trade_life.mjs`.
   **Trade life page** (Papa: "upon clicking on this positions tab … a full page view … all the information that has changed
   over the course of the life cycle of this trade … very very detailed and very very explanatory"; migration 103): full-page
   overlay `#tl_over` (`openTradeLife` / `renderTradeLife` / `closeTradeLife`, Esc, refresh every 30 s) from Desk › Positions

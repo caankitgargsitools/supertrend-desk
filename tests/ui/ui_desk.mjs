@@ -86,6 +86,11 @@ if (!m.movers || !m.up || m.ticks !== 1) fail("green dots", m);
 await p.waitForTimeout(3500);
 const after = await p.evaluate(() => desk.pool.length); if (!(after > before)) fail("pool denser", [before, after]);
 if (!(await p.textContent("#dk_run")).includes("4,11,954")) fail("total updated", await p.textContent("#dk_run"));
+// Locked in by stops (15 Nov 2026, Papa: beside the running profit): the gold short (entry 1,47,396, stop 1,45,000, 100 a
+// point) keeps ₹2,39,600, the gold long (entry 1,43,700, stop 1,39,500) loses ₹4,20,000; the two without a stop aren't counted.
+{ const lk = await p.textContent("#dk_lock"), sub = await p.textContent("#dk_runsub"), box = await p.getAttribute("#dk_lockbox", "title");
+  if (!/−₹1,80,400/.test(lk) || !/2 with a stop/.test(sub) || !/2 of 4 open positions have a stop/.test(box)) fail("locked in by stops", [lk, sub, box]);
+  if (await p.evaluate(() => desk.locked) !== -180400) fail("the profit-flow box shows the same figure", await p.evaluate(() => desk.locked)); }
 // A loss: Solana short, price up → red dots, pool thins.
 await p.evaluate(() => onMark({ strategy_id: "sol2", ltp: 99, upnl: -21000, at: new Date().toISOString() }));
 await p.waitForTimeout(200);
@@ -226,6 +231,10 @@ await p.click('#dk_heatv [data-v="pos"]'); await p.waitForTimeout(200);
     ladders: document.querySelectorAll("#dk_pos .dk-pc .pladder").length, saved: localStorage.getItem("dkHeat"),
     over: [...document.querySelectorAll("#dk_pos .dk-pc")].filter((c) => c.scrollWidth > c.clientWidth + 1).length,
     txt: (document.querySelector("#dk_pos .dk-pc") || {}).textContent || "" }));
+  // 15 Nov 2026 (Papa): the card shows the running profit once (its header), and the stop without "if hit" rupee figures.
+  { const all = await p.evaluate(() => [...document.querySelectorAll("#dk_pos .dk-pc")].map((c) => ({ t: c.textContent, n: (c.textContent.match(/₹7,17,400|₹7,47,400/g) || []).length })));
+    if (all.some((c) => /you keep|you lose|gives back|now [+−]₹/.test(c.t))) fail("no repeated profit, no stop-loss rupee figures", all.map((c) => c.t.slice(0, 200)));
+    if (!all.some((c) => / away/.test(c.t)) || !all.some((c) => /% since/.test(c.t))) fail("stop distance and % since entry stay", all.map((c) => c.t.slice(0, 200))); }
   if (!pv.tilesHidden || !pv.cards || pv.cards !== pv.open || pv.ladders !== pv.cards || pv.saved !== "pos" || pv.over || !/Stop/.test(pv.txt) || !/Entry/.test(pv.txt) || !/Target/.test(pv.txt) || !/Now /.test(pv.txt)) fail("positions view", pv);
   if (process.env.SHOT) await p.screenshot({ path: `${process.env.SHOT}/desk_pos_${theme}_${width}.png` });
   const id = await p.getAttribute("#dk_pos .dk-pc", "data-dk");

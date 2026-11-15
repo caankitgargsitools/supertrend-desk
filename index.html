@@ -1021,6 +1021,8 @@ details.xp > summary:hover { background: var(--blue-soft); }
 @media (max-width: 1560px) { .dk-main { grid-template-columns: 260px minmax(0, 1fr); } .dk-heat { grid-column: 1 / -1; } .dk-heat .dk-tiles { max-height: none; } }
 @media (max-width: 760px) { .dk-main { grid-template-columns: minmax(0, 1fr); } .dk-top { grid-template-columns: 1fr auto; } .dk-qwrap { grid-column: 1 / -1; grid-row: 2; } .dk-quotes { justify-content: flex-start; } }
 .dk-big { font: 600 32px/1.05 var(--font-data); margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
+.dk-run2 { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 2px 20px; }
+.dk-lock .dk-v { font-size: 19px; margin: 0 0 3px; }
 .dk-kv { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-top: 12px; }
 .dk-v { font: 600 15px var(--font-data); font-variant-numeric: tabular-nums; color: var(--dk-text); }
 .dk-badge { font: 600 10px var(--font-data); padding: 2px 6px; border-radius: 3px; background: var(--dk-up-soft); color: var(--dk-up); letter-spacing: .06em; }
@@ -1880,8 +1882,10 @@ body.dk-fs-on { overflow: hidden; }
       <div class="dk-main">
         <div class="dk-panel dk-acctp">
           <div class="dk-ph"><span class="dk-lbl"><b>●</b> <span id="dk_acct">Account</span></span><span class="dk-badge" id="dk_risk">SAFE</span></div>
-          <div class="dk-lbl">Running P&amp;L · open positions</div>
-          <div class="dk-big" id="dk_run">₹0</div>
+          <div class="dk-run2">
+            <div><div class="dk-lbl">Running P&amp;L · open positions</div><div class="dk-big" id="dk_run">₹0</div></div>
+            <div class="dk-lock" id="dk_lockbox"><div class="dk-lbl">Locked in by stops</div><div class="dk-v" id="dk_lock">–</div></div>
+          </div>
           <div class="dk-lbl dk-sm" id="dk_runsub"></div>
           <div class="dk-kv">
             <div><div class="dk-lbl">Booked P&amp;L</div><div class="dk-v" id="dk_book">–</div></div>
@@ -2679,6 +2683,14 @@ function stopLevel(s, now) {
  *  every kind of position (Dhan, MCX, Delta): using it as units showed the ladder's ₹ figures one lot size too small
  *  (14 Nov 2026, Papa: ETH short 596 lots "locks in ₹46,143" — really ₹81 lakh at 176 per lot). */
 function posUnits(s) { return (Number(s.pos_lots) || Number(s.pos_qty) || Number(s.lots) || 1) * (Number(s.lot_size) || 1); }
+/** What an open position ends with if its stop is hit now (all lots, before exit charges); null when it has no stop. */
+function lockedOf(s) {
+  if (!s || s.position === "FLAT" || s.pos_ltp == null) return null;
+  const { stop } = stopLevel(s, Number(s.pos_ltp)); if (stop == null) return null;
+  const entry = Number(s.trade_type === "OPTIONS" ? s.pos_entry_prem : s.pos_entry_px);
+  const dir = s.trade_type === "OPTIONS" ? (s.pos_option_side === "SELL" ? -1 : 1) : s.position === "LONG" ? 1 : -1;
+  return entry > 0 ? (stop - entry) * dir * posUnits(s) : null;
+}
 function stopMeterHTML(s) {
   if (!s || s.position === "FLAT" || s.pos_ltp == null) return "";
   const { stop, tgt } = stopLevel(s, Number(s.pos_ltp)), dir = s.position === "LONG" ? 1 : -1;
@@ -2691,7 +2703,11 @@ function stopMeterHTML(s) {
  *  target (green), the price now as the dot labelled "Now …", the move since entry filled green in profit / red in loss; under it
  *  the three figures in the same left-to-right order: how far the stop is (₹ and %), what it locks in or loses, % since entry,
  *  what the target makes and how far it is ("None" when there's no stop / target). The trailing stop follows the best price
- *  seen on this screen too, so it moves with the live price between engine updates. */
+ *  seen on this screen too, so it moves with the live price between engine updates.
+ *  15 Nov 2026 (Papa: "a couple of duplicated things … the profit of the trade on the top, and then again … I don't want to
+ *  see that you lose this much if you hit the stop loss, I'm good at calculating"): the entry cell no longer repeats the
+ *  running profit in rupees (it is on the card), and the stop cell shows only its price and distance — no "if hit: you
+ *  keep / lose" and no "gives back". What all the stops together would leave is one figure on the Desk (lockedOf). */
 function ladderHTML(s) {
   if (!s || s.position === "FLAT" || s.pos_ltp == null) return "";
   const { stop, tgt } = stopLevel(s, Number(s.pos_ltp));
@@ -2713,9 +2729,9 @@ function ladder({ entry, now, stop, tgt, dir, units }) {
   const a0 = at(entry), an = at(now), inProfit = gain(now) >= 0, nowCls = an < 12 ? " l" : an > 88 ? " r" : "";
   const hit = stop != null && gain(now) <= gain(stop);
   const slCell = stop == null ? `<div class="sl"><small>Stop</small><b class="none">None</b><span class="none">exits on its rules only</span></div>`
-    : `<div class="sl"><small>Stop</small><b>${fmtNum(stop)}</b>${hit ? '<span class="dn">reached</span>' : `<span>${away(stop)} away</span>`}<span class="${gain(stop) >= 0 ? "up" : "dn"}" title="What the whole position (all lots) ends with if the price comes back to the stop now">if hit: ${gain(stop) >= 0 ? "you keep" : "you lose"} ${rs(gain(stop) * units)}</span>${gain(now) > 0 && gain(stop) < gain(now) ? `<span class="gb" title="Part of today's running profit that would go back to the market before the stop closes the trade">gives back ${rs((gain(now) - gain(stop)) * units)}</span>` : ""}</div>`;
+    : `<div class="sl"><small>Stop</small><b>${fmtNum(stop)}</b>${hit ? '<span class="dn">reached</span>' : `<span>${away(stop)} away</span>`}</div>`;
   const move = gain(now) / entry * 100;
-  const inCell = `<div class="en"><small>Entry</small><b>${fmtNum(entry)}</b><span class="${move >= 0 ? "up" : "dn"}">${move >= 0 ? "+" : "−"}${Math.abs(move).toFixed(2)}% since</span><span class="${move >= 0 ? "up" : "dn"}" title="Running profit of the whole position at the price now (before exit charges)">now ${move >= 0 ? "+" : "−"}${rs(gain(now) * units)}</span></div>`;
+  const inCell = `<div class="en"><small>Entry</small><b>${fmtNum(entry)}</b><span class="${move >= 0 ? "up" : "dn"}">${move >= 0 ? "+" : "−"}${Math.abs(move).toFixed(2)}% since</span></div>`;
   const tgCell = tgt == null ? `<div class="tg"><small>Target</small><b>None</b><span>trails / rules</span></div>`
     : `<div class="tg"><small>Target</small><b>${fmtNum(tgt)}</b>${gain(now) >= gain(tgt) ? '<span class="up">reached</span>' : `<span>${away(tgt)} to go</span>`}<span class="up">if hit: you make ${rs(gain(tgt) * units)}</span></div>`;
   // The cells follow the bar: a long reads Stop · Entry · Target, a short Target · Entry · Stop.
@@ -9289,7 +9305,13 @@ function deskPaint() {
   $("dk_acct").textContent = live ? "Live account" : "Paper account";
   $("dk_note").textContent = live && !all.length ? "No live strategies yet: switch to Paper to see your paper desk." : "";
   $("dk_run").textContent = rupeesSigned(run); $("dk_run").className = "dk-big " + (run >= 0 ? "dk-up" : "dk-down");
-  $("dk_runsub").textContent = `${open.length} open position${open.length === 1 ? "" : "s"} · ${open.filter((s) => Number(s.pos_upnl) > 0).length} in profit`;
+  // Locked in by stops (15 Nov 2026, Papa: beside the running profit): what stays if every stop is hit now. Positions
+  // without a stop have nothing locked and aren't counted (the line under it says how many have one).
+  const lk = open.map(lockedOf).filter((x) => x != null), locked = lk.reduce((a, b) => a + b, 0);
+  desk.locked = lk.length ? locked : null;
+  $("dk_lock").textContent = lk.length ? rupeesSigned(locked) : "–"; $("dk_lock").className = "dk-v " + (!lk.length ? "" : locked >= 0 ? "dk-up" : "dk-down");
+  $("dk_lockbox").title = `What the open positions end with if every stop is hit now (all lots, before exit charges). ${lk.length} of ${open.length} open position${open.length === 1 ? " has" : "s have"} a stop; ones without a stop aren't counted.`;
+  $("dk_runsub").textContent = `${open.length} open position${open.length === 1 ? "" : "s"} · ${open.filter((s) => Number(s.pos_upnl) > 0).length} in profit · ${lk.length} with a stop`;
   $("dk_book").textContent = rupeesSigned(booked); $("dk_book").className = "dk-v " + (booked >= 0 ? "dk-up" : "dk-down");
   $("dk_win").textContent = n ? pct(wins / n * 100) : "–";
   $("dk_open").textContent = `${open.length} / ${all.length}`; $("dk_n").textContent = String(n);
@@ -9614,7 +9636,7 @@ function deskLayout() {
   // below the running P&L box, overlapping the cloud a little.
   const top = narrow ? 72 : 30, bottom = 30;
   const o = dkOpen().slice().sort((a, b) => (Number(b.pos_upnl) || 0) - (Number(a.pos_upnl) || 0)), laneH = (desk.H - top - bottom) / Math.max(1, o.length); desk.laneH = laneH;
-  const aTop = 128, aBot = desk.H - 22, aStep = (aBot - aTop) / (DK_AGENTS.length - 1);
+  const aTop = 168, aBot = desk.H - 22, aStep = (aBot - aTop) / (DK_AGENTS.length - 1);
   desk.agents = DK_AGENTS.map((a, i) => ({ ...a, x: desk.W - (narrow ? 38 : 62), y: aTop + aStep * i - 6 }));
   desk.links = desk.agents.map(() => o.map(() => ({ ph: Math.random() * Math.PI * 2, f: .35 + Math.random() * .7, run: Math.random() })));
   // Each stream ends at its own point inside the cloud (spread around its left half) and its tail wriggles like a snake (Papa, 3 Nov).
@@ -9789,13 +9811,16 @@ function deskDraw() {
   desk.flashes = desk.flashes.filter((f) => f.a > 0);
   // Running P&L in the panel's top-right corner, clear of the cloud (Papa, 3 Nov).
   // Booked P&L alongside it (Papa, 4 Nov): every closed trade of this mode, as on the account card.
-  const bw = narrow ? 168 : 196, bh = 92, bx = W - bw - 10, by = 10, bkd = Number(desk.booked) || 0;
+  const bw = narrow ? 168 : 196, bh = 132, bx = W - bw - 10, by = 10, bkd = Number(desk.booked) || 0, lkd = desk.locked;
   ctx.fillStyle = "rgba(9,13,20,.82)"; ctx.strokeStyle = DK_COL.line; ctx.lineWidth = 1; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 6); else ctx.rect(bx, by, bw, bh); ctx.fill(); ctx.stroke();
   ctx.textAlign = "right"; ctx.textBaseline = "middle";
   ctx.fillStyle = good ? DK_COL.up : DK_COL.down; ctx.font = `600 ${narrow ? 18 : 22}px monospace`; ctx.fillText(rupeesSigned(tot), bx + bw - 12, by + 20);
   ctx.fillStyle = DK_COL.muted; ctx.font = "500 10px monospace"; ctx.fillText(`RUNNING P&L · ${desk.pool.length} DOTS`, bx + bw - 12, by + 40);
-  ctx.fillStyle = bkd >= 0 ? DK_COL.up : DK_COL.down; ctx.font = `600 ${narrow ? 15 : 17}px monospace`; ctx.fillText(rupeesSigned(bkd), bx + bw - 12, by + 62);
-  ctx.fillStyle = DK_COL.muted; ctx.font = "500 10px monospace"; ctx.fillText("BOOKED P&L", bx + bw - 12, by + 80);
+  // Locked in by stops, right under the running P&L (15 Nov 2026, Papa), then the booked P&L.
+  ctx.fillStyle = lkd == null ? DK_COL.muted : lkd >= 0 ? DK_COL.up : DK_COL.down; ctx.font = `600 ${narrow ? 15 : 17}px monospace`; ctx.fillText(lkd == null ? "–" : rupeesSigned(lkd), bx + bw - 12, by + 62);
+  ctx.fillStyle = DK_COL.muted; ctx.font = "500 10px monospace"; ctx.fillText("LOCKED IN BY STOPS", bx + bw - 12, by + 80);
+  ctx.fillStyle = bkd >= 0 ? DK_COL.up : DK_COL.down; ctx.font = `600 ${narrow ? 15 : 17}px monospace`; ctx.fillText(rupeesSigned(bkd), bx + bw - 12, by + 102);
+  ctx.fillStyle = DK_COL.muted; ctx.font = "500 10px monospace"; ctx.fillText("BOOKED P&L", bx + bw - 12, by + 120);
   desk.raf = requestAnimationFrame(deskDraw);
 }
 /** A label cut to n characters with "…" (charts in the one-screen desk). */

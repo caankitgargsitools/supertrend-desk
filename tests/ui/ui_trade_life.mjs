@@ -18,8 +18,11 @@ const { b, p, errs } = await openApp({ theme, width, strategies: list, res: { "r
 // The ladder on the strategy page: ₹ figures use lots × lot size (596 × 176), and plain words.
 await p.evaluate(() => openStrat("eth1")); await p.waitForTimeout(900);
 const lad = (await p.textContent("#st_pos_meter")).replace(/\s+/g, " ");
-if (!/if hit: you keep ₹81,2\d,\d\d\d/.test(lad)) fail("stop keeps ≈ ₹81 lakh (77.42 × 596 × 176)", lad);
-if (/locks in/.test(lad) || !/gives back/.test(lad) || !/now \+₹2,4\d,\d\d,\d\d\d/.test(lad)) fail("ladder wording / profit now", lad);
+// 15 Nov 2026 (Papa): the ladder no longer repeats the running profit or shows what the stop would leave; the Trade life
+// page (below) and the Desk's "Locked in by stops" carry those figures.
+if (/if hit: you keep|you lose|locks in|gives back|now [+−]₹/.test(lad) || !/ away/.test(lad) || !/% since/.test(lad)) fail("ladder: stop distance and % since entry only", lad);
+{ const lk = await p.evaluate(() => { return Math.trunc(lockedOf(stratOf("eth1"))); });
+  if (!(lk > 8120000 && lk < 8130000)) fail("locked by the stop ≈ ₹81 lakh (77.42 × 596 × 176)", lk); }
 // Trade life from the strategy page.
 await p.click("#st_tl"); await p.waitForSelector("#tl_over:not([hidden]) .tl-tiles", { timeout: 6000 }).catch(() => fail("trade life didn't open"));
 const t = (await p.textContent("#tl_page")).replace(/\s+/g, " ");
