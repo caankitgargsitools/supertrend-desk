@@ -23,6 +23,7 @@ globalThis.fetch = async (url, init = {}) => {
     const o = dhan.orders.get(mm[1]);
     if (m === "GET") return J(o ?? {}, o ? 200 : 404);
     // Like Dhan (16 Nov 2026): a change whose legName is an empty string is refused; a plain order sends null.
+    if (m === "PUT" && dhan.refuseModify) return J({ errorType: "Input_Exception", errorCode: "DH-905", errorMessage: dhan.refuseModify }, 400);
     if (m === "PUT" && body.legName !== null) return J({ errorType: "Input_Exception", errorCode: "DH-905", errorMessage: "Missing required fields, bad values for parameters etc." }, 400);
     if (m === "PUT") { Object.assign(o, { orderType: body.orderType, price: body.price, triggerPrice: body.triggerPrice, quantity: body.quantity }); return J({ orderId: o.orderId, orderStatus: o.orderStatus }); }
     if (m === "DELETE") { if (o.orderStatus === "TRADED") return J({ errorMessage: "already traded" }, 400); o.orderStatus = "CANCELLED"; return J({ orderId: o.orderId, orderStatus: "CANCELLED" }); }
@@ -123,15 +124,72 @@ await t("exit for a position Dhan doesn't hold → not sent (no wrong-way trade)
   assert.ok(db.notifications.some((n) => /Exit not sent/.test(n.title)));
   Object.assign(S(), { position: "FLAT", pos_broker: null, exec_state: null });
 });
-await t("entry chased 4 steps then given up → desk flat again, alert", async () => {
+// 16 Nov 2026 (Papa: "It should not cancel the order. It should wait and ask me … change price further or cancel the entry").
+const notes = []; rpcs.live_note = async (a) => { notes.push(a); return { data: 1, error: null }; };
+const last = () => lo()[lo().length - 1];
+await t("entry chased 4 steps, still not filled → NOT cancelled: the order rests at Dhan and the owner is asked", async () => {
   dhan.ltp["35001"] = 25300;
   await E.queueDhan(S(), set, "ENTRY", [leg("B")], "Buy", { c: 25180 });
   Object.assign(S(), { position: "LONG", pos_qty: 1 });
   for (let i = 0; i < 5; i++) { dhan.ltp["35001"] += 20; await E.runOrders(1); }
-  const r = lo()[lo().length - 1];
-  assert.equal(r.state, "gave_up"); assert.equal(r.steps, 4);
+  const r = last(), o = dhan.orders.get(String(r.broker_order_id));
+  assert.equal(r.state, "working"); assert.equal(r.steps, 4); assert.ok(r.ask_at, "asked"); assert.equal(r.asks, 1); assert.equal(r.decision ?? null, null);
+  assert.equal(o.orderStatus, "PENDING", "still open at Dhan"); assert.equal(S().position, "LONG"); assert.equal(S().exec_state, "working");
+  const n = notes[notes.length - 1];
+  assert.equal(n.p_meta.stage, "ask"); assert.equal(n.p_meta.order, r.id); assert.equal(n.p_meta.quiet, false); assert.equal(n.p_tag, "le-s1");
+  assert.match(n.p_title, /LIVE BUY · NIFTY · not filled: what should the desk do\?/); assert.match(n.p_body, /change the price to the market, or cancel the entry/);
+});
+await t("no answer → the order is left exactly as it is (no more price steps, no cancel); a reminder after 5 minutes", async () => {
+  const r0 = { ...last() }, px = dhan.orders.get(String(r0.broker_order_id)).price, n0 = notes.length;
+  dhan.ltp["35001"] += 50; await E.runOrders(1); await E.runOrders(1);
+  assert.equal(dhan.orders.get(String(r0.broker_order_id)).price, px); assert.equal(last().steps, 4); assert.equal(last().state, "working"); assert.equal(notes.length, n0);
+  last().ask_at = new Date(Date.now() - 6 * 60000).toISOString();
+  await E.runOrders(1);
+  assert.equal(notes.length, n0 + 1); assert.equal(last().asks, 2); assert.equal(notes[notes.length - 1].p_meta.stage, "ask");
+});
+await t("the owner chooses 'change the price' → the limit goes to the market price, the desk's own steps start again", async () => {
+  const r = last(); r.decision = "chase"; dhan.ltp["35001"] = 25500;
+  await E.runOrders(1);
+  assert.equal(dhan.orders.get(String(r.broker_order_id)).price, 25500); assert.equal(last().limit_px, 25500);
+  assert.equal(last().steps, 0); assert.equal(last().ask_at, null); assert.equal(last().decision, null); assert.equal(last().state, "working");
+  assert.equal(notes[notes.length - 1].p_meta.stage, "sent"); assert.equal(notes[notes.length - 1].p_meta.quiet, true);
+  dhan.ltp["35001"] = 25504; await E.runOrders(1);
+  assert.equal(last().steps, 1, "chasing by itself again");
+});
+await t("Dhan refuses the price change three times → the owner is asked, with Dhan's reason", async () => {
+  const r = last(), o = dhan.orders.get(String(r.broker_order_id)), n0 = notes.length;
+  dhan.refuseModify = "Missing required fields, bad values for parameters etc.";
+  for (let i = 0; i < 2; i++) { dhan.ltp["35001"] += 20; await E.runOrders(1); }
+  assert.equal(last().fails, 2); assert.equal(last().ask_at ?? null, null); assert.equal(notes.length, n0);
+  dhan.ltp["35001"] += 20; await E.runOrders(1);
+  assert.ok(last().ask_at); assert.match(last().ask_why, /Missing required fields/); assert.equal(o.orderStatus, "PENDING");
+  assert.match(notes[notes.length - 1].p_body, /Dhan refused the price change/);
+  // "change the price" while Dhan still refuses → asked again, never silently stuck
+  last().decision = "chase"; const a = last().asks; await E.runOrders(1);
+  assert.equal(last().decision, null); assert.ok(last().ask_at); assert.equal(last().asks, a + 1);
+  dhan.refuseModify = null;
+});
+await t("the owner chooses 'cancel the entry' → cancelled at Dhan, desk flat again, strategy keeps running", async () => {
+  const r = last(); r.decision = "cancel";
+  await E.runOrders(1);
+  assert.equal(dhan.orders.get(String(r.broker_order_id)).orderStatus, "CANCELLED");
+  assert.equal(last().state, "gave_up"); assert.match(last().note, /cancelled as you chose/);
   assert.equal(S().position, "FLAT"); assert.equal(S().exec_state, null); assert.equal(S().active, true);
-  assert.ok(db.notifications.some((n) => /Entry not filled/.test(n.title)));
+  assert.ok(db.notifications.some((n) => /Entry cancelled/.test(n.title)));
+});
+await t("an order that fills while the owner is being asked is booked as a fill (the question is over)", async () => {
+  dhan.ltp["35001"] = 25300;
+  await E.queueDhan(S(), set, "ENTRY", [leg("B")], "Buy", { c: 25180 });
+  Object.assign(S(), { position: "LONG", pos_qty: 1 });
+  for (let i = 0; i < 5; i++) { dhan.ltp["35001"] += 20; await E.runOrders(1); }
+  assert.ok(last().ask_at);
+  fill(last().broker_order_id, last().limit_px);
+  await E.runOrders(1);
+  assert.equal(last().state, "filled"); assert.equal(S().exec_state, null); assert.equal(S().pos_broker.fill, last().limit_px);
+  // leave the desk flat for the tests below
+  dhan.orders.forEach((o) => { if (o.orderStatus === "PENDING") o.orderStatus = "CANCELLED"; });
+  for (const x of lo()) if (x.state === "resting" || x.state === "working") x.state = "cancelled";
+  Object.assign(S(), { position: "FLAT", pos_broker: null, pos_risk: null, exec_state: null, pos_qty: null });
 });
 await t("entry rejected cleanly → desk flat, NOT paused, owner told; three refusals in a row → paused and told", async () => {
   dhan.reject = "Insufficient margin"; db.notifications = db.notifications ?? []; const n0 = db.notifications.length;

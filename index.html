@@ -548,6 +548,14 @@ details.raw code { display: block; white-space: pre-wrap; word-break: break-all;
 .lt-card { --c: var(--green); position: relative; width: min(520px, 100%); background: var(--panel); color: var(--ink); border: 2px solid var(--c); border-radius: 18px; padding: 20px 20px 16px; box-shadow: 0 0 0 6px color-mix(in srgb, var(--c) 18%, transparent), 0 0 60px color-mix(in srgb, var(--c) 45%, transparent); animation: ltpop .45s cubic-bezier(.2, 1.4, .4, 1); }
 .lt-card.down, .lt-card.loss, .lt-card.failed { --c: var(--red); } .lt-card.win { --c: var(--yellow); }
 .lt-card.ping { animation: ltping .5s ease-out; }
+.lt-card.ask { --c: var(--yellow); }
+.ask-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 4px 0 10px; }
+.ask-grid > div { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; min-width: 0; }
+.ask-grid small { display: block; color: var(--muted); font-size: 11.5px; } .ask-grid b { font: 700 17px var(--font-data); overflow-wrap: anywhere; }
+.ask-btns { flex-wrap: wrap; } .ask-btns .btn { flex: 1 1 150px; }
+@media (max-width: 480px) { .ask-grid { gap: 6px; } .ask-grid > div { padding: 8px 6px; } .ask-grid b { font-size: 14px; } }
+#askAlert > div { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; } #askAlert > div + div { margin-top: 8px; }
+#askAlert .btn { background: var(--panel); }
 @keyframes ltpop { from { transform: scale(.7); opacity: 0; } }
 @keyframes ltping { 30% { transform: scale(1.025); } }
 .lt-badge { display: inline-flex; gap: 6px; align-items: center; font: 800 11.5px var(--font-ui, inherit); letter-spacing: .12em; text-transform: uppercase; color: var(--c); }
@@ -1246,6 +1254,7 @@ body.dk-fs-on { overflow: hidden; }
 
 <div id="engineAlert" class="banner err topalert" role="alert" hidden></div>
 <div id="breakerAlert" class="banner err topalert" role="alert" hidden></div>
+<div id="askAlert" class="banner warn topalert" role="alert" hidden></div>
 
 <div class="wrap" id="app">
   <main class="pane" id="pane">
@@ -2112,7 +2121,7 @@ function setBusy(btn, key, on) {
 }
 const rawFetch = window.fetch.bind(window);
 // Background checks that shouldn't light the comet (the heartbeat's own poll and the presence marks).
-const NET_QUIET = /\/rpc\/(desk_feeds|touch_presence|log_activity)\b|kind=eq\.live_trade|\/live_marks\?/;
+const NET_QUIET = /\/rpc\/(desk_feeds|touch_presence|log_activity|orders_asking)\b|kind=eq\.live_trade|\/live_marks\?/;
 window.fetch = (...args) => {
   const bar = document.getElementById("netbar");
   const url = String(args[0] && args[0].url || args[0] || "");
@@ -2506,7 +2515,7 @@ async function loadStrategies(soft) {
 async function loadAll(soft) {
   loadHolidays();
   loadEngineAlerts().catch(() => {});
-  loadBreaker().catch(() => {});
+  loadBreaker().catch(() => {}); askPoll(true).catch(() => {});
   if (!alertTimer) alertTimer = setInterval(() => { if (!document.hidden) { loadEngineAlerts().catch(() => {}); loadBreaker().catch(() => {}); } }, 60000);
   const [settings, strategies] = await Promise.all([
     db.rpc("broker_status").then(must),
@@ -9483,6 +9492,7 @@ function ltSound(kind) {
     if (kind === "entry") [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => note(f, i * .09, .45, "triangle"));
     else if (kind === "win") for (let i = 0; i < 7; i++) { note(1318.5 + (i % 2) * 260, i * .075, .22, "square", .07); note(2637, i * .075 + .02, .12, "sine", .05); }
     else if (kind === "loss") { note(220, 0, .6, "sawtooth", .09); note(164.8, .25, .8, "sawtooth", .09); }
+    else if (kind === "ask") for (let i = 0; i < 3; i++) { note(880, i * .55, .2, "square", .1); note(1174.66, i * .55 + .22, .26, "square", .1); }
     else note(880, 0, .12, "sine", .08);
   } catch { /* no sound on this device */ }
 }
@@ -9507,13 +9517,16 @@ function ltPaint(n) {
   $("lt_ok").onclick = ltClose;
   const op = $("lt_open"); if (op) op.onclick = () => { const u = n.url; ltClose(); openDeepLink(new URL(u, location.origin).href); };
 }
-function ltClose() { $("lt_over").hidden = true; lt.cur = null; $("lt_coins").innerHTML = ""; }
+function ltClose() { $("lt_over").hidden = true; lt.cur = null; $("lt_coins").innerHTML = ""; askQuiet(); }
 function ltShow(n) {
   if (!n || !n.meta) return;
   const m = n.meta, key = `${m.stage}|${m.at || ""}`;
   if (lt.seen.get(n.id) === key) return;
   lt.seen.set(n.id, key);
+  // "Not filled: what should the desk do?" has its own card, read from the order itself (askPoll).
+  if (m.stage === "ask") { askPoll(true).catch(() => {}); return; }
   const over = $("lt_over"), same = lt.cur === n.id && !over.hidden;
+  askQuiet();
   lt.cur = n.id; ltPaint(n); over.hidden = false;
   if (same) { const c = $("lt_card"); c.classList.remove("ping"); void c.offsetWidth; c.classList.add("ping"); }
   else $("lt_ok").focus({ preventScroll: true });
@@ -9529,13 +9542,77 @@ async function ltPoll(force) {
   if (!lt.init) { lt.init = true; for (const n of rows) if (n.meta) lt.seen.set(n.id, `${n.meta.stage}|${n.meta.at || ""}`); return; }
   for (const n of rows) ltShow(n);
 }
-setInterval(() => ltPoll().catch(() => {}), 10000);
+setInterval(() => { ltPoll().catch(() => {}); askPoll().catch(() => {}); }, 10000);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("lt_over").hidden) ltClose(); });
+/* ---------- A live entry that isn't filling: the owner decides (16 Nov 2026, Papa: "It should not cancel the order. It
+   should wait and ask me … show a notification, create a sound … options, change price further or cancel the entry").
+   The desk leaves the order at the broker and asks (live_orders.ask_at). The app reads the waiting orders every 10 s
+   (orders_asking; at once when the phone push or the notification arrives): a full-screen card with the two choices and
+   a sound that repeats every 20 s while it is open, and a banner on every page until the order is answered or filled. */
+const ask = { rows: [], shown: new Map(), cur: null, timer: 0 };
+const askPx = (v) => v == null ? "–" : "₹" + fmtNum(v);
+function askQuiet() { ask.cur = null; clearInterval(ask.timer); ask.timer = 0; }
+async function askPoll(force) {
+  if (!me || (document.hidden && !force)) return;
+  const { data, error } = await db.rpc("orders_asking");
+  if (error) return;
+  ask.rows = Array.isArray(data) ? data : [];
+  askBanner();
+  const open = ask.rows.filter((o) => !o.decision);
+  const next = open.find((o) => ask.shown.get(o.id) !== o.ask_at);
+  if (next) askShow(next);
+  else if (ask.cur) { const o = open.find((x) => x.id === ask.cur); if (o) askFigures(o); else ltClose(); } // answered or filled meanwhile (0 = the sample)
+}
+function askWords(o) {
+  const now = o.now_px ?? o.ask_px, lots = Number(o.lots) || 0;
+  return { now, what: `${o.side === "SELL" ? "Sell" : "Buy"} ${plural(lots, "lot")} ${o.underlying || ""}`, gap: now != null && o.limit_px != null ? Math.abs(Number(now) - Number(o.limit_px)) : null };
+}
+function askFigures(o) {
+  const w = askWords(o), a = document.querySelector("[data-asknow]"), g = document.querySelector("[data-askgap]"), b = $("ask_chase");
+  if (a) a.textContent = askPx(w.now); if (g) g.textContent = askPx(w.gap);
+  if (b && !b.classList.contains("busy")) b.textContent = `Change the price to the market (${askPx(w.now)})`;
+}
+function askShow(o) {
+  ask.shown.set(o.id, o.ask_at);
+  const w = askWords(o), card = $("lt_card"), over = $("lt_over");
+  lt.cur = null; ask.cur = o.id; $("lt_coins").innerHTML = "";
+  card.className = "lt-card ask";
+  card.innerHTML = `<div class="lt-badge"><i></i>Live order <b>· needs your decision</b></div>
+    <h2 id="lt_title">${o.test ? '<span class="lt-badge"><span class="tst">TEST</span></span> ' : ""}${esc(w.what)}: not filled</h2>
+    <p class="lt-body">${o.ask_why ? `The broker refused the desk's price change (${esc(o.ask_why)}).` : `The desk moved the price ${plural(Number(o.steps) || 0, "time")} and the market still moved away.`} The order ${esc(o.label || "")} is still at the broker. What should the desk do?</p>
+    <div class="ask-grid"><div><small>Your order waits at</small><b>${askPx(o.limit_px)}</b></div><div><small>Price now</small><b data-asknow>${askPx(w.now)}</b></div><div><small>Away by</small><b data-askgap>${askPx(w.gap)}</b></div></div>
+    <p class="hint">Until you choose, nothing is cancelled: the order stays at the broker and can still fill by itself. After a price change the desk follows the market for a few steps again and asks you once more if it still doesn't fill.</p>
+    <div class="formbar ask-btns"><button class="btn primary" type="button" id="ask_chase">Change the price to the market (${askPx(w.now)})</button><button class="btn danger" type="button" id="ask_cancel">Cancel the entry</button><button class="btn" type="button" id="ask_later">Decide later</button></div>`;
+  $("ask_chase").onclick = (e) => run(e.currentTarget, () => askDecide(o.id, "chase"));
+  $("ask_cancel").onclick = (e) => run(e.currentTarget, () => askDecide(o.id, "cancel"));
+  $("ask_later").onclick = ltClose;
+  over.hidden = false; $("ask_chase").focus({ preventScroll: true });
+  ltSound("ask"); clearInterval(ask.timer);
+  ask.timer = setInterval(() => { if (ask.cur != null && !$("lt_over").hidden && !document.hidden) ltSound("ask"); }, 20000);
+}
+async function askDecide(id, action) {
+  if (!id) { toast(`Sample only: nothing was sent. A real one would ${action === "chase" ? "move the order to the market price" : "cancel the order at the broker"}.`); ltClose(); return; }
+  try { must(await db.rpc("order_decide", { p_order: id, p_action: action })); toast(action === "chase" ? "Changing the price to the market…" : "Cancelling the entry at the broker…"); }
+  finally { if (ask.cur === id) ltClose(); await askPoll(true).catch(() => {}); for (const ms of [4000, 9000, 20000]) setTimeout(() => askPoll(true).catch(() => {}), ms); }
+}
+function askBanner() {
+  const box = $("askAlert"); if (!box) return;
+  box.hidden = !ask.rows.length;
+  if (box.hidden) { box.textContent = ""; return; }
+  box.innerHTML = ask.rows.map((o) => { const w = askWords(o);
+    return `<div><b>❓ Not filled: ${esc(w.what)}</b><span>waiting at ${askPx(o.limit_px)} · price now ${askPx(w.now)}.</span>${o.decision
+      ? `<span><span class="spin"></span> ${o.decision === "chase" ? "Changing the price to the market…" : "Cancelling the entry…"}</span>`
+      : `<span>The order stays at the broker until you choose.</span><button type="button" class="btn small" data-askdo="chase" data-id="${o.id}">Change the price to the market</button><button type="button" class="btn small danger" data-askdo="cancel" data-id="${o.id}">Cancel the entry</button>`}</div>`; }).join("");
+  box.querySelectorAll("[data-askdo]").forEach((b) => { b.onclick = (e) => run(e.currentTarget, () => askDecide(Number(b.dataset.id), b.dataset.askdo)); });
+}
 if (navigator.serviceWorker) navigator.serviceWorker.addEventListener("message", (e) => { if (e.data && e.data.liveTrade && !document.hidden) ltShow(e.data.liveTrade); });
 /** The test row under Phone notifications (shown even where phone notifications can't be switched on: the app's own alert still works). */
 function ltTestBar(box) {
   box.insertAdjacentHTML("beforeend", `<div class="formbar lt-testbar"><button class="btn small" type="button" id="lt_test">⚡ Send a test live-trade alert</button><span class="hint" id="lt_test_msg">A sample live trade (marked TEST) in four steps: signal → filled → stop at the broker → exit with P&amp;L. No strategy, order or trade is touched.</span></div>`);
   const b = $("lt_test"); if (b) b.addEventListener("click", () => run(b, () => ltTestRun()));
+  // A sample of the "order not filled: what should the desk do?" card with its sound (16 Nov 2026); it sends nothing.
+  box.insertAdjacentHTML("beforeend", `<div class="formbar lt-testbar"><button class="btn small" type="button" id="ask_test">❓ Show a sample "order not filled" question</button><span class="hint">What you see and hear when a live entry isn't filling: change the price or cancel. A sample only; no order is touched.</span></div>`);
+  const a = $("ask_test"); if (a) a.addEventListener("click", () => askShow({ id: 0, test: true, underlying: "GOLDM", side: "BUY", label: "GOLDM DEC FUT", lots: 2, limit_px: 137020, steps: 4, ask_at: String(Date.now()), ask_px: 137180, now_px: 137180 }));
 }
 /** The test button: a sample live trade in four steps, a few seconds apart (rows only in notifications, marked TEST). */
 async function ltTestRun() {

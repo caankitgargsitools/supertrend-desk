@@ -2909,7 +2909,10 @@ async function cancelStop(c: Creds, id: string): Promise<"cancelled" | "traded" 
 
 /** Places (or re-places) one order at the last traded price. Returns false when Dhan wouldn't take it. */
 async function placeRow(r: LiveRow, c: Creds): Promise<boolean> {
-  const ltp = await dhanLtp(c, r.seg, r.sec);
+  let ltp = await dhanLtp(c, r.seg, r.sec);
+  // The contract's own price couldn't be read (13 Nov 2026: the LT future's order went out at the SHARE's price, 14 points
+  // under the future — a sell fills at once like that, a buy would never fill): one more try before the signal's price.
+  if (ltp == null) { await new Promise((res) => setTimeout(res, 1200)); ltp = await dhanLtp(c, r.seg, r.sec); }
   const px = ltp ?? (Number(r.ref_px) > 0 ? Number(r.ref_px) : null);
   const market = r.market_retry || (px == null && r.purpose === "exit");
   if (px == null && !market) return failRow(r, "no price to place the order at");
@@ -3220,31 +3223,37 @@ async function runOrders(passes = 4) {
           done.push(`${r.id}:${d.kind}`);
           if (d.kind === "filled") await onFilled(r, st);
           else if (d.kind === "failed") await failRow(r, d.reason);
+          // An unfilled entry is never cancelled by the desk itself (16 Nov 2026, Papa): the owner is asked and decides.
+          else if (r.purpose === "entry" && await entryAsk(r, c, ltp, d.kind, done)) continue;
           else if (d.kind === "modify") {
             // Never chase past the day's price band (12 Nov 2026): the exchange would reject the modification.
             const band = await bandFor(r.seg, r.sec).catch(() => null);
             d.price = inBand(d.price, r.side, band);
             if (r.limit_px != null && d.price === Number(r.limit_px)) continue; // already at the band's edge: wait
-            await dhanModify(c, r.broker_order_id, { type: "LIMIT", qty: r.qty, price: d.price });
-            await sb.from("live_orders").update({ limit_px: d.price, steps: Number(r.steps) + 1, updated_at: nowIso() }).eq("id", r.id);
+            try { await dhanModify(c, r.broker_order_id, { type: "LIMIT", qty: r.qty, price: d.price }); }
+            catch (e) {
+              // Dhan refused the price change. An entry: after MODIFY_FAILS_ASK refusals in a row the owner is asked
+              // (16 Nov 2026: a refused change used to leave the order at its first price without a word).
+              if (r.purpose !== "entry") throw e;
+              const n = (Number(r.fails) || 0) + 1, why = String(e instanceof Error ? e.message : e).slice(0, 200);
+              done.push(`${r.id}:change refused ${n}`);
+              if (n >= MODIFY_FAILS_ASK) await askOwner({ ...r, fails: n }, ltp, why);
+              else await sb.from("live_orders").update({ fails: n, note: `check failed: ${why}`, updated_at: nowIso() }).eq("id", r.id);
+              continue;
+            }
+            await sb.from("live_orders").update({ limit_px: d.price, steps: Number(r.steps) + 1, fails: 0, note: null, updated_at: nowIso() }).eq("id", r.id);
           } else if (d.kind === "market") {
             await dhanModify(c, r.broker_order_id, { type: "MARKET", qty: r.qty });
             await sb.from("live_orders").update({ limit_px: null, note: `price ran ${r.steps} steps away: sent at market`, updated_at: nowIso() }).eq("id", r.id);
-          } else if (d.kind === "give_up") {
-            await dhanCancel(c, r.broker_order_id).catch(() => {});
-            const again = await dhanStatus(c, r.broker_order_id).catch(() => null);
-            const ss = String(again?.status ?? "").toUpperCase();
-            if (ss === "TRADED") { await onFilled(r, again!); continue; }
-            // Still open at Dhan (the cancel didn't take, or its state couldn't be read): never call it given up while
-            // it can still fill; the next pass tries again.
-            if (!again || !/CANCEL|REJECT|EXPIRE/.test(ss)) { done.push(`${r.id}:cancel pending`); continue; }
-            // Cancelled with part of it traded: the desk holds what filled.
-            if (again.filled > 0) { await partEntry(r, again, `the rest was cancelled after the price moved away (last ${ltp ?? "?"})`); continue; }
-            await giveUp(r, ltp);
           }
         } catch (e) {
           done.push(`${r.id}:error ${e instanceof Error ? e.message : e}`);
           await sb.from("live_orders").update({ note: `check failed: ${String(e instanceof Error ? e.message : e).slice(0, 200)}`, updated_at: nowIso() }).eq("id", r.id);
+          // An exit whose price can't be changed stays where it is: the owner must know at once.
+          if (r.purpose === "exit" && /Couldn't modify/.test(String(e))) {
+            const s = (await sb.from("algo_strategies").select("*").eq("id", r.strategy_id).maybeSingle()).data as Strategy | null;
+            if (s) await alert(s, "Exit order's price couldn't be changed", `Dhan refused the change of the exit order ${r.label} (${String(e instanceof Error ? e.message : e).slice(0, 160)}). It rests at ${r.limit_px ?? "market"}; the desk keeps trying. Check the order in Dhan.`, `exitmod-${r.id}`).catch(() => {});
+          }
         }
       }
     }
@@ -3304,21 +3313,91 @@ async function stuckWorking(done: string[]) {
         else if (b && /CANCEL|REJECT|EXPIRE/.test(ss)) { await failRow(r, b.reason || ss.toLowerCase()); done.push(`${r.id}:stuck failed`); }
         else stillOpen = true;
       }
-      if (stillOpen) await alert(s, "Order still open at Dhan", `An order of this strategy has been open at Dhan for over ${STUCK_MIN} minutes. The desk keeps checking it; meanwhile its own stops wait. Check the order in Dhan.`, `stuck-${s.id}`);
+      if (stillOpen && !rows.some((r) => r.ask_at)) await alert(s, "Order still open at Dhan", `An order of this strategy has been open at Dhan for over ${STUCK_MIN} minutes. The desk keeps checking it; meanwhile its own stops wait. Check the order in Dhan.`, `stuck-${s.id}`);
     } catch (e) { done.push(`${s.id}:stuck check failed ${e instanceof Error ? e.message : e}`); }
   }
 }
-/** The price ran away from an entry: the order is cancelled, the desk goes back to flat and you are told. */
+/* ---------- an entry that isn't filling: the owner decides (16 Nov 2026, Papa) ---------- */
+/** Price changes Dhan may refuse in a row before the owner is asked. */
+const MODIFY_FAILS_ASK = 3;
+/** Minutes between reminders while no answer came, and how many reminders. */
+const ASK_REMIND_MIN = 5, ASK_REMINDERS = 6;
+const pxText = (v: unknown) => Number(v) > 0 ? `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 })}` : "?";
+/** The entry's own live-trade notification (one per trade, updated in place; quiet = no new sound). */
+async function entryNote(r: LiveRow, title: string, body: string, meta: Record<string, unknown>) {
+  await sb.rpc("live_note", { p_user: r.user_id, p_sid: r.strategy_id, p_tag: `le-${r.strategy_id}`, p_new: false, p_title: title.slice(0, 120), p_body: body.slice(0, 400),
+    p_meta: { live: true, order: r.id, side: r.side, lots: r.lots, limit: r.limit_px, sid: r.strategy_id, ...meta } }).then(() => {}, () => {});
+}
+/**
+ * "Papa: it should not cancel the order. It should wait and ask me … change price further or cancel the entry."
+ * The order stays at the broker at its last price (it can still fill) and the owner is asked: a notification that is
+ * pushed with sound, the app's own card with the two choices. why = Dhan's reason when a price change was refused.
+ */
+async function askOwner(r: LiveRow, ltp: number | null, why: string | null) {
+  const asks = (Number(r.asks) || 0) + 1;
+  await must(() => sb.from("live_orders").update({ ask_at: nowIso(), ask_px: ltp, ask_why: why, decision: null, decision_at: null, asks, fails: Number(r.fails) || 0,
+    note: why ? `waiting for your choice: Dhan refused the price change (${why})`.slice(0, 300) : `waiting for your choice: the price moved away (last ${ltp ?? "?"}, limit ${r.limit_px}) after ${r.steps} steps`, updated_at: nowIso() }).eq("id", r.id), "ask the owner");
+  const s = (await sb.from("algo_strategies").select("underlying").eq("id", r.strategy_id).maybeSingle()).data;
+  const asset = String(s?.underlying ?? r.label ?? ""), lots = Number(r.lots) || 0, word = r.side === "SELL" ? "Sell" : "Buy";
+  await entryNote(r, `❓ LIVE ${r.side} · ${asset} · not filled: what should the desk do?`,
+    `${word} ${lots} lot${lots === 1 ? "" : "s"} ${r.label} is waiting at ${pxText(r.limit_px)}; the price is now ${pxText(ltp)}. ${why ? `Dhan refused the price change (${why}).` : `The desk moved the price ${r.steps} time${Number(r.steps) === 1 ? "" : "s"} and it still moved away.`} Choose: change the price to the market, or cancel the entry. Until you choose, the order stays at the broker and can still fill.`,
+    { stage: "ask", asset, now: ltp, why, asks, quiet: false });
+}
+/**
+ * An unfilled entry order, looked at by the order manager. Returns true when this look is done with it:
+ * the owner's answer is carried out; an order waiting for the answer is left alone (reminded every few minutes); an
+ * order whose own price steps are used up makes the desk ask instead of cancelling.
+ */
+async function entryAsk(r: LiveRow, c: Creds, ltp: number | null, kind: string, done: string[]): Promise<boolean> {
+  if (r.decision === "cancel") { await cancelEntry(r, c, ltp, done); return true; }
+  if (r.decision === "chase") { await chaseAgain(r, c, ltp, done); return true; }
+  if (r.ask_at) {
+    if (Date.now() - Date.parse(r.ask_at) > ASK_REMIND_MIN * 60000 && (Number(r.asks) || 0) <= ASK_REMINDERS) { await askOwner(r, ltp, r.ask_why ?? null); done.push(`${r.id}:asked again`); }
+    return true;
+  }
+  if (kind === "give_up") { await askOwner(r, ltp, null); done.push(`${r.id}:asked`); return true; }
+  return false;
+}
+/** The owner chose "change the price": the limit goes to the market price now and the desk's own steps start again. */
+async function chaseAgain(r: LiveRow, c: Creds, ltp: number | null, done: string[]) {
+  const cur = Number(r.limit_px), away = Number(ltp) > 0 && (r.side === "BUY" ? Number(ltp) > cur : Number(ltp) < cur);
+  let price = cur;
+  if (away) { const band = await bandFor(r.seg, r.sec).catch(() => null); price = inBand(toTick(Number(ltp), Number(r.tick), r.side), r.side, band); }
+  if (price !== cur) {
+    try { await dhanModify(c, r.broker_order_id, { type: "LIMIT", qty: r.qty, price }); }
+    catch (e) { done.push(`${r.id}:change refused`); await askOwner({ ...r, fails: (Number(r.fails) || 0) + 1 }, ltp, String(e instanceof Error ? e.message : e).slice(0, 200)); return; }
+  }
+  await must(() => sb.from("live_orders").update({ limit_px: price, steps: 0, fails: 0, ask_at: null, ask_px: null, ask_why: null, decision: null,
+    note: price !== cur ? `price changed to ${price} as you chose` : "you chose to change the price: the market is back at the order's price", updated_at: nowIso() }).eq("id", r.id), "price changed");
+  done.push(`${r.id}:price ${price} by the owner`);
+  const s = (await sb.from("algo_strategies").select("underlying").eq("id", r.strategy_id).maybeSingle()).data;
+  await entryNote({ ...r, limit_px: price }, `⚡ LIVE ${r.side} · ${String(s?.underlying ?? "")} · price changed to ${pxText(price)}`,
+    `As you chose, the order now waits at ${pxText(price)} (the market was at ${pxText(ltp)}). The desk follows the price again; you'll see the fill here.`, { stage: "sent", px: price, now: ltp, quiet: true });
+}
+/** The owner chose "cancel the entry": the order is cancelled at Dhan (confirmed), then the desk goes back to flat. */
+async function cancelEntry(r: LiveRow, c: Creds, ltp: number | null, done: string[]) {
+  await dhanCancel(c, r.broker_order_id).catch(() => {});
+  const again = await dhanStatus(c, r.broker_order_id).catch(() => null);
+  const ss = String(again?.status ?? "").toUpperCase();
+  if (ss === "TRADED") { await onFilled(r, again!); return; }
+  // Still open at Dhan (the cancel didn't take, or its state couldn't be read): never call it cancelled while it can
+  // still fill; the next look tries again.
+  if (!again || !/CANCEL|REJECT|EXPIRE/.test(ss)) { done.push(`${r.id}:cancel pending`); return; }
+  // Cancelled with part of it traded: the desk holds what filled.
+  if (again.filled > 0) { await partEntry(r, again, `the rest was cancelled as you chose (last ${ltp ?? "?"})`); return; }
+  await giveUp(r, ltp);
+}
+/** The owner cancelled an entry that wasn't filling: the desk goes back to flat. */
 async function giveUp(r: LiveRow, ltp: number | null) {
-  await sb.from("live_orders").update({ state: "gave_up", note: `price moved away (last ${ltp ?? "?"}, limit ${r.limit_px}); cancelled after ${r.steps} steps`, done_at: nowIso() }).eq("id", r.id);
+  await sb.from("live_orders").update({ state: "gave_up", note: `cancelled as you chose: the price had moved away (last ${ltp ?? "?"}, limit ${r.limit_px})`, ask_at: null, done_at: nowIso() }).eq("id", r.id);
   await sb.from("live_orders").update({ state: "cancelled", note: "not sent: the entry before it wasn't filled", done_at: nowIso() }).eq("batch", r.batch).eq("state", "queued");
   const s = (await sb.from("algo_strategies").select("*").eq("id", r.strategy_id).single()).data as Strategy | null;
   if (!s) return;
   const partial = (await sb.from("live_orders").select("id").eq("batch", r.batch).eq("purpose", "entry").eq("state", "filled")).data?.length;
   await sb.from("algo_strategies").update({ ...FLAT_STATE, exec_state: null, ...(partial ? { active: false, last_error: `Part of the entry filled, then the price ran away from ${r.label}. The strategy is paused: close the filled legs in Dhan.` } : {}) }).eq("id", s.id);
-  await logSignal({ ...s, live: true }, "INFO", `Entry not filled: ${r.label} moved away from the limit (${r.steps} steps). The order was cancelled and the desk is flat again.`, { c: ltp ?? undefined });
+  await logSignal({ ...s, live: true }, "INFO", `Entry cancelled by you: ${r.label} had moved away from the limit. The desk is flat again.`, { c: ltp ?? undefined });
   if (partial) await alert(s, "Strategy paused by the desk", `Part of the entry filled, then the price ran away from ${r.label} and the rest was cancelled. The desk paused the strategy: close the filled legs in Dhan.`, `partpause-${s.id}-${todayIst()}`);
-  if (!partial) await alert(s, "Entry not filled", `${r.label} moved away from the limit; the order was cancelled after ${r.steps} steps and the desk is flat again. It enters on the next signal.`);
+  if (!partial) await alert(s, "Entry cancelled", `${r.label}: the order was cancelled as you chose and the desk is flat again. It enters on the next signal.`);
 }
 
 /* ---------- the stop-loss order resting at the broker ---------- */

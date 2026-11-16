@@ -277,13 +277,17 @@ await t("6 an order filled at Dhan the order manager never saw → booked", asyn
 });
 
 // ---------------- 7. partly filled entries ----------------
-await t("7 entry given up while 25 of 75 traded → the desk holds 25 (1/3 lot) with its stop", async () => {
+await t("7 entry cancelled by the owner while 25 of 75 traded → the desk holds 25 (1/3 lot) with its stop", async () => {
   const S = add("e1", { risk: { basis: "UNDERLYING", sl: { type: "POINTS", value: 100 } } });
   dhan.ltp["35001"] = 25300;
   await E.queueDhan(S(), set, "ENTRY", [leg("B")], "Buy", { c: 25180 });
   Object.assign(S(), { position: "LONG", pos_qty: 1, pos_lots: 1, pos_margin: 300000, pos_entry_px: 25180, pos_risk: { basis: "UNDERLYING", dir: 1, stop: 25080, tgt: null, trail: null, best: 25180, scanFrom: 0 } });
   dhan.onCancel = (o) => { o.filledQty = 25; o.averageTradedPrice = 25305; };
   for (let i = 0; i < 6 && S().exec_state === "working"; i++) { dhan.ltp["35001"] += 20; await E.runOrders(1); }
+  // 16 Nov 2026: the desk no longer cancels by itself — it asks; the owner's "cancel the entry" does it.
+  const row = ordersOf("e1").find((r) => r.purpose === "entry");
+  assert.equal(row.state, "working"); assert.ok(row.ask_at, "the owner is asked"); assert.equal(S().exec_state, "working");
+  row.decision = "cancel"; await E.runOrders(1);
   dhan.onCancel = null;
   assert.equal(S().position, "LONG"); assert.equal(S().exec_state, null);
   assert.equal(S().pos_broker.legs[0].qty, 25); assert.ok(Math.abs(S().pos_qty - 1 / 3) < 0.001); assert.equal(S().pos_margin, 100000);

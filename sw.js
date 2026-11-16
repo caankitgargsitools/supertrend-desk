@@ -63,7 +63,7 @@ self.addEventListener("push", (e) => {
       for (const w of ws) w.postMessage({ liveTrade: { id: d.id, title: d.title, body: d.body, url: d.url, tag: d.tag, meta: m } });
     }
     let image;
-    if (live && m && m.stage !== "note" && m.stage !== "failed") image = await tradeImage(m).catch(() => undefined);
+    if (live && m && m.stage !== "note" && m.stage !== "failed" && m.stage !== "ask") image = await tradeImage(m).catch(() => undefined);
     const silent = kind === "trade" || (live && quiet);
     const opts = { body: d.body || "", tag: d.tag || undefined, renotify: !quiet && !!d.tag, icon: "icons/icon-192.png", badge: "icons/icon-192.png",
       requireInteraction: live || kind === "error" || kind === "account", data: { url: d.url || "/" } };

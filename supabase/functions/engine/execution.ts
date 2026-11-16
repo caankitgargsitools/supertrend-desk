@@ -7,8 +7,9 @@
 //   • every 15 seconds each working order is checked: filled → recorded; rejected → the desk is put right and you are
 //     alerted; price moved past the limit → the limit moves one step towards it (≈0.02% of the price, 1% of an option's
 //     premium, rounded to the tick); price not past the limit (a quiet market) → left as it is;
-//   • an entry gives up after 4 steps (the desk goes back to flat, you are alerted); an exit goes as a MARKET order
-//     after 3 steps, because getting out comes first;
+//   • an entry still unfilled after 4 steps is NOT cancelled (16 Nov 2026, Papa): it rests at the broker and the owner is
+//     asked — change the price to the market, or cancel the entry; an exit goes as a MARKET order after 3 steps, because
+//     getting out comes first;
 //   • after an entry fills, a STOP_LOSS_MARKET order is placed at the broker a little beyond the desk's stop, so the
 //     position is protected even if the desk is down; it follows the trailing stop and is cancelled before any exit;
 //   • every few minutes the broker's net positions are compared with the desk, contract by contract.

@@ -752,9 +752,42 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   `live_orders.note` / `pos_broker.stopErrAt`; if Dhan still refuses, try leaving `legName` out, then compare the body
   with Dhan's docs (dhanhq.co isn't reachable from the cloud session). Known side effects seen: while the entry waited
   the desk tracked the best price (₹1,72,381), so the trailing stop started 459 points tighter than from the fill;
-  with a working chase the rule would have cancelled this entry after 4 steps (₹1,72,700) — no trade. Open: a working
-  entry whose changes keep failing should be cancelled and told at once (today only `stuckWorking` after 10 minutes),
-  and a filled order keeps its last "check failed" note.
+  with a working chase the rule would have cancelled this entry after 4 steps (₹1,72,700) — no trade. A filled order
+  keeps its last "check failed" note.
+- **An unfilled live entry is never cancelled by the desk: the owner is asked (16 Nov 2026, Papa: "It should not cancel
+  the order. It should wait and ask me or the user … show a notification, create a sound … options, change price further
+  or cancel the entry. And the user will select"; migration 108, engine v165; tests `tests/sim/sim.test.mjs` "the owner
+  is asked" cases, `safety.test.mjs` "cancelled by the owner", `tests/ui/ui_order_ask.mjs` (args: theme width))**:
+  Dhan entry orders only (exits still go at market after 3 steps; Delta entries are market orders). The desk still
+  follows the price 4 steps by itself (`ENTRY_MAX_STEPS`); when the price is still away after that, or Dhan refuses a
+  price change 3 times in a row (`MODIFY_FAILS_ASK`), the order STAYS at the broker at its last price (it can still
+  fill) and `askOwner` sets `live_orders.ask_at / ask_px / ask_why / asks` and turns the entry's live-trade notification
+  (tag `le-<strategy>`, via `live_note`) into "❓ LIVE SELL · SILVERMIC · not filled: what should the desk do?" (meta
+  stage "ask", loud, pushed to the phone; reminded every 5 minutes, 6 times: `ASK_REMIND_MIN`, `ASK_REMINDERS`). The
+  owner's answer: `order_decide(p_order, 'chase' | 'cancel')` (owner or admin; sets `decision` and calls the order
+  manager at once). `entryAsk` in `runOrders`: **chase** (`chaseAgain`) = the limit goes straight to the market price now
+  (inside the day's band), steps back to 0, the desk follows 4 steps again and asks again if it still doesn't fill; a
+  refused change → asked again with Dhan's reason. **cancel** (`cancelEntry` → `giveUp`) = cancelled at Dhan
+  (confirmed; a part that traded is kept, `partEntry`), state `gave_up`, desk flat, strategy keeps running. No answer =
+  nothing changes; an order that fills meanwhile is booked as usual; Dhan's end-of-day expiry goes the "entry refused"
+  way. `stuckWorking` doesn't send its own alert for an asked order. Website: `askPoll` (every 10 s and at once on the
+  push; `orders_asking()`), a full-screen card in the live-alert overlay (`askShow`: waits at / price now / away by,
+  "Change the price to the market (₹…)", "Cancel the entry", "Decide later" / Esc), sound `ltSound("ask")` repeated every
+  20 s while the card is open, banner `#askAlert` on every page with the same two buttons until answered or filled
+  (`askBanner`). Sample card: Connections › Phone notifications "❓ Show a sample "order not filled" question" (sends
+  nothing). While the entry waits the desk still shows the position as open ("working") — the running P&L before the
+  fill isn't real.
+- **Stock / index futures: the desk's entry price is the SHARE / index price, Dhan's is the future's (16 Nov 2026, Papa:
+  "a difference on the desk price and the actual Dhan price at the entry of the L&T trade")**: by design — signals,
+  stops and backtests run on the share (LT cash ₹4,139.9 = `pos_entry_px`), the order goes to the near-month future
+  (filled ₹4,154.1 = `pos_broker.fill`; the gap, ₹14.2 = `pos_broker.offset`, moves the broker stop with it). Running P&L
+  on the desk = share move × units; Dhan's = future move × units; they differ by the change of that gap (it shrinks to
+  about zero by expiry — for a short that is ≈ ₹14.2 × 175 = ₹2,485 in his favour over the life of the contract). The
+  booked trade is corrected to Dhan's own fills on both sides when the exit fills (`fixLedger`). Not shown on the
+  website yet: Dhan's fill price beside the desk's entry (offered to Papa). **Found with it**: that order's limit was
+  the share's price, not the future's — `placeRow` couldn't read the future's price (`dhanLtp` null, probably the
+  one-a-second quote limit) and fell back to the signal's price; a SELL fills at once like that, a BUY would rest ₹14
+  under the market and not fill. `placeRow` now tries the contract's price a second time after 1.2 s before falling back.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
