@@ -2089,7 +2089,15 @@ let lastMarkAt = "";
  * single loop going; the strategy list is re-read every 5 seconds (positions change), prices every second.
  */
 const PRICE_COLS = "id, owner_id, data_segment, data_security_id, position, trade_type, structure, pos_entry_px, pos_risk, pos_qty, qty_mode, lot_size, pos_ltp_at, active, archived, ca_day, live, pos_broker";
+/** When this engine instance's price loop started (0 = none running). One loop per instance at a time (16 Nov 2026:
+ *  during a slowdown each 10-second run lasted 40–120 s and new runs piled on top — up to ten hitting the database). */
+let pricesSince = 0;
 async function pricesLoop() {
+  if (pricesSince && Date.now() - pricesSince < 30000) return { skipped: "a price loop is still running here" };
+  pricesSince = Date.now();
+  try { return await pricesLoopRun(); } finally { pricesSince = 0; }
+}
+async function pricesLoopRun() {
   // A fresh engine run every 10 seconds (cron) prices once a second for 10 seconds: each run stays well inside the
   // ~2 seconds of computing an engine run may use, and if one run dies the next takes over within 10 seconds.
   // Light mode: one price round per run (prices and per-second stops every 10 seconds instead of every second). It
@@ -2099,7 +2107,11 @@ async function pricesLoop() {
   // The next run takes over up to 3 s before this one ends (16 Nov 2026; was 0.7 s): a run that got the lock a second late
   // made the next 10-second call find it "still running" and skip, leaving ~9 s without prices. A short overlap is
   // harmless — both take turns at Dhan's quote API (Dhan.quoteGate).
-  const { data: lk } = await sb.from("price_lock").update({ at: new Date(Date.now() + 9800).toISOString() }).eq("id", 1).lt("at", new Date(Date.now() + 3000).toISOString()).select("id");
+  const lockQ = sb.from("price_lock").update({ at: new Date(Date.now() + 9800).toISOString() }).eq("id", 1).lt("at", new Date(Date.now() + 3000).toISOString()).select("id");
+  const lkr = await Promise.race([lockQ, new Promise<null>((r) => setTimeout(() => r(null), 5000))]);
+  // The database didn't answer the lock in 5 s: it is struggling — this run adds nothing to its load.
+  if (!lkr) return { skipped: "database too slow for a price run" };
+  const lk = lkr.data;
   if (!lk?.length) return { skipped: "another price loop is running" };
   // 2.5 s (16 Nov 2026; was 0.8 s): a single slow answer on a busy minute switched whole runs to one price in 10 s,
   // which made most of the gaps Papa saw once Dhan's turns were sorted out. Light mode is for a database in trouble.
