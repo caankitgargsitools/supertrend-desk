@@ -829,7 +829,7 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   answer cut whole runs to one price); (6) the next 10-second run takes the price lock up to 3 s early (was 0.7 s: a run
   that started a second late made the next one skip, ~9 s without prices). Measured after (10:40 IST): prices 1–2 s
   old for most of each minute, Dhan refusals 0; **still a 10–15 s gap right after each minute starts**, when the
-  database is busy with the tick (the price run's own reads / writes then take 4–8 s) — the Micro compute's limit
+  database is busy with the tick (the price run's own reads / writes then take 4–8 s) — the Nano compute's limit
   (pending item 3, after the Dhan IP lock ends 19 Nov) or Dhan's WebSocket feed (pending) would remove it. Also seen
   today: twice "SSL connection timeout" from the database to api.dhan.co (the order manager's check of a resting stop,
   and a test call) — the order path through the database's IP; one more reason for pending item 00.
@@ -1185,8 +1185,9 @@ Still open:
 2. **Database permissions**: tighten table grants (anon / authenticated have ALL; RLS is the only barrier). (Discuss later.)
 3. **Supabase compute upgrade**: **Papa upgraded it on 16 Nov 2026** (database restarted 12:10:39 IST). Checked at once: the
    IPv6 Dhan sees did NOT change (detectedIP 2406:da1a:314:7102:21be:db71:d17e:402, SECONDARY_MATCH, ordersAllowed true).
-   But the database still showed the old size's settings (max_connections 60, shared_buffers 256 MB = Micro's) — asked
-   Papa to confirm the size in the dashboard. Prices after it: average 2.5 s old, worst 9 s; the minute-start gap gone.
+   **Nano → Micro** (Papa: "I upgraded from Nano to Micro"; the notes before had called it Micro by mistake): Micro =
+   1 GB RAM, max_connections 60, shared_buffers 256 MB — the settings shown match. Prices after it: 1.8–2.5 s old, worst
+   9 s; the minute-start gap gone; 0 timeouts. Next size if needed: Small (2 GB, 90 connections).
 4. **Prediction Lab**: Papa chose the confident-only signal (all 5 paths agree + corrected ≥ 55%) as the next step, but
    keep it pending until he asks. Other ideas from 1 Nov (filter on lab strategies, range for stops / lots, bigger models,
    fine-tune round 2) stay on the shelf.
@@ -1306,7 +1307,7 @@ Still open:
         (the engine and stops keep running on Supabase, but nobody could open the portal or press Emergency stop).
         Options put to Papa: Vercel Pro (~$20/month; the free plan is also for non-commercial use only), cut Dhandha's
         function CPU (in the Dhandha session), or host this static site apart from Dhandha.
-      - **Supabase** (Pro $25/month, Micro compute: 1 GB RAM, 60 connections): only the compute is short. Database 1,166 MB
+      - **Supabase** (Pro $25/month, Nano compute until 16 Nov — the notes said Micro by mistake; Micro since): only the compute is short. Database 1,166 MB
         of 8 GB disk, files 35 MB of 100 GB, 4 users, ~30 of 60 connections when quiet, engine calls roughly a third of
         the 2 million a month. Database time over ~25 h with the labs off: Realtime change-decoding 29%, per-second
         `pos_ltp` writes 9.5%, `algo_chart` 5%, `desk_feeds()` 5%, `desk_health()` 4% (6.7 s a run, was 0.6 s), the
