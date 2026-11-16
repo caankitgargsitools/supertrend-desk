@@ -2120,6 +2120,8 @@ async function pricesLoop() {
   await flushBars();
   const st = priceStat, n = Math.max(1, st.calls);
   console.log(`prices run: rounds ${rounds} light ${light} runMs ${Date.now() - t0} dhanFail ${st.fail} dhanAvgMs ${Math.round(st.dhanMs / n)} prepAvgMs ${Math.round(st.prepMs / Math.max(1, rounds))} writeAvgMs ${Math.round(st.writeMs / Math.max(1, rounds))} riskAvgMs ${Math.round(st.riskMs / Math.max(1, rounds))} totalAvgMs ${Math.round(st.totalMs / Math.max(1, rounds))}${st.why ? ` why ${st.why}` : ""}`);
+  const q = Dhan.quoteStat; console.log(`prices quotes: n ${q.n} waitAvgMs ${Math.round(q.waitMs / Math.max(1, q.n))} fetchAvgMs ${Math.round(q.fetchMs / Math.max(1, q.n))} http429 ${q.s429}`);
+  Object.assign(Dhan.quoteStat, { waitMs: 0, fetchMs: 0, n: 0, s429: 0 });
   Object.assign(priceStat, { rounds: 0, fail: 0, calls: 0, dhanMs: 0, prepMs: 0, writeMs: 0, riskMs: 0, totalMs: 0, why: "" });
   return { rounds };
 }
