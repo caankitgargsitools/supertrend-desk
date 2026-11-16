@@ -18,4 +18,14 @@ await Promise.all([a.daily("13", "IDX_I", "INDEX", "2026-01-01", "2026-10-22"), 
 assert.ok(calls[1].at - calls[0].at >= 200, "shared pacing");
 Dhan.memo = null; Dhan.ltpSeed = null;
 calls.length = 0; await a.ltp("IDX_I", "13"); assert.equal(calls.length, 1, "outside a tick: direct");
+// 16 Nov 2026: the desk-wide quote turn — a quote request waits for the moment the gate hands out; candles don't ask it.
+{ const asked = []; let next = Date.now() + 1500;
+  Dhan.quoteGate = async (k) => { asked.push(k); const t = next; next += 1100; return t; };
+  const c2 = new Dhan("c2", "tok2"); calls.length = 0; const tq = Date.now();
+  await c2.ltpMany({ IDX_I: ["13"] }, true);
+  assert.ok(calls[0].at - tq >= 1400, "waits for its turn"); assert.deepEqual(asked, ["c2"], "keyed by the client id");
+  await c2.daily("13", "IDX_I", "INDEX", "2026-01-01", "2026-10-22"); assert.equal(asked.length, 1, "candles don't take a quote turn");
+  Dhan.quoteGate = async () => { throw new Error("db down"); };
+  calls.length = 0; await new Dhan("c3", "tok3").ltpMany({ IDX_I: ["13"] }, true); assert.equal(calls.length, 1, "gate unreachable: asks anyway");
+  Dhan.quoteGate = null; }
 console.log("ok", Date.now() - t0, "ms");

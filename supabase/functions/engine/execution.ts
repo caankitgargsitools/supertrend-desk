@@ -189,8 +189,13 @@ export async function dhanPositions(c: Creds): Promise<Map<string, number>> {
 export async function dhanLtp(c: Creds, seg: string, sec: string): Promise<number | null> {
   // The per-second price updater covers every order being worked; its price is used when it is under 3 seconds old.
   if (via) {
+    // Up to 6 s old (16 Nov 2026; was 3 s): a fresh request here costs one of the account's one-a-second quote turns.
     const { data: f } = await via.from("live_prices").select("px, at").eq("seg", seg).eq("sec", String(sec)).maybeSingle();
-    if (f && Date.now() - Date.parse(f.at) < 3000 && Number(f.px) > 0) return Number(f.px);
+    if (f && Date.now() - Date.parse(f.at) < 6000 && Number(f.px) > 0) return Number(f.px);
+    // The desk-wide turn at Dhan's quote API (see Dhan.quoteGate).
+    const { data: slot } = await via.rpc("quote_slot", { p_key: c.client, p_gap_ms: 1100 }).then((r) => r, () => ({ data: null }));
+    const t = slot ? Date.parse(String(slot)) : 0;
+    if (t > Date.now()) await new Promise((res) => setTimeout(res, Math.min(5000, t - Date.now())));
   }
   const x = await dhanReq(c, "POST", "/marketfeed/ltp", { [seg]: [Number(sec)] }).catch(() => null);
   if (!x?.ok) return null;

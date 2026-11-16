@@ -39,6 +39,14 @@ export class Dhan {
   static memo: Memo | null = null;
   /** Last prices fetched in one batch at the start of a tick: "SEG|sec" -> price. */
   static ltpSeed: Map<string, number> | null = null;
+  /**
+   * One turn at Dhan's quote API for the whole desk (16 Nov 2026). Dhan allows one quote request a second per account;
+   * each engine run spaced only its own requests, so the price loop, the minute tick, the order manager and the spread
+   * watcher collided and Dhan refused about one price request in three ("rate-limited"). The gate (database function
+   * quote_slot, set by the engine) hands out the next free second per account; it returns that moment (ms), or null when
+   * it can't be reached (then only this run's own spacing applies).
+   */
+  static quoteGate: ((key: string) => Promise<number | null>) | null = null;
   /** Candles built without Dhan's candle API (stored history + own minute candles), set by the engine. */
   static own: { intraday: (sec: string, seg: string, interval: number, from: string, to: string) => Promise<Raw[] | null>;
     daily: (sec: string, seg: string, from: string, to: string) => Promise<DayBar[] | null> } | null = null;
@@ -80,7 +88,8 @@ export class Dhan {
       // Dhan's data APIs allow about 5 requests a second per account: requests are spaced 210 ms apart per token.
       const tk = this.token || "-";
       const quote = path.startsWith("/marketfeed/"); // ltp and full quote share the one-a-second limit
-      const at = Math.max(Date.now(), (lastByToken.get(tk) ?? 0) + 210, quote ? (lastQuoteByToken.get(tk) ?? 0) + 1050 : 0);
+      let at = Math.max(Date.now(), (lastByToken.get(tk) ?? 0) + 210, quote ? (lastQuoteByToken.get(tk) ?? 0) + 1050 : 0);
+      if (quote && Dhan.quoteGate) { const slot = await Dhan.quoteGate(this.clientId || tk.slice(-12)).catch(() => null); if (Number(slot) > 0) at = Math.max(at, Number(slot)); }
       lastByToken.set(tk, at);
       if (quote) lastQuoteByToken.set(tk, at);
       if (at > Date.now()) await sleep(at - Date.now());

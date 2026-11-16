@@ -42,6 +42,8 @@ const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
   auth: { persistSession: false },
 });
 setDhanRpc(sb); // Dhan order calls from the database's fixed IP address
+// One desk-wide turn per second at Dhan's quote API (16 Nov 2026: separate engine runs collided and Dhan refused them).
+Dhan.quoteGate = async (key: string) => { const { data, error } = await sb.rpc("quote_slot", { p_key: key, p_gap_ms: 1100 }); return error || !data ? null : Date.parse(String(data)); };
 Dhan.own = { intraday: (sec, seg, i, a, z) => ownIntraday(sb, sec, seg, i, a, z), daily: (sec, seg, a, z) => ownDaily(sb, sec, seg, a, z) };
 
 type Strategy = Record<string, any>;
