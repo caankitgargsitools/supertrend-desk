@@ -1096,6 +1096,13 @@ async function selfCall(body: Record<string, unknown>) {
 }
 /** Start of the current tick, rounded down to the minute (when the candles closed); for the decision delay. */
 let tickT0: number | null = null;
+/**
+ * Ticks running at once in this engine instance (16 Nov 2026). Since the minute calls run in the background the market
+ * tick and the crypto tick share one instance: the first to finish used to clear the shared candle memo and price seed
+ * (Dhan.memo / Dhan.ltpSeed) under the other, whose strategies then asked Dhan one by one — about 20 quote requests at
+ * the start of every minute, against Dhan's one a second, so the per-second prices stalled for up to 10 s each minute.
+ */
+let tickDepth = 0, tickMemoMin = 0;
 const flatten = (s: Strategy, set: Settings, update: Record<string, unknown>, candle: Candle, why = "Manual exit", event = "FLATTEN") => actLocked(() => flattenNow(s, set, update, candle, why, event));
 async function flattenNow(s: Strategy, set: Settings, update: Record<string, unknown>, candle: Candle, why = "Manual exit", event = "FLATTEN") {
   if (s.position === "FLAT") return;
@@ -4086,7 +4093,12 @@ async function handleReq(req: Request): Promise<Response> {
   // Market data fetched during this tick is shared between strategies (one request per asset and timeframe), and
   // last prices are fetched in batches.
   const tickMode = action === "tick" || cryptoTick;
-  if (tickMode) { Dhan.memo = new Map(); Dhan.ltpSeed = new Map(); Dhan.ownUsed.clear(); tickT0 = Math.floor(Date.now() / 60000) * 60000; }
+  if (tickMode) {
+    const min = Math.floor(Date.now() / 60000) * 60000;
+    // A new memo only when no other tick runs, or a new minute began (a minute's candles never serve the next one).
+    if (tickDepth <= 0 || min !== tickMemoMin || !Dhan.memo || !Dhan.ltpSeed) { Dhan.memo = new Map(); Dhan.ltpSeed = new Map(); Dhan.ownUsed.clear(); tickMemoMin = min; tickDepth = 0; }
+    tickDepth++; tickT0 = min;
+  }
   // Every strategy's last price in one request per account at the start of the tick (Dhan's quote API allows one
   // request a second, so separate requests would queue up behind each other).
   if (action === "tick") {
@@ -4235,7 +4247,7 @@ async function handleReq(req: Request): Promise<Response> {
   // Up to 8 strategies at a time (Dhan's request pacing is shared, per account).
   const queue = [...strategies];
   await Promise.all(Array.from({ length: Math.min(8, queue.length) }, async () => { for (let r = queue.shift(); r; r = queue.shift()) await runOne(r); }));
-  if (tickMode) { Dhan.memo = null; Dhan.ltpSeed = null; tickT0 = null; }
+  if (tickMode) { tickDepth = Math.max(0, tickDepth - 1); if (!tickDepth) { Dhan.memo = null; Dhan.ltpSeed = null; tickT0 = null; } }
   if (tickMode0(action, body)) await breakerAfterTick(okUsers, errUsers, breakers).catch((e) => console.error("breaker", e));
   // Strategies ran on own candles (Dhan refused candle requests): the warning at the top of every page, and the
   // owner is notified once when it starts.
