@@ -2066,7 +2066,8 @@ async function pricesLoop() {
   if (!lk?.length) return { skipped: "another price loop is running" };
   const slowDb = Date.now() - t0 > 800;
   const light = Deno.env.get("ENGINE_LIGHT") === "1" || slowDb;
-  const end = light ? t0 + 1500 : t0 + 9800;
+  // Light mode still prices once (16 Nov 2026: measured from t0, a slow lock left no time and the run priced nothing).
+  const end = light ? Date.now() + 1500 : t0 + 9800;
   let rounds = 0, rows: Strategy[] = [], rowsAt = 0;
   // A round starts every second on the second, without waiting for a slow one to finish (at most 2 at once), so a
   // slow answer from one price source doesn't stretch the rhythm.
@@ -3587,6 +3588,8 @@ function brkOf(b: Breaker | undefined, live: boolean) {
   return live ? { ticks: Number(b.err_ticks) || 0, halted_at: b.halted_at ?? null, reason: b.halt_reason ?? null }
     : { ticks: Number(b.paper_err_ticks) || 0, halted_at: b.paper_halted_at ?? null, reason: b.paper_halt_reason ?? null };
 }
+/** Calls of the minute dispatcher (engine_minute) that answer at once and work in the background (handleReq). */
+const BG_ACTIONS = new Set(["tick", "tick_crypto", "orders", "reconcile", "pred_feed", "spreads", "push"]);
 const tickMode0 = (action: string, body: { strategy_id?: string }) => (action === "tick" || action === "tick_crypto") && !body.strategy_id;
 async function loadBreakers(rows: Strategy[]): Promise<Map<string, Breaker>> {
   const ids = [...new Set(rows.map((x) => String(x.owner_id ?? "")).filter(Boolean))];
@@ -3746,7 +3749,7 @@ function expiryExitDue(s: Strategy): boolean {
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS" };
 
-Deno.serve(async (req) => {
+async function handleReq(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   const secret = req.headers.get("x-engine-secret");
   // The signed-in app may ask for one thing only: current prices of its open positions.
@@ -3795,6 +3798,15 @@ Deno.serve(async (req) => {
   let body: { action?: string; strategy_id?: string; backtest_id?: number; user_id?: string } = {};
   try { body = await req.json(); } catch { /* empty body */ }
   const action = body.action ?? "tick";
+  // The minute dispatcher's long calls answer at once and work in the background (16 Nov 2026). The database sends
+  // engine calls in batches and waits for the slowest one of a batch: a market tick or an order-manager run of up to 55
+  // seconds held back the every-10-second price calls behind it, so from the 09:00 open prices (and the stop line that
+  // follows them) refreshed only about once a minute. A call that asks to wait for the answer (wait: true) still does.
+  if (BG_ACTIONS.has(action) && !body.strategy_id && !(body as { wait?: boolean }).wait) {
+    const inner = new Request(req.url, { method: "POST", headers: req.headers, body: JSON.stringify({ ...body, wait: true }) });
+    EdgeRuntime.waitUntil(handleReq(inner).then((r) => r.text()).then((t) => console.log(`${action}: ${t.slice(0, 300)}`)).catch((e) => console.error(action, e)));
+    return Response.json({ action, accepted: true });
+  }
   // Coins from crypto_assets join the asset list (lab, backtests and live trading).
   await loadCryptoAssets(sb).catch((e) => console.error("crypto assets", e));
 
@@ -4182,4 +4194,5 @@ Deno.serve(async (req) => {
   for (const [u, ids] of liveIds) { try { const a = accounts.get(`${u}|DHAN`); if (a) await brokerFills(a, ids); } catch (e) { console.error("fills", e); } }
   if (lockName && !body.strategy_id) await sb.from("engine_lock").update({ until: nowIso() }).eq("name", lockName);
   return Response.json({ action, results });
-});
+}
+Deno.serve(handleReq);

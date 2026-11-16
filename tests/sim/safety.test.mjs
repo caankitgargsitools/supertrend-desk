@@ -76,7 +76,8 @@ const write = async (id, upd) => Object.assign(db.algo_strategies.find((x) => x.
 const note = (re) => db.notifications.some((n) => re.test(n.title));
 const ordersOf = (id) => db.live_orders.filter((r) => r.strategy_id === id);
 const tick = async (action = "tick") => {
-  const r = await handler(new Request("http://x", { method: "POST", headers: { "x-engine-secret": "SECRET", "content-type": "application/json" }, body: JSON.stringify({ action }) }));
+  // wait: the minute dispatcher's calls otherwise answer at once and work in the background (16 Nov 2026).
+  const r = await handler(new Request("http://x", { method: "POST", headers: { "x-engine-secret": "SECRET", "content-type": "application/json" }, body: JSON.stringify({ action, wait: true }) }));
   return (await r.json()).results ?? {};
 };
 let fails = 0;
@@ -737,5 +738,18 @@ await t("shared data: a user without Dhan runs paper on the admin's prices; live
   db.algo_strategies = db.algo_strategies.filter((x) => !["sp1", "sp2"].includes(x.id));
 });
 
+// 16 Nov 2026: the dispatcher's minute calls answer at once (the work goes on in the background), so a slow tick no longer
+// holds back the every-10-second price calls the database sends in the same batch.
+await t("the minute dispatcher's calls answer at once; the work runs in the background", async () => {
+  const bg = []; const was = globalThis.EdgeRuntime.waitUntil; globalThis.EdgeRuntime.waitUntil = (p) => { bg.push(p); };
+  try {
+    for (const action of ["tick", "tick_crypto", "orders", "reconcile", "push"]) {
+      const r = await handler(new Request("http://x", { method: "POST", headers: { "x-engine-secret": "SECRET", "content-type": "application/json" }, body: JSON.stringify({ action }) }));
+      assert.deepEqual(await r.json(), { action, accepted: true });
+    }
+    assert.equal(bg.length, 5, "five background runs");
+    await Promise.all(bg);
+  } finally { globalThis.EdgeRuntime.waitUntil = was; }
+});
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);
