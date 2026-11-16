@@ -844,6 +844,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   the live marks; the 30-second refresh had put a row saved a second EARLIER on top of the newer live price — the
   website now keeps the newer live figures when it reloads a row (`keepLive` in `loadStrategies`; test `ui_poll.mjs`
   "3b"). Papa's screen also ran a page from before 15 Nov (its corner box had no "Locked in by stops" line).
+- **"Server stuck" again, 16 Nov 2026 ~15:20 IST (Papa; engine v179–v180)**: the database, engine calls and prices were
+  fine; the REST API was slow for everyone — every request averaged ~1 s and waited up to 5–9 s (even tiny reads such as
+  `market_holidays`). Cause: the engine's caches stored only FINISHED answers, so when ~60 strategies asked at once (each
+  price round, each minute tick) every one of them read the same row: `broker_accounts` ~25 reads a second, `profiles`
+  (the admin lookup for shared data) ~2 a second, `mcx_contracts` ~3 a second — queuing the REST API's connection pool.
+  Now reads in flight are shared (`once` in accounts.ts for `accountFor` / `adminCached`; `mcxSecWait` in the price loop;
+  `nearContract` keeps its answer a minute, `NEAR_MEMO`). Measured right after: REST average 1 s → 0.25 s, worst ~1.5 s;
+  broker_accounts reads ~400 → ~20 a minute.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");

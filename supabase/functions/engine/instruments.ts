@@ -57,7 +57,19 @@ export type Contract = { sec_id: string; underlying: string; display: string | n
  * The contract to use for an underlying on a given IST date: the nearest expiry after that date
  * (on expiry day the next contract is used, as liquidity has already moved).
  */
-export async function nearContract(sb: SupabaseClient, creds: { client: string; token: string }, underlying: string, onDate: string): Promise<Contract> {
+// One read per commodity and day a minute, shared by the strategies that ask at the same time (16 Nov 2026: the minute
+// tick read mcx_contracts once per strategy, ~100 reads a minute).
+const NEAR_MEMO = new Map<string, { at: number; p: Promise<Contract> }>();
+export function nearContract(sb: SupabaseClient, creds: { client: string; token: string }, underlying: string, onDate: string): Promise<Contract> {
+  const k = `${underlying}|${onDate}`, m = NEAR_MEMO.get(k);
+  if (m && Date.now() - m.at < 60000) return m.p;
+  const p = nearContractRead(sb, creds, underlying, onDate);
+  NEAR_MEMO.set(k, { at: Date.now(), p });
+  p.catch(() => NEAR_MEMO.delete(k));
+  return p;
+}
+
+async function nearContractRead(sb: SupabaseClient, creds: { client: string; token: string }, underlying: string, onDate: string): Promise<Contract> {
   const pick = async () => (await sb.from("mcx_contracts").select("sec_id, underlying, display, expiry, synced_at")
     .eq("underlying", underlying).gt("expiry", onDate).order("expiry").limit(1)).data?.[0];
   let c = await pick();
