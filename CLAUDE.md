@@ -1183,7 +1183,10 @@ Still open:
 1. **Broker stops across the night**: Dhan stop orders are day orders; use Dhan's Forever Order (GTT) for positional
    stops? Test in the supervised 1-lot test. (Papa, 4 Nov: discuss later.)
 2. **Database permissions**: tighten table grants (anon / authenticated have ALL; RLS is the only barrier). (Discuss later.)
-3. **Supabase compute upgrade**: not done yet; later.
+3. **Supabase compute upgrade**: **Papa upgraded it on 16 Nov 2026** (database restarted 12:10:39 IST). Checked at once: the
+   IPv6 Dhan sees did NOT change (detectedIP 2406:da1a:314:7102:21be:db71:d17e:402, SECONDARY_MATCH, ordersAllowed true).
+   But the database still showed the old size's settings (max_connections 60, shared_buffers 256 MB = Micro's) — asked
+   Papa to confirm the size in the dashboard. Prices after it: average 2.5 s old, worst 9 s; the minute-start gap gone.
 4. **Prediction Lab**: Papa chose the confident-only signal (all 5 paths agree + corrected ≥ 55%) as the next step, but
    keep it pending until he asks. Other ideas from 1 Nov (filter on lab strategies, range for stops / lots, bigger models,
    fine-tune round 2) stay on the shelf.
