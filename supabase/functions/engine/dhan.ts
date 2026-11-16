@@ -49,6 +49,7 @@ export class Dhan {
   static quoteGate: ((key: string) => Promise<number | null>) | null = null;
   /** Time quote requests spent waiting for their turn and at Dhan (ms, summed; read and reset by the price loop's log). */
   static quoteStat = { waitMs: 0, fetchMs: 0, n: 0, s429: 0 };
+  static quoteBy = new Map<string, number>();
   /** Candles built without Dhan's candle API (stored history + own minute candles), set by the engine. */
   static own: { intraday: (sec: string, seg: string, interval: number, from: string, to: string) => Promise<Raw[] | null>;
     daily: (sec: string, seg: string, from: string, to: string) => Promise<DayBar[] | null> } | null = null;
@@ -96,7 +97,12 @@ export class Dhan {
       if (quote) lastQuoteByToken.set(tk, at);
       const w0 = Date.now();
       if (at > Date.now()) await sleep(at - Date.now());
-      if (quote) { Dhan.quoteStat.waitMs += Date.now() - w0; Dhan.quoteStat.n++; }
+      if (quote) {
+        Dhan.quoteStat.waitMs += Date.now() - w0; Dhan.quoteStat.n++;
+        // Who asked (diagnosis, 16 Nov 2026): the first engine function names on the call stack.
+        const who = (new Error().stack ?? "").split("\n").slice(2, 9).map((l) => (/at (?:async )?([\w.$]+)/.exec(l) ?? [])[1]).filter((x) => x && !/^(Dhan|Object|Array|Promise|new)/.test(x)).slice(0, 3).join(">") || "?";
+        Dhan.quoteBy.set(who, (Dhan.quoteBy.get(who) ?? 0) + 1);
+      }
       this.last = Date.now();
       this.calls++;
       let r: Response, text: string;
