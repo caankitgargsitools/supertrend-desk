@@ -2095,7 +2095,7 @@ async function pricesLoop() {
   // A round starts every second on the second, without waiting for a slow one to finish (at most 2 at once), so a
   // slow answer from one price source doesn't stretch the rhythm.
   const inflight = new Set<Promise<unknown>>();
-  while (Date.now() < end - 700) {
+  while (Date.now() < end - (light ? 700 : 1500)) {
     const t = Date.now();
     try {
       if (Date.now() - rowsAt > 5000) {
@@ -2104,11 +2104,15 @@ async function pricesLoop() {
         // Nothing open and no Dhan strategy inside its trading hours: no need to price.
         if (!rows.some((x) => x.position !== "FLAT" || (x.active && !isCrypto(String(x.data_segment)) && inSessionNow(String(x.data_segment))))) break;
       }
-      if (inflight.size < 2) {
+      // One round at a time (16 Nov 2026; was 2): every round now waits for the desk-wide quote turn (Dhan.quoteGate), and
+      // two rounds of one run — plus the next run's — only queued up behind each other (rounds 2–10 s late).
+      if (inflight.size < 1) {
         const p = pricesTick(rows).then(() => { rounds++; }, (e) => console.error("prices", e)).finally(() => inflight.delete(p));
         inflight.add(p);
       }
     } catch (e) { console.error("prices", e); }
+    // The next round as soon as this one is done (at most one a second; the quote turn spaces them further).
+    await Promise.race([Promise.all(inflight), new Promise((r) => setTimeout(r, 3000))]);
     const wait = 1000 - (Date.now() - t);
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   }
