@@ -738,6 +738,21 @@ await t("shared data: a user without Dhan runs paper on the admin's prices; live
   db.algo_strategies = db.algo_strategies.filter((x) => !["sp1", "sp2"].includes(x.id));
 });
 
+// 16 Nov 2026 (Papa: "L&T still showing as 4139.9"): a live future held against the index / share is valued on the future.
+await t("held future: running P&L from Dhan's fill and the future's own price; paper unchanged", async () => {
+  const S = add("hf1", { live: true, position: "SHORT", pos_qty: 1, pos_lots: 1, lot_size: 75, qty_mode: "LOTS", pos_entry_px: 25000, pos_ltp_at: null,
+    pos_broker: { broker: "DHAN", fill: 25120, offset: 120, legs: [{ seg: "NSE_FNO", sec: "35001", qty: -75 }], tick: 0.05, step: 5, option: false } });
+  db.live_prices = (db.live_prices ?? []).filter((r) => r.sec !== "35001");
+  db.live_prices.push({ seg: "NSE_FNO", sec: "35001", px: 25100, at: new Date(clock).toISOString() });
+  dhan.ltp["13"] = 24990;
+  const s2 = await E.markPrice(S(), set);
+  assert.equal(s2.pos_ltp, 24990, "the desk's own price stays the index");
+  assert.equal(s2.pos_bk_ltp, 25100); assert.equal(s2.pos_upnl, (25120 - 25100) * 75, "short: future 25,120 → 25,100 = +₹1,500");
+  const P = add("hf2", { live: false, position: "SHORT", pos_qty: 1, pos_lots: 1, lot_size: 75, qty_mode: "LOTS", pos_entry_px: 25000, pos_ltp_at: null, pos_broker: null });
+  const p2 = await E.markPrice(P(), set);
+  assert.equal(p2.pos_upnl, (25000 - 24990) * 75); assert.equal(p2.pos_bk_ltp ?? null, null);
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "hf1" && x.id !== "hf2");
+});
 // 16 Nov 2026: the dispatcher's minute calls answer at once (the work goes on in the background), so a slow tick no longer
 // holds back the every-10-second price calls the database sends in the same batch.
 await t("the minute dispatcher's calls answer at once; the work runs in the background", async () => {

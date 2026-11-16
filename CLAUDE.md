@@ -787,6 +787,18 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   the share's price, not the future's — `placeRow` couldn't read the future's price (`dhanLtp` null, probably the
   one-a-second quote limit) and fell back to the signal's price; a SELL fills at once like that, a BUY would rest ₹14
   under the market and not fill. `placeRow` now tries the contract's price a second time after 1.2 s before falling back.
+  **Shown in the future's own prices since 16 Nov 2026 (Papa: "L&T … still showing as 4139.9"; engine v167, migration
+  110; tests `tests/ui/ui_held_future.mjs` (args: theme width), `tests/sim/safety.test.mjs` "held future")**: for a LIVE
+  single-futures Dhan position whose leg is another contract than the one the desk watches (`heldContract` in the
+  engine, `heldBk` on the website: stock and index futures; not MCX, crypto, options, paper), the price loop prices the
+  held future in the same batched request (`pos_bk_ltp`, `live_marks.bk_ltp`) and the running P&L (`live_marks.upnl`,
+  `pos_upnl`, so every total and the Desk) is the future's move from Dhan's fill; the minute tick's `markPrice` does the
+  same (its live_prices row if under 60 s old, else Dhan's LTP). The screens show entry = Dhan's fill (`dispEntry`),
+  now = the future's price (`dispNow`; before the first one: the share + the gap at the fill), stop / target + that gap
+  (`dispLevels`, `posLevels`) — ladder, stop meter, strategy page tile (which names the share entry once), price
+  texts, Trades tab open rows, Desk feed. The desk's own figures stay on the share / index (`pos_entry_px`, `pos_ltp`,
+  stops, signals — and `stockExDate` keeps comparing share prices). The Trade life page stays on the share and says so
+  in a banner. Booked trades were already corrected to Dhan's fills at the exit (`fixLedger`).
 - **Prices refreshed only about once a minute after the open (16 Nov 2026, Papa: "the desk still shows the old price and
   the old stop loss"; engine v166, migration 109; test `tests/sim/safety.test.mjs` "answer at once")**: the database sends
   engine calls (pg_net) in batches and waits for the slowest call of a batch. From 09:00 IST the market tick and the order

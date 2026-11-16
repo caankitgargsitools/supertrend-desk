@@ -94,7 +94,7 @@ function warmDays(tf: number, atr: number, seg = "IDX_I", bars = WARM_BARS) {
   return Math.min(400, Math.max(5, Math.ceil(((Math.max(bars, atr * 10) * tf) / dayMins) * 1.5) + 4));
 }
 const FLAT_STATE = { position: "FLAT", pos_legs: null, pos_option_type: null, pos_option_side: null, pos_strike: null, pos_expiry: null, pos_qty: null, pos_entry_date: null, pos_risk: null,
-  pos_entry_px: null, pos_entry_prem: null, pos_lots: null, pos_margin: null, pos_ltp: null, pos_ltp_at: null, pos_upnl: null, pos_broker: null };
+  pos_entry_px: null, pos_entry_prem: null, pos_lots: null, pos_margin: null, pos_ltp: null, pos_ltp_at: null, pos_upnl: null, pos_broker: null, pos_bk_ltp: null };
 const NO_PENDING = { pending_target: null, pending_trigger: null, pending_from: null, pending_to: null };
 const hhmm = (sec: number) => fmtIst(sec, true).slice(11, 16);
 
@@ -283,6 +283,20 @@ type Candle = { t?: number; trend?: number; c?: number; st?: number };
 /* ---------- stop loss, target, trailing stop, daily loss limit (live) ---------- */
 type PosRisk = Partial<RiskState> & { basis: string; entry?: number; entryPrem?: number | null };
 const riskOf = (s: Strategy) => normaliseRisk(s.risk, s.trade_type === "OPTIONS" && !isMulti(s));
+/**
+ * A live single-futures position held at Dhan in another contract than the one the desk watches (stock and index futures:
+ * signals, stops and backtests run on the share / index, the order goes to the future). 16 Nov 2026 (Papa: "L&T still
+ * showing as 4139.9" — the share's price at the signal, while Dhan filled the future at 4154.1): its running P&L is the
+ * held contract's move from Dhan's fill, and the screens show the future's own prices (`pos_bk_ltp`, `live_marks.bk_ltp`).
+ * The desk's own figures (pos_entry_px, pos_ltp, stops) stay on the share / index.
+ */
+function heldContract(s: Strategy): { key: string; seg: string; sec: string; fill: number } | null {
+  const pb = s.pos_broker as { broker?: string; legs?: { seg: string; sec: string }[]; fill?: number | null } | null;
+  if (!s.live || !pb || pb.broker !== "DHAN" || s.trade_type === "OPTIONS" || s.position === "FLAT" || pb.legs?.length !== 1) return null;
+  const l = pb.legs[0], fill = Number(pb.fill);
+  if (!l || l.seg === s.data_segment || isCrypto(String(l.seg)) || !(fill > 0)) return null;
+  return { key: `${l.seg}|${l.sec}`, seg: String(l.seg), sec: String(l.sec), fill };
+}
 const unitsOf = (s: Strategy) => s.qty_mode === "LOTS" ? Number(s.pos_qty) * Number(s.lot_size) : Number(s.pos_qty);
 const lotsOf = (s: Strategy) => s.qty_mode === "LOTS" ? Number(s.pos_qty) : Math.round(Number(s.pos_qty) / Number(s.lot_size));
 const todayIst = () => ist(Date.now() / 1000).date;
@@ -942,9 +956,16 @@ async function markPrice(s: Strategy, set: Settings): Promise<Strategy> {
   const pr = (s.pos_risk ?? {}) as PosRisk;
   const inPx = opt ? Number(s.pos_entry_prem ?? pr.entryPrem ?? 0) : Number(s.pos_entry_px ?? pr.entry ?? 0);
   const dir = opt ? (s.pos_option_side === "SELL" ? -1 : 1) : (s.position === "LONG" ? 1 : -1);
-  const upd = { pos_ltp: +Number(px).toFixed(2), pos_ltp_at: new Date().toISOString(), pos_upnl: inPx > 0 ? Math.trunc((Number(px) - inPx) * dir * unitsOf(s)) : null };
+  const upd: Record<string, unknown> = { pos_ltp: +Number(px).toFixed(2), pos_ltp_at: new Date().toISOString(), pos_upnl: inPx > 0 ? Math.trunc((Number(px) - inPx) * dir * unitsOf(s)) : null };
+  // A live future held against the share / index: P&L on the held contract (its price from the last minute, else Dhan).
+  const h = opt ? null : heldContract(s);
+  if (h) {
+    const { data: lp } = await sb.from("live_prices").select("px, at").eq("seg", h.seg).eq("sec", h.sec).maybeSingle();
+    const hp = lp && Date.now() - Date.parse(lp.at) < 60000 && Number(lp.px) > 0 ? Number(lp.px) : await dhanFor(set).ltp(h.seg, h.sec).catch(() => null);
+    if (Number(hp) > 0) Object.assign(upd, { pos_bk_ltp: +Number(hp).toFixed(2), pos_upnl: Math.trunc((Number(hp) - h.fill) * dir * unitsOf(s)) });
+  }
   await sb.from("algo_strategies").update(upd).eq("id", s.id);
-  return { ...s, ...upd };
+  return { ...s, ...upd } as Strategy;
 }
 /**
  * Live orders: reads the account's Dhan trade book and writes the actual fill price on each order leg still waiting
@@ -2054,7 +2075,7 @@ let lastMarkAt = "";
  * One engine run per minute (cron) that prices every second until the next run takes over. A lock row keeps a
  * single loop going; the strategy list is re-read every 5 seconds (positions change), prices every second.
  */
-const PRICE_COLS = "id, owner_id, data_segment, data_security_id, position, trade_type, structure, pos_entry_px, pos_risk, pos_qty, qty_mode, lot_size, pos_ltp_at, active, archived, ca_day";
+const PRICE_COLS = "id, owner_id, data_segment, data_security_id, position, trade_type, structure, pos_entry_px, pos_risk, pos_qty, qty_mode, lot_size, pos_ltp_at, active, archived, ca_day, live, pos_broker";
 async function pricesLoop() {
   // A fresh engine run every 10 seconds (cron) prices once a second for 10 seconds: each run stays well inside the
   // ~2 seconds of computing an engine run may use, and if one run dies the next takes over within 10 seconds.
@@ -2117,7 +2138,7 @@ async function adminCached(): Promise<Account | null> {
   return adminMemo.acc;
 }
 /** The last price written per open position (live_marks is written only when it moves, or every 15 s). */
-const lastMarkPx = new Map<string, { ltp: number; at: number }>();
+const lastMarkPx = new Map<string, { ltp: number; bk?: number | null; at: number }>();
 /** The last chart bar written per strategy (algo_chart is written on a new bar, or every 5 minutes). */
 const chartLast = new Map<string, { t: number; at: number }>();
 /** When the portal last asked for a refresh (settings changed: the chart is rewritten whatever the candle). */
@@ -2151,7 +2172,10 @@ async function pricesTick(rows: Strategy[]) {
       if (!r) return;
       sec = r;
     }
-    add(await dataUid(sb, s.owner_id, accounts), seg, sec);
+    const uid = await dataUid(sb, s.owner_id, accounts);
+    add(uid, seg, sec);
+    // The future held at Dhan (stock / index futures) is priced in the same batched request.
+    const h = heldContract(s); if (h) add(uid, h.seg, h.sec);
     want.set(s.id, { s, key: `${seg}|${sec}` });
   }));
   // Live orders being worked: their own contracts (the order manager chases them with these prices).
@@ -2191,7 +2215,7 @@ async function pricesTick(rows: Strategy[]) {
   await sb.from("live_prices").upsert(pxRows);
   // Running P&L of open positions priced on one instrument (futures, index basis, crypto). Option positions are
   // priced by the minute tick (their premium comes from the option chain, allowed once every 3 seconds).
-  const marks: { strategy_id: string; owner_id: string; ltp: number; upnl: number | null; at: string }[] = [];
+  const marks: { strategy_id: string; owner_id: string; ltp: number; upnl: number | null; at: string; bk_ltp: number | null }[] = [];
   const checks: Promise<unknown>[] = [];
   const slow: PromiseLike<unknown>[] = [];
   for (const { s: s0, key } of want.values()) {
@@ -2209,21 +2233,23 @@ async function pricesTick(rows: Strategy[]) {
     }
     const pr = (s.pos_risk ?? {}) as PosRisk;
     const inPx = Number(s.pos_entry_px ?? pr.entry ?? 0), dir = s.position === "LONG" ? 1 : -1;
-    const upnl = inPx > 0 ? Math.trunc((p! - inPx) * dir * unitsOf(s)) : null;
-    marks.push({ strategy_id: s.id, owner_id: s.owner_id, ltp: +p!.toFixed(2), upnl, at });
+    const h = heldContract(s), hp = h ? px.get(h.key) : undefined, bk = h && Number(hp) > 0 ? +Number(hp).toFixed(2) : null;
+    // Running P&L: the held future's move from Dhan's fill when it has a price, else the share / index move.
+    const upnl = h && bk != null ? Math.trunc((bk - h.fill) * dir * unitsOf(s)) : inPx > 0 ? Math.trunc((p! - inPx) * dir * unitsOf(s)) : null;
+    marks.push({ strategy_id: s.id, owner_id: s.owner_id, ltp: +p!.toFixed(2), upnl, at, bk_ltp: bk });
     checks.push(secondRisk(s, p!, at));
     // The strategy row itself (lists, capital, alerts) every 30 seconds (10 s until 14 Nov 2026: 145,000 row writes a
     // day, 9% of all database time; the app's live figures come from live_marks, and the minute tick prices a position
     // itself only when this is over 50 s old).
-    if (Date.now() - (rowWriteAt.get(s.id) ?? (s.pos_ltp_at ? Date.parse(s.pos_ltp_at) : 0)) > ROW_PX_MS) rowWriteAt.set(s.id, Date.now()), slow.push(sb.from("algo_strategies").update({ pos_ltp: +p!.toFixed(2), pos_upnl: upnl, pos_ltp_at: at }).eq("id", s.id).eq("position", s.position));
+    if (Date.now() - (rowWriteAt.get(s.id) ?? (s.pos_ltp_at ? Date.parse(s.pos_ltp_at) : 0)) > ROW_PX_MS) rowWriteAt.set(s.id, Date.now()), slow.push(sb.from("algo_strategies").update({ pos_ltp: +p!.toFixed(2), pos_upnl: upnl, pos_ltp_at: at, ...(bk != null ? { pos_bk_ltp: bk } : {}) }).eq("id", s.id).eq("position", s.position));
   }
   // Realtime decodes every write of live_marks (18% of all database time, 6 Nov 2026 audit): unchanged prices are
   // written only every 15 seconds, so the row never looks stale but a flat market costs nothing.
-  const moved = marks.filter((m) => { const l = lastMarkPx.get(m.strategy_id); return !l || l.ltp !== m.ltp || Date.now() - l.at > 15000; });
+  const moved = marks.filter((m) => { const l = lastMarkPx.get(m.strategy_id); return !l || l.ltp !== m.ltp || l.bk !== m.bk_ltp || Date.now() - l.at > 15000; });
   if (moved.length && at >= lastMarkAt) {
     lastMarkAt = at;
     const { error } = await sb.from("live_marks").upsert(moved);
-    if (!error) for (const m of moved) lastMarkPx.set(m.strategy_id, { ltp: m.ltp, at: Date.now() });
+    if (!error) for (const m of moved) lastMarkPx.set(m.strategy_id, { ltp: m.ltp, bk: m.bk_ltp, at: Date.now() });
   }
   await Promise.all(checks);
   await Promise.all(slow);
