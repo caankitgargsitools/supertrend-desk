@@ -737,6 +737,24 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (`lab_tried`) aren't written again. A strategy is tuned once (`lab_results.stop_tuned_at`); its versions carry the mark
   too, so they are never tuned themselves. Tight trailing stops are never written (the study: they lose 26–64% of the
   profit). The lab's jobs are off since 13 Nov, so this starts working when they are switched back on.
+- **Price changes of a working Dhan order were refused (16 Nov 2026, Papa: a live SILVERMIC sell "not fulfilled because
+  price went down … is it being checked and the price being changed?"; engine v164)**: the first live order that had to
+  be chased — SELL 2 lots SILVERMIC NOV FUT (Lab #294435 live), limit ₹1,72,840 at 09:01 IST, price fell to ₹1,72,381.
+  The order manager did check it every 15 s, but every change (`dhanModify`, PUT /v2/orders/{id}) came back "Missing
+  required fields, bad values for parameters etc." (DH-905; on the order's `note` as "check failed: Couldn't modify
+  order …"), so it stayed at its first price with 0 steps and was never given up; the desk showed SHORT ("working")
+  meanwhile. Cause (best reading, from Dhan's own Python client and its reference example): `legName: ""` — a plain
+  order sends `legName: null` (the name is only for bracket / cover order legs). Fixed in `execution.ts`; the simulated
+  Dhan in `sim.test.mjs` / `safety.test.mjs` / `safety2.test.mjs` now refuses a non-null legName the same way.
+  **Not yet proven against the real Dhan**: the order filled by itself at ₹1,72,840 at 09:13:12 (the price came back)
+  before the new code made a change; the stop went in at once (trigger ₹1,76,637). The first real proof is the next
+  price change of a working order or the first trailing move of a broker stop (`syncStop` uses the same call) — look at
+  `live_orders.note` / `pos_broker.stopErrAt`; if Dhan still refuses, try leaving `legName` out, then compare the body
+  with Dhan's docs (dhanhq.co isn't reachable from the cloud session). Known side effects seen: while the entry waited
+  the desk tracked the best price (₹1,72,381), so the trailing stop started 459 points tighter than from the fill;
+  with a working chase the rule would have cancelled this entry after 4 steps (₹1,72,700) — no trade. Open: a working
+  entry whose changes keep failing should be cancelled and told at once (today only `stuckWorking` after 10 minutes),
+  and a filled order keeps its last "check failed" note.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
