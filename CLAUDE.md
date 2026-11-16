@@ -746,11 +746,10 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   meanwhile. Cause (best reading, from Dhan's own Python client and its reference example): `legName: ""` — a plain
   order sends `legName: null` (the name is only for bracket / cover order legs). Fixed in `execution.ts`; the simulated
   Dhan in `sim.test.mjs` / `safety.test.mjs` / `safety2.test.mjs` now refuses a non-null legName the same way.
-  **Not yet proven against the real Dhan**: the order filled by itself at ₹1,72,840 at 09:13:12 (the price came back)
-  before the new code made a change; the stop went in at once (trigger ₹1,76,637). The first real proof is the next
-  price change of a working order or the first trailing move of a broker stop (`syncStop` uses the same call) — look at
-  `live_orders.note` / `pos_broker.stopErrAt`; if Dhan still refuses, try leaving `legName` out, then compare the body
-  with Dhan's docs (dhanhq.co isn't reachable from the cloud session). Known side effects seen: while the entry waited
+  The order itself filled at ₹1,72,840 at 09:13:12 (the price came back) before the new code changed anything; the stop
+  went in at once (trigger ₹1,76,637). **Proven live a minute later**: at 09:14:12 the trailing stop moved and Dhan
+  accepted the change of the broker stop (`syncStop`, the same call): trigger ₹1,76,637 → ₹1,76,479, no `stopErrAt`.
+  (dhanhq.co isn't reachable from the cloud session; Dhan's Python client on GitHub was the reference.) Known side effects seen: while the entry waited
   the desk tracked the best price (₹1,72,381), so the trailing stop started 459 points tighter than from the fill;
   with a working chase the rule would have cancelled this entry after 4 steps (₹1,72,700) — no trade. A filled order
   keeps its last "check failed" note.
