@@ -813,6 +813,26 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   before the lock. Measured right after: calls every 10 s on time, prices 2–13 s old (the old note "normally up to ~21 s"
   stands; each 10-second run does only a few rounds). The `_http_response` bodies of those calls no longer show their
   results.
+  **Then (same day, Papa: "the prices are still updating very slow"; engine v168–v176, migration 111; tests
+  `tests/sim/dhan.test.mjs` "quote turn")**: measured with the run log ("prices run: …", "prices quotes: …", "prices quote
+  callers: …" — diagnostic lines in the function log, one each per 10-second run; the caller line takes a stack trace
+  per quote request: remove once prices are settled) — Dhan refused about one price request in three (rate-limited:
+  ONE quote request a second per account, and every engine run spaced only its own). Fixes: (1) **one desk-wide turn**
+  per account at the quote API, `quote_slot(p_key = Dhan client id, p_gap_ms 1100)` on table `quote_gate` →
+  `Dhan.quoteGate` in `dhan.ts send()` (every /marketfeed call) and in `execution.ts dhanLtp` (which now reuses prices up
+  to 6 s old); (2) the price loop works **one round at a time**, the next as soon as the last is done; (3) the minute tick
+  reuses prices up to **30 s** old (was 10 s); (4) **the bug that ate the turns**: since the minute calls run in the
+  background, the market tick and the crypto tick share an engine instance and the first to finish cleared the shared
+  `Dhan.memo` / `Dhan.ltpSeed` under the other, whose strategies then asked Dhan one by one (~20 quote requests at the
+  start of every minute) — now `tickDepth` / `tickMemoMin` keep the memo until the last tick of the minute ends (a new
+  minute always starts a fresh memo); (5) light mode only when the price lock takes over 2.5 s (was 0.8 s: one slow
+  answer cut whole runs to one price); (6) the next 10-second run takes the price lock up to 3 s early (was 0.7 s: a run
+  that started a second late made the next one skip, ~9 s without prices). Measured after (10:40 IST): prices 1–2 s
+  old for most of each minute, Dhan refusals 0; **still a 10–15 s gap right after each minute starts**, when the
+  database is busy with the tick (the price run's own reads / writes then take 4–8 s) — the Micro compute's limit
+  (pending item 3, after the Dhan IP lock ends 19 Nov) or Dhan's WebSocket feed (pending) would remove it. Also seen
+  today: twice "SSL connection timeout" from the database to api.dhan.co (the order manager's check of a resting stop,
+  and a test call) — the order path through the database's IP; one more reason for pending item 00.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
