@@ -4105,9 +4105,11 @@ async function handleReq(req: Request): Promise<Response> {
       const du = await dataUid(sb, x.owner_id, accounts);
       const m = byOwner.get(du) ?? {}; (m[seg] ??= []).push(sec); byOwner.set(du, m);
     }));
-    // Prices the per-second updater fetched in the last 10 seconds are used as they are (it skips a second now and
-    // then when Dhan rate-limits; asking Dhan again here would only collide with it).
-    const { data: fresh } = await sb.from("live_prices").select("seg, sec, px").gt("at", new Date(Date.now() - 10000).toISOString());
+    // Prices the per-second updater fetched in the last 30 seconds are used as they are (10 s until 16 Nov 2026: Dhan
+    // allows one quote request a second per account, and the tick re-asking for prices the updater had just fetched took
+    // most of those turns — the updater then priced only every 5–10 s). The tick decides on closed candles; this price
+    // only fills the forming minute and the running P&L.
+    const { data: fresh } = await sb.from("live_prices").select("seg, sec, px").gt("at", new Date(Date.now() - 30000).toISOString());
     for (const f of fresh ?? []) Dhan.ltpSeed!.set(`${f.seg}|${f.sec}`, Number(f.px));
     for (const [uid, m] of byOwner) {
       for (const seg of Object.keys(m)) { m[seg] = m[seg].filter((sec) => !Dhan.ltpSeed!.has(`${seg}|${sec}`)); if (!m[seg].length) delete m[seg]; }
