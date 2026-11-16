@@ -833,6 +833,17 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (pending item 3, after the Dhan IP lock ends 19 Nov) or Dhan's WebSocket feed (pending) would remove it. Also seen
   today: twice "SSL connection timeout" from the database to api.dhan.co (the order manager's check of a resting stop,
   and a test call) — the order path through the database's IP; one more reason for pending item 00.
+  **Outage 11:43–11:58 IST the same day** (Papa's Desk photo: "+₹3,846" in the profit-flow box vs "+₹4,432" on the account
+  card): the engine's database calls took 10–90 s, the database's calls to Dhan and Delta failed ("SSL connection
+  timeout"), pg_net calls hung on the name lookup — strategies didn't run 11:44–11:53, prices stopped 11:45–11:59. My
+  direct SQL stayed fast and the public REST API answered in 0.2–0.6 s, so the slowness was between the engine and the
+  database / outbound network (Supabase side, not proven). **Made worse by our own price loop**: each 10-second run then
+  lasted 40–120 s and new ones kept starting on top (up to ~10 at once). Fixed (engine v177–v178): one price loop per
+  engine instance (`pricesSince`), none when the price lock takes over 5 s, a hung round stops counting after 8 s, the
+  quote turn waits at most 2 s for the database. The two Desk figures: the canvas box reads the strategy rows, the card
+  the live marks; the 30-second refresh had put a row saved a second EARLIER on top of the newer live price — the
+  website now keeps the newer live figures when it reloads a row (`keepLive` in `loadStrategies`; test `ui_poll.mjs`
+  "3b"). Papa's screen also ran a page from before 15 Nov (its corner box had no "Locked in by stops" line).
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");

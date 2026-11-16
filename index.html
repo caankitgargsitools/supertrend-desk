@@ -2491,6 +2491,16 @@ const stratStampOf = (rows) => rows.reduce((m, r) => Math.max(m, Date.parse(r.up
  * answer (20 seconds of overlap) plus the list of ids, which shows deleted and new ones; every 5 minutes, after any
  * action of the user, and whenever something doesn't add up, everything is read again.
  */
+/**
+ * A reloaded strategy row keeps the live price figures the screen already has when they are newer (16 Nov 2026, Papa's
+ * Desk photo: the account card read +₹4,432 from the live prices, the profit-flow box +₹3,846 from the row saved a second
+ * earlier, which the 30-second refresh had put back on top). Same position only; the row wins when it is as new or newer.
+ */
+function keepLive(fresh, prev) {
+  if (!prev || !fresh || fresh.position !== prev.position || fresh.position === "FLAT" || fresh.pos_entry_px !== prev.pos_entry_px) return fresh;
+  const a = Date.parse(prev.pos_ltp_at || "") || 0, b = Date.parse(fresh.pos_ltp_at || "") || 0;
+  return a > b ? { ...fresh, pos_ltp: prev.pos_ltp, pos_upnl: prev.pos_upnl, pos_ltp_at: prev.pos_ltp_at, pos_bk_ltp: prev.pos_bk_ltp ?? fresh.pos_bk_ltp } : fresh;
+}
 async function loadStrategies(soft) {
   const old = state && state.strategies;
   if (soft && old && old.length && strat.stamp && Date.now() - strat.fullAt < 300000) {
@@ -2500,7 +2510,7 @@ async function loadStrategies(soft) {
         stratRows("*", (q) => q.gt("updated_at", new Date(strat.stamp - 20000).toISOString())),
       ]);
       const by = new Map(old.map((x) => [x.id, x]));
-      for (const r of rows) by.set(r.id, r);
+      for (const r of rows) by.set(r.id, keepLive(r, by.get(r.id)));
       const keep = new Set(ids.map((x) => x.id));
       if (ids.every((x) => by.has(x.id))) {
         strat.stamp = Math.max(strat.stamp, stratStampOf(rows));
@@ -2510,6 +2520,7 @@ async function loadStrategies(soft) {
   }
   const all = await stratRows("*");
   strat.fullAt = Date.now(); strat.stamp = stratStampOf(all);
+  if (old && old.length) { const prev = new Map(old.map((x) => [x.id, x])); return all.map((r) => keepLive(r, prev.get(r.id))); }
   return all;
 }
 async function loadAll(soft) {

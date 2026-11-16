@@ -68,7 +68,8 @@ if (sockets.length) fail("no Realtime connection is opened", sockets);
 
 // 3. background refresh: only changed rows + the id list; a deleted strategy goes, a changed one is replaced, order kept
 const fullBefore = count("full");
-delta = [{ ...list[0], active: false, name: "Lab #1 · Futures · GOLD daily · renamed", updated_at: iso(Date.now()) }];
+const renamed = { ...list[0], active: false, name: "Lab #1 · Futures · GOLD daily · renamed", updated_at: iso(Date.now()) };
+delta = [renamed];
 ids = [{ id: "g2" }, { id: "sol" }, { id: "cu" }]; // gm was deleted on another device
 await p.evaluate(() => refreshAll()); await p.waitForTimeout(400);
 if (count("full") !== fullBefore) fail("a background refresh doesn't read every strategy", seen.map((x) => x.kind));
@@ -77,10 +78,20 @@ let now = await st();
 if (now.map((x) => x.id).join() !== "g2,sol,cu") fail("deleted one gone, order kept", now);
 if (now[0].active !== false || !/renamed/.test(now[0].name)) fail("changed row replaced", now[0]);
 if (Number(now[1].upnl) !== 50) fail("the open position keeps its live price", now[1]);
+// 3b. 16 Nov 2026 (Papa's Desk photo: +₹4,432 on the account card, +₹3,846 in the profit-flow box): a changed row saved
+// BEFORE the live price the screen already has doesn't put the older figures back; a newer row does replace them.
+delta = [{ ...list[2], pos_ltp: 102, pos_upnl: 20, pos_ltp_at: iso(Date.now() - 60000), updated_at: iso(Date.now()) }];
+await p.evaluate(() => { lastRefresh = 0; return refreshAll(); }); await p.waitForTimeout(400);
+now = await st();
+if (Number(now[1].upnl) !== 50 || Number(now[1].ltp) !== 105) fail("an older row keeps the newer live price", now[1]);
+delta = [{ ...list[2], pos_ltp: 107, pos_upnl: 70, pos_ltp_at: iso(Date.now() + 1000), updated_at: iso(Date.now() + 1000) }];
+await p.evaluate(() => { lastRefresh = 0; return refreshAll(); }); await p.waitForTimeout(400);
+now = await st();
+if (Number(now[1].upnl) !== 70) fail("a newer row replaces the live price", now[1]);
 
 // 4. an id the app doesn't know and the changed rows don't carry → everything is read again
 const n5 = S("new", 5, "ZINC", "MCX_COMM", 5000);
-list = [delta[0], list[2], list[3], n5]; delta = []; ids = [{ id: "g2" }, { id: "sol" }, { id: "cu" }, { id: "new" }];
+list = [renamed, list[2], list[3], n5]; delta = []; ids = [{ id: "g2" }, { id: "sol" }, { id: "cu" }, { id: "new" }];
 await p.evaluate(() => { lastRefresh = 0; return refreshAll(); }); await p.waitForTimeout(400);
 if (count("full") !== fullBefore + 1) fail("unknown id → full read", seen.map((x) => x.kind));
 now = await st();
