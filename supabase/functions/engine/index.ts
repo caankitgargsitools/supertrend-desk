@@ -2081,6 +2081,7 @@ async function runAudit(batch: string, offset: number) {
  */
 let priceHolDay = "";
 const mcxSecMemo = new Map<string, string>();
+const mcxSecWait = new Map<string, Promise<string>>();
 const rowWriteAt = new Map<string, number>();
 const ROW_PX_MS = 30000;
 let lastMarkAt = "";
@@ -2210,10 +2211,19 @@ async function pricesTick(rows: Strategy[]) {
     if (isCommodity(seg) && !/^\d+$/.test(sec)) {
       let r = mcxSecMemo.get(sec);
       if (!r) {
-        const set = await dataAccount(sb, s.owner_id, accounts).catch(() => null);
-        if (!set?.dhan_access_token) return;
-        r = (await dataSecurity(sb, credsOf(set), seg, sec, today).catch(() => ({ sec: "" }))).sec;
-        if (r) mcxSecMemo.set(sec, r);
+        // One lookup per commodity even when many strategies ask at once (16 Nov 2026: ~3 reads of mcx_contracts a second).
+        let p = mcxSecWait.get(sec);
+        if (!p) {
+          p = (async () => {
+            const set = await dataAccount(sb, s.owner_id!, accounts).catch(() => null);
+            if (!set?.dhan_access_token) return "";
+            const v = (await dataSecurity(sb, credsOf(set), seg, sec, today).catch(() => ({ sec: "" }))).sec;
+            if (v) mcxSecMemo.set(sec, v);
+            return v;
+          })().finally(() => mcxSecWait.delete(sec));
+          mcxSecWait.set(sec, p);
+        }
+        r = await p;
       }
       if (!r) return;
       sec = r;

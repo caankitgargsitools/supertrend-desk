@@ -12,16 +12,29 @@ export type Account = {
 };
 
 /** Broker account of a user (Dhan today; the broker column leaves room for others). */
-export async function accountFor(sb: SupabaseClient, userId: string, broker = "DHAN", cache?: Map<string, Account | null>): Promise<Account | null> {
-  const key = `${userId}|${broker}`;
-  if (cache?.has(key)) return cache.get(key)!;
+// Reads in flight per cache (16 Nov 2026: the price loop asks for one account from ~60 strategies at once; caching only the
+// finished answer let every one of them read broker_accounts — ~25 reads a second that queued the whole REST API).
+const inflight = new WeakMap<Map<string, Account | null>, Map<string, Promise<Account | null>>>();
+function once(cache: Map<string, Account | null> | undefined, key: string, read: () => Promise<Account | null>): Promise<Account | null> {
+  if (!cache) return read();
+  if (cache.has(key)) return Promise.resolve(cache.get(key)!);
+  let m = inflight.get(cache); if (!m) inflight.set(cache, m = new Map());
+  let p = m.get(key);
+  if (!p) { p = read().then((a) => { cache.set(key, a); return a; }).finally(() => m!.delete(key)); m.set(key, p); }
+  return p;
+}
+
+export function accountFor(sb: SupabaseClient, userId: string, broker = "DHAN", cache?: Map<string, Account | null>): Promise<Account | null> {
+  return once(cache, `${userId}|${broker}`, () => readAccount(sb, userId, broker));
+}
+
+async function readAccount(sb: SupabaseClient, userId: string, broker: string): Promise<Account | null> {
   const { data } = await sb.from("broker_accounts").select("*").eq("user_id", userId).eq("broker", broker).maybeSingle();
   const a = data ? {
     user_id: data.user_id, broker: data.broker, dhan_client_id: data.client_id, dhan_access_token: data.access_token, webhook_url: data.webhook_url,
     webhook_secret: data.webhook_secret, capital: data.capital, capital_since: data.capital_since, deploy_pct: data.deploy_pct, funds_at: data.funds_at,
     paper_capital: data.paper_capital, paper_since: data.paper_since, paper_deploy_pct: data.paper_deploy_pct,
   } as Account : null;
-  cache?.set(key, a);
   return a;
 }
 
@@ -50,11 +63,8 @@ export async function adminAccount(sb: SupabaseClient): Promise<Account | null> 
  */
 export const SHARED_PAPER_DATA = true;
 
-async function adminCached(sb: SupabaseClient, cache?: Map<string, Account | null>) {
-  if (cache?.has("__admin")) return cache.get("__admin")!;
-  const a = await adminAccount(sb);
-  cache?.set("__admin", a);
-  return a;
+function adminCached(sb: SupabaseClient, cache?: Map<string, Account | null>) {
+  return once(cache, "__admin", () => adminAccount(sb));
 }
 
 /** The Dhan account whose login reads market data for this user: their own, else (SHARED_PAPER_DATA) the admin's. */
