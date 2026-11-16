@@ -33,6 +33,8 @@ globalThis.fetch = async (url, init = {}) => {
   if (mm) {
     const o = dhan.orders.get(mm[1]);
     if (m === "GET") return J(o ?? {}, o ? 200 : 404);
+    // Like Dhan (16 Nov 2026): a change whose legName is an empty string is refused; a plain order sends null.
+    if (m === "PUT" && body.legName !== null) return J({ errorType: "Input_Exception", errorCode: "DH-905", errorMessage: "Missing required fields, bad values for parameters etc." }, 400);
     if (m === "PUT") { Object.assign(o, { orderType: body.orderType, price: body.price, triggerPrice: body.triggerPrice, quantity: body.quantity }); return J({ orderId: o.orderId, orderStatus: o.orderStatus }); }
     if (m === "DELETE") {
       if (dhan.noCancel.has(mm[1])) return J({ errorMessage: "order is being modified" }, 400);

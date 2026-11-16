@@ -155,9 +155,14 @@ export async function dhanByTag(c: Creds, tag: string): Promise<{ id: string; st
   const o = x.ok ? one(x.j) : null;
   return o?.orderId ? { id: String(o.orderId), st: statusOf(o) } : null;
 }
+/**
+ * legName is null for a plain order, as in Dhan's own client (it names a leg of a bracket / cover order only). An empty
+ * string is refused: "Missing required fields, bad values for parameters etc." — found 16 Nov 2026 on the first live
+ * order that had to be chased (SELL 2 SILVERMIC, every price change refused for 8 minutes).
+ */
 export async function dhanModify(c: Creds, id: string, m: { type: OrdType; qty: number; price?: number; trigger?: number }) {
   const x = await dhanReq(c, "PUT", `/orders/${encodeURIComponent(id)}`, {
-    orderId: id, orderType: m.type, legName: "", quantity: Math.trunc(m.qty), price: hasPrice(m.type) ? Number(m.price) : 0,
+    orderId: String(id), orderType: m.type, legName: null, quantity: Math.trunc(m.qty), price: hasPrice(m.type) ? Number(m.price) : 0,
     disclosedQuantity: 0, triggerPrice: hasTrigger(m.type) ? Number(m.trigger) : 0, validity: "DAY",
   });
   if (!x.ok) throw new Error(`Couldn't modify order ${id}: ${errText(x)}`);
