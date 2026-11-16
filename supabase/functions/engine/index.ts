@@ -43,7 +43,11 @@ const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
 });
 setDhanRpc(sb); // Dhan order calls from the database's fixed IP address
 // One desk-wide turn per second at Dhan's quote API (16 Nov 2026: separate engine runs collided and Dhan refused them).
-Dhan.quoteGate = async (key: string) => { const { data, error } = await sb.rpc("quote_slot", { p_key: key, p_gap_ms: 1100 }); return error || !data ? null : Date.parse(String(data)); };
+Dhan.quoteGate = async (key: string) => {
+  // At most 2 s for the turn's answer (a slow database must never hold a price request): else only this run's spacing.
+  const r = await Promise.race([sb.rpc("quote_slot", { p_key: key, p_gap_ms: 1100 }), new Promise<null>((res) => setTimeout(() => res(null), 2000))]);
+  return !r || r.error || !r.data ? null : Date.parse(String(r.data));
+};
 Dhan.own = { intraday: (sec, seg, i, a, z) => ownIntraday(sb, sec, seg, i, a, z), daily: (sec, seg, a, z) => ownDaily(sb, sec, seg, a, z) };
 
 type Strategy = Record<string, any>;
@@ -2121,6 +2125,9 @@ async function pricesLoop() {
       if (inflight.size < 1) {
         const p = pricesTick(rows).then(() => { rounds++; }, (e) => console.error("prices", e)).finally(() => inflight.delete(p));
         inflight.add(p);
+        // A round that hangs (16 Nov 2026, 11:43–11:53 IST: the engine's database calls took 10–40 s and some never came
+        // back, so with one round at a time prices stopped for 10 minutes) stops counting after 8 s: the next one starts.
+        setTimeout(() => inflight.delete(p), 8000);
       }
     } catch (e) { console.error("prices", e); }
     // The next round as soon as this one is done (at most one a second; the quote turn spaces them further).
@@ -2128,7 +2135,7 @@ async function pricesLoop() {
     const wait = 1000 - (Date.now() - t);
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   }
-  await Promise.all(inflight);
+  await Promise.race([Promise.all(inflight), new Promise((r) => setTimeout(r, 8000))]);
   await flushBars();
   const st = priceStat, n = Math.max(1, st.calls);
   console.log(`prices run: rounds ${rounds} light ${light} runMs ${Date.now() - t0} dhanFail ${st.fail} dhanAvgMs ${Math.round(st.dhanMs / n)} prepAvgMs ${Math.round(st.prepMs / Math.max(1, rounds))} writeAvgMs ${Math.round(st.writeMs / Math.max(1, rounds))} riskAvgMs ${Math.round(st.riskMs / Math.max(1, rounds))} totalAvgMs ${Math.round(st.totalMs / Math.max(1, rounds))}${st.why ? ` why ${st.why}` : ""}`);
