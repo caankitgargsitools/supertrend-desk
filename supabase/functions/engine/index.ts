@@ -2094,7 +2094,9 @@ async function pricesLoop() {
   const t0 = Date.now();
   const { data: lk } = await sb.from("price_lock").update({ at: new Date(Date.now() + 9800).toISOString() }).eq("id", 1).lt("at", new Date(Date.now() + 700).toISOString()).select("id");
   if (!lk?.length) return { skipped: "another price loop is running" };
-  const slowDb = Date.now() - t0 > 800;
+  // 2.5 s (16 Nov 2026; was 0.8 s): a single slow answer on a busy minute switched whole runs to one price in 10 s,
+  // which made most of the gaps Papa saw once Dhan's turns were sorted out. Light mode is for a database in trouble.
+  const slowDb = Date.now() - t0 > 2500;
   const light = Deno.env.get("ENGINE_LIGHT") === "1" || slowDb;
   // Light mode still prices once (16 Nov 2026: measured from t0, a slow lock left no time and the run priced nothing).
   const end = light ? Date.now() + 1500 : t0 + 9800;
