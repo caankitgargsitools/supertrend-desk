@@ -2092,7 +2092,10 @@ async function pricesLoop() {
   // switches on by itself whenever the database answers slowly (its disk allowance running low), and back off once
   // it is quick again; ENGINE_LIGHT=1 forces it on.
   const t0 = Date.now();
-  const { data: lk } = await sb.from("price_lock").update({ at: new Date(Date.now() + 9800).toISOString() }).eq("id", 1).lt("at", new Date(Date.now() + 700).toISOString()).select("id");
+  // The next run takes over up to 3 s before this one ends (16 Nov 2026; was 0.7 s): a run that got the lock a second late
+  // made the next 10-second call find it "still running" and skip, leaving ~9 s without prices. A short overlap is
+  // harmless — both take turns at Dhan's quote API (Dhan.quoteGate).
+  const { data: lk } = await sb.from("price_lock").update({ at: new Date(Date.now() + 9800).toISOString() }).eq("id", 1).lt("at", new Date(Date.now() + 3000).toISOString()).select("id");
   if (!lk?.length) return { skipped: "another price loop is running" };
   // 2.5 s (16 Nov 2026; was 0.8 s): a single slow answer on a busy minute switched whole runs to one price in 10 s,
   // which made most of the gaps Papa saw once Dhan's turns were sorted out. Light mode is for a database in trouble.
