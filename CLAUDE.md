@@ -787,6 +787,20 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   the share's price, not the future's — `placeRow` couldn't read the future's price (`dhanLtp` null, probably the
   one-a-second quote limit) and fell back to the signal's price; a SELL fills at once like that, a BUY would rest ₹14
   under the market and not fill. `placeRow` now tries the contract's price a second time after 1.2 s before falling back.
+- **Prices refreshed only about once a minute after the open (16 Nov 2026, Papa: "the desk still shows the old price and
+  the old stop loss"; engine v166, migration 109; test `tests/sim/safety.test.mjs` "answer at once")**: the database sends
+  engine calls (pg_net) in batches and waits for the slowest call of a batch. From 09:00 IST the market tick and the order
+  manager (4 passes 15 s apart whenever any order is working or resting — a resting broker stop is enough) took up to the
+  55-second timeout, and some calls hung 55 s on the name lookup ("DNS time: 55000 ms"; 10 of 16 timeouts in the 09:00
+  hour, none before), so the every-10-second `prices` calls waited behind them: `live_prices` / `live_marks` (and the
+  stop line, which follows the price) moved about once a minute. Now the minute dispatcher's calls (`BG_ACTIONS`: tick,
+  tick_crypto, orders, reconcile, pred_feed, spreads, push — without a strategy_id) answer `{accepted: true}` at once and
+  run in the background (`handleReq` calls itself with `wait: true`; the result goes to the function log as
+  "<action>: …"); `engine_call` gives them (and prices / audit / kill) a 10-second timeout, others keep 55 s. Also fixed:
+  light mode (database slow, the price lock took > 800 ms) priced NOTHING in its run — the loop's end was measured from
+  before the lock. Measured right after: calls every 10 s on time, prices 2–13 s old (the old note "normally up to ~21 s"
+  stands; each 10-second run does only a few rounds). The `_http_response` bodies of those calls no longer show their
+  results.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
