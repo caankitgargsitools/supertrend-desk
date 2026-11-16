@@ -2112,6 +2112,9 @@ async function pricesLoop() {
   }
   await Promise.all(inflight);
   await flushBars();
+  const st = priceStat, n = Math.max(1, st.calls);
+  console.log(`prices run: rounds ${rounds} light ${light} runMs ${Date.now() - t0} dhanFail ${st.fail} dhanAvgMs ${Math.round(st.dhanMs / n)} prepAvgMs ${Math.round(st.prepMs / Math.max(1, rounds))} writeAvgMs ${Math.round(st.writeMs / Math.max(1, rounds))} riskAvgMs ${Math.round(st.riskMs / Math.max(1, rounds))} totalAvgMs ${Math.round(st.totalMs / Math.max(1, rounds))}${st.why ? ` why ${st.why}` : ""}`);
+  Object.assign(priceStat, { rounds: 0, fail: 0, calls: 0, dhanMs: 0, prepMs: 0, writeMs: 0, riskMs: 0, totalMs: 0, why: "" });
   return { rounds };
 }
 /** Minute candles built from this run's prices, written in one go (merged with what earlier runs wrote). */
@@ -2143,7 +2146,10 @@ const lastMarkPx = new Map<string, { ltp: number; bk?: number | null; at: number
 const chartLast = new Map<string, { t: number; at: number }>();
 /** When the portal last asked for a refresh (settings changed: the chart is rewritten whatever the candle). */
 let chartForce = 0;
+/** Timing of the price rounds of one run (logged at the end of the run: "prices run: …"). */
+const priceStat = { rounds: 0, fail: 0, calls: 0, dhanMs: 0, prepMs: 0, writeMs: 0, riskMs: 0, totalMs: 0, why: "" };
 async function pricesTick(rows: Strategy[]) {
+  const tA = Date.now();
   const nowI = ist(Date.now() / 1000), today = nowI.date;
   const at = nowIso(); // the round's start: of two overlapping rounds, the later-started one's prices are the newer
   await priceHolidays(today);
@@ -2193,15 +2199,19 @@ async function pricesTick(rows: Strategy[]) {
   const { data: work } = await sb.from("live_orders").select("user_id, seg, sec").eq("broker", "DHAN").in("state", ["queued", "working"]);
   for (const w of work ?? []) add(w.user_id, w.seg, String(w.sec));
   const px = new Map<string, number>();
+  priceStat.prepMs += Date.now() - tA;
   await Promise.all([
     ...[...bySeg].map(async ([uid, segs]) => {
       const set = await accountFor(sb, uid, "DHAN", accounts).catch(() => null);
       if (!set?.dhan_access_token) return;
-      try { for (const [k, v] of await dhanFor(set).ltpMany(segs, true)) px.set(k, v); } catch { /* rate-limited or busy: the next round is a second away */ }
+      const q0 = Date.now();
+      try { for (const [k, v] of await dhanFor(set).ltpMany(segs, true)) px.set(k, v); } catch (e) { priceStat.fail++; priceStat.why = String((e as Error)?.message ?? e).slice(0, 120); /* rate-limited or busy: the next round is a second away */ }
+      priceStat.dhanMs += Date.now() - q0; priceStat.calls++;
     }),
     ...[...coins].map(async (c) => { const v = await cryptoLtp(c).catch(() => null); if (v) px.set(`DELTA|${c}`, v); }),
   ]);
-  if (!px.size) return { prices: 0 };
+  if (!px.size) { priceStat.totalMs += Date.now() - tA; return { prices: 0 }; }
+  const tW = Date.now();
   const pxRows = [...px].map(([k, v]) => { const [seg, sec] = k.split("|"); return { seg, sec, px: v, at }; });
   // The same prices make the desk's own 1-minute candles (used when Dhan's candle API refuses requests), built here and
   // written once per run (flushBars) to keep the database's disk use low.
@@ -2213,6 +2223,8 @@ async function pricesTick(rows: Strategy[]) {
     else { b.h = Math.max(b.h, r.px); b.l = Math.min(b.l, r.px); if (at >= b.at) { b.c = r.px; b.at = at; } }
   }
   await sb.from("live_prices").upsert(pxRows);
+  priceStat.writeMs += Date.now() - tW;
+  const tR = Date.now();
   // Running P&L of open positions priced on one instrument (futures, index basis, crypto). Option positions are
   // priced by the minute tick (their premium comes from the option chain, allowed once every 3 seconds).
   const marks: { strategy_id: string; owner_id: string; ltp: number; upnl: number | null; at: string; bk_ltp: number | null }[] = [];
@@ -2253,6 +2265,7 @@ async function pricesTick(rows: Strategy[]) {
   }
   await Promise.all(checks);
   await Promise.all(slow);
+  priceStat.riskMs += Date.now() - tR; priceStat.totalMs += Date.now() - tA;
   return { prices: px.size, marks: marks.length };
 }
 /* ---------- stock futures across a split / bonus ex-date ---------- */
