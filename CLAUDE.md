@@ -852,6 +852,14 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   Now reads in flight are shared (`once` in accounts.ts for `accountFor` / `adminCached`; `mcxSecWait` in the price loop;
   `nearContract` keeps its answer a minute, `NEAR_MEMO`). Measured right after: REST average 1 s → 0.25 s, worst ~1.5 s;
   broker_accounts reads ~400 → ~20 a minute.
+- **Auto update (17 Nov 2026, Papa: "Yes add the auto update")**: an open Desk had run a page from before the 16 Nov
+  future-price change and showed LT's share price (₹4,207) instead of the future's (the third stale page after 15 / 16 Nov).
+  `updCheck` every minute while on screen and on coming back: HEAD `/` (no download; ETag, else last-modified + length,
+  `updTag`); the first answer is the page's version, a different one later = a new version. It reloads by itself (after
+  `savePage`, so the same page opens again) unless `updHold()`: unsaved strategy form (`formDirty`), anything typed in the
+  last 10 minutes (`upd.typed`, input / keydown in fields), the confirm box / live-trade or question card / Trade life open,
+  browser full screen — then the bar `#updAlert` ("A new version of the portal is ready … Refresh now") and the reload
+  happens at a later check once nothing holds it. Test: `tests/ui/ui_update.mjs` (args: theme width).
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");

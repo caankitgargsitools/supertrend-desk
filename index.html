@@ -1255,6 +1255,7 @@ body.dk-fs-on { overflow: hidden; }
 <div id="engineAlert" class="banner err topalert" role="alert" hidden></div>
 <div id="breakerAlert" class="banner err topalert" role="alert" hidden></div>
 <div id="askAlert" class="banner warn topalert" role="alert" hidden></div>
+<div id="updAlert" class="banner info topalert" role="status" hidden></div>
 
 <div class="wrap" id="app">
   <main class="pane" id="pane">
@@ -11175,6 +11176,50 @@ $("aa_body").addEventListener("click", (e) => { const b2 = e.target.closest(".aa
 let presenceAt = 0;
 function touchPresence() { if (!me || document.hidden || Date.now() - presenceAt < 290000) return; presenceAt = Date.now(); db.rpc("touch_presence").then(() => {}, () => { presenceAt = 0; }); }
 setInterval(touchPresence, 60000); document.addEventListener("visibilitychange", touchPresence);
+/* Auto update (17 Nov 2026, Papa: an open Desk kept running a page from before a change and showed LT's share price,
+   ₹4,207, instead of the future's). Every minute while on screen (and on coming back) the app asks the site, without
+   downloading it, whether the page changed (HEAD, its ETag). A new version reloads by itself when nothing would be lost:
+   no unsaved strategy form, nothing typed in the last 10 minutes, no question / live-trade card / dialog open, not in
+   browser full screen. Otherwise a bar offers "Refresh now" (and the reload happens later once that holds). After the
+   reload the same page opens again (savePage / restorePage). */
+const upd = { tag: null, ready: false, typed: 0, busy: false };
+document.addEventListener("input", () => { upd.typed = Date.now(); }, true);
+document.addEventListener("keydown", (e) => { if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) upd.typed = Date.now(); }, true);
+async function updTag() {
+  const r = await rawFetch(location.origin + "/", { method: "HEAD", cache: "no-store" });
+  if (!r.ok) return null;
+  return r.headers.get("etag") || [r.headers.get("last-modified"), r.headers.get("content-length")].filter(Boolean).join("|") || null;
+}
+/** Why a reload would lose something now (null = safe). */
+function updHold() {
+  if (formDirty) return "unsaved changes";
+  if (Date.now() - upd.typed < 600000) return "typing";
+  if (document.fullscreenElement) return "full screen";
+  for (const id of ["confirmBox", "lt_over", "tl_over"]) { const el = $(id); if (el && !el.hidden) return id; }
+  return null;
+}
+function updBar() {
+  const el = $("updAlert"); if (!el) return;
+  el.hidden = !upd.ready;
+  if (upd.ready && !el.dataset.on) { el.dataset.on = "1"; el.innerHTML = `<b>A new version of the portal is ready.</b> It refreshes by itself once nothing unsaved is open. <button class="btn small" id="upd_now" type="button">Refresh now</button>`; }
+}
+$("updAlert").addEventListener("click", (e) => { if (e.target.closest("#upd_now")) { try { savePage(); } catch { /* not signed in */ } location.reload(); } });
+async function updCheck() {
+  if (document.hidden || upd.busy) return;
+  upd.busy = true;
+  try {
+    if (!upd.ready) {
+      const t = await updTag().catch(() => null);
+      if (!t) return;
+      if (upd.tag == null) { upd.tag = t; return; }
+      if (t === upd.tag) return;
+      upd.ready = true;
+    }
+    if (!updHold()) { try { savePage(); } catch { /* not signed in */ } location.reload(); return; }
+    updBar();
+  } finally { upd.busy = false; }
+}
+setInterval(updCheck, 60000); document.addEventListener("visibilitychange", updCheck); updCheck();
 /* Time per page for Admin › User activity (Papa, 6 Nov 2026): every second the page on screen gets a second "open", and a
    second "in use" when there was a scroll, tap, click or key in the last 30 s; a change of page counts a visit. Reported
    about once a minute (and when the app goes to the background) through log_activity; nothing else is recorded. */
