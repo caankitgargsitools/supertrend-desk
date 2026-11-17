@@ -592,6 +592,7 @@ details.raw code { display: block; white-space: pre-wrap; word-break: break-all;
 .lpgh .pl span { font-weight: 600; font-variant-numeric: tabular-nums; }
 .tag { font: 600 10.5px/1 var(--font-data); letter-spacing: .03em; padding: 4px 7px; border-radius: 6px; white-space: nowrap; }
 .tag.ok { background: var(--green-soft); color: var(--green); } .tag.warn { background: var(--yellow-soft); color: var(--yellow-ink); border: 1px solid var(--yellow); }
+.tag.pbo { margin-right: 6px; cursor: help; border: 1px solid transparent; } .tag.pbo.ok { border-color: var(--green); } .tag.pbo.warn { border-color: var(--yellow); } .tag.pbo.bad { background: var(--red-soft); color: var(--red); border-color: var(--red); }
 .rank { display: inline-block; font: 600 10.5px/1 var(--font-data); padding: 3px 6px; border-radius: 6px; background: var(--chip); color: var(--muted); margin-left: 6px; white-space: nowrap; vertical-align: middle; }
 .rank.best { background: var(--yellow-soft); color: var(--yellow-ink); } .rank.none { opacity: .7; }
 .lpgd { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 10px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); cursor: pointer; font-size: 12.5px; margin-top: 4px; }
@@ -7769,9 +7770,25 @@ async function loadLabScores() {
   const key = ids.join(","); if (!ids.length || (key === labScoresKey && Date.now() - labScoresAt < 600000)) return;
   labScoresKey = key; labScoresAt = Date.now();
   for (let i = 0; i < ids.length; i += 100) {
-    const rows = await db.rpc("lab_scores", { p_ids: ids.slice(i, i + 100) }).then((r) => r.data || []).catch(() => []);
+    const [rows, pb] = await Promise.all([
+      db.rpc("lab_scores", { p_ids: ids.slice(i, i + 100) }).then((r) => r.data || []).catch(() => []),
+      db.rpc("group_pbo", { p_ids: ids.slice(i, i + 100) }).then((r) => r.data || []).catch(() => []),
+    ]);
     for (const r of rows) labScores.set(Number(r.id), r.consistency == null ? null : Number(r.consistency));
+    for (const r of pb) labPbo.set(Number(r.id), r);
   }
+}
+/* Overfitting gauge on each group (17 Nov 2026, Papa: "Yes, show the PBO Score as well"): the Probability of Backtest
+   Overfitting the Strategy Lab measured for the group's asset and kind (daily / intraday) — the median of its latest 10
+   runs (group_pbo, migration 112). It says how far the lab's ranking (★, "best is live / isn't live") can be trusted. */
+const labPbo = new Map();
+function pboChip(list, best) {
+  const pick = [best, ...list].find((s) => s && s.lab_id && labPbo.has(Number(s.lab_id)));
+  const x = pick && labPbo.get(Number(pick.lab_id)); if (!x || x.pbo == null) return "";
+  const v = Number(x.pbo), pc = Math.round(v * 100), c = v > 0.5 ? "bad" : v > 0.2 ? "warn" : "ok";
+  const word = v > 0.5 ? "worse than a random pick" : v > 0.2 ? "only partly reliable" : "reliable";
+  const tip = `Overfitting (PBO) ${pc}%: in the Strategy Lab's tests on ${assetLabel(x.asset)} ${x.mode === "DAILY" ? "daily" : "intraday"} strategies, the one that looked best on half of the history did worse than the average on the other half in ${pc}% of the splits. Under 20% the lab's ranking holds up; around 50% it is a coin toss; over 50% the top backtest tends to disappoint. So the ★ ranking here is ${word}; judge by paper results. Median of the last ${x.runs} lab runs (~${x.strategies} strategies each), latest ${fmtDay(x.last_at)}.`;
+  return `<span class="tag pbo ${c}" title="${esc(tip)}">PBO ${pc}%</span>`;
 }
 const grpKey = (s) => `${s.underlying}|${cxStratTf(s)}|${s.trade_type === "OPTIONS" ? "O" : "F"}`;
 const tfLabel = (s) => { const t = cxStratTf(s); return t === "D" || t === "1440" ? "Daily" : `${t} min`; };
@@ -7827,14 +7844,14 @@ function groupInfo(g, ranks, hiddenArch) {
   const parts = [plural(g.list.length, "strategy", "strategies"), `${live.length} live`, `${paper.length} paper`];
   if (arch.length) parts.push(`${arch.length} archived`); if (hiddenArch) parts.push(`${hiddenArch} archived hidden`);
   const r = (s) => ranks.get(s.id) || {}, ranked = g.list.filter((s) => r(s).rank).sort((a, b) => r(a).rank - r(b).rank), best = ranked[0];
-  let tag = "";
+  let tag = pboChip(g.list, best);
   if (live.length && best) {
     const short = (s) => String(s.name || "").split(" · ")[0];
     // The best counts as live when it, or its live copy (same lab result), runs live (13 Nov 2026: copies keep the lab id).
     const bestLive = best.live || live.some((s) => s.lab_id && Number(s.lab_id) === Number(best.lab_id));
-    if (bestLive) tag = `<span class="tag ok" title="${esc(`${best.name} (consistency ${r(best).score}) is the best of this group and it is live`)}">best is live</span>`;
+    if (bestLive) tag += `<span class="tag ok" title="${esc(`${best.name} (consistency ${r(best).score}) is the best of this group and it is live`)}">best is live</span>`;
     else {
-      tag = `<span class="tag warn" title="${esc(`Best: ${best.name} (consistency ${r(best).score}, not live). Live: ${live.map((s) => `${short(s)} (${r(s).rank ? `rank ${r(s).rank} of ${r(s).of}` : "no lab result"})`).join(", ")}`)}">best isn't live</span>`;
+      tag += `<span class="tag warn" title="${esc(`Best: ${best.name} (consistency ${r(best).score}, not live). Live: ${live.map((s) => `${short(s)} (${r(s).rank ? `rank ${r(s).rank} of ${r(s).of}` : "no lab result"})`).join(", ")}`)}">best isn't live</span>`;
       // 14 Nov 2026 (Papa): name the best right here, compare it with the one running live, and switch over smoothly.
       const run = live.filter((s) => !s.wait_for && Number(s.lab_id) !== Number(best.lab_id)).sort((a, b) => (r(a).rank || 1e9) - (r(b).rank || 1e9))[0];
       const waiting = live.find((s) => s.wait_for);

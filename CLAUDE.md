@@ -860,6 +860,13 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   last 10 minutes (`upd.typed`, input / keydown in fields), the confirm box / live-trade or question card / Trade life open,
   browser full screen — then the bar `#updAlert` ("A new version of the portal is ready … Refresh now") and the reload
   happens at a later check once nothing holds it. Test: `tests/ui/ui_update.mjs` (args: theme width).
+- **PBO on each Strategies group (17 Nov 2026, Papa: "Yes, show the PBO Score as well")**: a chip "PBO 63%" on the group
+  header (`pboChip`, before the best-is-live tag; red > 50% "worse than a random pick", amber 20–50%, green < 20%; the
+  tooltip explains it in words) from SQL `group_pbo(p_ids)` (migration 112; owner / admin as `lab_scores`): per lab result
+  its asset and mode and the MEDIAN PBO of the latest 10 lab runs that measured that asset / mode (one run measures only
+  ~30 fresh tries, so one run is noisy), runs, strategies per run, latest date; read with the lab scores (`labPbo`).
+  Figures stop at 30 Oct (lab jobs off). On 17 Nov: Copper daily 81%, Bitcoin daily 80%, Sol daily 76%, Gold daily 68%.
+  Test: `tests/ui/ui_group.mjs` "2a".
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");

@@ -44,6 +44,9 @@ const res = {
   "rpc/my_capital": { capital: 2000000, since: null, deploy_pct: 60, live_net: 0, paper_net: 0, live_used: 0, paper_used: 0, funds: {} },
   "algo_strategies": strategies,
   "algo_trades": [["g1", "LIVE", 12000], ["g1", "LIVE", -3000], ["g2", "PAPER", 5000], ["n1", "LIVE", 2500], ["c2", "PAPER", -1200]].map(([sid, mode, net], i) => ({ id: i + 1, strategy_id: sid, user_id: A, mode, net, exit_at: `2026-10-0${i + 1}T10:00:00Z`, entry_day: `2026-10-0${i + 1}`, contract: "X", lots: 1, side: "LONG", entry_px: 1, exit_px: 2, gross: net, costs: 0, exit_why: "signal" })),
+  // Overfitting gauge (17 Nov 2026): Gold daily 63% (red), Nifty 15 min 18% (green), Crude none.
+  "rpc/group_pbo": [[901, "GOLD", "DAILY", 0.63], [902, "GOLD", "DAILY", 0.63], [903, "GOLD", "DAILY", 0.63], [904, "GOLD", "DAILY", 0.63], [911, "NIFTY", "INTRADAY", 0.18], [912, "NIFTY", "INTRADAY", 0.18], [913, "NIFTY", "INTRADAY", 0.18]]
+    .map(([id, asset, mode, pbo]) => ({ id, asset, mode, pbo, runs: 10, strategies: 29, last_at: "2026-10-30T18:34:43Z" })),
   "rpc/lab_scores": Object.entries(cons).map(([id, c]) => ({ id: Number(id), score: 5, consistency: c })),
   "rpc/lab_feed": { run: { id: 6, status: "done", counts: { generated: 300, passed: 4 }, from_day: "2025-10-09", split_day: "2026-07-09", to_day: "2026-10-09", created_at: now }, rows: labRows },
   "lab_results": labRows, "rpc/my_lab_requests": [], "rpc/lab_long_map": {}, "rpc/lab_long_results": [], "lab_runs": [{ id: 6, status: "done", phase: "done", counts: {}, created_at: now }], "lab_settings": { id: 1, enabled: true, assets: ["NIFTY"] },
@@ -55,6 +58,7 @@ await p.route(/supabase\.co/, (r) => {
   const m = u.match(/\/rest\/v1\/(rpc\/[a-z_]+|[a-z_]+)/), key = m && m[1];
   let body = key in res ? res[key] : [];
   if (key === "lab_results_list") body = labRows;
+  if (key === "rpc/group_pbo") { const ids = JSON.parse(r.request().postData() || "{}").p_ids || []; body = body.filter((x) => ids.includes(x.id)); }
   if (key === "rpc/lab_scores") { const ids = JSON.parse(r.request().postData() || "{}").p_ids || []; body = body.filter((x) => ids.includes(x.id)); }
   if (/application\/vnd\.pgrst\.object/.test(r.request().headers()["accept"] || "") && Array.isArray(body)) body = body[0] ?? null;
   r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
@@ -81,10 +85,15 @@ if (!/15 min · Futures/.test(heads[2]) || !/3 strategies · 1 live · 2 paper/.
 if (!/Running P&L \+₹4,250/.test(heads[1]) || !/Booked P&L Live ₹9,000 · Paper ₹5,000/.test(heads[1]) || /14,000/.test(heads[1])) fail("gold group P&L", heads[1]);
 if (!/Running P&L −₹800/.test(heads[0])) fail("crude running P&L", heads[0]);
 // 2. Tags: Gold's best (902, consistency 83.5) isn't the live one (901) → amber; Nifty's best is live → green; Crude has nothing live → no tag.
-const tags = await p.$$eval(hdSel, (x) => x.map((t) => { const g = t.querySelector(".tag"); return g ? [g.className, g.textContent, g.title] : null; }));
+const tags = await p.$$eval(hdSel, (x) => x.map((t) => { const g = t.querySelector(".tag:not(.pbo)"); return g ? [g.className, g.textContent, g.title] : null; }));
 if (tags[0] !== null) fail("crude has no tag", tags[0]);
 if (!tags[1] || !/warn/.test(tags[1][0]) || tags[1][1] !== "best isn't live" || !/Lab #902/.test(tags[1][2]) || !/rank 2 of 3/.test(tags[1][2])) fail("gold amber tag", tags[1]);
 if (!tags[2] || !/ok/.test(tags[2][0]) || tags[2][1] !== "best is live") fail("nifty green tag", tags[2]);
+// 2a. The overfitting gauge (PBO) on each group with a lab measurement: Gold 63% red, Nifty 18% green, Crude none.
+const pbo = await p.$$eval(hdSel, (x) => x.map((t) => { const g = t.querySelector(".tag.pbo"); return g ? [g.className, g.textContent, g.title] : null; }));
+if (pbo[0] !== null) fail("crude: no PBO", pbo[0]);
+if (!pbo[1] || !/\bbad\b/.test(pbo[1][0]) || pbo[1][1] !== "PBO 63%" || !/Gold.*daily/i.test(pbo[1][2]) || !/worse than a random pick/.test(pbo[1][2]) || !/last 10 lab runs/.test(pbo[1][2])) fail("gold PBO chip", pbo[1]);
+if (!pbo[2] || !/\bok\b/.test(pbo[2][0]) || pbo[2][1] !== "PBO 18%" || !/intraday/.test(pbo[2][2])) fail("nifty PBO chip", pbo[2]);
 // 2b. (14 Nov 2026, Papa) The amber header names the best, with ⇄ Compare and "Switch to the best ▸"; the switch pauses the
 // live one (it exits on its own) and the best starts after that exit — one rpc, switch_to_best(live, best).
 if (!/Best: Lab #902 ★ 83\.5 vs live 61/.test(heads[1]) || !/⇄ Compare/.test(heads[1]) || !/Switch to the best ▸/.test(heads[1])) fail("gold header names the best with its buttons", heads[1]);
