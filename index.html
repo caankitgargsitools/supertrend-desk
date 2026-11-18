@@ -1111,7 +1111,7 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one .topalert { margin: 8px 8px 0 !important; max-width: none; }
   body.dk-one footer.disclaim { display: none; }
   body.dk-one #deskPane { height: calc(100vh - 16px); min-height: 640px; box-sizing: border-box; overflow: hidden; padding: 8px; gap: 8px;
-    grid-template-columns: minmax(0, .8fr) minmax(0, 1.3fr) minmax(0, 2.2fr) 300px; grid-template-rows: auto auto minmax(0, 1.25fr) minmax(0, 1fr) auto; }
+    grid-template-columns: minmax(0, .8fr) minmax(0, 1.3fr) minmax(0, 2.2fr) 300px; grid-template-rows: auto auto minmax(0, 1fr) auto auto; }
   body.dk-one #deskPane .dk-main, body.dk-one #deskPane .dk-low { display: contents; }
   body.dk-one #deskPane .dk-top, body.dk-one #deskPane .dk-modebar, body.dk-one #deskPane .dk-foot { grid-column: 1 / -1; }
   body.dk-one #deskPane .dk-top { padding: 6px 10px; row-gap: 5px; }
@@ -1133,11 +1133,11 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one .dk-flow { grid-column: 3; grid-row: 3 / 5; padding: 0 !important; }
   body.dk-one .dk-flow:not(.full) #dk_cv { flex: 1 1 auto; height: auto; min-height: 0; }
   body.dk-one .dk-flowfoot { padding: 4px 10px; }
-  body.dk-one .dk-heat { grid-column: 2; grid-row: 3; }
+  body.dk-one .dk-heat { grid-column: 2; grid-row: 3 / 5; }
   body.dk-one .dk-heat .dk-pos { max-height: none; flex: 1 1 auto; min-height: 0; }
   body.dk-one .dk-heat .dk-tiles { max-height: none; flex: 1 1 auto; min-height: 0; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
   body.dk-one .dk-tile .p { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
-  body.dk-one .dk-cvp { grid-column: 4; grid-row: 4; }
+  body.dk-one .dk-cvp { grid-column: 4; grid-row: 4; min-height: 260px; }
   body.dk-one .dk-cvp #dk_cvp { flex: 1 1 auto; height: auto; min-height: 110px; }
   body.dk-one .dk-cvp .dk-cvp-read { flex: 0 1 auto; min-height: 0; overflow: auto; }
   body.dk-one .dk-cvp .dk-cvp-read { margin: 0 0 4px; }
@@ -1145,15 +1145,36 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one #dk_cvp_big { display: none; }
   body.dk-one #dk_cvp_note, body.dk-one .dk-cvp .dk-date { display: none; }
   body.dk-one .dk-cvp .dk-cvp-read { gap: 2px 12px; }
-  body.dk-one .dk-tlp, body.dk-one .dk-skp { grid-column: 2; grid-row: 4; }
+  /* 18 Nov 2026 (Papa): Capital flow (or the Timeline, one switch) is a square under Activity, as wide as that column */
+  body.dk-one .dk-tlp, body.dk-one .dk-skp { grid-column: 1; grid-row: 4; aspect-ratio: 1 / 1; max-height: 40vh; min-height: 220px; }
   body.dk-one:not(.dk-low-sk) .dk-skp, body.dk-one.dk-low-sk .dk-tlp { display: none !important; }
+  /* Any widget opens large when its title band is clicked (18 Nov 2026, Papa); click the band again or press Esc. */
+  body.dk-one #deskPane .dk-panel { position: relative; }
+  body.dk-one #deskPane .dk-panel > .dk-ph { cursor: zoom-in; padding-right: 16px; }
+  body.dk-one #deskPane .dk-panel > .dk-ph::after { content: "⤢"; position: absolute; top: 6px; right: 8px; color: var(--dk-dim); font-size: 12px; pointer-events: none; }
+  body.dk-one #deskPane .dk-panel > .dk-ph:hover::after { color: var(--dk-amber); }
+  body.dk-one #deskPane .dk-panel.dk-max { position: fixed; inset: 14px; z-index: 60; grid-column: auto; grid-row: auto; aspect-ratio: auto; max-height: none;
+    padding: 14px 18px; box-shadow: 0 0 0 100vmax rgba(3,6,12,.72); }
+  body.dk-one #deskPane .dk-panel.dk-max > .dk-ph { cursor: zoom-out; margin-bottom: 10px; }
+  body.dk-one #deskPane .dk-panel.dk-max > .dk-ph { padding-right: 70px; }
+  body.dk-one #deskPane .dk-panel.dk-max > .dk-ph::after { content: "✕  Esc"; top: 12px; right: 16px; color: var(--dk-muted); }
+  body.dk-one .dk-heat.dk-max .dk-pos { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  body.dk-one .dk-heat.dk-max .dk-tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  body.dk-one .dk-heat.dk-max .dk-tile { min-height: 72px; }
+  body.dk-one .dk-actp.dk-max .dk-feed { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 10px; }
+  body.dk-one .dk-actp.dk-max .dk-feed div { font-size: 12.5px; grid-template-columns: 96px minmax(0, 1fr) auto; }
+  body.dk-one .dk-actp.dk-max .dk-feed div > :last-child { grid-column: auto; }
+  body.dk-one .dk-cvp.dk-max #dk_cvp_note, body.dk-one .dk-cvp.dk-max .dk-date { display: revert; }
+  body.dk-one .dk-cvp.dk-max .dk-cvp-read b { font-size: 16px; }
+  body.dk-one .dk-acctp.dk-max .dk-big { font-size: 44px; }
+  body.dk-one .dk-acctp.dk-max .dk-kv { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   body.dk-one .dk-lowtog { display: inline-block; margin-left: auto; padding: 1px 7px; font-size: 10px; }
   body.dk-one .dk-tlp .dk-ph > .dk-lbl:last-child, body.dk-one .dk-skp .dk-ph > .dk-lbl:last-child { display: none; }
   body.dk-one .dk-svgbox { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   body.dk-one #dk_tl, body.dk-one #dk_sk { display: block; height: 100%; }
   /* 18 Nov 2026 (Papa): Activity runs the full height of the left column; the system feeds sit in the profit flow's
      top-right corner instead of the running / locked / booked box (those are on the account card). */
-  body.dk-one .dk-actp { grid-column: 1; grid-row: 3 / 5; }
+  body.dk-one .dk-actp { grid-column: 1; grid-row: 3; }
   body.dk-one .dk-flow { position: relative; }
   body.dk-one .dk-flow > .dk-pulsebox { position: absolute; top: 34px; right: 10px; width: min(330px, 46%); z-index: 1; margin: 0; padding: 7px 9px 6px;
     background: rgba(9,13,20,.82); border: 1px solid var(--dk-line); border-radius: 6px; }
@@ -7117,7 +7138,7 @@ const myStrats = () => state.strategies.filter((x) => me && x.owner_id === me.us
 function instName(s) { return s.trade_type === "OPTIONS" ? (s.option_side === "SELL" ? "Option writing" : "Option buying") : "Futures"; }
 function assetLabel(k) { return (PRESETS[k] && PRESETS[k].name) || k || "–"; }
 const NEW_PANES = ["listPane", "marketPane", "walletPane", "adminPane", "termsPane", "passPane", "ideasPane", "predPane", "cmpPane", "comboPane", "healthPane", "spreadPane", "deskPane"];
-function hideNewPanes() { NEW_PANES.forEach((id) => $(id).hidden = true); document.body.classList.remove("dk-one"); }
+function hideNewPanes() { NEW_PANES.forEach((id) => $(id).hidden = true); document.body.classList.remove("dk-one"); document.querySelectorAll("#deskPane .dk-panel.dk-max").forEach((x) => x.classList.remove("dk-max")); }
 function markNav(id) { document.querySelectorAll("#nav .btn").forEach((b) => b.id === id ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")); }
 /** One page at a time: list, strat, market, wallet, admin, conn, cap, lab, terms. */
 /* ---------- stay on the same page after a refresh (Papa, 3 Nov): page, open strategy and Strategies tab, per browser ---------- */
@@ -10265,7 +10286,7 @@ function deskOneApply() {
     if (on && moved) flow.appendChild(pb); else if (!on && moved) home.prepend(pb);
     if (moved && page === "desk" && desk.lanes) requestAnimationFrame(() => deskLayout()); // the agents' column starts below the box
   }
-  let low = "tl"; try { low = localStorage.getItem("dkLow") === "sk" ? "sk" : "tl"; } catch { /* private window */ }
+  let low = "sk"; try { low = localStorage.getItem("dkLow") === "tl" ? "tl" : "sk"; } catch { /* private window */ } // Capital flow first (18 Nov 2026)
   document.body.classList.toggle("dk-low-sk", on && low === "sk");
   const b = $("dk_one"); if (b) { b.setAttribute("aria-pressed", String(want)); b.textContent = want ? "Show menu" : "One screen"; }
 }
@@ -10273,6 +10294,20 @@ document.querySelectorAll("#deskPane .dk-lowtog").forEach((b) => b.addEventListe
   try { localStorage.setItem("dkLow", b.dataset.low); } catch { /* private window: this visit only */ }
   deskOneApply(); requestAnimationFrame(() => { deskTimeline(); deskSankey(); });
 }));
+/** A widget opened large (Papa, 18 Nov 2026): one at a time, over the desk; the charts are drawn again at the new size. */
+function dkMax(panel, on) {
+  document.querySelectorAll("#deskPane .dk-panel.dk-max").forEach((x) => { if (x !== panel || on === false) x.classList.remove("dk-max"); });
+  if (panel && on !== false) panel.classList.toggle("dk-max", on ?? !panel.classList.contains("dk-max"));
+  requestAnimationFrame(() => { deskTimeline(); deskSankey(); deskCvpDraw(); });
+}
+document.getElementById("deskPane").addEventListener("click", (e) => {
+  if (!document.body.classList.contains("dk-one")) return;
+  const ph = e.target.closest(".dk-ph"), panel = ph && ph.parentElement && ph.parentElement.classList.contains("dk-panel") ? ph.parentElement : null;
+  if (!panel || e.target.closest("button, input, select, a, label, [role=group]")) return;
+  if (panel.classList.contains("dk-flow")) { $("dk_fs").click(); return; } // the profit flow has its own full screen
+  dkMax(panel);
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.querySelector("#deskPane .dk-panel.dk-max")) dkMax(null, false); });
 function deskRelayout() { if (page !== "desk") return; deskLayout(); desk.pool = []; desk.amb = []; deskFill(); deskTimeline(); deskSankey(); deskCvpDraw(); }
 $("dk_one").addEventListener("click", () => {
   try { localStorage.setItem("deskOne", deskOneWanted() ? "0" : "1"); } catch { /* private window: this visit only */ }

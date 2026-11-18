@@ -884,10 +884,16 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (`body.dk-one`): the profit flow draws no running / locked / booked corner box (the account card has them; the box stays
   off the one-screen desk); the System feeds box (`.dk-pulsebox`) is moved by `deskOneApply` into the flow panel's
   top-right corner (back to Activity's top otherwise) and the decorative agents start below it (`deskLayout`, measured);
-  columns Activity (full height) · Strategies over Timeline · Profit flow · Account over Capital deployed vs profit
-  (`minmax(0,.8fr) minmax(0,1.3fr) minmax(0,2.2fr) 300px`; 1280–1599 px `.7fr 1.1fr 1.6fr 270px`; rows 1.25fr / 1fr);
-  Timeline and Capital flow share one cell with a switch (`.dk-lowtog`, localStorage `dkLow`). Strategies panel
-  redesign: suggestions put to Papa, not built. Tested in `tests/ui/ui_desk.mjs` ("one screen layout").
+  columns Activity over a square Capital flow box · Strategies (full height) · Profit flow · Account over Capital
+  deployed vs profit (`minmax(0,.8fr) minmax(0,1.3fr) minmax(0,2.2fr) 300px`; 1280–1599 px `.7fr 1.1fr 1.6fr 270px`;
+  rows `minmax(0,1fr) auto`); the square box (`aspect-ratio: 1`, 220 px–40vh) shows Capital flow by default with a switch
+  to the Timeline (`.dk-lowtog`, localStorage `dkLow` = "tl" keeps the Timeline). Same day (Papa: "whenever I click on the
+  top band of that widget, it should expand to kind of full screen … strategies … show me 4 rows which lists all the
+  strategies"): **every widget opens large from its title band** (`dkMax`, class `.dk-max`: fixed over the desk with a dim
+  backdrop, "✕ Esc"; the band again or Esc closes; buttons / inputs in the band keep working; the profit flow's band
+  opens its own full screen `#dk_fs`): Strategies 4 cards across (≈ 24 positions on 1920 × 1080; tiles 150 px), Activity
+  in 3 columns, the capital chart with its dates and note, the account's figures bigger; charts redrawn at the new size.
+  Tested in `tests/ui/ui_desk.mjs` ("one screen layout", "opens large").
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
