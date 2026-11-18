@@ -32,7 +32,7 @@ const strategies = [
 const cons = { 901: 61, 902: 83.5, 903: 40, 904: 70, 911: 77, 912: 52, 913: 66, 921: 71, 922: 58 };
 const me = { user_id: A, email: "ca.ankitgarg@gmail.com", role: "admin", status: "active", can_build: true, terms_accepted: true, billing: {}, entries: { ok: true } };
 // A lab feed whose results carry the desk strategies' lab ids (so the Lab table shows "On desk").
-const labRow = (id, asset, tf, label) => ({ id, run_id: 6, created_at: now, asset, stage: "screened", passed: true, basic_passed: true, score: 5, champion: false, label, fingerprint: `f${id}`, family: `fam${id}`, has_risk: false, robust_status: "done",
+const labRow = (id, asset, tf, label) => ({ id, run_id: 6, created_at: now, asset, mode: tf === 1440 ? "DAILY" : "INTRADAY", stage: "screened", passed: true, basic_passed: true, score: 5, champion: false, label, fingerprint: `f${id}`, family: `fam${id}`, has_risk: false, robust_status: "done",
   metrics: { passed: true, why: [], score: 3.2, full: { n: 40, win_rate: 55, net: 120000, gross: 130000, costs: 10000, pf: 1.8, max_dd: 30000, avg: 3000, best: 20000, worst: -9000 }, train: { n: 30, win_rate: 55, net: 90000, gross: 1, costs: 1, pf: 1.7, max_dd: 30000, avg: 1, best: 1, worst: 1 },
     test: { n: 10, win_rate: 60, net: 30000, gross: 1, costs: 1, pf: 2, max_dd: 8000, avg: 1, best: 1, worst: 1 }, months: [{ m: "2026-01", net: 10000, n: 4 }], months_n: 12, train_months_n: 9, pos_months: 8, margin_lot: 150000, ret_margin: 80 },
   robust: { passed: true, why: [], rev: 5, status: "done", self: { net: 120000, max_dd: 30000 }, bh: { net: 60000, max_dd: 40000, ratio: 1.5 }, vs_bh: 2, risk_vs_bh: 2.67, assets: { ok: 4, n: 6, list: [] }, tfs: { ok: 2, n: 3, list: [] },
@@ -47,6 +47,8 @@ const res = {
   // Overfitting gauge (17 Nov 2026): Gold daily 63% (red), Nifty 15 min 18% (green), Crude none.
   "rpc/group_pbo": [[901, "GOLD", "DAILY", 0.63], [902, "GOLD", "DAILY", 0.63], [903, "GOLD", "DAILY", 0.63], [904, "GOLD", "DAILY", 0.63], [911, "NIFTY", "INTRADAY", 0.18], [912, "NIFTY", "INTRADAY", 0.18], [913, "NIFTY", "INTRADAY", 0.18]]
     .map(([id, asset, mode, pbo]) => ({ id, asset, mode, pbo, runs: 10, strategies: 29, last_at: "2026-10-30T18:34:43Z" })),
+  // The Lab table's PBO column (18 Nov 2026): per asset and kind; Crude intraday has none.
+  "rpc/pbo_summary": [{ asset: "GOLD", mode: "DAILY", pbo: 0.63, runs: 10, strategies: 29, last_at: "2026-10-30T18:34:43Z" }, { asset: "NIFTY", mode: "INTRADAY", pbo: 0.18, runs: 10, strategies: 45, last_at: "2026-10-30T18:34:43Z" }],
   "rpc/lab_scores": Object.entries(cons).map(([id, c]) => ({ id: Number(id), score: 5, consistency: c })),
   "rpc/lab_feed": { run: { id: 6, status: "done", counts: { generated: 300, passed: 4 }, from_day: "2025-10-09", split_day: "2026-07-09", to_day: "2026-10-09", created_at: now }, rows: labRows },
   "lab_results": labRows, "rpc/my_lab_requests": [], "rpc/lab_long_map": {}, "rpc/lab_long_results": [], "lab_runs": [{ id: 6, status: "done", phase: "done", counts: {}, created_at: now }], "lab_settings": { id: 1, enabled: true, assets: ["NIFTY"] },
@@ -140,6 +142,18 @@ await p.screenshot({ path: `group_${theme}_${width}.png`, fullPage: true });
 await p.click("#openLab"); await p.waitForTimeout(1400);
 const marks = await p.$$eval(".chip.ondesk", (x) => x.map((t) => t.textContent));
 if (!marks.includes("On desk · Live") || !marks.includes("On desk · Paper")) fail("lab on-desk marks", marks);
+// 6a. The PBO column: each row shows its asset's figure for its kind (Gold daily 63% red, Nifty intraday 18% green, Crude none).
+// (a table on a computer, cards on a phone)
+const pboCells = await p.$$eval(phone ? "#lab_cards > div" : "#lab_body tr.pick", (rows) => rows.filter((tr) => tr.querySelector(".t, .nm")).map((tr) => {
+  const c = [...tr.querySelectorAll("[title]")].find((el) => /verfitting/.test(el.title));
+  return [tr.querySelector(".t, .nm").textContent, c ? c.textContent.trim() : null, c ? c.className : ""];
+}));
+const pg = (re) => pboCells.find((x) => re.test(x[0]));
+if (!pg(/Gold/) || pg(/Gold/)[1] !== "63%" || !/red/.test(pg(/Gold/)[2])) fail("lab PBO gold", pboCells);
+if (!pg(/Nifty/) || pg(/Nifty/)[1] !== "18%" || !/green/.test(pg(/Nifty/)[2])) fail("lab PBO nifty", pboCells);
+if (!pg(/Crude/) || pg(/Crude/)[1] !== "–") fail("lab PBO crude: none", pboCells);
+const labHeads = await p.$$eval("#lab_head *", (x) => x.map((t) => t.textContent.trim()));
+if (!phone && !labHeads.includes("PBO")) fail("PBO heading in the lab table", labHeads);
 const live = (await p.$$(".chip.ondesk")).find(async () => true);
 await p.click(".chip.ondesk:text('On desk · Live') >> nth=0"); await p.waitForTimeout(600);
 if (await p.isHidden("#stratPane")) fail("on-desk mark opens the strategy");

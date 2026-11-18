@@ -1077,7 +1077,8 @@ details.xp > summary:hover { background: var(--blue-soft); }
 .dk-pc .h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font: 700 12.5px/1.2 var(--font-ui); color: var(--dk-text); }
 .dk-pc .h .s { font: 600 10px var(--font-data); color: var(--dk-muted); }
 .dk-pc .h .sd { font: 700 10px var(--font-data); letter-spacing: .05em; } .dk-pc .h .sd.long { color: var(--dk-up); } .dk-pc .h .sd.short { color: var(--dk-down); }
-.dk-pc .h .v { margin-left: auto; font: 700 13px var(--font-data); } .dk-pc .h .v .hint { display: none; }
+.dk-pc .h .v { margin-left: auto; font: 700 13px var(--font-data); display: inline-flex; flex-direction: column; align-items: flex-end; } .dk-pc .h .v .hint { display: none; }
+.dk-pc .h .v .lk { font: 600 10.5px var(--font-data); margin-top: 2px; } .dk-pc .h .v .lk:empty { display: none; } .dk-pc .lk .pos-num { color: var(--dk-up); } .dk-pc .lk .neg-num { color: var(--dk-down); }
 .dk-pc .pladder { margin-top: 4px; } .dk-pc .pladder .pl-cells { font-size: 10.5px; }
 .dk-tile.flash { box-shadow: 0 0 0 1px var(--dk-amber) inset; }
 .dk-low { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; }
@@ -5589,7 +5590,27 @@ async function loadLab() {
   lab.loading = true;
   try { await loadLabRun(stale); } finally { if (!stale()) lab.loading = false; }
 }
+/* PBO per asset and kind in the Strategy Lab table (18 Nov 2026, Papa: "that will help me in selecting the strategies"):
+   pbo_summary() (migration 113) — the median PBO of the latest 10 lab runs per asset and mode, read with each lab load
+   (at most every 10 minutes). A row's figure is its asset's for its mode (DAILY / INTRADAY). */
+const labPboSum = { at: 0, map: new Map() };
+async function loadPboSummary() {
+  if (Date.now() - labPboSum.at < 600000 && labPboSum.map.size) return;
+  const rows = await db.rpc("pbo_summary").then((r) => r.data || []).catch(() => null);
+  if (!rows) return;
+  labPboSum.at = Date.now(); labPboSum.map = new Map(rows.map((x) => [`${x.asset}|${x.mode}`, x]));
+}
+const labPboOf = (r) => {
+  const mode = r.mode || (r.config && r.config.rules && r.config.rules.daily ? "DAILY" : null);
+  return mode ? labPboSum.map.get(`${r.asset}|${mode}`) || null : null;
+};
+function labPboHTML(r) {
+  const x = labPboOf(r); if (!x || x.pbo == null) return '<span class="hint" title="No overfitting measurement for this asset and kind yet">–</span>';
+  const v = Number(x.pbo), pc = Math.round(v * 100), c = v > 0.5 ? "red" : v > 0.2 ? "yellow" : "green";
+  return `<span class="chip ${c}" title="${esc(`Overfitting (PBO) for ${assetLabel(x.asset)} ${x.mode === "DAILY" ? "daily" : "intraday"} strategies: ${pc}% — in the lab's tests the one that looked best on half of the history did worse than the average on the other half in ${pc}% of the splits. Under 20% the ranking on this asset holds up, around 50% it is a coin toss, over 50% the top backtest tends to disappoint. Median of the last ${x.runs} runs (~${x.strategies} strategies each), latest ${fmtDay(x.last_at)}.`)}">${pc}%</span>`;
+}
 async function loadLabRun(stale) {
+  await loadPboSummary().catch(() => {});
   // Today's margin for one lot of every asset (Dhan's margin calculator; crypto: Delta at 10× leverage), refreshed each run.
   lab.marg = await db.from("lab_margins").select("asset, detail, checked_at").then((x) => Object.fromEntries((x.data || []).map((m) => [m.asset, { ...(m.detail || {}), at: m.checked_at }]))).catch(() => lab.marg || {});
   if (!isAdmin()) {
@@ -6261,6 +6282,7 @@ const LAB_COLS = [
   { k: "months", w: 54, t: "Months +", f: "num", n: true, v: (g) => g.m.pos_months, tip: "Profitable months out of the months traded" },
   { k: "desk", w: 58, t: "Desk score (0–100)", f: "num", n: true, v: (g) => { const d = deskScore(g.r); return d ? d.score : null; }, tip: "Steady returns 35 + low drawdown 25 + works on other assets 20 + works on other timeframes 20 (hover a score for its parts)" },
   { k: "cons", w: 62, t: "Consistency (0–100)", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.consistency ? x.consistency.score : null; }, tip: "The lab's ranking: steady profit scores more than the same profit made in a few good stretches. Years profitable 25 + quarters profitable 25 + smooth, even profit curve 20 + yearly profit ÷ worst drawdown 15 + worst year 15. Open a strategy to see the breakdown." },
+  { k: "pbo", w: 52, t: "Overfitting (PBO)", f: "num", n: true, v: (g) => { const x = labPboOf(g.r); return x && x.pbo != null ? Math.round(Number(x.pbo) * 100) : null; }, tip: "Probability of Backtest Overfitting for this asset and kind (daily / intraday), from the lab's own runs: how often the strategy that looked best on half of the history did worse than the average on the other half. Lower is better: under 20% the ranking holds up, around 50% it is a coin toss, over 50% the top backtest tends to disappoint. It is the same for every strategy of an asset and kind — use it to judge how far to trust the ranking there." },
   { k: "quality", w: 58, t: "Quality (0–100)", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.quality ? x.quality.score : null; }, tip: "Quality score from the whole year-by-year test (up to 10 years): unbroken runs of profitable years, profitable months, yearly profit ÷ worst drawdown, profit factor, how even the yearly profits are, other assets and timeframes, and enough trades. Open a strategy to see the breakdown." },
   { k: "score", w: 50, t: "Rank score (9 mo)", f: "num", n: true, v: (g) => g.m.score, tip: "The first-round ranking: net of the first 9 months ÷ their worst drawdown × share of profitable months" },
   { k: "oassets", w: 56, t: "Other assets +", f: "num", n: true, v: (g) => { const x = robOf(g.r); return x && x.status === "done" ? x.assets_ok : null; }, tip: "Of the other assets the same rules were tried on (same family first: indices for index strategies, commodities for commodity ones), how many made money with a profit factor of 1.1 or more" },
@@ -6280,6 +6302,7 @@ const labPctC = (v) => v == null ? "–" : `<span class="${v > 0 ? "pos-num" : v
 const labRatio = (ok, n, need) => n == null ? "–" : `<span class="${n && ok >= need ? "pos-num" : "neg-num"}">${ok ?? 0}/${n ?? 0}</span>`;
 function labRobDone(r) { const x = robOf(r); return x && x.status === "done" ? x : null; }
 const LAB_SHOW = {
+  pbo: (g) => labPboHTML(g.r),
   asset: (g) => esc(labAssetName(g.r.asset)),
   style: (g) => { const c = g.r.config; if (!c) return esc(labStyle(g.r)); return esc(`${c.rules && c.rules.daily ? "Daily" : `${c.timeframe_min}m ${c.intraday ? "intraday" : "positional"}`}${c.rules && c.rules.candles === "HA" ? " · HA" : ""}`); },
   trades: (g) => g.m.full.n ?? "–",
@@ -6310,12 +6333,12 @@ const LAB_SHOW = {
  * named in the header, each sortable and filterable on its own). 14 columns instead of 26, so no sideways scrolling
  * on a laptop screen.
  */
-const LAB_GROUPS = [["no"], ["name"], ["asset", "style"], ["trades", "win"], ["net", "test"], ["dd", "pf"], ["months", "years"], ["cons", "quality"],
+const LAB_GROUPS = [["no"], ["name"], ["asset", "style"], ["trades", "win"], ["net", "test"], ["dd", "pf"], ["months", "years"], ["cons", "quality"], ["pbo"],
   ["desk", "score"], ["mtoday", "rtoday"], ["margin", "rom"], ["oassets", "otfs"], ["vsbh", "nights"], ["longnet", "longpos"]];
 const labCol = (k) => LAB_COLS.find((c) => c.k === k);
 /** Short names for the two-line header (the full name and explanation show on hover). */
 const LAB_SHORT = { asset: "Asset", style: "Style", trades: "Trades", win: "Win %", net: "Net 1 yr", test: "Last 3 mo", dd: "Max DD", pf: "PF", months: "Months +",
-  years: "Years +", cons: "Consistency", quality: "Quality", desk: "Desk score", score: "Rank (9 mo)", mtoday: "Margin today", rtoday: "Return on it",
+  years: "Years +", cons: "Consistency", quality: "Quality", pbo: "PBO", desk: "Desk score", score: "Rank (9 mo)", mtoday: "Margin today", rtoday: "Return on it",
   margin: "Avg margin", rom: "Return on margin", oassets: "Other assets", otfs: "Other TFs", vsbh: "vs Buy & Hold", nights: "Nights passed", longnet: "Long test net",
   longpos: "Periods +" };
 /** Status codes under each strategy's name, explained in the legend above the table. */
@@ -6613,7 +6636,7 @@ function renderLabCards(fams, pc, rs) {
       <div class="chips">${labDeskMark(g) || labDeskChip(g, f, sub)}${status}${g.rechecking ? '<span class="chip blue">Re-checking today</span>' : ""}${r.refresh ? '<span class="chip blue">Re-tested (current rules)</span>' : r.champion ? '<span class="chip green">Re-tested</span>' : ""}${r.starred ? '<span class="chip yellow">★</span>' : ""}</div>
       <div class="mg">${cell("Net (1 yr)", pc(m.full.net) + longNetLine(r))}${cell("Win %", m.full.win_rate)}${cell("Trades", m.full.n)}
         ${cell("Max DD", rs(m.full.max_dd))}${cell("PF", m.full.pf ?? "–")}${cell("Months +", `${m.pos_months}/${m.months_n}`)}
-        ${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Margin today (1 lot)", marginToday(r) ? rupees(marginToday(r)) : "–")}${cell("1-yr net on today's margin", returnToday(g) == null ? "–" : returnToday(g) + "%")}${cell("Desk score", deskCell(deskScore(r)))}${cell("Consistency", x && x.consistency ? `<span class="${x.consistency.score >= 70 ? "pos-num" : x.consistency.score < 40 ? "neg-num" : ""}">${x.consistency.score}</span>` : "–")}${cell("Quality", x && x.quality ? `<span class="${x.quality.score >= 70 ? "pos-num" : x.quality.score < 40 ? "neg-num" : ""}">${x.quality.score}</span>` : "–")}
+        ${cell("Overfitting (PBO)", labPboHTML(r))}${cell("Last 3 mo", pc(m.test.net))}${cell("On margin", m.ret_margin == null ? "–" : m.ret_margin + "%")}${cell("Margin today (1 lot)", marginToday(r) ? rupees(marginToday(r)) : "–")}${cell("1-yr net on today's margin", returnToday(g) == null ? "–" : returnToday(g) + "%")}${cell("Desk score", deskCell(deskScore(r)))}${cell("Consistency", x && x.consistency ? `<span class="${x.consistency.score >= 70 ? "pos-num" : x.consistency.score < 40 ? "neg-num" : ""}">${x.consistency.score}</span>` : "–")}${cell("Quality", x && x.quality ? `<span class="${x.quality.score >= 70 ? "pos-num" : x.quality.score < 40 ? "neg-num" : ""}">${x.quality.score}</span>` : "–")}
         ${done ? cell("Assets +", ratio(x.assets_ok, x.assets_n)) + cell("Timeframes +", x.tfs_n ? ratio(x.tfs_ok, x.tfs_n, x.tfs_n >= 3 ? 2 : 1) : "n/a") + cell("Years +", x.years_n == null ? "–" : x.q_n ? `<span class="${x.q_ok >= 3 ? "pos-num" : "neg-num"}">${x.q_ok}/${x.q_n} qtr</span>` : `<span class="${x.years_n >= 3 && x.years_ok === x.years_n ? "pos-num" : "neg-num"}">${x.years_ok}/${x.years_n}</span>`) : ""}</div>
       <div class="cardbtns">${!sub && f.members.length > 1 ? `<button type="button" class="btn small fam">${lab.openFam.has(f.key) ? "Hide similar" : `+${f.members.length - 1} similar`}</button>` : ""}${isAdmin() && r.config ? cmpBtnHTML("lab", r.id, r.label) : ""}</div>`;
     el.querySelector(".nm").textContent = r.label;
@@ -8250,8 +8273,8 @@ function upnlHtml(s) {
 /** Puts the latest prices into every place on screen that shows an open position, with a short flash on change. */
 function paintMarks(prev) {
   // Three passes over the screen per paint (not three per strategy): id → the elements that show that position.
-  const by = new Map(), add = (k) => document.querySelectorAll(`[data-${k}]`).forEach((el) => { const id = el.dataset[k]; if (!by.has(id)) by.set(id, { upnl: [], ltp: [], ltpn: [], smeter: [], ladder: [] }); by.get(id)[k].push(el); });
-  add("upnl"); add("ltp"); add("ltpn"); add("smeter"); add("ladder");
+  const by = new Map(), add = (k) => document.querySelectorAll(`[data-${k}]`).forEach((el) => { const id = el.dataset[k]; if (!by.has(id)) by.set(id, { upnl: [], ltp: [], ltpn: [], smeter: [], ladder: [], lock: [] }); by.get(id)[k].push(el); });
+  add("upnl"); add("ltp"); add("ltpn"); add("smeter"); add("ladder"); add("lock");
   for (const s of state.strategies || []) {
     const els = by.get(s.id); if (!els) continue;
     for (const el of els.smeter) el.innerHTML = stopMeterHTML(s);
@@ -8261,6 +8284,7 @@ function paintMarks(prev) {
       const p = prev && prev.get(s.id);
       if (p != null && s.pos_upnl != null && Number(s.pos_upnl) !== p) { el.classList.remove("tick-up", "tick-down"); requestAnimationFrame(() => el.classList.add(Number(s.pos_upnl) > p ? "tick-up" : "tick-down")); }
     }
+    for (const el of els.lock) el.innerHTML = lockLineHtml(s);
     for (const el of els.ltp) el.textContent = posPriceText(s);
     for (const el of els.ltpn) el.textContent = fmtNum(dispNow(s));
   }
@@ -9418,6 +9442,14 @@ function deskPaint() {
 /** Tiles or Positions in the Strategies panel (localStorage dkHeat). Positions = one card per open position: name, side and
  *  lots, running P&L, and the ladder (stop · entry · now · target); prices and P&L follow the live marks (paintMarks). */
 function dkHeatView() { try { return localStorage.getItem("dkHeat") === "pos" ? "pos" : "tiles"; } catch { return "tiles"; } }
+/** Under a position's running P&L (Desk › Positions; 18 Nov 2026, Papa): what the stop locks in now, or what it would
+ *  still lose if hit; blank when the position has no stop-loss. */
+function lockLineHtml(s) {
+  const v = lockedOf(s); if (v == null) return "";
+  const t = Math.trunc(v);
+  return t >= 0 ? `<span class="pos-num" title="If the stop is hit now this much profit stays (before exit charges)">Locked ${rupeesSigned(t)}</span>`
+    : `<span class="neg-num" title="The stop is still below the entry for a long (above it for a short): if hit now this trade loses this much (before exit charges)">At stop ${rupeesSigned(t)}</span>`;
+}
 function deskPosPaint(open) {
   const v = dkHeatView(), box = $("dk_pos");
   $("dk_heatv").querySelectorAll("[data-v]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
@@ -9426,7 +9458,7 @@ function deskPosPaint(open) {
   if (v !== "pos") return;
   box.innerHTML = open.slice().sort((a, b) => (Number(b.pos_upnl) || 0) - (Number(a.pos_upnl) || 0)).map((s) => {
     const lots = Number(s.pos_lots) || 0, sd = s.position === "LONG" ? "long" : "short";
-    return `<div class="dk-pc" data-dk="${esc(s.id)}" role="button" tabindex="0"><div class="h"><span>${esc(dkName(s.underlying))}</span><span class="s">${esc(dkLabId(s))}</span><span class="sd ${sd}">${sd.toUpperCase()}${lots ? ` ${lots} LOT${lots === 1 ? "" : "S"}` : ""}</span><span class="v" data-upnl="${esc(s.id)}">${upnlHtml(s)}</span></div><div data-ladder="${esc(s.id)}">${ladderHTML(s)}</div></div>`;
+    return `<div class="dk-pc" data-dk="${esc(s.id)}" role="button" tabindex="0"><div class="h"><span>${esc(dkName(s.underlying))}</span><span class="s">${esc(dkLabId(s))}</span><span class="sd ${sd}">${sd.toUpperCase()}${lots ? ` ${lots} LOT${lots === 1 ? "" : "S"}` : ""}</span><span class="v"><span data-upnl="${esc(s.id)}">${upnlHtml(s)}</span><span class="lk" data-lock="${esc(s.id)}">${lockLineHtml(s)}</span></span></div><div data-ladder="${esc(s.id)}">${ladderHTML(s)}</div></div>`;
   }).join("") || '<p class="dk-lbl">No open position in this mode.</p>';
 }
 $("dk_heatv").addEventListener("click", (e) => { const b = e.target.closest("[data-v]"); if (!b) return; try { localStorage.setItem("dkHeat", b.dataset.v); } catch { /* private window */ } deskPosPaint(dkOpen()); });

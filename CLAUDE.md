@@ -867,6 +867,17 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   ~30 fresh tries, so one run is noisy), runs, strategies per run, latest date; read with the lab scores (`labPbo`).
   Figures stop at 30 Oct (lab jobs off). On 17 Nov: Copper daily 81%, Bitcoin daily 80%, Sol daily 76%, Gold daily 68%.
   Test: `tests/ui/ui_group.mjs` "2a".
+- **PBO in the Strategy Lab table and locked profit on Desk › Positions (18 Nov 2026, Papa: "Are we showing this PBO score
+  on the strategy lab list also? … that will help me in selecting the strategies … on the position tile in one view …
+  just below that profit, show logged profit … no fixed stop loss, just keep it blank … still in loss because of the stop
+  loss, show that as well"; migration 113)**: Lab table column "PBO" (`LAB_COLS` k `pbo`, sortable / filterable, its own
+  group after Consistency / Quality; phone cards a cell "Overfitting (PBO)") = the row's asset and mode's median PBO of the
+  latest 10 runs (`pbo_summary()`, read with each lab load at most every 10 min, `labPboSum` / `labPboOf` / `labPboHTML`;
+  red > 50%, amber 20–50%, green < 20%, "–" when not measured). `lab_feed` rows now carry `mode` (the migration rewrites
+  the function with `l.mode` added). The same figure for every strategy of an asset and kind — it says how far the
+  ranking there can be trusted. Desk › Positions tile: under the running P&L `lockLineHtml(s)` (`[data-lock]`, repainted
+  by `paintMarks`): "Locked +₹X" (green) = `lockedOf(s)` ≥ 0, "At stop −₹X" (red) when the stop would still lose, blank
+  without a stop. Tests: `tests/ui/ui_group.mjs` "6a", `tests/ui/ui_desk_lock.mjs` (args: theme width).
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
