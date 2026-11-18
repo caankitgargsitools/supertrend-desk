@@ -1101,6 +1101,7 @@ body.dk-fs-on { overflow: hidden; }
 /* One-screen desk (Papa, 6 Nov 2026: "fit it in one screen … hide the menu on the left"): on big screens every panel
    sits in one screen-high grid; the left menu is hidden while the Desk is open. Toggle #dk_one (localStorage deskOne). */
 .dk-onebtn { display: none; margin-left: auto; }
+.dk-lowtog { display: none; }
 #deskPane .dk-step { text-transform: none; letter-spacing: .02em; color: var(--dk-amber); }
 @media (min-width: 1280px) {
   .dk-onebtn { display: inline-block; }
@@ -1110,7 +1111,7 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one .topalert { margin: 8px 8px 0 !important; max-width: none; }
   body.dk-one footer.disclaim { display: none; }
   body.dk-one #deskPane { height: calc(100vh - 16px); min-height: 640px; box-sizing: border-box; overflow: hidden; padding: 8px; gap: 8px;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2.4fr) 250px; grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) auto; }
+    grid-template-columns: minmax(0, .8fr) minmax(0, 1.3fr) minmax(0, 2.2fr) 300px; grid-template-rows: auto auto minmax(0, 1.25fr) minmax(0, 1fr) auto; }
   body.dk-one #deskPane .dk-main, body.dk-one #deskPane .dk-low { display: contents; }
   body.dk-one #deskPane .dk-top, body.dk-one #deskPane .dk-modebar, body.dk-one #deskPane .dk-foot { grid-column: 1 / -1; }
   body.dk-one #deskPane .dk-top { padding: 6px 10px; row-gap: 5px; }
@@ -1136,19 +1137,26 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one .dk-heat .dk-pos { max-height: none; flex: 1 1 auto; min-height: 0; }
   body.dk-one .dk-heat .dk-tiles { max-height: none; flex: 1 1 auto; min-height: 0; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
   body.dk-one .dk-tile .p { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
-  body.dk-one .dk-cvp { grid-column: 1; grid-row: 3; }
-  body.dk-one .dk-cvp #dk_cvp { flex: 1 1 auto; height: auto; min-height: 0; }
+  body.dk-one .dk-cvp { grid-column: 4; grid-row: 4; }
+  body.dk-one .dk-cvp #dk_cvp { flex: 1 1 auto; height: auto; min-height: 110px; }
+  body.dk-one .dk-cvp .dk-cvp-read { flex: 0 1 auto; min-height: 0; overflow: auto; }
   body.dk-one .dk-cvp .dk-cvp-read { margin: 0 0 4px; }
   body.dk-one .dk-cvp .dk-cvp-read b { font-size: 13px; }
   body.dk-one #dk_cvp_big { display: none; }
   body.dk-one #dk_cvp_note, body.dk-one .dk-cvp .dk-date { display: none; }
   body.dk-one .dk-cvp .dk-cvp-read { gap: 2px 12px; }
-  body.dk-one .dk-tlp { grid-column: 2; grid-row: 4; }
-  body.dk-one .dk-skp { grid-column: 1; grid-row: 4; }
+  body.dk-one .dk-tlp, body.dk-one .dk-skp { grid-column: 2; grid-row: 4; }
+  body.dk-one:not(.dk-low-sk) .dk-skp, body.dk-one.dk-low-sk .dk-tlp { display: none !important; }
+  body.dk-one .dk-lowtog { display: inline-block; margin-left: auto; padding: 1px 7px; font-size: 10px; }
   body.dk-one .dk-tlp .dk-ph > .dk-lbl:last-child, body.dk-one .dk-skp .dk-ph > .dk-lbl:last-child { display: none; }
   body.dk-one .dk-svgbox { flex: 1 1 auto; min-height: 0; overflow: hidden; }
   body.dk-one #dk_tl, body.dk-one #dk_sk { display: block; height: 100%; }
-  body.dk-one .dk-actp { grid-column: 4; grid-row: 4; }
+  /* 18 Nov 2026 (Papa): Activity runs the full height of the left column; the system feeds sit in the profit flow's
+     top-right corner instead of the running / locked / booked box (those are on the account card). */
+  body.dk-one .dk-actp { grid-column: 1; grid-row: 3 / 5; }
+  body.dk-one .dk-flow { position: relative; }
+  body.dk-one .dk-flow > .dk-pulsebox { position: absolute; top: 34px; right: 10px; width: min(330px, 46%); z-index: 1; margin: 0; padding: 7px 9px 6px;
+    background: rgba(9,13,20,.82); border: 1px solid var(--dk-line); border-radius: 6px; }
   body.dk-one .dk-feed { max-height: none; flex: 1 1 auto; min-height: 0; align-content: start; }
   body.dk-one .dk-foot .dk-v { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   body.dk-one .dk-feed div { grid-template-columns: 62px minmax(0, 1fr); font-size: 10.5px; padding: 3px 5px; }
@@ -1156,7 +1164,7 @@ body.dk-fs-on { overflow: hidden; }
   body.dk-one #deskPane .dk-foot { margin-left: 0; grid-row: 5; }
   body.dk-one .dk-foot > div { padding: 5px 10px; }
 }
-@media (min-width: 1280px) and (max-width: 1599px) { body.dk-one #deskPane { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.7fr) 210px; } }
+@media (min-width: 1280px) and (max-width: 1599px) { body.dk-one #deskPane { grid-template-columns: minmax(0, .7fr) minmax(0, 1.1fr) minmax(0, 1.6fr) 270px; } }
 /* Show password (Papa, 6 Nov 2026: a client typing on a phone got "wrong email or password"): an eye button inside the field. */
 /* Admin › User activity: compact cells that wrap (Papa: "don't make it too bulky") */
 #aa_table td, #aa_table th { white-space: normal; vertical-align: top; }
@@ -1935,8 +1943,8 @@ body.dk-fs-on { overflow: hidden; }
         <p class="dk-lbl dk-sm" id="dk_cvp_note" style="margin:6px 0 0;text-transform:none;letter-spacing:0"></p>
       </div>
       <div class="dk-low">
-        <div class="dk-panel dk-tlp"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Timeline · last 3 weeks</span><span class="dk-lbl">bar = open position · dot = closed trade</span></div><div class="dk-svgbox"><svg id="dk_tl" width="100%" height="300" role="img" aria-label="Timeline of open positions and closed trades by asset"></svg></div></div>
-        <div class="dk-panel dk-skp"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Capital flow · margin in use</span><span class="dk-lbl">asset → side → result</span></div><div class="dk-svgbox"><svg id="dk_sk" width="100%" height="300" role="img" aria-label="Margin in use flowing from assets to long or short, then to in profit or in loss"></svg></div></div>
+        <div class="dk-panel dk-tlp"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Timeline · last 3 weeks</span><span class="dk-lbl">bar = open position · dot = closed trade</span><button class="dk-btn dk-lowtog" type="button" data-low="sk" title="Show the capital flow here instead">Capital flow ▸</button></div><div class="dk-svgbox"><svg id="dk_tl" width="100%" height="300" role="img" aria-label="Timeline of open positions and closed trades by asset"></svg></div></div>
+        <div class="dk-panel dk-skp"><div class="dk-ph"><span class="dk-lbl"><b>●</b> Capital flow · margin in use</span><span class="dk-lbl">asset → side → result</span><button class="dk-btn dk-lowtog" type="button" data-low="tl" title="Show the timeline here instead">Timeline ▸</button></div><div class="dk-svgbox"><svg id="dk_sk" width="100%" height="300" role="img" aria-label="Margin in use flowing from assets to long or short, then to in profit or in loss"></svg></div></div>
       </div>
       <div class="dk-panel dk-actp"><div class="dk-pulsebox"><div class="dk-lr"><span>System feeds</span><span id="dk_feedsum"></span></div><div class="dk-pulses" id="dk_feeds" role="list" aria-label="System feeds"></div></div><div class="dk-ph"><span class="dk-lbl"><b>●</b> Activity</span><span class="dk-lbl">newest first</span></div><div class="dk-feed" id="dk_feed"></div></div>
       <footer class="dk-foot">
@@ -9802,7 +9810,10 @@ function deskLayout() {
   // below the running P&L box, overlapping the cloud a little.
   const top = narrow ? 72 : 30, bottom = 30;
   const o = dkOpen().slice().sort((a, b) => (Number(b.pos_upnl) || 0) - (Number(a.pos_upnl) || 0)), laneH = (desk.H - top - bottom) / Math.max(1, o.length); desk.laneH = laneH;
-  const aTop = 168, aBot = desk.H - 22, aStep = (aBot - aTop) / (DK_AGENTS.length - 1);
+  // On the one-screen desk the system feeds box sits in that corner (18 Nov 2026): the agents start below it.
+  const fb = document.body.classList.contains("dk-one") && document.querySelector(".dk-flow > .dk-pulsebox"), cvEl = $("dk_cv");
+  const fbBot = fb && cvEl ? fb.getBoundingClientRect().bottom - cvEl.getBoundingClientRect().top : 0;
+  const aTop = fb ? Math.max(60, Math.min(desk.H * .45, (fbBot > 0 ? fbBot : 150) + 34)) : 168, aBot = desk.H - 22, aStep = (aBot - aTop) / (DK_AGENTS.length - 1);
   desk.agents = DK_AGENTS.map((a, i) => ({ ...a, x: desk.W - (narrow ? 38 : 62), y: aTop + aStep * i - 6 }));
   desk.links = desk.agents.map(() => o.map(() => ({ ph: Math.random() * Math.PI * 2, f: .35 + Math.random() * .7, run: Math.random() })));
   // Each stream ends at its own point inside the cloud (spread around its left half) and its tail wriggles like a snake (Papa, 3 Nov).
@@ -9977,6 +9988,7 @@ function deskDraw() {
   desk.flashes = desk.flashes.filter((f) => f.a > 0);
   // Running P&L in the panel's top-right corner, clear of the cloud (Papa, 3 Nov).
   // Booked P&L alongside it (Papa, 4 Nov): every closed trade of this mode, as on the account card.
+  if (document.body.classList.contains("dk-one")) { desk.raf = requestAnimationFrame(deskDraw); return; } // the account card shows them (18 Nov 2026, Papa)
   const bw = narrow ? 168 : 196, bh = 132, bx = W - bw - 10, by = 10, bkd = Number(desk.booked) || 0, lkd = desk.locked;
   ctx.fillStyle = "rgba(9,13,20,.82)"; ctx.strokeStyle = DK_COL.line; ctx.lineWidth = 1; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 6); else ctx.rect(bx, by, bw, bh); ctx.fill(); ctx.stroke();
   ctx.textAlign = "right"; ctx.textBaseline = "middle";
@@ -10246,8 +10258,21 @@ function deskOneWanted() { try { return localStorage.getItem("deskOne") !== "0";
 function deskOneApply() {
   const want = deskOneWanted(), on = page === "desk" && want && innerWidth >= 1280;
   document.body.classList.toggle("dk-one", on);
+  // The system feeds: in the profit flow's corner on the one-screen desk, at the top of Activity otherwise.
+  const pb = document.querySelector("#deskPane .dk-pulsebox"), home = document.querySelector("#deskPane .dk-actp"), flow = document.querySelector("#deskPane .dk-flow");
+  if (pb && home && flow) {
+    const moved = on ? pb.parentElement !== flow : pb.parentElement !== home;
+    if (on && moved) flow.appendChild(pb); else if (!on && moved) home.prepend(pb);
+    if (moved && page === "desk" && desk.lanes) requestAnimationFrame(() => deskLayout()); // the agents' column starts below the box
+  }
+  let low = "tl"; try { low = localStorage.getItem("dkLow") === "sk" ? "sk" : "tl"; } catch { /* private window */ }
+  document.body.classList.toggle("dk-low-sk", on && low === "sk");
   const b = $("dk_one"); if (b) { b.setAttribute("aria-pressed", String(want)); b.textContent = want ? "Show menu" : "One screen"; }
 }
+document.querySelectorAll("#deskPane .dk-lowtog").forEach((b) => b.addEventListener("click", () => {
+  try { localStorage.setItem("dkLow", b.dataset.low); } catch { /* private window: this visit only */ }
+  deskOneApply(); requestAnimationFrame(() => { deskTimeline(); deskSankey(); });
+}));
 function deskRelayout() { if (page !== "desk") return; deskLayout(); desk.pool = []; desk.amb = []; deskFill(); deskTimeline(); deskSankey(); deskCvpDraw(); }
 $("dk_one").addEventListener("click", () => {
   try { localStorage.setItem("deskOne", deskOneWanted() ? "0" : "1"); } catch { /* private window: this visit only */ }

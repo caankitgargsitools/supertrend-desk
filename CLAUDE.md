@@ -878,6 +878,16 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   ranking there can be trusted. Desk › Positions tile: under the running P&L `lockLineHtml(s)` (`[data-lock]`, repainted
   by `paintMarks`): "Locked +₹X" (green) = `lockedOf(s)` ≥ 0, "At stop −₹X" (red) when the stop would still lose, blank
   without a stop. Tests: `tests/ui/ui_group.mjs` "6a", `tests/ui/ui_desk_lock.mjs` (args: theme width).
+- **Desk one-screen rearranged (18 Nov 2026, Papa: "the total profit, the locked in profit, and booked P&L is getting
+  duplicated … remove it from the nebula view, and in that space put the system feeds … bring the capital deployed versus
+  profit section just below the running P&L … give the activity … a full long view")**: on the one-screen desk only
+  (`body.dk-one`): the profit flow draws no running / locked / booked corner box (the account card has them; the box stays
+  off the one-screen desk); the System feeds box (`.dk-pulsebox`) is moved by `deskOneApply` into the flow panel's
+  top-right corner (back to Activity's top otherwise) and the decorative agents start below it (`deskLayout`, measured);
+  columns Activity (full height) · Strategies over Timeline · Profit flow · Account over Capital deployed vs profit
+  (`minmax(0,.8fr) minmax(0,1.3fr) minmax(0,2.2fr) 300px`; 1280–1599 px `.7fr 1.1fr 1.6fr 270px`; rows 1.25fr / 1fr);
+  Timeline and Capital flow share one cell with a switch (`.dk-lowtog`, localStorage `dkLow`). Strategies panel
+  redesign: suggestions put to Papa, not built. Tested in `tests/ui/ui_desk.mjs` ("one screen layout").
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");

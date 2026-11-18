@@ -197,7 +197,7 @@ if (width >= 1280) {
   await p.setViewportSize({ width, height: Number(process.argv[4] || 1000) });
   await p.click("#dk_one"); await p.waitForTimeout(700);
   const one = await p.evaluate(() => {
-    const vh = innerHeight, vw = innerWidth, ids = [".dk-acctp", ".dk-flow", ".dk-heat", ".dk-cvp", ".dk-tlp", ".dk-skp", ".dk-actp", ".dk-foot", ".dk-top"];
+    const vh = innerHeight, vw = innerWidth, ids = [".dk-acctp", ".dk-flow", ".dk-heat", ".dk-cvp", ".dk-tlp", ".dk-actp", ".dk-foot", ".dk-top"];
     const out = ids.map((q) => { const r = document.querySelector(q).getBoundingClientRect(); return { q, top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), h: Math.round(r.height), w: Math.round(r.width) }; });
     return { on: document.body.classList.contains("dk-one"), bar: getComputedStyle(document.querySelector(".bar")).display, sh: document.documentElement.scrollHeight, vh, vw, out,
       cv: [desk.W, desk.H], cvp: document.getElementById("dk_cvp").getBoundingClientRect().height, tl: document.getElementById("dk_tl").getAttribute("viewBox"), stored: localStorage.getItem("deskOne") };
@@ -208,6 +208,22 @@ if (width >= 1280) {
   if (!(one.cv[1] > 200 && one.cvp > 80)) fail("one screen: charts fill their boxes", one);
   if (process.env.SHOT) await p.screenshot({ path: `${process.env.SHOT}/desk_one_${theme}_${width}.png` });
   console.log("ok   one screen", JSON.stringify(one.out.map((r) => `${r.q}:${r.w}x${r.h}`)));
+  // 18 Nov 2026 (Papa): no running / locked / booked box on the profit flow (the account card has them); the system feeds sit in
+  // its corner; Activity runs the full left column; the capital chart sits under the account card; Timeline and Capital flow
+  // share one cell with a switch.
+  const lay = await p.evaluate(() => {
+    const r = (q) => document.querySelector(q).getBoundingClientRect();
+    return { feedsIn: !!document.querySelector(".dk-flow > .dk-pulsebox"), act: r(".dk-actp"), heat: r(".dk-heat"), acct: r(".dk-acctp"), cvp: r(".dk-cvp"), flow: r(".dk-flow"), tl: r(".dk-tlp") };
+  });
+  if (!lay.feedsIn) fail("system feeds in the profit flow's corner");
+  if (!(lay.act.left < lay.heat.left && lay.act.top <= lay.heat.top + 1 && lay.act.bottom >= lay.tl.bottom - 1)) fail("activity: the full left column", lay);
+  if (!(Math.abs(lay.cvp.left - lay.acct.left) < 2 && lay.cvp.top > lay.acct.bottom - 1)) fail("capital chart under the account card", lay);
+  await p.click(".dk-tlp .dk-lowtog"); await p.waitForTimeout(300);
+  const sk = await p.evaluate(() => ({ sk: document.querySelector(".dk-skp").getBoundingClientRect().height, tl: document.querySelector(".dk-tlp").getBoundingClientRect().height, saved: localStorage.getItem("dkLow"), drawn: document.querySelectorAll("#dk_sk *").length }));
+  if (!(sk.sk > 40 && sk.tl === 0 && sk.saved === "sk" && sk.drawn > 0)) fail("switch to the capital flow", sk);
+  await p.click(".dk-skp .dk-lowtog"); await p.waitForTimeout(300);
+  if (await p.evaluate(() => document.querySelector(".dk-tlp").getBoundingClientRect().height < 40)) fail("back to the timeline");
+  console.log("ok   one screen layout (feeds in the flow, activity full height, chart under the account, timeline / capital flow switch)");
   // 30 open positions at once (Papa, 6 Nov): the lanes keep room, the tiles' amounts stay inside the tiles.
   const many = await p.evaluate(async () => {
     const U = ["GOLD", "GOLDM", "SILVER", "SILVERM", "CRUDEOIL", "NATURALGAS", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NIFTY", "BANKNIFTY", "MIDCPNIFTY", "FINNIFTY", "SOLUSD"];
