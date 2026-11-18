@@ -741,6 +741,53 @@ export function stopTuneVariants(parent: LabConfig): LabConfig[] {
   }
   return out;
 }
+/**
+ * Condition tuning (18 Nov 2026, Papa: "analyze … the market parameters that were prevailing when they actually lost the
+ * money … not to trade when this condition is there … put it as a parameter in the strategy lab … certain time of the
+ * day … certain days of the week"): versions of a passed strategy that only ENTER under one market condition — with the
+ * 200-day / 20-day average, with or without a trend (ADX 14 on daily candles), in calm or lively markets (volatility vs
+ * its usual), not on one weekday, or (minute strategies) only before / after noon. Exits and stops stay as they were.
+ * Each version is tested like any strategy (years, doubled slippage, the held-back months) and passes or fails on its own.
+ * Honest note: the 18 Nov study of the 30 paper strategies found no condition whose removal helped most strategies, and
+ * per-strategy filters chosen on the older years made the last 12 months worse for 17 of 24 — so most versions will fail.
+ */
+export function condTuneVariants(parent: LabConfig): LabConfig[] {
+  const r = parent.rules; if (!r) return [];
+  const sides = (["long", "short"] as const).filter((s) => r[s]?.conds?.length && (r[s].mode ?? "ALL") === "ALL");
+  if (!sides.length) return [];
+  const daily = !!r.daily, a = LAB_ASSETS[parent.underlying], crypto = !!a?.crypto, ttf = daily ? "D" : "base";
+  const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  type V = { note: string; cond: (s: "long" | "short") => Cond };
+  const vs: V[] = [
+    { note: "enter only with the 200-day average (long above it, short below)", cond: (s) => ({ ind: "SMA", op: s === "long" ? "price_above" : "price_below", tf: "D", p: { len: 200 } } as Cond) },
+    { note: "enter only with the 20-day average (long above it, short below)", cond: (s) => ({ ind: "SMA", op: s === "long" ? "price_above" : "price_below", tf: "D", p: { len: 20 } } as Cond) },
+    { note: "enter only when a trend is present (daily ADX 14 above 20)", cond: () => ({ ind: "ADX", op: "gt", tf: "D", p: { len: 14 }, v: 20 } as Cond) },
+    { note: "enter only without a strong trend (daily ADX 14 below 25)", cond: () => ({ ind: "ADX", op: "lt", tf: "D", p: { len: 14 }, v: 25 } as Cond) },
+    { note: "enter only in calm markets (daily volatility below its usual)", cond: () => ({ ind: "VOL", op: "low_vol", tf: "D", p: { len: 20, look: 250 } } as Cond) },
+    { note: "enter only in lively markets (daily volatility above its usual)", cond: () => ({ ind: "VOL", op: "high_vol", tf: "D", p: { len: 20, look: 250 } } as Cond) },
+  ];
+  for (const d of crypto ? [0, 1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]) vs.push({ note: `no entries on ${DAYS[d]}s`, cond: () => ({ ind: "TIME", op: "not_weekday", tf: ttf, p: { d } } as Cond) });
+  if (!daily) {
+    vs.push({ note: "entries before 12:00 IST only", cond: () => ({ ind: "TIME", op: "in_hours", tf: "base", p: { from: 0, to: 12 } } as Cond) });
+    vs.push({ note: "entries from 12:00 IST only", cond: () => ({ ind: "TIME", op: "in_hours", tf: "base", p: { from: 12, to: 24 } } as Cond) });
+    if (a?.commodity) vs.push({ note: "entries before 17:00 IST only (no evening session)", cond: () => ({ ind: "TIME", op: "in_hours", tf: "base", p: { from: 0, to: 17 } } as Cond) });
+  }
+  const out: LabConfig[] = [];
+  for (const v of vs) {
+    const cfg: LabConfig = JSON.parse(JSON.stringify(parent));
+    let dup = false;
+    for (const s of sides) {
+      const c = v.cond(s), conds: Cond[] = cfg.rules[s].conds;
+      if (conds.some((x) => x.ind === c.ind && x.tf === c.tf && x.op === c.op && JSON.stringify(x.p ?? {}) === JSON.stringify(c.p ?? {}))) { dup = true; break; }
+      if (conds.length >= 6) { dup = true; break; }
+      conds.push(c);
+    }
+    if (dup) continue;
+    cfg.lab_note = `Condition tuning: ${v.note}`;
+    out.push(cfg);
+  }
+  return out;
+}
 /** Other indicator combinations: add a filter, swap a filter for another indicator, or drop one (the entry signal stays). */
 export function recombine(parent: LabConfig, seed: number): LabConfig | null {
   const r = rng(seed);
@@ -1646,6 +1693,32 @@ export async function generatePhase(sb: SupabaseClient, run: Run, assets: string
     const keep = tuneRows.filter((r) => !triedT.has(String(r.fingerprint)));
     rows.push(...keep); nTuned = keep.length;
     if (tp.length) { const { error } = await sb.from("lab_results").update({ stop_tuned_at: at }).in("id", tp.map((x) => x.id)); if (error) throw new Error(error.message); }
+  }
+  // Condition tuning (lab_settings.cond_tune = passed strategies a run, 0 = off; 18 Nov 2026, Papa): the same way, with
+  // condTuneVariants; stop and condition tuning together stay within 40% of the run. Tuned once (cond_tuned_at); the
+  // versions themselves (stop- or condition-tuned) are never tuned again.
+  const condMax = set.focus || n <= 0 ? 0 : Math.min(Math.max(0, Math.min(20, Math.trunc(Number(set.cond_tune) || 0))), Math.max(0, Math.floor((n * 0.4 - nTuned) / 12)));
+  if (condMax > 0) {
+    const { data: cand, error: ce } = await sb.from("lab_results").select("id, promoted_id, score").eq("passed", true).eq("robust_status", "done")
+      .is("superseded_by", null).is("cond_tuned_at", null).in("asset", assets).order("score", { ascending: false }).limit(500);
+    if (ce) throw new Error(ce.message);
+    const top = (cand ?? []).sort((x, y) => (y.promoted_id ? 1 : 0) - (x.promoted_id ? 1 : 0) || (Number(y.score) || 0) - (Number(x.score) || 0) || Number(x.id) - Number(y.id)).slice(0, condMax);
+    const { data: got, error: te } = top.length ? await sb.from("lab_results").select("id, fingerprint, config").in("id", top.map((x) => x.id)) : { data: [], error: null };
+    if (te) throw new Error(te.message);
+    const tp = top.map((x) => (got ?? []).find((g) => g.id === x.id)).filter((g): g is { id: number; fingerprint: string; config: LabConfig } => !!g && !/^(Stop|Condition) tuning/.test(String(g.config?.lab_note ?? "")));
+    const condRows: Record<string, unknown>[] = [];
+    const at = new Date().toISOString();
+    for (const par of tp) for (const cfg of condTuneVariants(par.config)) {
+      const fp = fingerprint(cfg);
+      if (fp === par.fingerprint || seen.has(fp)) continue;
+      seen.add(fp);
+      cfg.lab_note = `${cfg.lab_note} (from lab strategy #${par.id})`;
+      condRows.push({ run_id: run.id, asset: cfg.underlying, mode: cfg.rules.daily ? "DAILY" : "INTRADAY", label: labelFor(cfg), fingerprint: fp, champion: false, config: cfg, stage: "pending", cond_tuned_at: at, stop_tuned_at: at });
+    }
+    const triedC = await triedOf(sb, condRows.map((r) => String(r.fingerprint)));
+    const keep = condRows.filter((r) => !triedC.has(String(r.fingerprint)));
+    rows.push(...keep); nTuned += keep.length;
+    if (top.length) { const { error } = await sb.from("lab_results").update({ cond_tuned_at: at }).in("id", top.map((x) => x.id)); if (error) throw new Error(error.message); }
   }
   // Evolution: about 40% of the night goes to the winners. Each is tried on the other assets, other decision timeframes,
   // other stop / target / trailing-stop settings, other indicator combinations and setting tweaks. A strategy that keeps

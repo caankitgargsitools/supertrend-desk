@@ -175,6 +175,7 @@ export function describeCond(c: Cond): string {
     new_high: "close above the highest high (breakout)", new_low: "close below the lowest low (breakdown)", above_mid: "price above the channel middle", below_mid: "price below the channel middle",
     high_vol: "is high (above its usual level)", low_vol: "is low (below its usual level)",
     in_hours: `between ${String(p.from ?? 0).padStart(2, "0")}:00 and ${String(p.to ?? 24).padStart(2, "0")}:00 IST`, on_weekday: `is a ${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][Number(p.d ?? 5)] ?? "?"}`,
+    not_weekday: `is not a ${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][Number(p.d ?? 5)] ?? "?"}`,
     not_weekend: "is a weekday (Mon–Fri)", has_buy: `is green (buy) with strength ≥ ${v}`, has_sell: `is red (sell) with strength ≥ ${v}`, has_doji: "is a doji (hold)", btc_up: `is up (daily close above its ${p.len ?? 50}-day EMA)`, btc_down: `is down (daily close below its ${p.len ?? 50}-day EMA)`,
     oi_rising: "is rising", oi_falling: "is falling", oi_up_price_up: "rising with the price rising (long build-up)", oi_up_price_down: "rising with the price falling (short build-up)",
     above_pp: "price above the pivot", below_pp: "price below the pivot", cross_up_pp: "crosses above the pivot", cross_down_pp: "crosses below the pivot",
@@ -623,7 +624,7 @@ export class RuleBook {
         check = (_k, T, day) => {
           const m = ist(T - 1).min, w = weekdayOf(day);
           return c.op === "in_hours" ? (from <= to ? m >= from && m < to : m >= from || m < to)
-            : c.op === "on_weekday" ? w === wd : c.op === "not_weekend" ? w >= 1 && w <= 5 : false;
+            : c.op === "on_weekday" ? w === wd : c.op === "not_weekday" ? w !== wd : c.op === "not_weekend" ? w >= 1 && w <= 5 : false;
         };
         break;
       }

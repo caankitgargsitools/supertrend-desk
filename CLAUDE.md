@@ -737,6 +737,31 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   (`lab_tried`) aren't written again. A strategy is tuned once (`lab_results.stop_tuned_at`); its versions carry the mark
   too, so they are never tuned themselves. Tight trailing stops are never written (the study: they lose 26–64% of the
   profit). The lab's jobs are off since 13 Nov, so this starts working when they are switched back on.
+- **Market-condition study and condition tuning (18 Nov 2026, Papa: "analyze our strategies … on the basis of various market
+  parameters that were prevailing when they actually lost the money … not to trade when this condition is there … put it as
+  a parameter in the strategy lab … certain time of the day … certain days of the week"; migration 114, engine v181; tests
+  `tests/sim/condtune.test.mjs`, `tests/ui/ui_rules.mjs`)**: study run like the stop study (the 30 paper strategies' lab
+  backtests on the saved candle files; scripts in the session scratchpad, not in the repo). Each trade's entry classed by
+  the last COMPLETED daily candle before it: weekday, entry hour (the 5 minute strategies), ADX 14 (< 20 / 20–25 / > 25),
+  with / against the 200-day average, volatility (ATR % of price, its rank over 250 days, thirds), with / against the
+  20-day move. **Findings**: (1) a "skip" filter chosen per strategy on the older years made the last 12 months WORSE for
+  17 of 24 strategies (better 7) — e.g. GOLD #19325 "skip entries against the 200-day average" +₹15 lakh on the older
+  years, −₹30.5 lakh on the last 12 months; (2) as one rule for all, skipping ANY bucket (any ADX band, either side of the
+  200-day / 20-day, any volatility third, any single weekday) cut profit for most strategies in both periods — every
+  bucket is profitable on average; entries against the 20-day move / 200-day average earn about half as much (0.12 vs 0.34,
+  0.19 vs 0.35 typical trades) but still earn; no hour of day stood out on enough trades. Conclusion told to Papa: the
+  losses aren't concentrated in a market condition we can see in advance. **Built anyway as a Lab parameter (Papa asked; the
+  Lab's own year / held-back tests judge each version)**: Lab settings › "Condition tuning: passed strategies a run (0 =
+  off)" (`#ls_cond_tune`, `lab_settings.cond_tune`, 0–20, set to 5). In the writing phase (after stop tuning; the two
+  together ≤ 40% of a run) the best passed strategies not yet condition-tuned (desk ones first; stop / condition versions
+  never) get `condTuneVariants` (lab.ts): ENTER only with the 200-day / 20-day average (long above, short below), only with
+  a trend (daily ADX 14 > 20), only without a strong trend (< 25), only in calm / lively markets (`VOL` low_vol /
+  high_vol), no entries on one weekday (Mon–Fri; coins all 7 days — new TIME op `not_weekday`, "is not the day" in the
+  rule builder), minute strategies only before / from 12:00 IST (MCX also before 17:00: no evening session). Exits and
+  stops unchanged; added to both sides' entry conditions (ALL mode only; never a duplicate; ≤ 6 conditions). Marks
+  `lab_results.cond_tuned_at` (parent and versions; versions also carry `stop_tuned_at`). Checked on real candles: GOLD
+  #19325's Monday version has 0 Monday entries, MIDCPNIFTY #264526's "from 12:00" version only afternoon entries — and
+  every version earned less than the original on those two. The lab jobs are off since 13 Nov, so it runs once they are on.
 - **Price changes of a working Dhan order were refused (16 Nov 2026, Papa: a live SILVERMIC sell "not fulfilled because
   price went down … is it being checked and the price being changed?"; engine v164)**: the first live order that had to
   be chased — SELL 2 lots SILVERMIC NOV FUT (Lab #294435 live), limit ₹1,72,840 at 09:01 IST, price fell to ₹1,72,381.

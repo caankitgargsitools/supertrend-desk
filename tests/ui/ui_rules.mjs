@@ -5,7 +5,7 @@ import { openApp, fail } from "./_mock.mjs";
 // Args: theme (dark|light) width.
 const theme = process.argv[2] || "dark", width = Number(process.argv[3] || 1440);
 const { b, p, errs, writes } = await openApp({ theme, width, res: { "market_events": [{ day: "2026-11-07", name: "RBI policy" }, { day: "2026-12-05", name: "Fed meeting" }],
-  "rpc/lab_feed": { run: null, rows: [] }, "rpc/my_lab_requests": [], "rpc/lab_long_map": {}, "rpc/lab_long_results": [], "lab_runs": [], "lab_settings": { id: 1, enabled: true, assets: ["NIFTY"], stop_tune: 5 } } });
+  "rpc/lab_feed": { run: null, rows: [] }, "rpc/my_lab_requests": [], "rpc/lab_long_map": {}, "rpc/lab_long_results": [], "lab_runs": [], "lab_settings": { id: 1, enabled: true, assets: ["NIFTY"], stop_tune: 5, cond_tune: 3 } } });
 await p.evaluate(() => { openStrat("n1"); showTab("set"); }); await p.waitForTimeout(800);
 // Every new indicator is on offer in a condition row.
 // The indicator select sits under the "Indicator" label (a set's first select is its ALL / ANY mode).
@@ -36,9 +36,13 @@ if (!/Added 28 Nov 26/.test(await p.textContent("#ev_msg"))) fail("confirmation"
 // Stop tuning (14 Nov 2026): a Lab setting — how many passed strategies a run get their stops tuned (0 = off).
 if (await p.inputValue("#ls_stop_tune") !== "5") fail("stop tuning shows the saved figure", await p.inputValue("#ls_stop_tune"));
 if (!/tighter first stop/.test(await p.getAttribute("label:has(#ls_stop_tune)", "title"))) fail("stop tuning explains itself");
+// Condition tuning (18 Nov 2026): the saved figure, its explanation, saved with the rest.
+if (await p.inputValue("#ls_cond_tune") !== "3") fail("condition tuning shows the saved figure", await p.inputValue("#ls_cond_tune"));
+if (!/only ENTER under one market condition/.test(await p.getAttribute("label:has(#ls_cond_tune)", "title"))) fail("condition tuning explains itself");
+await p.fill("#ls_cond_tune", "4");
 await p.fill("#ls_stop_tune", "8"); await p.evaluate(() => document.getElementById("labSetForm").requestSubmit()); await p.waitForTimeout(700);
 const sw = writes.find((x) => /lab_settings/.test(x.u) && x.meth === "PATCH");
-if (!sw || JSON.parse(sw.body).stop_tune !== 8) fail("stop tuning saved", writes.map((x) => x.meth + " " + x.u + " " + String(x.body).slice(0, 200)));
+if (!sw || JSON.parse(sw.body).stop_tune !== 8 || JSON.parse(sw.body).cond_tune !== 4) fail("stop tuning saved", writes.map((x) => x.meth + " " + x.u + " " + String(x.body).slice(0, 200)));
 if (errs.length) fail("page errors", errs);
 console.log("ok rule builder + event days + stop tuning", theme, width);
 await b.close();
