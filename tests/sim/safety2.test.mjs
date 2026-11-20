@@ -22,6 +22,8 @@ globalThis.fetch = async (url, init = {}) => {
   const mm = u.pathname.match(/^\/v2\/orders\/(\w+)$/);
   if (mm) {
     const o = dhan.orders.get(mm[1]);
+    // Like Dhan (20 Nov 2026): an earlier day's order is no longer listed — a GET answers 200 with "[]", a cancel is refused.
+    if (dhan.gone?.has(mm[1])) return m === "GET" ? J([]) : J({ errorType: "Input_Exception", errorCode: "DH-905", errorMessage: "Missing required fields, bad values for parameters etc." }, 400);
     if (m === "GET") return J(o ?? {}, o ? 200 : 404);
     // Like Dhan (16 Nov 2026): a change whose legName is an empty string is refused; a plain order sends null.
     if (m === "PUT" && body.legName !== null) return J({ errorType: "Input_Exception", errorCode: "DH-905", errorMessage: "Missing required fields, bad values for parameters etc." }, 400);
@@ -154,5 +156,22 @@ await t("a claim left behind by a dead worker is taken over after two minutes; a
   assert.equal(db.algo_signals.length, 1);
 });
 
+await t("a stop order Dhan no longer lists (a day order of an earlier session) counts as gone: the stop-loss exit goes, and the order manager clears it", async () => {
+  // 20 Nov 2026: SILVERMIC's stop of 16 Nov read as "still open" for four days and the exit waited for ever to cancel it.
+  dhan.gone = new Set(["555"]); dhan.log = [];
+  db.live_orders = [entryRow(), { id: 50, user_id: "u1", strategy_id: "s1", broker: "DHAN", batch: "st", seq: 0, purpose: "stop", event: "STOP", side: "SELL", sec: "35001", seg: "NSE_FNO", product: "MARGIN", qty: 150, lots: 2, lot: 75,
+    tick: 0.05, option: false, label: "NIFTY OCT FUT", state: "resting", broker_order_id: "555", created_at: new Date(T0 - 4 * 864e5).toISOString() }];
+  Object.assign(S(), held(), { position: "LONG" }); S().pos_broker = { ...S().pos_broker, stopId: "555", stopTrig: 24900 };
+  // the order manager sees it gone: the row is closed and the strategy's stop record cleared (a new stop goes in later)
+  await E.runOrders(1);
+  assert.equal(lo().find((x) => x.id === 50).state, "failed"); assert.equal(S().pos_broker.stopId, null);
+  // and an exit with the stale id still on record goes out instead of waiting for a cancel that can't happen
+  S().pos_broker = { ...S().pos_broker, stopId: "555" };
+  dhan.positions = [{ exchangeSegment: "NSE_FNO", securityId: "35001", netQty: 150 }];
+  assert.equal(await E.queueDhan(S(), set, "STOP_LOSS", [leg("S")], "Sell NIFTY1! x 2 to close long", { c: 24890 }), true);
+  assert.ok(lo().some((x) => x.purpose === "exit" && x.state === "working" && dhan.orders.get(String(x.broker_order_id))?.transactionType === "SELL"), dhan.log.join(" | "));
+  assert.ok(!dhan.log.includes("DELETE /v2/orders/555"), "no cancel is tried for an order Dhan doesn't list");
+  dhan.gone = null;
+});
 console.log(fails ? `${fails} FAILED` : "all passed");
 process.exit(fails ? 1 : 0);

@@ -19,7 +19,8 @@ import { fnoUnderlying, isStock } from "./stocks.ts";
 export type Creds = { client: string; token: string };
 export type Side = "BUY" | "SELL";
 export type Purpose = "entry" | "exit";
-export type BrokerStatus = { status: string; filled: number; qty: number; avg: number | null; reason: string | null; price: number | null; orderType: string | null };
+/** missing = Dhan answered but no longer lists the order (an earlier day's order: Dhan's book holds only today's). */
+export type BrokerStatus = { status: string; filled: number; qty: number; avg: number | null; reason: string | null; price: number | null; orderType: string | null; missing?: boolean };
 
 /* ---------------------------------------------------------------- pure rules (tested) */
 
@@ -148,7 +149,12 @@ function statusOf(o: any): BrokerStatus {
 export async function dhanStatus(c: Creds, id: string): Promise<BrokerStatus> {
   const x = await dhanReq(c, "GET", `/orders/${encodeURIComponent(id)}`);
   if (!x.ok) throw new Error(`Couldn't read order ${id}: ${errText(x)}`);
-  return statusOf(one(x.j));
+  // An empty answer ("[]") = Dhan no longer lists the order: a day order from an earlier session that expired at its close
+  // (20 Nov 2026: SILVERMIC's stop of 16 Nov read as "still open" for four days — no stop rested at Dhan, every trailing
+  // move was refused, and the stop-loss exit waited for ever to cancel it).
+  const o = one(x.j);
+  if (!o || (typeof o === "object" && !o.orderId && !o.orderStatus)) return { ...statusOf(null), missing: true };
+  return statusOf(o);
 }
 /** An order placed with this tag (used when the reply to a placement was lost). */
 export async function dhanByTag(c: Creds, tag: string): Promise<{ id: string; st: BrokerStatus } | null> {

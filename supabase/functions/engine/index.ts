@@ -2411,7 +2411,7 @@ async function stockExDate(s0: Strategy, px: number, set?: Settings | null): Pro
     const gone = set ? await dhanCancel(credsOf(set), pb.stopId).then(() => true, async () => {
       // Already cancelled by the exchange (usual before an ex-date) counts as gone; anything else is left to a person.
       const st = await dhanStatus(credsOf(set), pb.stopId!).catch(() => null);
-      return !!st && /CANCEL|REJECT|EXPIRE/i.test(String(st.status));
+      return !!st && (!!st.missing || /CANCEL|REJECT|EXPIRE/i.test(String(st.status)));
     }) : false;
     if (gone) await sb.from("live_orders").update({ state: "cancelled", done_at: nowIso(), note: "split / bonus ex-date: replaced by a stop for the adjusted quantity" }).eq("broker_order_id", pb.stopId).eq("state", "resting");
     else await alert(s, `${s.underlying}: check the stop order at Dhan`, `After today's split / bonus the desk couldn't cancel the old stop order (${pb.stopId}) at Dhan. Please cancel it in Dhan; the desk places a new stop for the adjusted quantity.`, `castop-${s.id}-${today}`);
@@ -2985,12 +2985,12 @@ async function cancelStop(c: Creds, id: string): Promise<"cancelled" | "traded" 
     const st0 = await dhanStatus(c, id).catch(() => null);
     const s0 = String(st0?.status ?? "").toUpperCase();
     if (s0 === "TRADED") return "traded";
-    if (/CANCEL|REJECT|EXPIRE/.test(s0)) return "cancelled";
+    if (st0?.missing || /CANCEL|REJECT|EXPIRE/.test(s0)) return "cancelled"; // gone from Dhan's book: nothing rests
     try { await dhanCancel(c, id); } catch (e) { why = e instanceof Error ? e.message : String(e); }
     const st = await dhanStatus(c, id).catch(() => null);
     const s1 = String(st?.status ?? "").toUpperCase();
     if (s1 === "TRADED") return "traded";
-    if (/CANCEL|REJECT|EXPIRE/.test(s1)) return "cancelled";
+    if (st?.missing || /CANCEL|REJECT|EXPIRE/.test(s1)) return "cancelled";
     if (!st) why = why || "couldn't read the order's state";
     else why = why || `still ${s1.toLowerCase() || "open"}`;
   }
@@ -3583,7 +3583,9 @@ async function checkStop(r: LiveRow, set: Settings) {
     state = st.state === "closed" && st.unfilled === 0 ? "TRADED" : st.state === "cancelled" ? "CANCELLED" : "PENDING"; avg = st.avg; filled = st.size - st.unfilled;
   } else {
     const st = await dhanStatus(credsOf(set), r.broker_order_id);
-    state = String(st.status).toUpperCase(); avg = st.avg; filled = st.filled;
+    // No longer listed by Dhan = a day order of an earlier session: it expired at that close (a fill would show in the
+    // position, which reconcile compares).
+    state = st.missing ? "EXPIRED" : String(st.status).toUpperCase(); avg = st.avg; filled = st.filled;
   }
   if (state !== "TRADED" && !["REJECTED", "CANCELLED", "EXPIRED"].includes(state)) return;
   const s0 = (await sb.from("algo_strategies").select("*").eq("id", r.strategy_id).single()).data as Strategy | null;
