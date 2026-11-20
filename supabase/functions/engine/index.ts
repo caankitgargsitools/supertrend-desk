@@ -612,7 +612,14 @@ async function bandFor(seg: string, sec: string): Promise<{ lo: number; hi: numb
   let k = data?.[0];
   if (!k && seg === "MCX_COMM") k = (await sb.from("fno_contracts").select("band_hi, band_lo").eq("seg", seg).eq("sec_id", sec).limit(1)).data?.[0];
   const lo = Number(k?.band_lo), hi = Number(k?.band_hi);
-  return lo > 0 && hi > lo ? { lo, hi } : null;
+  if (!(lo > 0 && hi > lo)) return null;
+  // The band is read from Dhan's list once a night, but the exchange widens it during the day (20 Nov 2026: SILVERM traded
+  // at 1,52,609 under its stored band 1,55,650–1,68,620, so its stop "couldn't be reached today" and wasn't placed). A
+  // price outside the stored band means it is out of date: then it isn't used (Dhan's own answer decides).
+  const { data: lp } = await sb.from("live_prices").select("px, at").eq("seg", seg).eq("sec", String(sec)).maybeSingle();
+  const px = Number(lp?.px);
+  if (px > 0 && Date.now() - Date.parse(String(lp?.at)) < 10 * 60000 && (px < lo || px > hi)) return null;
+  return { lo, hi };
 }
 /** A limit price kept inside the day's band (the exchange rejects one outside it): a buy no higher than the top, a sell no lower than the bottom. */
 export function inBand(px: number, side: string, band: { lo: number; hi: number } | null): number {

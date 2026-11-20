@@ -628,6 +628,14 @@ await t("price band: a limit is kept inside the day's band; a stop beyond it isn
   c.band_lo = 24000; // now inside the band: placed
   await E.syncStop(S(), set);
   assert.ok(S().pos_broker.stopId);
+  // 20 Nov 2026: the exchange widened the band during the day — the price itself is outside the stored band, so the stored
+  // one is out of date and doesn't stop the stop (SILVERM at 1,52,609 under a stored 1,55,650–1,68,620).
+  c.band_lo = 24950; S().pos_broker = pbOf("35001", 75);
+  db.live_prices = (db.live_prices ?? []).filter((r) => r.sec !== "35001");
+  db.live_prices.push({ seg: "NSE_FNO", sec: "35001", px: 24920, at: new Date(clock).toISOString() });
+  await E.syncStop(S(), set);
+  assert.ok(S().pos_broker.stopId, "placed: the price is outside the stored band, so the band is stale");
+  db.live_prices = db.live_prices.filter((r) => r.sec !== "35001");
   delete c.band_lo; delete c.band_hi;
   db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "bd1");
 });
