@@ -3530,6 +3530,17 @@ async function syncStop(s: Strategy, set: Settings): Promise<Strategy> {
       pb.stopId = null; pb.stopTrig = null;
     }
   }
+  // A Dhan stop on record that Dhan no longer holds (rejected, cancelled, expired, or no longer listed) is placed afresh
+  // (20 Nov 2026: SILVERM's stop rejected on 17 Nov and SILVERMIC's expired on 16 Nov stayed "on record" for days, so no
+  // stop rested at Dhan and every trailing move was refused). A filled one is left to the order manager (checkStop).
+  if (pb.broker === "DHAN" && pb.stopId) {
+    const st = await dhanStatus(credsOf(set), pb.stopId).catch(() => null);
+    if (st && (st.missing || /CANCEL|REJECT|EXPIRE/i.test(String(st.status)))) {
+      await sb.from("live_orders").update({ state: "failed", done_at: nowIso(), note: `${st.missing ? "no longer listed" : String(st.status).toLowerCase()} at the broker: a new stop placed` })
+        .eq("broker_order_id", pb.stopId).eq("state", "resting");
+      pb.stopId = null; pb.stopTrig = null;
+    }
+  }
   if (pb.stopId && pb.stopTrig != null && (w.long ? w.trig <= pb.stopTrig : w.trig >= pb.stopTrig)) return s; // not tighter
   const leg = pb.legs[0], side: Side = w.long ? "SELL" : "BUY", qty = Math.abs(leg.qty);
   if (pb.broker === "DHAN") {

@@ -173,5 +173,17 @@ await t("a stop order Dhan no longer lists (a day order of an earlier session) c
   assert.ok(!dhan.log.includes("DELETE /v2/orders/555"), "no cancel is tried for an order Dhan doesn't list");
   dhan.gone = null;
 });
+await t("a stop on record that Dhan rejected (or no longer lists) is placed afresh at the next stop check, not 'moved' for ever", async () => {
+  // 20 Nov 2026: SILVERM's stop of 17 Nov was rejected; the desk kept its id and tried to move it every 10 minutes.
+  db.live_orders = [entryRow()]; dhan.gone = new Set(["556"]); dhan.log = [];
+  Object.assign(S(), held()); S().pos_broker = { ...S().pos_broker, stopId: "556", stopTrig: 24900 };
+  db.live_orders.push({ id: 60, user_id: "u1", strategy_id: "s1", broker: "DHAN", purpose: "stop", state: "resting", broker_order_id: "556", sec: "35001", seg: "NSE_FNO", qty: 150 });
+  await E.syncStop(S(), set);
+  const id = S().pos_broker.stopId;
+  assert.ok(id && id !== "556", `a new stop id, got ${id}`); assert.equal(dhan.orders.get(String(id)).orderType, "STOP_LOSS");
+  assert.equal(lo().find((x) => x.id === 60).state, "failed");
+  assert.ok(!dhan.log.includes("PUT /v2/orders/556"), "the dead order isn't 'moved'");
+  dhan.gone = null;
+});
 console.log(fails ? `${fails} FAILED` : "all passed");
 process.exit(fails ? 1 : 0);
