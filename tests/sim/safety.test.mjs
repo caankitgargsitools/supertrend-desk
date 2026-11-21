@@ -462,6 +462,47 @@ await t("move sizing: the entry takes target ÷ one lot's typical day, the new l
   db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "m1");
 });
 
+// ---------------- broker capital, compounding and the locked-profit reserve (21 Nov 2026, Papa) ----------------
+await t("compounding: a strategy sized as a share of the capital takes share × the broker's capital now (profit raises the lots)", async () => {
+  db.lab_margins = [{ asset: "NIFTY", price: 25000, fut_pct: 0.12, day_move: 0.02 }];
+  // the wizard set it on ₹3 lakh: ₹37,500 a typical day = 12.5% → 1 lot (25,000 × 75 × 2% = ₹37,500)
+  const S = add("cg1", { live: true, risk: null, lots: 1, sizing: { mode: "MOVE", move_amt: 37500, share: 0.125 } });
+  let room = { equity: 300000, used: 0, pct: 100, pct_eff: 100, locked: 0, bonus: 0, src: "broker" };
+  rpcs.capital_room = async () => ({ data: room, error: null });
+  const go = async () => { const e = E.entryLeg(S(), "LONG", 25000, 1, S().lots), legs = [e.leg].flat(), ns = { ...e.state, position: "LONG" }; delete ns._px; const n = [e.label]; const ok = await E.sizeEntry(S(), set, legs, ns, 25000, n); return { ok, ns, n }; };
+  let r = await go(); assert.equal(r.ok, true, r.n.join(" | ")); assert.equal(r.ns.pos_qty, 1, r.n.join(" | "));
+  // the account has grown to ₹9 lakh (booked profit, deposits): ₹1,12,500 a day → 3 lots, saved
+  room = { ...room, equity: 900000 };
+  r = await go(); assert.equal(r.ns.pos_qty, 3, r.n.join(" | ")); assert.equal(S().lots, 3);
+  // a strategy without a share keeps its fixed ₹ a day whatever the capital
+  const F = add("cg2", { live: true, risk: null, lots: 1, sizing: { mode: "MOVE", move_amt: 37500 } });
+  const e = E.entryLeg(F(), "LONG", 25000, 1, 1), legs = [e.leg].flat(), ns = { ...e.state, position: "LONG" }; delete ns._px;
+  assert.equal(await E.sizeEntry(F(), set, legs, ns, 25000, [e.label]), true); assert.equal(ns.pos_qty, 1);
+  delete rpcs.capital_room;
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "cg1" && x.id !== "cg2");
+});
+await t("locked-profit reserve: the limit grows by the reserve that profit locked in by stops frees (the database's figure)", async () => {
+  db.lab_margins = [{ asset: "NIFTY", price: 25000, fut_pct: 0.12, day_move: 0.02 }];
+  // ₹4 lakh, 90% limit → ₹3.6 lakh; one lot ₹2.25 lakh; ₹1.5 lakh already used → room ₹2.1 lakh (0 lots) …
+  rpcs.capital_room = async () => ({ data: { equity: 400000, used: 150000, pct: 90, pct_eff: 90, locked: 0, bonus: 0 }, error: null });
+  const S = add("lk1", { live: true, risk: null, lots: 2 });
+  const go = async () => { const e = E.entryLeg(S(), "LONG", 25000, 1, 2), legs = [e.leg].flat(), ns = { ...e.state, position: "LONG" }; delete ns._px; const n = [e.label]; const ok = await E.sizeEntry(S(), set, legs, ns, 25000, n); return { ok, ns, n }; };
+  let r = await go(); assert.equal(r.ok, false, r.n.join(" | "));
+  // … with ₹40,000 locked in by stops the whole ₹40,000 reserve opens: limit 100% = ₹4 lakh, room ₹2.5 lakh → 1 lot
+  rpcs.capital_room = async () => ({ data: { equity: 400000, used: 150000, pct: 90, pct_eff: 100, locked: 85000, bonus: 40000 }, error: null });
+  r = await go(); assert.equal(r.ok, true); assert.equal(r.ns.pos_qty, 1, r.n.join(" | "));
+  assert.match(r.n.join(" | "), /reserve opened by ₹40,000 of profit locked in by stops/);
+  delete rpcs.capital_room;
+  db.algo_strategies = db.algo_strategies.filter((x) => x.id !== "lk1");
+});
+await t("the broker's balance moves the capital only in steps of 10% or more", async () => {
+  assert.deepEqual(E.capStep({ cap_src: "fixed", cap_base: null }, 400000), {});
+  assert.equal(E.capStep({ cap_src: "broker", cap_base: null }, 482955.56).cap_base, 482955);
+  assert.deepEqual(E.capStep({ cap_src: "broker", cap_base: 482955 }, 520000), {}, "7.7% more: unchanged");
+  assert.equal(E.capStep({ cap_src: "broker", cap_base: 482955 }, 531300).cap_base, 531300, "10% more: stepped");
+  assert.equal(E.capStep({ cap_src: "broker", cap_base: 482955 }, 430000).cap_base, 430000, "11% less: stepped down");
+});
+
 // ---------------- go-live review (12 Nov 2026): Max lots for move sizing, one order's limit for live entries ----------------
 await t("move sizing obeys the strategy's max lots when live (paper as sized)", async () => {
   db.lab_margins = [{ asset: "NIFTY", price: 25000, fut_pct: 0.12, day_move: 0.02 }];

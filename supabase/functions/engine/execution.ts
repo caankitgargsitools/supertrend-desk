@@ -178,6 +178,17 @@ export async function dhanCancel(c: Creds, id: string) {
   const x = await dhanReq(c, "DELETE", `/orders/${encodeURIComponent(id)}`);
   if (!x.ok) throw new Error(`Couldn't cancel order ${id}: ${errText(x)}`);
 }
+/**
+ * Dhan's margin for one position at today's price and today's exchange rates (its margin calculator): what Dhan blocks
+ * for it, extra margins near an expiry included (21 Nov 2026: NATGASMINI 4 lots — the desk's estimate at entry ₹46,433,
+ * Dhan's ₹1,00,010 in the week before the contract's expiry). Null when Dhan doesn't answer.
+ */
+export async function dhanMarginCalc(c: Creds, o: { seg: string; sec: string; side: Side; qty: number; product: string; price: number }): Promise<number | null> {
+  const x = await dhanReq(c, "POST", "/margincalculator", { exchangeSegment: o.seg, transactionType: o.side, quantity: Math.trunc(Math.abs(o.qty)),
+    productType: o.product || "MARGIN", securityId: String(o.sec), price: Number(o.price), triggerPrice: 0 });
+  const t = Number(x.j?.totalMargin ?? x.j?.data?.totalMargin);
+  return x.ok && t > 0 ? t : null;
+}
 /** Net open quantity per contract ("SEGMENT|securityId" → signed quantity, + long / − short). */
 export async function dhanPositions(c: Creds): Promise<Map<string, number>> {
   const x = await dhanReq(c, "GET", "/positions");

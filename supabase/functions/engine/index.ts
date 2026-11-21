@@ -18,9 +18,9 @@ import { atr as atrSeries } from "./indicators.ts";
 import { effectiveStop, hasLevels, needsSwing, normaliseRisk, riskInit, riskScan, type RiskState } from "./risk.ts";
 import { fromCol, LAB_ASSETS, labNext, labOptStep, labReverdict, labStart, labStep, labWalkForward, loadCryptoAssets, loadMarketEvents, pagedRows, refreshCryptoMargins, periodWindows, refreshAsset, TOKEN_ERR } from "./lab.ts";
 import { runCombos } from "./combos.ts";
-import { contractsFor, CRYPTO, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaCancel, deltaOrderChecked, deltaOrderState, deltaPositions, deltaStop, deltaStopMove, niceLot } from "./crypto.ts";
+import { contractsFor, CRYPTO, cryptoDaily, cryptoDailyDelta, cryptoFunding, cryptoLtp, cryptoProduct, deltaBalances, deltaCancel, deltaPrivate, FX, deltaOrderChecked, deltaOrderState, deltaPositions, deltaStop, deltaStopMove, niceLot } from "./crypto.ts";
 import {
-  brokerQty, type BrokerStatus, brokerStopTrigger, chaseDecision, type Creds, dhanByTag, dhanCancel, dhanLtp, dhanModify, dhanPlace, dhanPositions, dhanStatus,
+  brokerQty, type BrokerStatus, brokerStopTrigger, chaseDecision, type Creds, dhanByTag, dhanCancel, dhanLtp, dhanMarginCalc, dhanModify, dhanPlace, dhanPositions, dhanStatus,
   lotsPerOrder, positionDiff, productOf, resolveLeg, setDhanRpc, type Side, sideOf, stepFor, stopLimit, syncFno, toTick,
 } from "./execution.ts";
 import { loadMarginRates, refreshDayMoves, refreshMargins } from "./margins.ts";
@@ -351,11 +351,28 @@ function ratesFor(s: Strategy): ChargeRates {
   return { brk_pct: 0.03, stt_fut: 0.05, stt_opt: 0.15, exch_fut: bse ? 0 : 0.00183, exch_opt: bse ? 0.0325 : 0.03553, sebi: 0.0001, gst: 18, stamp_fut: 0.002, stamp_opt: 0.003 };
 }
 /** Equity (starting capital + realised P&L of this mode's closed trades) and the margin other open positions hold. */
-async function capitalState(set: Settings, live: boolean, excludeId: string) {
+/**
+ * The room to deploy for a strategy's owner, mode and broker (21 Nov 2026, Papa): SQL capital_room — the same figures the
+ * Capital page shows. Live Dhan strategies size from the Dhan account, live crypto from the Delta wallet, paper from the
+ * paper capital. equity = the capital (the broker's start-of-day balance, moved in 10% steps, or the typed capital + booked
+ * P&L); used = margin of this broker's other open positions (the broker's own figure when fresh); pct = the limit % made
+ * larger by the reserve that profit locked in by stops frees (least(reserve, locked)): with a 90% limit on Rs 4 lakh the
+ * Rs 40,000 reserve opens up once stops lock in Rs 40,000 or more, Rs 20,000 of it with Rs 20,000 locked.
+ * Falls back to the old reckoning (Dhan row's capital + this mode's booked P&L) when the database answers nothing.
+ */
+async function capitalState(set: Settings, live: boolean, excludeId: string, owner?: string, crypto?: boolean) {
+  const u = String(owner ?? set.user_id);
+  const { data: r } = await sb.rpc("capital_room", { p_user: u, p_live: live, p_broker: live && crypto ? "DELTA" : "DHAN", p_exclude: excludeId });
+  if (r && typeof r === "object" && Number.isFinite(Number((r as any).equity))) {
+    const x = r as Record<string, any>;
+    const equity = Number(x.equity) || 0;
+    return { equity, used: Number(x.used) || 0, pct: Math.round((Number(x.pct_eff) || Number(x.pct) || 100) * 100) / 100, set: equity > 0,
+      locked: Number(x.locked) || 0, bonus: Number(x.bonus) || 0, src: String(x.src ?? "") };
+  }
   const { data: net } = await sb.rpc("ledger_net_user", { p_user: set.user_id, p_mode: live ? "LIVE" : "PAPER", p_since: set.capital_since ?? null });
   const { data: open } = await sb.from("algo_strategies").select("id, pos_margin").eq("owner_id", set.user_id).neq("position", "FLAT").eq("live", live).neq("id", excludeId);
   const used = (open ?? []).reduce((a, x) => a + (Number(x.pos_margin) || 0), 0);
-  return { equity: Number(set.capital ?? 0) + Number(net ?? 0), used };
+  return { equity: Number(set.capital ?? 0) + Number(net ?? 0), used, pct: Number(set.deploy_pct ?? 100), set: Number(set.capital ?? 0) > 0, locked: 0, bonus: 0, src: "" };
 }
 /**
  * Today's margin rate for a strategy's asset from Dhan's margin calculator (checked every morning): futures or option
@@ -447,15 +464,18 @@ async function sizeEntry(s: Strategy, set0: Settings, legs: Record<string, unkno
   }
   const capMode = s.sizing?.mode === "CAPITAL" && Number(s.capital) > 0;
   if ((sz || capMode) && rate) notes.push(`Margin ${(rate * 100).toFixed(1)}% of contract value (Dhan, today)`);
+  // The room to deploy (one read): this broker's capital, other open positions' margin, the limit with the reserve that
+  // locked-in profit frees (capitalState).
+  const cs = await capitalState(set, !!s.live, s.id, String(s.owner_id), isCrypto(String(s.data_segment)));
+  if (cs.bonus > 0) notes.push(`Limit ${cs.pct}%: the reserve opened by ₹${Math.trunc(cs.bonus).toLocaleString("en-IN")} of profit locked in by stops`);
   if (capMode) {
     // A bought strategy: the capital the user gave it, plus what it has made or lost since, decides the lots.
     const { data: own } = await sb.from("algo_trades").select("net").eq("strategy_id", s.id).eq("mode", s.live ? "LIVE" : "PAPER").eq("hidden", false);
     const eq = Number(s.capital) + (own ?? []).reduce((a, x) => a + (Number(x.net) || 0), 0);
-    const cs = await capitalState(set, !!s.live, s.id);
     const max = Math.max(1, Math.trunc(Number(s.sizing.max_lots) || 1000));
     const byCap = mLot > 0 ? Math.floor(Math.max(0, eq) / mLot) : max;
-    const acctEq = Number(set.capital ?? 0) > 0 ? cs.equity : null;
-    const room = acctEq == null ? Infinity : acctEq * Number(set.deploy_pct ?? 100) / 100 - cs.used;
+    const acctEq = cs.set ? cs.equity : null;
+    const room = acctEq == null ? Infinity : acctEq * cs.pct / 100 - cs.used;
     const byRoom = mLot > 0 && room !== Infinity ? Math.floor(Math.max(0, room) / mLot) : max;
     const n = Math.max(0, Math.min(max, byCap, byRoom));
     const r0 = (x: number) => Math.trunc(x).toLocaleString("en-IN");
@@ -469,8 +489,7 @@ async function sizeEntry(s: Strategy, set0: Settings, legs: Record<string, unkno
     if (last >= 0) notes[last] = notes[last].replace(/ x \d+$/, ` x ${e.state.pos_qty}`);
     notes.push(`Size: ${why}`);
   } else if (sz) {
-    const cs = await capitalState(set, !!s.live, s.id);
-    const res = lotsFor(sz, cs.equity, mLot, cs.used, Number(set.deploy_pct ?? 100));
+    const res = lotsFor(sz, cs.equity, mLot, cs.used, cs.pct);
     if (res.lots < 1) { notes.push(`Entry skipped: not enough capital for 1 lot (${res.why}).`); return false; }
     lots = res.lots;
     const e = entryLeg(s, newState.position, entryPx, legs.length - nLegs + 1, lots);
@@ -484,7 +503,14 @@ async function sizeEntry(s: Strategy, set0: Settings, legs: Record<string, unkno
     // (changes of 20% or less ignored); the new lots are saved so the pages show them.
     const { data: mr } = await sb.from("lab_margins").select("day_move").eq("asset", String(s.underlying)).maybeSingle();
     const dm = Number(mr?.day_move) || 0, perLot = entryPx * Number(s.lot_size) * dm;
-    const mv = moveLots(lots, Number(s.sizing.move_amt) || 0, perLot);
+    // Compounding (21 Nov 2026, Papa: "as soon as we end up getting some profits, the lots should automatically be
+    // increased"): a strategy sized with a SHARE of the capital (sizing.share, saved by the Lots wizard) aims at share x
+    // this broker's capital now, so booked profit (and deposits) raise the lots and losses lower them; the capital moves
+    // only in 10% steps (cap_base) and changes of 20% or less in the lots are ignored (moveLots).
+    const share = Number(s.sizing.share) || 0;
+    const amt = share > 0 && cs.set ? share * cs.equity : Number(s.sizing.move_amt) || 0;
+    if (share > 0 && cs.set) s = { ...s, sizing: { ...s.sizing, move_amt: amt } } as Strategy;
+    const mv = moveLots(lots, amt, perLot);
     // "Never more than" lots (12 Nov 2026, go-live review): MOVE sizing had no cap (1,006 lots NATGASMINI on paper). Live
     // only: 60 paper strategies carry an old default max of 10 from automatic sizing that nobody chose for MOVE.
     const moveMax = s.live ? Math.trunc(Number(s.sizing.max_lots) || 0) : 0;
@@ -501,9 +527,8 @@ async function sizeEntry(s: Strategy, set0: Settings, legs: Record<string, unkno
       if (last >= 0) notes[last] = notes[last].replace(/ x \d+$/, ` x ${e.state.pos_qty}`);
       notes.push(`Size: ${mv.why}`);
     }
-    if (Number(set.capital ?? 0) > 0 && mLot > 0) {
-      const cs = await capitalState(set, !!s.live, s.id);
-      const fit = fixedLotsFit(lots, mLot, cs.equity, cs.used, Number(set.deploy_pct ?? 100), true);
+    if (cs.set && mLot > 0) {
+        const fit = fixedLotsFit(lots, mLot, cs.equity, cs.used, cs.pct, true);
       if (fit.lots < 1) { notes.push(`Entry skipped: ${fit.why}.`); return false; }
       if (fit.lots < lots) {
         lots = fit.lots;
@@ -513,10 +538,9 @@ async function sizeEntry(s: Strategy, set0: Settings, legs: Record<string, unkno
         notes.push(`Size: ${fit.why} ⇒ ${lots} lot${lots === 1 ? "" : "s"}`);
       }
     }
-  } else if (Number(set.capital ?? 0) > 0 && mLot > 0) {
+  } else if (cs.set && mLot > 0) {
     // Fixed lots: still kept inside the account's "never use more than" limit (other open positions of this mode).
-    const cs = await capitalState(set, !!s.live, s.id);
-    const fit = fixedLotsFit(lots, mLot, cs.equity, cs.used, Number(set.deploy_pct ?? 100), true);
+    const fit = fixedLotsFit(lots, mLot, cs.equity, cs.used, cs.pct, true);
     if (fit.lots < 1) { notes.push(`Entry skipped: ${fit.why}.`); return false; }
     if (fit.lots < lots) {
       // Trade what fits (e.g. 36 of 40 lots) instead of skipping.
@@ -1277,9 +1301,9 @@ async function manualAdd(s: Strategy, set0: Settings, want: number, done: (state
   const set = modeAccount(capSrc, !!s.live);
   const rate = await dhanRate(s).catch(() => null);
   const mLot = marginPerLot(s as any, rate ? { margin_pct: rate * 100 } as any : null, px, null);
-  if (Number(set.capital ?? 0) > 0 && mLot > 0) {
-    const cs = await capitalState(set, !!s.live, s.id);
-    const fit = fixedLotsFit(add, mLot, cs.equity, cs.used + (Number(s.pos_margin) || 0), Number(set.deploy_pct ?? 100), true);
+  const cs = await capitalState(set, !!s.live, s.id, String(s.owner_id), crypto);
+  if (cs.set && mLot > 0) {
+    const fit = fixedLotsFit(add, mLot, cs.equity, cs.used + (Number(s.pos_margin) || 0), cs.pct, true);
     if (fit.lots < 1) return done("refused", `Not sent: ${fit.why}.`);
     if (fit.lots < add) { add = fit.lots; notes.push(`cut to ${add} by your limit`); }
   }
@@ -1883,8 +1907,8 @@ async function dataPlanCheck(id: number) {
   await sb.from("notifications").insert({ user_id: a.user_id, kind: "error", url: "/?conn=1", title, body });
 }
 /** Funds in the Dhan account (available balance, margin in use), shown next to the desk's own capital figures. */
-async function refreshFunds(userId: string) {
-  const { data: set } = await sb.from("broker_accounts").select("id, client_id, access_token").eq("user_id", userId).eq("broker", "DHAN").maybeSingle();
+async function refreshFunds(userId: string, extra: Record<string, unknown> = {}) {
+  const { data: set } = await sb.from("broker_accounts").select("id, client_id, access_token, cap_src, cap_base").eq("user_id", userId).eq("broker", "DHAN").maybeSingle();
   if (!set?.access_token) return { ok: false };
   const r = await fetch("https://api.dhan.co/v2/fundlimit", { headers: { "access-token": set.access_token, "client-id": set.client_id ?? "", Accept: "application/json" }, signal: AbortSignal.timeout(15000) });
   const j = await r.json().catch(() => null);
@@ -1892,10 +1916,88 @@ async function refreshFunds(userId: string) {
   const pickN = (...k: string[]) => { for (const x of k) if (j[x] !== undefined && j[x] !== null) return Number(j[x]); return null; };
   const funds = {
     available: pickN("availabelBalance", "availableBalance"), sod: pickN("sodLimit"), collateral: pickN("collateralAmount"),
-    utilized: pickN("utilizedAmount"), withdrawable: pickN("withdrawableBalance"), receivable: pickN("receiveableAmount", "receivableAmount"),
+    utilized: pickN("utilizedAmount"), withdrawable: pickN("withdrawableBalance"), receivable: pickN("receiveableAmount", "receivableAmount"), ...extra,
   };
-  await sb.from("broker_accounts").update({ funds, funds_at: new Date().toISOString(), funds_error: null }).eq("id", set.id);
+  const upd: Record<string, unknown> = { funds, funds_at: new Date().toISOString(), funds_error: null, ...capStep(set, funds.sod) };
+  await sb.from("broker_accounts").update(upd).eq("id", set.id);
   return { ok: true };
+}
+/**
+ * The live capital that follows the broker (cap_src 'broker'; 21 Nov 2026, Papa): the broker's booked balance — Dhan's
+ * start-of-day balance, Delta's wallet balance — moved only when it has changed by 10% or more since the last step, so
+ * lots don't change with every small booking. Returns the columns to save (none when nothing moves).
+ */
+export function capStep(row: { cap_src?: string | null; cap_base?: number | string | null }, total: number | null): Record<string, unknown> {
+  if ((row.cap_src ?? "broker") !== "broker" || !(Number(total) > 0)) return {};
+  const base = Number(row.cap_base) || 0;
+  if (base > 0 && Math.abs(Number(total) - base) / base < CAP_STEP) return {};
+  return { cap_base: Math.trunc(Number(total)), cap_base_at: new Date().toISOString() };
+}
+export const CAP_STEP = 0.10;
+/**
+ * The brokers' own money, every 5 minutes (21 Nov 2026, Papa: "fetch margin from Dhan as we are fetching the funds …
+ * fetch balance from delta also"), for every user with a live strategy: Dhan's funds (fundlimit) and Dhan's margin for
+ * each open live position (margin calculator, at today's price and rates; funds.pos = {strategy id: margin}) — every 5
+ * minutes in market hours, every 30 outside; Delta's wallet (balance, margin in use, free; in dollars and in rupees at
+ * Delta's own rate) around the clock, its margin split over the open crypto positions by their size.
+ */
+async function brokerMoney(onlyUser?: string): Promise<Record<string, string>> {
+  let q = sb.from("algo_strategies").select("id, owner_id, live, active, archived, position, data_segment, pos_broker, pos_ltp, pos_margin").eq("live", true).not("archived", "is", true);
+  if (onlyUser) q = q.eq("owner_id", onlyUser);
+  const { data: rows } = await q;
+  const now = ist(Date.now() / 1000), wd = new Date(Date.now() + 19800000).getUTCDay();
+  const dhanHours = wd >= 1 && wd <= 5 && now.min >= 8 * 60 + 55 && now.min <= 23 * 60 + 59;
+  const byUser = new Map<string, any[]>();
+  for (const s of rows ?? []) if (s.active || s.position !== "FLAT") byUser.set(s.owner_id, [...(byUser.get(s.owner_id) ?? []), s]);
+  if (onlyUser && !byUser.has(onlyUser)) byUser.set(onlyUser, []);
+  const out: Record<string, string> = {};
+  for (const [u, list] of byUser) {
+    const dhanList = list.filter((s) => !isCrypto(String(s.data_segment))), cr = list.filter((s) => isCrypto(String(s.data_segment)));
+    try {
+      if ((dhanList.length || onlyUser) && (dhanHours || now.min % 30 < 5 || onlyUser)) {
+        const set = await accountFor(sb, u, "DHAN").catch(() => null);
+        if (set?.dhan_access_token && !set.shared_data) {
+          const c = credsOf(set), pos: Record<string, number> = {};
+          for (const s of dhanList) {
+            const leg = (s.pos_broker as PosBroker | null)?.legs?.[0];
+            if (s.position === "FLAT" || !leg || (s.pos_broker as PosBroker).legs.length !== 1) continue;
+            const { data: lp } = await sb.from("live_prices").select("px").eq("seg", leg.seg).eq("sec", String(leg.sec)).maybeSingle();
+            const px = Number(lp?.px) || Number(s.pos_ltp) || 0;
+            if (!(px > 0)) continue;
+            const m = await dhanMarginCalc(c, { seg: leg.seg, sec: String(leg.sec), side: leg.qty > 0 ? "BUY" : "SELL", qty: leg.qty, product: leg.product ?? "MARGIN", price: px }).catch(() => null);
+            if (m != null) pos[s.id] = Math.round(m);
+          }
+          const r = await refreshFunds(u, { pos, pos_at: new Date().toISOString() });
+          out[`${u}:DHAN`] = r.ok ? `ok, ${Object.keys(pos).length} positions` : "funds not read";
+        }
+      }
+      if (cr.length || onlyUser) out[`${u}:DELTA`] = await deltaMoney(u, cr);
+    } catch (e) { out[u] = `error ${e instanceof Error ? e.message : e}`; }
+  }
+  return out;
+}
+/** Delta's wallet for one user (see brokerMoney): USD balance, margin in use and free, and the same in rupees. */
+async function deltaMoney(u: string, cr: any[]): Promise<string> {
+  const { data: row } = await sb.from("broker_accounts").select("id, access_token, cap_src, cap_base").eq("user_id", u).eq("broker", "DELTA").maybeSingle();
+  if (!row?.access_token) return "no Delta key";
+  try {
+    const j = await deltaPrivate(sb, u, "GET", "/v2/wallet/balances");
+    const usd = (Array.isArray(j?.result) ? j.result : []).find((x: any) => String(x.asset_symbol ?? x.asset?.symbol) === "USD") ?? {};
+    const bal = Number(usd.balance) || 0, avail = Number(usd.available_balance) || 0;
+    const marg = (Number(usd.position_margin) || 0) + (Number(usd.order_margin) || 0) + (Number(usd.blocked_margin) || 0);
+    const balInr = Number(usd.balance_inr) || 0, rate = bal > 0 && balInr > 0 ? balInr / bal : FX.usdInr;
+    const open = cr.filter((s) => s.position !== "FLAT"), tot = open.reduce((a, s) => a + (Number(s.pos_margin) || 0), 0);
+    const pos: Record<string, number> = {};
+    for (const s of open) pos[s.id] = Math.round(marg * rate * (tot > 0 ? (Number(s.pos_margin) || 0) / tot : 1 / open.length));
+    const funds = { usd: bal, usd_available: avail, usd_margin: marg, equity_usd: Number(j?.meta?.net_equity) || null, rate: Math.round(rate * 10000) / 10000,
+      balance_inr: Math.round(balInr || bal * rate), available_inr: Math.round(Number(usd.available_balance_inr) || avail * rate), margin_inr: Math.round(marg * rate), pos, pos_at: new Date().toISOString() };
+    await sb.from("broker_accounts").update({ funds, funds_at: new Date().toISOString(), funds_error: null, ...capStep(row, funds.balance_inr) }).eq("id", row.id);
+    return `ok, $${bal.toFixed(2)}`;
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    await sb.from("broker_accounts").update({ funds_error: why.slice(0, 300), funds_at: new Date().toISOString() }).eq("id", row.id);
+    return `error ${why.slice(0, 120)}`;
+  }
 }
 
 /** Checks a user's Delta Exchange API key by reading the wallet; the result shows under the connection form. */
@@ -3939,7 +4041,12 @@ async function handleReq(req: Request): Promise<Response> {
   if (action === "live_test" && body.strategy_id) return Response.json({ action, ...(await liveTest(String(body.strategy_id))) });
   if (action === "orders") return Response.json({ action, ...(await runOrders(Math.min(4, Math.max(1, Number(body.passes) || 4)))) });
   if (action === "reconcile") { const { data: hol } = await sb.from("market_holidays").select("day, exch, opens_at").eq("day", ist(Date.now() / 1000).date); setHolidays(hol ?? []); }
-  if (action === "reconcile") return Response.json({ action, ...(await reconcile()) });
+  if (action === "reconcile") {
+    const rec = await reconcile();
+    // The brokers' money with every broker match (every 5 minutes): Dhan funds and margins, Delta's wallet.
+    const money = await brokerMoney().catch((e) => ({ error: String(e) }));
+    return Response.json({ action, ...rec, money });
+  }
   if (action === "prices") { EdgeRuntime.waitUntil(pricesLoop().catch((e) => console.error("price loop", e))); return Response.json({ action, accepted: true }); }
   if (action === "audit") {
     const b = body as { batch?: string; offset?: number };
@@ -4046,9 +4153,11 @@ async function handleReq(req: Request): Promise<Response> {
   }
   if (action === "token" || action === "token_renew") return Response.json({ action, ...(await tokenCheck(action === "token_renew", body.user_id)) });
   if (action === "funds") {
-    if (body.user_id) return Response.json({ action, ...(await refreshFunds(body.user_id)) });
-    const admin = await adminAccount(sb);
-    return Response.json({ action, ...(admin ? await refreshFunds(admin.user_id) : { ok: false }) });
+    // The Capital page's "Refresh": Dhan's funds and margins and Delta's wallet for that user, now.
+    const uid = body.user_id ?? (await adminAccount(sb))?.user_id;
+    if (!uid) return Response.json({ action, ok: false });
+    const money = await brokerMoney(uid);
+    return Response.json({ action, ok: Object.values(money).some((x) => /^ok/.test(x)), money });
   }
   if (action === "sync") {
     if (!body.user_id) return Response.json({ error: "user_id missing" }, { status: 400 });
