@@ -954,6 +954,23 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   with subtotals. On 21 Nov: Dhan capital ₹4,82,955 (sodLimit), Dhan margin ₹3,81,881 vs the desk's ₹3,10,228, locked
   ₹83,196 (SILVERM's stop); the Dhan live limit is saved as 100% (Papa spoke of 90%) so the reserve is 0 until he sets it;
   Delta ₹1,00,000 at 60%.
+- **Crypto: ₹85 a dollar and a smaller lot (21 Nov 2026, Papa: "Set 85" … "make the crypto lots smaller")**: Delta India
+  books at exactly ₹85 a dollar ($1,176.47 = ₹1,00,000), so `lab_settings.usd_inr` 88 → 85 and every crypto strategy's
+  `lot_size` re-priced × 85 ÷ 88 (same coins per lot; 17 open paper positions' running P&L ~3.5% lower; trades booked
+  before stay at 88). Then the lot (`crypto_assets.lot_coins`) was made 1/5 — SOL 50 → 10, ETH 2 → 0.4, XRP 5000 → 1000,
+  others ÷ 5 — and **BTC 0.05 → 0.025** (÷ 2: the table's check `lot_size ≥ 1` refuses 0.01 BTC = 0.85, and paper lots
+  must stay whole). Every crypto strategy's `lot_size` and `sizing.dd_per_lot` were divided the same way; PAPER ones (and
+  listing masters) took × the factor in `lots` and in open positions' `pos_lots` / `pos_qty`, so paper money at work is
+  unchanged; LIVE ones kept their lot count (smaller), and the four live ones still carrying paper's ₹37 lakh a day
+  (MOVE without a share: #42336, #39115, #264758, #305005) were set to FIXED 1 lot. Done with triggers off
+  (`session_replication_role = replica`, `updated_at` set by hand) so position_log shows no false "lots changed". Trades
+  booked before keep their old `lots` figure (units are exact). Website: `labStrategyRow` gives a crypto strategy made from
+  an older lab result today's lot (`lotCoinsOf × USD_INR`, worst fall per lot scaled); `cmpLoad` scales a desk strategy's
+  lab backtest by its lot ÷ the backtest's lot (Compare, drawdown check). Old lab results' figures stay per their old lot.
+  Before this, a stop study of the three live crypto strategies (lab backtester, 1 lot, full history; scripts in the
+  scratchpad): no stop → worst single trade at the old lot −₹1.70 L (SOL #104958), −₹1.14 L (SOL #42336), −₹54k (BTC);
+  SOL #104958 with a fixed 1 × ATR stop was better on every count; Papa chose smaller lots over stops (a stop changes
+  the tested strategy); stop versions to be tested on paper / by the Lab's stop tuning first.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");

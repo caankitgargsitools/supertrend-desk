@@ -7091,7 +7091,12 @@ function labStrategyRow(r, v) {
   if (v.side) Object.assign(row, { trade_type: "OPTIONS", option_side: v.side === "SELL" ? "SELL" : "BUY", risk: v.risk || null, strike_offset: 0, structure: v.side === "SPREAD" ? v.structure || null : null });
   row.name = `Lab #${r.id} · ${v.key === "FUT" ? "Futures" : v.side === "SELL" ? "Option writing" : v.side === "SPREAD" ? (v.structure && STRUCTS[v.structure.preset] ? STRUCTS[v.structure.preset].name : "Spread") : "Option buying"} · ${r.label}`.slice(0, 80);
   // Lots stay fixed until you choose to size from capital; the tested worst drawdown for 1 lot is filled in for that.
-  row.sizing = { mode: "FIXED", alloc_pct: 20, dd_pct: 25, dd_per_lot: Math.trunc((v.metrics && v.metrics.full && v.metrics.full.max_dd) || 0) || null, dd_mult: 1.5, margin_pct: c.data_segment === "MCX_COMM" || c.data_segment === "DELTA" ? 10 : 12, max_lots: 10 };
+  // A coin's lot is today's (crypto_assets.lot_coins × the dollar rate), not the one the backtest ran with (21 Nov 2026: the
+  // crypto lot was made 5× smaller); the tested worst fall per lot is scaled to it.
+  const coin = c.data_segment === "DELTA" ? coinOf(c.underlying) : null, lotNow = coin ? +(lotCoinsOf(coin) * USD_INR).toFixed(4) : null;
+  const lotK = lotNow && Number(c.lot_size) > 0 ? lotNow / Number(c.lot_size) : 1;
+  if (lotNow) row.lot_size = lotNow;
+  row.sizing = { mode: "FIXED", alloc_pct: 20, dd_pct: 25, dd_per_lot: Math.trunc(((v.metrics && v.metrics.full && v.metrics.full.max_dd) || 0) * lotK) || null, dd_mult: 1.5, margin_pct: c.data_segment === "MCX_COMM" || c.data_segment === "DELTA" ? 10 : 12, max_lots: 10 };
   row.active = false; row.live = false; row.lab_id = r.id;
   return row;
 }
@@ -8908,7 +8913,10 @@ async function cmpLoad(x) {
     it.name = it.lab.label; it.asset = it.lab.asset;
   }
   if (it.lab && it.lab.config) {
-    it.trades = labTradeList(it.lab, { key: "FUT", trades: it.lab.trades || [] }).map((t) => ({ t: cmpTime(t.exit), net: Number(t.net) || 0 })).filter((t) => t.t);
+    // A desk strategy's lot can differ from the one its backtest ran with (crypto lots made 5× smaller on 21 Nov 2026):
+    // its backtest is shown per lot of the desk strategy.
+    const k = it.s && Number(it.s.lot_size) > 0 && Number(it.lab.config.lot_size) > 0 ? Number(it.s.lot_size) / Number(it.lab.config.lot_size) : 1;
+    it.trades = labTradeList(it.lab, { key: "FUT", trades: it.lab.trades || [] }).map((t) => ({ t: cmpTime(t.exit), net: (Number(t.net) || 0) * k })).filter((t) => t.t);
     it.src = `Lab #${it.lab.id} backtest`;
   }
   if (!it.trades.length && it.desk) { it.trades = it.desk; it.src = `Desk trades (${it.s && it.s.live ? "live" : "paper"})`; }
