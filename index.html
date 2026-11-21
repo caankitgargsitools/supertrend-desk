@@ -1238,6 +1238,18 @@ body.dk-fs-on { overflow: hidden; }
 .rd-list li { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; font-size: 14px; }
 .rd-list .chip { min-width: 24px; text-align: center; } .rd-fix { margin-top: 2px; font-size: 13px; color: var(--text); }
 .mfold { margin-top: 8px; } .mfold > summary { cursor: pointer; font-size: 14px; padding: 4px 0; }
+/* Capital page, Live: one card per broker (21 Nov 2026) */
+.cap-bks { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
+.cap-bk { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--panel, transparent); min-width: 0; }
+.cap-bk h3 { font-size: 15px; margin: 0 0 2px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.cap-bk .kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin: 10px 0 0; font-size: 13px; }
+.cap-bk .kv dt { color: var(--muted); margin: 0; }
+.cap-bk .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.cap-bk .kv dd.big { font-size: 17px; color: var(--green); }
+.cap-bk .kv .sub { grid-column: 1 / -1; color: var(--muted); font-size: 12px; margin: -2px 0 4px; }
+.cap-bk form { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; align-items: end; }
+.cap-bk form .formbar { grid-column: 1 / -1; margin: 0; }
+tr.lwsub td { font-size: 12px; color: var(--muted); border-top: 0; }
 </style>
 </head>
 <body>
@@ -1613,20 +1625,21 @@ body.dk-fs-on { overflow: hidden; }
           <div><span class="label">Money</span><h2>Capital</h2></div>
           <div class="actions">
             <div class="seg" id="cap_mode" role="group" aria-label="Mode"><button type="button" data-m="LIVE" aria-pressed="true">Live</button><button type="button" data-m="PAPER" aria-pressed="false">Paper</button></div>
-            <button class="btn" id="cap_funds" type="button">Refresh Dhan funds</button>
+            <button class="btn" id="cap_funds" type="button" title="Reads Dhan's funds and margins and the Delta wallet now (the desk also reads them every 5 minutes)">Refresh broker funds</button>
           </div>
         </div>
         <div class="seg" id="cap_tabs" role="tablist" aria-label="Capital page" style="margin-top:10px"><button type="button" role="tab" data-t="main" aria-pressed="true">Capital &amp; limit</button><button type="button" role="tab" data-t="lots" aria-pressed="false">Lots wizard</button><button type="button" role="tab" data-t="trades" aria-pressed="false">Closed trades</button></div>
         <div id="cap_stats" style="margin-top:12px"></div>
+        <div id="cap_brokers" class="cap-bks" hidden></div>
         <form novalidate id="capForm" style="margin-top:14px">
-          <div class="grid">
+          <div class="grid" id="cap_grid">
             <label class="f"><span id="cap_capLbl">Live trading capital (₹)</span><input id="cap_capital" type="number" min="0" step="1000"></label>
             <label class="f"><span>Never use more than (% of capital at once)</span><input id="cap_deploy" type="number" min="1" max="100" step="1"></label>
             <label class="f adv"><span>Count profits &amp; losses from</span><input id="cap_since" type="date" lang="en-IN"></label>
           </div>
           <div id="cap_dd" class="dd-box"></div>
-          <p class="hint"><b>Live and Paper each have their own capital, limit and count-from date</b> (switch Live / Paper at the top); saving changes only the one shown. Strategies set to “Automatic” lots size every trade from this capital plus the profit or loss made so far, so they trade more after profits and less after losses. The limit keeps all strategies together (fixed and automatic lots) from using more than this share at once: a new entry takes only the lots that fit (e.g. 36 of 40), is skipped only when not even 1 lot fits, and the strategy's log says why. Exits always go.</p>
-          <div class="formbar"><button class="btn primary" type="submit">Save</button><span class="hint" id="cap_msg"></span><label class="advtoggle" style="margin-left:auto"><input type="checkbox" data-adv> Show advanced settings</label></div>
+          <p class="hint" id="cap_hint"><b>Live and Paper each have their own capital, limit and count-from date</b> (switch Live / Paper at the top); saving changes only the one shown. Strategies set to “Automatic” lots size every trade from this capital plus the profit or loss made so far, so they trade more after profits and less after losses. The limit keeps all strategies together (fixed and automatic lots) from using more than this share at once: a new entry takes only the lots that fit (e.g. 36 of 40), is skipped only when not even 1 lot fits, and the strategy's log says why. Exits always go.</p>
+          <div class="formbar" id="cap_bar"><button class="btn primary" type="submit">Save</button><span class="hint" id="cap_msg"></span><label class="advtoggle" style="margin-left:auto"><input type="checkbox" data-adv> Show advanced settings</label></div>
         </form>
       </section>
       <section class="card" id="lw_card">
@@ -1635,6 +1648,7 @@ body.dk-fs-on { overflow: hidden; }
           <div class="actions"><button class="btn" id="lw_toggle" type="button" aria-expanded="true">Hide</button></div>
         </div>
         <div id="lw_body">
+          <div class="seg" id="lw_bk" role="tablist" aria-label="Broker" style="margin-top:8px" hidden><button type="button" role="tab" data-bk="DHAN" aria-pressed="true">Dhan · indices, stocks, MCX</button><button type="button" role="tab" data-bk="DELTA" aria-pressed="false">Crypto · Delta</button></div>
           <p class="hint" style="margin:4px 0 0">Choose how the capital is spread across your <b id="lw_modeTxt">live</b> strategies and see the lots, the margin each one blocks and the total. Nothing changes until you press “Apply these lots”. Open positions keep their lots; the new lots are used from each strategy's next entry.</p>
           <div class="lw-grid">
             <div>
@@ -5159,10 +5173,14 @@ async function loadCap() {
   const st = capView(await loadCapStatus(), cap.mode), trades = myTrades.filter((t) => t.mode === cap.mode).slice(0, 200); // this mode's settings; the latest 200 closed trades of the mode
   $("cap_capLbl").textContent = cap.mode === "LIVE" ? "Live trading capital (₹)" : "Paper trading capital (₹)";
   if (!$("cap_capital").matches(":focus")) { $("cap_capital").value = String(Math.trunc(st.capital ?? 0)); $("cap_since").value = st.since || ""; $("cap_deploy").value = String(st.deploy_pct ?? 60); }
-  if (lw.savedPct !== st.deploy_pct) { lw.savedPct = st.deploy_pct; $("lw_capPct").value = String(st.deploy_pct ?? 60); }
-  if (!lw.capSet) { $("lw_cap").value = String(Math.trunc(equityOf(st, cap.mode))); }
-  if (lw.restoredFor !== cap.mode) { lw.restoredFor = cap.mode; lwRestore(); }
-  $("cap_funds").hidden = cap.mode !== "LIVE"; // real Dhan money has no place on the Paper screen
+  const lwPct = lwSavedPct();
+  if (lw.savedPct !== lwPct) { lw.savedPct = lwPct; $("lw_capPct").value = String(lwPct); }
+  if (!lw.capSet) { $("lw_cap").value = String(Math.trunc(lwEquity())); }
+  const lwKey = lwLastKey();
+  if (lw.restoredFor !== lwKey) { lw.restoredFor = lwKey; lwRestore(); }
+  $("lw_bk").hidden = cap.mode !== "LIVE";
+  $("lw_bk").querySelectorAll("[data-bk]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.bk === lw.bk)));
+  $("cap_funds").hidden = cap.mode !== "LIVE"; // real broker money has no place on the Paper screen
   renderCap(st, trades); lwRender(); capDd(st).catch((e) => { $("cap_dd").innerHTML = `<p class="hint">Drawdown check: ${esc(errorText(e))}</p>`; });
 }
 function renderCap(st, trades) {
@@ -5170,13 +5188,26 @@ function renderCap(st, trades) {
   const bk = bookOf(live ? "LIVE" : "PAPER"), net = st.since ? Number(live ? st.live_net : st.paper_net) : bk.net, equity = equityOf(st, cap.mode), used = runOf(live ? "LIVE" : "PAPER").margin;
   const capAmt = equity * Number(st.deploy_pct) / 100, f = st.funds || {};
   const archNet = st.since ? 0 : bk.arch;
-  $("cap_stats").innerHTML = `<div class="stats">
+  // Live (21 Nov 2026, Papa): one card per broker — its own capital, margin, free money, limit, the reserve that profit
+  // locked in by stops frees, and what can still be deployed; the old single capital form is for Paper only.
+  for (const id of ["cap_grid", "cap_hint", "cap_bar"]) $(id).hidden = live;
+  $("cap_brokers").hidden = !live;
+  if (live) {
+    const rd = st.room_dhan || {}, rx = st.room_delta || {};
+    $("cap_stats").innerHTML = `<div class="stats">
+      ${tile("Live capital · Dhan + Delta", rupees((Number(rd.equity) || 0) + (Number(rx.equity) || 0)), "", `Dhan ${rupees(rd.equity || 0)} · Delta ${rupees(rx.equity || 0)}`)}
+      ${tile("Booked P&L (live)", rupees(net), net > 0 ? "up" : net < 0 ? "down" : "", `every closed live trade${archNet ? ` · includes ${rupees(archNet)} from archived strategies` : ""}`)}
+      ${tile("Margin in use · brokers", rupees((Number(rd.used) || 0) + (Number(rx.used) || 0)), "", "what Dhan and Delta block now")}
+      ${tile("Can still deploy", rupees(Math.max(0, Number(rd.room) || 0) + Math.max(0, Number(rx.room) || 0)), "", "inside your limits, with the reserve locked-in profit opens", "--green")}
+    </div>`;
+    $("cap_brokers").innerHTML = capBrokerCard(rd, "DHAN", st) + capBrokerCard(rx, "DELTA", st);
+  } else $("cap_stats").innerHTML = `<div class="stats">
     ${tile("Capital", rupees(st.capital), "", "")}
     ${tile(`Booked P&L (${live ? "live" : "paper"})`, rupees(net), net > 0 ? "up" : net < 0 ? "down" : "", `capital now ${rupees(equity)}${archNet ? ` · includes ${rupees(archNet)} from archived strategies (the same figure as on the Desk; the Strategies list shows it as “account” under its total)` : ""}${st.since ? ` · closed trades since ${st.since}` : ""}`)}
     ${tile("Margin in use", rupees(used), "", equity > 0 ? `${pct(used / equity * 100, 1)} of capital now · Limit ${st.deploy_pct}%` : "")}
     ${live ? tile("Dhan account balance", f.available != null ? rupees(f.available) : "–", "", st.funds_error ? st.funds_error : f.available != null ? `updated ${fmtDate(st.funds_at)}` : "press Refresh Dhan funds") : ""}
   </div>
-  ${f.available != null && Number(st.capital) > Number(f.available) + Number(f.utilized || 0) + Number(f.collateral || 0) && live ? `<div class="banner warn" style="margin-top:10px">Your trading capital (${rupees(st.capital)}) is more than the funds in your Dhan account (${rupees(Number(f.available) + Number(f.utilized || 0))}). Sizing works from the capital you set here, so orders could be rejected for margin. Add funds or lower the capital.</div>` : ""}`;
+  ${f.available != null && Number(st.capital) > Number(f.available) + Number(f.utilized || 0) + Number(f.collateral || 0) && live && false ? `<div class="banner warn" style="margin-top:10px">Your trading capital (${rupees(st.capital)}) is more than the funds in your Dhan account (${rupees(Number(f.available) + Number(f.utilized || 0))}). Sizing works from the capital you set here, so orders could be rejected for margin. Add funds or lower the capital.</div>` : ""}`;
   const names = new Map(state.strategies.map((x) => [x.id, sName(x)]));
   // Every trade of each strategy (the list below shows only the latest 200).
   const byStrat = new Map(); for (const [id, a] of (pnl || new Map())) byStrat.set(id, live ? a.live : a.paper);
@@ -5214,12 +5245,73 @@ function renderCap(st, trades) {
     tb.append(tr);
   }
 }
+/**
+ * One broker's money on the Live Capital screen (21 Nov 2026, Papa): from capital_room (SQL) — the same figures the engine
+ * sizes every live entry with. Capital = the broker's booked balance (Dhan's start-of-day balance, Delta's wallet; moved in
+ * 10% steps) or a typed figure; Limit = "never use more than"; the reserve above the limit opens as far as profit locked
+ * in by the stops of this broker's open positions (least(reserve, locked)); Can deploy = limit + that − margin in use.
+ */
+function capBrokerCard(r, bk, st) {
+  const dl = bk === "DELTA", f = r.funds || {}, name = dl ? "Delta · Crypto" : "Dhan · NSE, BSE, MCX";
+  const connected = dl ? st.delta_connected : !!(st.funds || st.funds_at);
+  const src = r.src === "fixed" ? "fixed" : "broker", pct = Number(r.pct) || 0;
+  const free = dl ? f.available_inr : f.available, inBk = dl ? f.balance_inr : (Number(f.available) || 0) + (Number(f.utilized) || 0);
+  const age = r.funds_at ? fmtDate(r.funds_at) : null;
+  const row = (k, v, cls = "") => `<dt>${k}</dt><dd class="${cls}">${v}</dd>`, sub = (t) => `<div class="sub">${t}</div>`;
+  const capWhy = src === "broker" ? (dl ? `Delta wallet (${f.usd != null ? `$${Number(f.usd).toFixed(2)} at ₹${f.rate}` : "not read yet"}), moved in steps of 10%` : "Dhan's start-of-day balance, moved in steps of 10%") + (r.base_at ? ` · set ${esc(fmtDate(r.base_at))}` : "")
+    : `typed ${rupees(r.capital)} + booked ${dl ? "crypto" : "Dhan"} P&L ${rupees(r.net)}`;
+  const gap = Math.abs((Number(r.used) || 0) - (Number(r.used_desk) || 0));
+  if (dl && !connected) return `<div class="cap-bk"><h3>${name}</h3><p class="hint" style="margin:6px 0 0">No Delta API key yet: Connections › Delta Exchange.</p></div>`;
+  return `<div class="cap-bk" data-bk="${bk}">
+    <h3>${name} <span class="hint" style="font-weight:400;font-size:12px">${age ? `read ${esc(age)}${r.fresh ? "" : " · old"}` : "not read yet"}${r.funds_error ? ` · ${esc(r.funds_error)}` : ""}</span></h3>
+    <dl class="kv">
+      ${row("Capital", rupees(r.equity))}${sub(esc(capWhy))}
+      ${row(`In ${dl ? "Delta" : "Dhan"} now`, inBk != null ? rupees(inBk) : "–")}${sub(free != null ? `free ${rupees(free)}` : "")}
+      ${row("Margin in use", rupees(r.used))}${sub(`${r.open || 0} open position${r.open === 1 ? "" : "s"}${gap >= 1000 ? ` · the desk's estimate at entry ${rupees(r.used_desk)}: ${dl ? "Delta" : "Dhan"} charges today's rates` : ""}`)}
+      ${row(`Limit ${pct}%`, rupees(r.limit))}
+      ${row("Reserve above the limit", rupees(r.reserve))}
+      ${row("Locked in by stops", rupees(r.locked), Number(r.locked) > 0 ? "pos-num" : Number(r.locked) < 0 ? "neg-num" : "")}${sub(`${r.with_stop || 0} of ${r.open || 0} open positions have a stop · opens ${rupees(r.bonus)} of the reserve`)}
+      ${row("Can still deploy", rupees(Math.max(0, Number(r.room) || 0)), "big")}${sub("limit + the reserve the locked profit opens − margin in use: what new entries can use now")}
+    </dl>
+    <form novalidate data-bkform="${bk}">
+      <label class="f"><span>Capital</span><select data-bksrc><option value="broker" ${src === "broker" ? "selected" : ""}>${dl ? "Delta wallet" : "Dhan balance"}</option><option value="fixed" ${src === "fixed" ? "selected" : ""}>Fixed amount</option></select></label>
+      <label class="f" ${src === "broker" ? "hidden" : ""} data-bkcapbox><span>Fixed capital (₹)</span><input type="number" min="0" step="1000" data-bkcap value="${Math.trunc(Number(r.capital) || 0)}"></label>
+      <label class="f"><span>Never use more than (%)</span><input type="number" min="1" max="100" step="1" data-bkpct value="${pct}"></label>
+      <div class="formbar"><button class="btn primary" type="submit">Save ${dl ? "Delta" : "Dhan"}</button><span class="hint" data-bkmsg></span></div>
+    </form>
+  </div>`;
+}
+$("cap_brokers").addEventListener("change", (e) => {
+  const sel = e.target.closest("[data-bksrc]"); if (!sel) return;
+  const box = sel.closest("form").querySelector("[data-bkcapbox]"); if (box) box.hidden = sel.value !== "fixed";
+});
+$("cap_brokers").addEventListener("submit", (e) => {
+  const f = e.target.closest("[data-bkform]"); if (!f) return;
+  e.preventDefault();
+  const bk = f.dataset.bkform, src = f.querySelector("[data-bksrc]").value, c = Number(f.querySelector("[data-bkcap]").value), d = Number(f.querySelector("[data-bkpct]").value);
+  const msg = f.querySelector("[data-bkmsg]");
+  if (src === "fixed" && !(c >= 0)) { msg.textContent = "Capital must be 0 or more."; return; }
+  if (!(d >= 1 && d <= 100)) { msg.textContent = "The limit must be between 1 and 100%."; return; }
+  run(e.submitter, async () => {
+    must(await db.rpc("save_broker_capital", { p_broker: bk, p_src: src, p_capital: src === "fixed" ? c : null, p_since: null, p_deploy_pct: d }));
+    toast(`Saved for ${bk === "DELTA" ? "Delta (crypto)" : "Dhan"}: live entries size from it from the next one.`);
+    lw.capSet = false; lw.savedPct = undefined; await loadAll(); await loadCap();
+  });
+});
+/** The Lots wizard on Live sizes one broker at a time (21 Nov 2026, Papa): Dhan (indices, stocks, MCX) from the Dhan
+ *  capital, crypto from the Delta capital. Paper: every paper strategy from the paper capital, as before. */
+const lwRoom = () => cap.mode === "LIVE" && cap.status ? (lw.bk === "DELTA" ? cap.status.room_delta : cap.status.room_dhan) || null : null;
+const lwEquity = () => { const r = lwRoom(); return r ? Number(r.equity) || 0 : equityOf(cap.status, cap.mode); };
+const lwSavedPct = () => { const r = lwRoom(); return r ? Number(r.pct) || 60 : Number(capView(cap.status, cap.mode).deploy_pct ?? 60); };
+const lwLastKey = () => cap.mode === "LIVE" ? `lwLast:LIVE:${lw.bk}` : `lwLast:${cap.mode}`;
+const lwInScope = (x) => cap.mode !== "LIVE" || isCrypto(x.data_segment) === (lw.bk === "DELTA");
 /* ---------- Drawdown check (Capital page): how far the running strategies have fallen, alone and together ---------- */
 let capDdSeq = 0;
 async function capDd(st) {
   const seq = ++capDdSeq, live = cap.mode === "LIVE", box = $("cap_dd");
   const strats = myStrats().filter((x) => !x.archived && x.active && (!!x.live === live));
-  const equity = equityOf(st, cap.mode);
+  // Live: the two brokers' capital (21 Nov 2026); the suggestion's "Use" fills the Dhan card's limit.
+  const rd = live && st.room_dhan, equity = rd ? (Number(rd.equity) || 0) + (Number((st.room_delta || {}).equity) || 0) : equityOf(st, cap.mode);
   if (!strats.length) { box.innerHTML = `<h4>Drawdown check</h4><p class="hint" style="margin:0">No active ${live ? "live" : "paper"} strategies to check.</p>`; return; }
   box.innerHTML = `<h4>Drawdown check</h4><p class="hint" style="margin:0"><span class="spin" aria-hidden="true"></span> Reading the trade history of ${strats.length} ${live ? "live" : "paper"} strateg${strats.length === 1 ? "y" : "ies"}…</p>`;
   const items = [];
@@ -5258,13 +5350,17 @@ async function capDd(st) {
       ${tile("If every worst fall came at once", pTxt(sumPct), "", "very unlikely; the upper bound", "--line")}
       ${tile("Margin if all are in a trade", pTxt(pc(marginAll)), "", rupees(marginAll), "--blue")}
     </div>
-    ${sug != null ? `<p class="dd-sug hint" style="margin-top:10px">You could allow up to <b>${sug}%</b> for “Never use more than” and still keep 1.5 × the worst fall (${pTxt(basis)}${maxSingle > togPct ? ", the worst single strategy" : ", all together"}) free; <b>${Number(st.deploy_pct) || 60}%</b> is saved.${pc(marginAll) != null && pc(marginAll) > sug ? ` All strategies in a trade at once need ${pTxt(pc(marginAll))}: above that, some entries would wait for room.` : ""} <button class="btn small" type="button" id="cap_dd_use">Use ${sug}%</button></p>` : ""}
+    ${sug != null ? `<p class="dd-sug hint" style="margin-top:10px">You could allow up to <b>${sug}%</b> for “Never use more than” and still keep 1.5 × the worst fall (${pTxt(basis)}${maxSingle > togPct ? ", the worst single strategy" : ", all together"}) free; <b>${rd ? Number(rd.pct) || 60 : Number(st.deploy_pct) || 60}%</b> is saved${rd ? " for Dhan" : ""}.${pc(marginAll) != null && pc(marginAll) > sug ? ` All strategies in a trade at once need ${pTxt(pc(marginAll))}: above that, some entries would wait for room.` : ""} <button class="btn small" type="button" id="cap_dd_use">Use ${sug}%</button></p>` : ""}
     <details><summary>Each strategy</summary><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Strategy</th><th class="n">Lots</th><th class="n">Worst fall (all its years)</th><th class="n">% of capital</th><th class="n">Worst fall ${yr(from).slice(0, 4)}→</th><th>From</th></tr></thead><tbody>${rows.map((r) => `<tr><td title="${esc(r.s.name || "")}">${esc(sName(r.s))}</td><td class="n mono">${r.lots}${r.auto ? " (auto)" : ""}</td><td class="n mono">${r.all ? rupees(r.all.dd) : "–"}</td><td class="n mono">${r.all ? pTxt(pc(r.all.dd)) : "–"}</td><td class="n mono">${r.common ? rupees(r.common.dd) : "–"}</td><td class="hint">${esc(r.src)}${r.tr.length ? ` · ${yr(r.tr[0].t).slice(0, 4)}–${yr(r.tr.at(-1).t).slice(0, 4)}` : ""}</td></tr>`).join("")}</tbody></table></div>
     <p class="hint" style="margin:6px 0 0">Backtest falls are history, not a limit: a real fall can be deeper. Strategies on automatic lots are counted at their saved lots. Change the lots with the wizard below and this check follows.</p></details>`;
-  const b = $("cap_dd_use"); if (b) b.onclick = () => { $("cap_deploy").value = String(sug); $("cap_msg").textContent = `Limit set to ${sug}% — press Save to keep it.`; $("cap_deploy").focus(); };
+  const b = $("cap_dd_use"); if (b) b.onclick = () => {
+    const bk = rd && document.querySelector('[data-bkform="DHAN"] [data-bkpct]');
+    if (bk) { bk.value = String(sug); bk.closest("form").querySelector("[data-bkmsg]").textContent = `Limit set to ${sug}% — press Save Dhan to keep it.`; bk.focus(); return; }
+    $("cap_deploy").value = String(sug); $("cap_msg").textContent = `Limit set to ${sug}% — press Save to keep it.`; $("cap_deploy").focus();
+  };
 }
 /* ---------- Lots wizard (Capital page) ---------- */
-const lw = { method: "move", typesOff: new Set(), off: new Set(), pct: {}, assetLots: {}, manual: {}, capSet: false, plan: [] };
+const lw = { method: "move", typesOff: new Set(), off: new Set(), pct: {}, assetLots: {}, manual: {}, capSet: false, plan: [], bk: (() => { try { return localStorage.getItem("lwBk") === "DELTA" ? "DELTA" : "DHAN"; } catch { return "DHAN"; } })() };
 const LW_TYPES = ["Indices", "Stocks", "Commodities", "Crypto"];
 const lwType = (s) => isCrypto(s.data_segment) ? "Crypto" : isMcx(s.data_segment) ? "Commodities" : /EQ|STOCK/i.test(String(s.data_segment)) || (PRESETS[s.underlying] && PRESETS[s.underlying].stock) ? "Stocks" : "Indices";
 const lwName = (u) => (PRESETS[u] && PRESETS[u].name) || u;
@@ -5279,9 +5375,9 @@ function lwMargin(s) {
 function lwPlan() {
   const capAmt = Math.max(0, Number($("lw_cap").value) || 0);
   const rp = Number($("lw_riskPct").value) || 0, mult = Math.max(1, Number($("lw_mult").value) || 1);
-  const all = myStrats().filter((x) => !x.archived && (!!x.live === (cap.mode === "LIVE")))
+  const all = myStrats().filter((x) => !x.archived && (!!x.live === (cap.mode === "LIVE")) && lwInScope(x))
     .map((s) => ({ s, margin: lwMargin(s), dd: Number(s.sizing && s.sizing.dd_per_lot) || null, move: lwMove(s), type: lwType(s) }))
-    .sort((a, b) => String(a.s.underlying).localeCompare(String(b.s.underlying)) || String(a.s.name).localeCompare(String(b.s.name)));
+    .sort((a, b) => LW_TYPES.indexOf(a.type) - LW_TYPES.indexOf(b.type) || String(a.s.underlying).localeCompare(String(b.s.underlying)) || String(a.s.name).localeCompare(String(b.s.name)));
   for (const r of all) r.on = !lw.off.has(r.s.id) && !lw.typesOff.has(r.type) && r.margin != null;
   const on = all.filter((r) => r.on);
   if (lw.method === "pct" && on.length && !on.some((r) => lw.pct[r.s.id] > 0)) on.forEach((r) => lw.pct[r.s.id] = Math.trunc(10000 / on.length) / 100);
@@ -5336,8 +5432,8 @@ function lwRender() {
   const used = sized.reduce((a, r) => a + r.used, 0), fall = sized.reduce((a, r) => a + (r.fall || 0), 0), lots = sized.reduce((a, r) => a + r.lots, 0);
   const zero = sized.filter((r) => !r.lots).length, over = used > limit;
   $("lw_modeTxt").textContent = live ? "live" : "paper";
-  const savedPct = Number(capView(cap.status, cap.mode).deploy_pct) || 60;
-  $("lw_capWords").innerHTML = capAmt ? esc(`${rupees(capAmt)} · margin may use up to ${rupees(limit)} at once. Prefilled with your capital plus ${live ? "live" : "paper"} profit / loss and your saved limit (${savedPct}%).`)
+  const savedPct = lwSavedPct(), rm = lwRoom();
+  $("lw_capWords").innerHTML = capAmt ? esc(`${rupees(capAmt)} · margin may use up to ${rupees(limit)} at once. Prefilled with ${rm ? `your ${lw.bk === "DELTA" ? "Delta (crypto)" : "Dhan"} capital${rm.src === "broker" ? ` (the ${lw.bk === "DELTA" ? "wallet" : "account"}'s balance)` : ""}` : `your capital plus ${live ? "live" : "paper"} profit / loss`} and your saved limit (${savedPct}%).${rm && Number(rm.bonus) > 0 ? ` Profit locked in by stops opens ${rupees(rm.bonus)} more of the reserve for new entries now.` : ""} Lots sized here grow and shrink with the capital: each strategy keeps its share of it.`)
     + (capPct > savedPct ? ` <b style="color:var(--red)">Above your saved limit of ${savedPct}%.</b>` : "") : "Enter the capital.";
   $("lw_capPct").style.borderColor = capPct > savedPct ? "var(--red)" : "";
   $("lw_riskBox").hidden = lw.method !== "risk";
@@ -5356,11 +5452,17 @@ function lwRender() {
   const pctCol = lw.method === "pct", nCol = pctCol ? 8 : 7;
   $("lw_tbl").tHead.innerHTML = `<tr><th>Strategy</th>${pctCol ? '<th class="n">Share %</th>' : ""}<th class="n">Now</th><th class="n">Margin / lot</th><th class="n">${byMove ? "Typical day / lot" : "Worst fall / lot"}</th><th class="n">New lots</th><th class="n">Margin blocked</th><th class="n">${byMove ? "Typical day at these lots" : "Worst fall at these lots"}</th></tr>`;
   const groups = new Map(); for (const r of all) { if (!groups.has(r.s.underlying)) groups.set(r.s.underlying, []); groups.get(r.s.underlying).push(r); }
-  let body = "";
+  let body = "", lastType = null;
+  // Indices, stocks and MCX as their own sections with subtotals (21 Nov 2026, Papa: "separate the stock futures, MCX").
+  const typeSum = (t) => { const rs = all.filter((r) => r.type === t && r.on && r.lots != null); return { n: all.filter((r) => r.type === t).length, lots: rs.reduce((a, r) => a + r.lots, 0), used: rs.reduce((a, r) => a + r.used, 0) }; };
   for (const [u, rs] of groups) {
     const tOff = lw.typesOff.has(rs[0].type);
+    if (rs[0].type !== lastType) {
+      lastType = rs[0].type; const ts = typeSum(lastType);
+      body += `<tr class="grp"><td colspan="${nCol}" style="font-size:13px"><b>${esc(lastType === "Commodities" ? "MCX commodities" : lastType === "Stocks" ? "Stock futures" : lastType)}</b> <span class="hint">· ${ts.n} strateg${ts.n === 1 ? "y" : "ies"} · ${ts.lots} lots · margin ${rupees(ts.used)}${capAmt ? ` (${Math.round(ts.used / capAmt * 100)}% of capital)` : ""}</span></td></tr>`;
+    }
     const ain = lw.method === "asset" && !tOff ? `<label style="text-transform:none;letter-spacing:0;font-weight:500">lots<input type="number" min="0" step="1" data-lwasset="${esc(u)}" value="${lw.assetLots[u] ?? 1}" aria-label="Lots for ${esc(lwName(u))}"></label>` : "";
-    body += `<tr class="grp"><td colspan="${nCol}">${esc(lwName(u))} · ${esc(rs[0].type)} ${ain}</td></tr>`;
+    body += `<tr class="lwsub"><td colspan="${nCol}">${esc(lwName(u))} ${ain}</td></tr>`;
     for (const r of rs) {
       const s = r.s, z = r.on && r.lots === 0, now = s.sizing && s.sizing.mode === "AUTO" ? "Auto" : String(s.lots);
       const note = r.margin == null ? "options: size in its settings" : r.why;
@@ -5370,14 +5472,14 @@ function lwRender() {
         + `<td class="n lots ${z ? "z" : ""}">${r.on ? `<input class="lw-lots${r.manualSet ? " set" : ""}" type="number" min="0" step="1" inputmode="numeric" data-lwlots="${s.id}" value="${r.lots != null ? r.lots : ""}" placeholder="–" aria-label="Lots for ${esc(sName(s))}" title="Type the lots you want for this strategy (it then keeps a fixed number of lots)">` : "–"}</td><td class="n mono">${r.on && r.lots != null ? rupees(r.used) : "–"}</td><td class="n mono">${byMove ? (r.on && r.day != null && r.lots ? rupees(r.day) : "–") : r.on && r.fall != null ? rupees(r.fall) : "–"}</td></tr>`;
     }
   }
-  $("lw_tbl").tBodies[0].innerHTML = body || `<tr><td colspan="${nCol}" class="hint">No ${live ? "live" : "paper"} strategies.</td></tr>`;
+  $("lw_tbl").tBodies[0].innerHTML = body || `<tr><td colspan="${nCol}" class="hint">No ${live ? `live ${lw.bk === "DELTA" ? "crypto" : "Dhan"}` : "paper"} strategies.</td></tr>`;
   const pctSum = on.reduce((a, r) => a + (lw.pct[r.s.id] || 0), 0);
   $("lw_tbl").tFoot.innerHTML = `<tr><td><b>Total · ${on.length} strategies</b></td>${pctCol ? `<td class="n mono" style="color:${Math.abs(pctSum - 100) > 0.5 ? "var(--red)" : "inherit"}">${pctSum.toFixed(1)}%</td>` : ""}<td></td><td></td><td></td><td class="n lots">${lots}</td><td class="n mono"><b>${rupees(used)}</b></td><td class="n mono"><b>${rupees(fall)}</b></td></tr>`;
   const byA = new Map(); for (const r of sized) byA.set(r.s.underlying, (byA.get(r.s.underlying) || 0) + r.used);
   const top = Math.max(1, ...byA.values());
   $("lw_assets").innerHTML = [...byA].sort((a, b) => b[1] - a[1]).map(([u, v]) => `<div class="lw-a"><span>${esc(lwName(u))}</span><span class="b"><i class="${capAmt && v / capAmt > .25 ? "hot" : ""}" style="width:${v / top * 100}%"></i></span><span class="v">${rupees(v)}${capAmt ? ` · ${Math.round(v / capAmt * 100)}%` : ""}</span></div>`).join("") || '<p class="hint">Nothing ticked.</p>';
   const notes = [];
-  const saved = Number(capView(cap.status, cap.mode).deploy_pct) || 60;
+  const saved = lwSavedPct();
   if (capPct > saved) notes.push(["err", `${capPct}% here is above your saved limit of ${saved}% (“Never use more than” at the top of this page). Strategies on automatic lots stop new entries above ${saved}%, so plan with ${saved}% or raise the saved limit first.`]);
   else if (used > capAmt * saved / 100) notes.push(["err", `Margin needed (${rupees(used)}) is above your saved limit of ${saved}% (${rupees(capAmt * saved / 100)}).`]);
   if (over) notes.push(["err", `Margin needed (${rupees(used)}) is above your ${capPct}% limit (${rupees(limit)}). Lower the lots or the share, or raise the limit.`]);
@@ -5405,8 +5507,8 @@ function lwRestore() {
   // stayed in the box after switching to Live).
   Object.assign(lw, { method: "move", off: new Set(), typesOff: new Set(), pct: {}, assetLots: {}, manual: {} });
   $("lw_moveAmt").value = "";
-  let last = null; try { last = JSON.parse(localStorage.getItem(`lwLast:${cap.mode}`) || "null"); } catch { last = null; }
-  const mine = myStrats().filter((x) => !x.archived && (!!x.live === (cap.mode === "LIVE")));
+  let last = null; try { last = JSON.parse(localStorage.getItem(lwLastKey()) || (cap.mode === "LIVE" && lw.bk === "DHAN" ? localStorage.getItem("lwLast:LIVE") : null) || "null"); } catch { last = null; }
+  const mine = myStrats().filter((x) => !x.archived && (!!x.live === (cap.mode === "LIVE")) && lwInScope(x));
   if (!last) {
     const amts = new Map();
     for (const x of mine) if (x.sizing && x.sizing.mode === "MOVE" && Number(x.sizing.move_amt) > 0) { const a = Math.trunc(Number(x.sizing.move_amt)); amts.set(a, (amts.get(a) || 0) + 1); }
@@ -5462,7 +5564,10 @@ function lwAutofill() {
     + `${extra ? ` · ${plural(extra, "extra lot")} on ${plural(touched.size, "strategy", "strategies")} to use what was left` : ""}${zero ? ` · ${plural(zero, "contract")} too big for this share: 0 lots` : ""}${noMove ? ` · ${noMove} left out (no day's move stored)` : ""}. Check the table, then press Apply.`;
 }
 const lwChanges = () => lw.plan.filter((r) => r.on && r.lots > 0 && (r.manualSet ? (Number(r.s.lots) !== r.lots || !(r.s.sizing && r.s.sizing.mode === "FIXED")) : Number(r.s.lots) !== r.lots || (r.s.sizing && r.s.sizing.mode === "AUTO")
-  || (lw.method === "move" ? !(r.s.sizing && r.s.sizing.mode === "MOVE" && Math.trunc(Number(r.s.sizing.move_amt)) === Math.trunc(lw.target || 0)) : !!(r.s.sizing && r.s.sizing.mode === "MOVE"))));
+  || (lw.method === "move" ? !(r.s.sizing && r.s.sizing.mode === "MOVE" && Math.trunc(Number(r.s.sizing.move_amt)) === Math.trunc(lw.target || 0) && Math.abs((Number(r.s.sizing.share) || 0) - lwShare()) < 1e-6) : !!(r.s.sizing && r.s.sizing.mode === "MOVE"))));
+/** The share of the capital each strategy aims at on a typical day (21 Nov 2026, Papa: lots grow with the profit): saved
+ *  with "same ₹ on a typical day", so at every new entry the engine aims at share × that broker's capital then. */
+const lwShare = () => { const c = Number($("lw_cap").value) || 0; return c > 0 && lw.target > 0 ? Math.round(lw.target / c * 1e6) / 1e6 : 0; };
 $("lw_toggle").addEventListener("click", () => {
   const open = $("lw_body").hidden; $("lw_body").hidden = !open;
   $("lw_toggle").textContent = open ? "Hide" : "Show"; $("lw_toggle").setAttribute("aria-expanded", String(open));
@@ -5470,6 +5575,12 @@ $("lw_toggle").addEventListener("click", () => {
 });
 try { if (localStorage.getItem("lwHidden")) { $("lw_body").hidden = true; $("lw_toggle").textContent = "Show"; $("lw_toggle").setAttribute("aria-expanded", "false"); } } catch {}
 $("lw_auto").addEventListener("click", () => lwAutofill());
+$("lw_bk").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-bk]"); if (!b || b.dataset.bk === lw.bk) return;
+  lw.bk = b.dataset.bk; try { localStorage.setItem("lwBk", lw.bk); } catch { /* not remembered */ }
+  lw.capSet = false; lw.savedPct = undefined; $("lw_msg").textContent = "";
+  loadCap().catch((x) => toast(errorText(x)));
+});
 $("lw_card").addEventListener("click", (e) => {
   const m = e.target.closest("[data-lwm]"); if (m) { lw.method = m.dataset.lwm; return lwRender(); }
   const t = e.target.closest("[data-lwtype]"); if (t) { const k = t.dataset.lwtype; lw.typesOff.has(k) ? lw.typesOff.delete(k) : lw.typesOff.add(k); lw.pct = {}; return lwRender(); }
@@ -5488,19 +5599,19 @@ $("lw_apply").addEventListener("click", (e) => {
   const byMove = lw.method === "move" && lw.target > 0;
   const list = ch.slice(0, 12).map((r) => `${esc(sName(r.s))}: ${r.s.sizing && r.s.sizing.mode === "MOVE" ? `≈${Number(r.s.lots) || 0}` : Number(r.s.lots) || 0} → <b>${r.lots}</b> lot${r.lots === 1 ? "" : "s"}`).join("<br>") + (ch.length > 12 ? `<br>… and ${ch.length - 12} more` : "");
   askConfirm(`<b style="color:var(--red)">You are changing the lots of ${ch.length} strateg${ch.length === 1 ? "y" : "ies"}.</b><br><span class="hint">${list}</span><br>` + (byMove
-    ? `Each is set to “Same ₹ on a typical day” at ${rupees(lw.target)}: from now on its lots follow its asset's typical day's move at every new entry (changes of 20% or less are ignored).`
+    ? `Each is set to “Same ₹ on a typical day” at ${rupees(lw.target)} (${(lwShare() * 100).toFixed(2)}% of ${rupees(Number($("lw_cap").value) || 0)}): from now on its lots follow its asset's typical day's move and <b>grow or shrink with the capital</b> at every new entry (changes of 20% or less are ignored).`
     : "Each is set to a fixed number of lots (automatic sizing is switched off for them).")
     + (open ? `<br>${open} ${open === 1 ? "has" : "have"} a position open: ${open === 1 ? "it exits" : "they exit"} with the lots held now; the new lots are used from the next entry (also after a reversal).` : "")
     + (liveN ? `<br><b>${liveN} ${liveN === 1 ? "is" : "are"} live: real orders will use the new lots.</b>` : ""), "Apply these lots", () => run(btn, async () => {
     let done = 0; const failed = [];
     for (const r of ch) {
-      const sizing = byMove && !r.manualSet ? { ...(r.s.sizing || {}), mode: "MOVE", move_amt: Math.trunc(lw.target) } : { ...(r.s.sizing || {}), mode: "FIXED" };
+      const sizing = byMove && !r.manualSet ? { ...(r.s.sizing || {}), mode: "MOVE", move_amt: Math.trunc(lw.target), share: lwShare() || undefined } : { ...(r.s.sizing || {}), mode: "FIXED" };
       const res = await db.from("algo_strategies").update({ lots: r.lots, sizing }).eq("id", r.s.id);
       if (res.error) failed.push(`${sName(r.s)}: ${errorText(res.error)}`); else done++;
     }
     const saved = { method: lw.method, moveAmt: byMove ? Math.trunc(lw.target) : Number($("lw_moveAmt").value) || null, cap: Number($("lw_cap").value) || null, capPct: Number($("lw_capPct").value) || null,
       on: lw.plan.filter((r) => r.on).map((r) => r.s.id), pct: lw.pct, assetLots: lw.assetLots, manual: lw.manual, at: new Date().toISOString() };
-    try { localStorage.setItem(`lwLast:${cap.mode}`, JSON.stringify(saved)); } catch { /* private window */ }
+    try { localStorage.setItem(lwLastKey(), JSON.stringify(saved)); } catch { /* private window */ }
     lw.last = saved; if (byMove) $("lw_moveAmt").value = String(saved.moveAmt);
     await loadAll(); await loadCap();
     $("lw_msg").textContent = `Saved lots for ${done} strateg${done === 1 ? "y" : "ies"}${failed.length ? `; ${failed.length} failed` : ""}.`;
@@ -5515,7 +5626,7 @@ $("cap_mode").querySelectorAll("button").forEach((b) => b.addEventListener("clic
 }));
 $("cap_funds").addEventListener("click", (e) => run(e.currentTarget, async () => {
   must(await db.rpc("desk_engine", { p_action: "funds", p_strategy: null }));
-  await new Promise((r) => setTimeout(r, 4000)); await loadCap(); toast("Dhan funds refreshed.");
+  await new Promise((r) => setTimeout(r, 4000)); await loadCap(); toast("Broker funds refreshed (Dhan and Delta).");
 }));
 $("capForm").addEventListener("submit", (e) => {
   e.preventDefault();

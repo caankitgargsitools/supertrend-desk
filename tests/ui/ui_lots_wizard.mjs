@@ -121,10 +121,12 @@ for (const w of patches) { const x = JSON.parse(w.body), id = w.u.match(/id=eq\.
 writes.length = 0;
 await p.click('[data-lwm="move"]'); await p.fill("#lw_moveAmt", "100000"); await p.dispatchEvent("#lw_moveAmt", "input");
 await p.click("#lw_apply"); await p.waitForSelector("#cf_yes");
-if (!/follow its asset's typical day's move at every new entry/.test(await p.textContent("#confirmBox"))) fail("move confirm wording", await p.textContent("#confirmBox"));
+if (!/follow its asset's typical day's move and grow or shrink with the capital at every new entry/.test(await p.textContent("#confirmBox"))) fail("move confirm wording", await p.textContent("#confirmBox"));
 await p.click("#cf_yes"); await p.waitForTimeout(1200);
 const mp = writes.filter((w) => w.meth === "PATCH" && /algo_strategies/.test(w.u)).map((w) => ({ id: w.u.match(/id=eq\.(\w+)/)[1], ...JSON.parse(w.body) }));
 if (mp.length < 5 || mp.some((x) => x.sizing.mode !== "MOVE" || x.sizing.move_amt !== 100000)) fail("move patches", mp);
+// 21 Nov 2026 (Papa: lots grow with the profit): the share of the capital is saved with it — ₹1 lakh of ₹1 crore = 1%.
+if (mp.some((x) => x.sizing.share !== 0.01)) fail("move patches carry the share of the capital", mp.map((x) => x.sizing));
 if (mp.find((x) => x.id === "gm").lots !== 6) fail("move patch lots gm", mp);
 // The strategy form offers the same mode: it reads back as sizing MOVE with its ₹, and refuses an empty amount.
 const form = await p.evaluate(() => {

@@ -919,6 +919,41 @@ marketplace, paper and live trading. Built for and with the owner, a Chartered A
   opens its own full screen `#dk_fs`): Strategies 4 cards across (≈ 24 positions on 1920 × 1080; tiles 150 px), Activity
   in 3 columns, the capital chart with its dates and note, the account's figures bigger; charts redrawn at the new size.
   Tested in `tests/ui/ui_desk.mjs` ("one screen layout", "opens large").
+- **Broker money, live capital per broker, the locked-profit reserve, compounding lots (21 Nov 2026, Papa: "fetch margin
+  from Dhan as we are fetching the funds … fetch balance from delta also … in the lots wizard separate … create lots as
+  per the Dhan capital … for crypto a separate tab … as soon as we end up getting some profits, the lots should
+  automatically be increased … whatever profit we have locked, we can use that much of reserved capital"; migration 115,
+  engine v185; tests `tests/sim/safety.test.mjs` "compounding", "locked-profit reserve", "steps of 10%",
+  `tests/ui/ui_capital_modes.mjs`, `ui_lots_wizard.mjs`)**: (1) `brokerMoney` (with every 5-minute `reconcile`, and the
+  Capital page's "Refresh broker funds" = action `funds`): Dhan `/fundlimit` + Dhan's margin calculator for each open live
+  position (`dhanMarginCalc`, `broker_accounts.funds.pos` = {strategy id: margin}; every 5 min in Dhan hours, every 30
+  outside), Delta `/v2/wallet/balances` (`deltaMoney`: USD balance / margin / free and the same in rupees at Delta's own
+  rate — **Delta India books at exactly ₹85 a dollar**: $1,176.47 = ₹1,00,000; the desk's `lab_settings.usd_inr` is 88,
+  pending 9.1) into the DELTA row's `funds`, its margin split over the crypto positions by size. (2) SQL
+  `capital_room(user, live, broker, exclude)` — one figure for the engine (`capitalState`, every entry, also `manualAdd`)
+  and the website (`my_capital` → `room_dhan` / `room_delta` / `room_paper`): live Dhan strategies size from the DHAN row,
+  live crypto from the DELTA row (no longer the Dhan row), paper from paper_capital. `cap_src` 'broker' (default): capital
+  = `cap_base` = the broker's booked balance (Dhan's start-of-day sodLimit, Delta's wallet balance_inr), moved only when it
+  changes by 10% or more (`capStep`, `CAP_STEP`); 'fixed': the typed capital + that broker's booked live P&L since the
+  count-from date. used = this broker's open positions' margin (the broker's own figure when under 15 min old, else the
+  desk's `pos_margin`). **Locked-profit reserve (Papa's rule)**: limit = capital × "never use more than" %; reserve = the
+  rest; locked = profit locked in by the stops of this broker's open futures positions (pos_upnl × (stop − entry) ÷ (now −
+  entry)); bonus = least(reserve, max(0, locked)); room = limit + bonus − used; the engine uses `pct_eff` = (limit + bonus)
+  ÷ capital (note "Limit N%: the reserve opened by ₹X of profit locked in by stops"). E.g. ₹4 lakh at 90%: ₹40,000 reserve,
+  all of it usable with ₹40,000+ locked, ₹20,000 of it with ₹20,000 locked. `save_broker_capital(broker, src, capital,
+  since, pct)`. (3) **Compounding**: the Lots wizard's "same ₹ on a typical day" now also saves `sizing.share` = target ÷
+  the wizard's capital; at each new entry `sizeEntry` aims at share × that broker's capital now (lots grow with booked
+  profit and deposits, shrink with losses; the 20% band of `moveLots` still applies). Strategies sized before 21 Nov have
+  no share (fixed ₹ a day) until the wizard is applied again. (4) Website: Capital › Live = tiles (Dhan + Delta capital,
+  Booked P&L, brokers' margin, can still deploy) and one card per broker (`capBrokerCard`: capital and its source, in the
+  broker now / free, margin in use vs the desk's estimate at entry, limit, reserve, locked in by stops and what it opens,
+  can still deploy; its own form: Dhan balance / Delta wallet / fixed amount + limit %); the old capital form is Paper
+  only; the drawdown check uses Dhan + Delta capital and its "Use N%" fills the Dhan card. Lots wizard on Live: a switch
+  Dhan (indices, stocks, MCX) / Crypto (Delta) (`lw.bk`, localStorage `lwBk`, last selection per broker `lwLast:LIVE:<bk>`),
+  each sized from its broker's capital and limit; the table has sections Indices / Stock futures / MCX commodities / Crypto
+  with subtotals. On 21 Nov: Dhan capital ₹4,82,955 (sodLimit), Dhan margin ₹3,81,881 vs the desk's ₹3,10,228, locked
+  ₹83,196 (SILVERM's stop); the Dhan live limit is saved as 100% (Papa spoke of 90%) so the reserve is 0 until he sets it;
+  Delta ₹1,00,000 at 60%.
 - **Welcome message in Manage user** (8 Nov 2026, Papa): Admin › Users › Manage shows the first-time message again
   (`loginText`: portal link, login email, trial, first steps) with Copy / WhatsApp (`showLoginBox`, `#ue_msg`), for every
   user but yourself. Passwords are only a one-way hash, so the old one can't be shown ("the one sent to you earlier");
